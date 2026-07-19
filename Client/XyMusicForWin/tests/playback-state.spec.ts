@@ -26,9 +26,9 @@ describe("playback resume position", () => {
 
 describe("play mode derivation", () => {
   const cases: Array<{ repeatMode: RepeatMode; shuffled: boolean; expected: PlayMode }> = [
-    { repeatMode: "off", shuffled: false, expected: "sequential" },
-    { repeatMode: "one", shuffled: false, expected: "repeat-one" },
+    { repeatMode: "off", shuffled: false, expected: "repeat-all" },
     { repeatMode: "all", shuffled: false, expected: "repeat-all" },
+    { repeatMode: "one", shuffled: false, expected: "repeat-one" },
     { repeatMode: "off", shuffled: true, expected: "shuffle" },
     // shuffled 优先级高于 repeatMode，避免歧义状态
     { repeatMode: "one", shuffled: true, expected: "shuffle" },
@@ -44,9 +44,8 @@ describe("play mode derivation", () => {
 
 describe("play mode split", () => {
   it("splits each mode into mutually exclusive repeatMode and shuffled", () => {
-    expect(splitPlayMode("sequential")).toEqual({ repeatMode: "off", shuffled: false });
-    expect(splitPlayMode("repeat-one")).toEqual({ repeatMode: "one", shuffled: false });
     expect(splitPlayMode("repeat-all")).toEqual({ repeatMode: "all", shuffled: false });
+    expect(splitPlayMode("repeat-one")).toEqual({ repeatMode: "one", shuffled: false });
     expect(splitPlayMode("shuffle")).toEqual({ repeatMode: "off", shuffled: true });
   });
 
@@ -60,10 +59,9 @@ describe("play mode split", () => {
 
 describe("play mode cycle", () => {
   it("cycles through all modes in order and wraps around", () => {
-    expect(cyclePlayMode("sequential")).toBe("repeat-one");
-    expect(cyclePlayMode("repeat-one")).toBe("repeat-all");
-    expect(cyclePlayMode("repeat-all")).toBe("shuffle");
-    expect(cyclePlayMode("shuffle")).toBe("sequential");
+    expect(cyclePlayMode("repeat-all")).toBe("repeat-one");
+    expect(cyclePlayMode("repeat-one")).toBe("shuffle");
+    expect(cyclePlayMode("shuffle")).toBe("repeat-all");
   });
 });
 

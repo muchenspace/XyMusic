@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, watch } from "vue";
-import { Heart, ListMusic, ListOrdered, LoaderCircle, Maximize2, Monitor, PanelTopOpen, Pause, Play, Repeat1, Repeat2, Shuffle, SkipBack, SkipForward, Volume1, Volume2, VolumeX } from "@lucide/vue";
+import { Heart, ListMusic, LoaderCircle, Maximize2, Monitor, PanelTopOpen, Pause, Play, Repeat1, Repeat2, Shuffle, SkipBack, SkipForward, Volume1, Volume2, VolumeX } from "@lucide/vue";
 import type { Track } from "../../domain/music";
 import { usePlayerStore } from "../stores/playerStore";
 import { useDesktopLyricsStore } from "../stores/desktopLyricsStore";
@@ -21,17 +21,15 @@ const formatTime = (seconds: number) => {
 const playModeIcon = computed(() => {
   switch (player.playMode) {
     case "repeat-one": return Repeat1;
-    case "repeat-all": return Repeat2;
     case "shuffle": return Shuffle;
-    default: return ListOrdered;
+    default: return Repeat2;
   }
 });
 const playModeLabel = computed(() => {
   switch (player.playMode) {
     case "repeat-one": return "单曲循环";
-    case "repeat-all": return "列表循环";
     case "shuffle": return "随机播放";
-    default: return "顺序播放";
+    default: return "列表循环";
   }
 });
 
@@ -85,7 +83,7 @@ function handleArtworkFailed(): void {
           <Play v-else :size="20" fill="currentColor" />
         </button>
         <button type="button" class="bare-button" title="下一首" aria-label="下一首" :disabled="player.loading" @click="player.next"><SkipForward :size="19" fill="currentColor" /></button>
-        <button type="button" class="bare-button" :class="{ enabled: player.playMode !== 'sequential' }" :title="playModeLabel" :aria-label="playModeLabel" :aria-pressed="player.playMode !== 'sequential'" @click="player.cyclePlayMode"><component :is="playModeIcon" :size="17" /></button>
+        <button type="button" class="bare-button" :class="{ enabled: player.playMode !== 'repeat-all' }" :title="playModeLabel" :aria-label="playModeLabel" :aria-pressed="player.playMode !== 'repeat-all'" @click="player.cyclePlayMode"><component :is="playModeIcon" :size="17" /></button>
       </div>
       <div class="progress-row">
         <span>{{ formatTime(player.currentTime) }}</span>
