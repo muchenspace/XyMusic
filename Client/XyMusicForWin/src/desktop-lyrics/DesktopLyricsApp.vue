@@ -72,7 +72,10 @@ const emptyMessage = computed(() => {
 function applyState(payload: DesktopLyricsStatePayload): void {
   if (payload.version !== DESKTOP_LYRICS_PROTOCOL_VERSION) return;
   const incomingRevision = Number.isFinite(payload.revision) ? payload.revision! : 0;
-  if (incomingRevision < stateRevision) return;
+  // 主窗口 F5 刷新后 revision 会以时间戳重新计数，远大于歌词窗口保留的旧 revision。
+  // 此时差值会非常大（远超正常递增），认定为主窗口重启，接受新快照以同步最新曲目。
+  const restartGap = Math.abs(incomingRevision - stateRevision);
+  if (incomingRevision < stateRevision && restartGap < REVISION_RESTART_THRESHOLD) return;
   stateRevision = incomingRevision;
   state.value = payload;
   const stateClock = clockFromState(payload);
@@ -184,6 +187,9 @@ function clamp(value: number, minimum: number, maximum: number): number {
 }
 
 const FRAME_INTERVAL_MS = 1_000 / 30;
+// 主窗口重启后 revision 以 Date.now() 初始化，与歌词窗口保留的旧 revision 差值远超此阈值。
+// 正常递增的 revision 差值不会接近此值，因此超过阈值即认定为主窗口重启，必须接受新快照。
+const REVISION_RESTART_THRESHOLD = 1_000_000_000;
 </script>
 
 <template>

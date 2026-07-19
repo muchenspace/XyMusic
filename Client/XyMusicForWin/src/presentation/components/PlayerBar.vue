@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { watch } from "vue";
-import { Heart, ListMusic, LoaderCircle, Maximize2, Monitor, PanelTopOpen, Pause, Play, Repeat1, Repeat2, Shuffle, SkipBack, SkipForward, Volume1, Volume2, VolumeX } from "@lucide/vue";
+import { computed, watch } from "vue";
+import { Heart, ListMusic, ListOrdered, LoaderCircle, Maximize2, Monitor, PanelTopOpen, Pause, Play, Repeat1, Repeat2, Shuffle, SkipBack, SkipForward, Volume1, Volume2, VolumeX } from "@lucide/vue";
 import type { Track } from "../../domain/music";
 import { usePlayerStore } from "../stores/playerStore";
 import { useDesktopLyricsStore } from "../stores/desktopLyricsStore";
@@ -18,6 +18,23 @@ const formatTime = (seconds: number) => {
   return `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, "0")}`;
 };
 
+const playModeIcon = computed(() => {
+  switch (player.playMode) {
+    case "repeat-one": return Repeat1;
+    case "repeat-all": return Repeat2;
+    case "shuffle": return Shuffle;
+    default: return ListOrdered;
+  }
+});
+const playModeLabel = computed(() => {
+  switch (player.playMode) {
+    case "repeat-one": return "单曲循环";
+    case "repeat-all": return "列表循环";
+    case "shuffle": return "随机播放";
+    default: return "顺序播放";
+  }
+});
+
 function updateProgress(event: Event) { player.seek(Number((event.target as HTMLInputElement).value)); }
 function updateVolume(event: Event) { player.volume = Number((event.target as HTMLInputElement).value); }
 function toggleMute() {
@@ -31,8 +48,14 @@ function toggleMute() {
 function toggleFullscreen() {
   void desktopWindow.toggleFullscreen().catch(() => undefined);
 }
-function cycleRepeatMode() {
-  player.repeatMode = player.repeatMode === "off" ? "all" : player.repeatMode === "all" ? "one" : "off";
+
+// 同一曲目仅触发一次封面刷新，避免签名 URL 过期后反复请求。
+let lastRefreshedTrackId = "";
+function handleArtworkFailed(): void {
+  const trackId = player.currentTrack?.id;
+  if (!trackId || trackId === lastRefreshedTrackId) return;
+  lastRefreshedTrackId = trackId;
+  void player.refreshCurrentTrackArtwork();
 }
 </script>
 
@@ -45,7 +68,7 @@ function cycleRepeatMode() {
       :aria-label="`${player.lyricsOpen ? '返回首页' : '打开歌词页'}：${player.currentTrack.title}`"
       @click="player.toggleLyrics"
     >
-      <ArtworkImage :src="player.currentTrack.coverUrl" :alt="`${player.currentTrack.title}封面`" kind="track" loading="eager" />
+      <ArtworkImage :src="player.currentTrack.coverUrl" :alt="`${player.currentTrack.title}封面`" kind="track" loading="eager" @load-failed="handleArtworkFailed" />
       <span class="now-playing-copy" aria-live="polite">
         <strong>{{ player.currentTrack.title }}</strong>
         <span>{{ player.currentTrack.artist }}</span>
@@ -55,7 +78,6 @@ function cycleRepeatMode() {
 
     <div class="transport">
       <div class="transport-buttons">
-        <button type="button" class="bare-button" :class="{ enabled: player.shuffled }" title="随机播放" aria-label="随机播放" :aria-pressed="player.shuffled" @click="player.shuffled = !player.shuffled"><Shuffle :size="17" /></button>
         <button type="button" class="bare-button" title="上一首" aria-label="上一首" :disabled="player.loading" @click="player.previous"><SkipBack :size="19" fill="currentColor" /></button>
         <button type="button" class="play-button" :title="player.isPlaying ? '暂停' : '播放'" :aria-label="player.isPlaying ? '暂停' : '播放'" :disabled="player.loading" @click="player.toggle">
           <LoaderCircle v-if="player.loading" class="spin" :size="19" />
@@ -63,7 +85,7 @@ function cycleRepeatMode() {
           <Play v-else :size="20" fill="currentColor" />
         </button>
         <button type="button" class="bare-button" title="下一首" aria-label="下一首" :disabled="player.loading" @click="player.next"><SkipForward :size="19" fill="currentColor" /></button>
-        <button type="button" class="bare-button" :class="{ enabled: player.repeatMode !== 'off' }" :title="player.repeatMode === 'off' ? '顺序播放' : player.repeatMode === 'all' ? '列表循环' : '单曲循环'" :aria-label="player.repeatMode === 'off' ? '顺序播放，点击切换列表循环' : player.repeatMode === 'all' ? '列表循环，点击切换单曲循环' : '单曲循环，点击切换顺序播放'" :aria-pressed="player.repeatMode !== 'off'" @click="cycleRepeatMode"><Repeat1 v-if="player.repeatMode === 'one'" :size="17" /><Repeat2 v-else :size="17" /></button>
+        <button type="button" class="bare-button" :class="{ enabled: player.playMode !== 'sequential' }" :title="playModeLabel" :aria-label="playModeLabel" :aria-pressed="player.playMode !== 'sequential'" @click="player.cyclePlayMode"><component :is="playModeIcon" :size="17" /></button>
       </div>
       <div class="progress-row">
         <span>{{ formatTime(player.currentTime) }}</span>

@@ -109,4 +109,54 @@ describe("desktop lyrics window UI", () => {
     expect(wrapper.get(".desktop-lyric-fill").attributes("style")).toContain("100%");
     wrapper.unmount();
   });
+
+  it("accepts snapshot after main window restart even when revision is smaller", async () => {
+    let stateListener!: (state: DesktopLyricsStatePayload) => void;
+    const bridge: DesktopLyricsBridge = {
+      async onState(listener) { stateListener = listener; return () => undefined; },
+      async onClock() { return () => undefined; },
+      async emitAction() {},
+    };
+    const wrapper = mount(DesktopLyricsApp, { props: { bridge } });
+    await flushPromises();
+
+    // 模拟主窗口刷新前：歌词窗口已收到 revision 较大的旧快照（track-1）
+    stateListener({
+      version: 2,
+      revision: 1_000_000_005,
+      track: { id: "track-1", title: "Old Song", artist: "Old Artist" },
+      lyrics: null,
+      isPlaying: false,
+      positionSeconds: 0,
+      anchoredAtMs: Date.now(),
+      offsetSeconds: 0,
+      showTranslation: false,
+      wordLyricsEnabled: false,
+      locked: false,
+      fontScale: 1,
+    });
+    await nextTick();
+    expect(wrapper.text()).toContain("Old Song");
+
+    // 主窗口刷新后 revision 重置为小值，差值远超阈值，应接受新快照（track-2）
+    stateListener({
+      version: 2,
+      revision: 1,
+      track: { id: "track-2", title: "New Song", artist: "New Artist" },
+      lyrics: null,
+      isPlaying: true,
+      positionSeconds: 0,
+      anchoredAtMs: Date.now(),
+      offsetSeconds: 0,
+      showTranslation: false,
+      wordLyricsEnabled: false,
+      locked: false,
+      fontScale: 1,
+    });
+    await nextTick();
+    expect(wrapper.text()).toContain("New Song");
+    expect(wrapper.text()).not.toContain("Old Song");
+
+    wrapper.unmount();
+  });
 });

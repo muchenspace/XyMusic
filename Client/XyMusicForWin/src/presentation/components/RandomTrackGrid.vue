@@ -15,6 +15,7 @@ const emit = defineEmits<{
   toggle: [];
   favorite: [track: Track];
   add: [track: Track];
+  "artwork-failed": [];
 }>();
 
 function toggleTrack(track: Track): void {
@@ -34,7 +35,7 @@ function formatTime(seconds: number): string {
     <div class="random-track-grid">
       <article v-for="track in tracks" :key="track.id" class="random-track-card" :class="{ current: currentId === track.id }">
         <button type="button" class="random-track-main" :aria-label="currentId === track.id && isPlaying ? `暂停《${track.title}》` : `播放《${track.title}》`" @click="toggleTrack(track)">
-          <ArtworkImage :src="track.coverUrl" :alt="`${track.title}封面`" kind="track" />
+          <ArtworkImage :src="track.coverUrl" :alt="`${track.title}封面`" kind="track" @load-failed="emit('artwork-failed')" />
           <span class="random-track-copy">
             <strong>{{ track.title }}</strong>
             <small>{{ track.artist }}</small>

@@ -1,11 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
-import type {
-  DesktopLyrics,
-  DesktopLyricsAction,
-  DesktopLyricsClock,
-  DesktopLyricsSnapshot,
-  DesktopLyricsWindowState,
+import {
+  DESKTOP_LYRICS_PROTOCOL_VERSION,
+  type DesktopLyrics,
+  type DesktopLyricsAction,
+  type DesktopLyricsClock,
+  type DesktopLyricsSnapshot,
+  type DesktopLyricsWindowState,
 } from "../../application/ports/DesktopLyrics";
 import type { DesktopLyricsFullscreenBehavior } from "../../application/ports/UserInterfacePreferences";
 
@@ -97,7 +98,7 @@ function isTauriRuntime(): boolean {
 function isDesktopLyricsAction(value: unknown): value is DesktopLyricsAction {
   if (!value || typeof value !== "object") return false;
   const payload = value as Record<string, unknown>;
-  if (payload.version !== 1 || typeof payload.issuedAtMs !== "number" || !Number.isFinite(payload.issuedAtMs)) return false;
+  if (payload.version !== DESKTOP_LYRICS_PROTOCOL_VERSION || typeof payload.issuedAtMs !== "number" || !Number.isFinite(payload.issuedAtMs)) return false;
   if (payload.action === "lock") return payload.locked === true;
   if (payload.action === "set-font-scale") {
     return typeof payload.value === "number" && Number.isFinite(payload.value) && payload.value >= 0.75 && payload.value <= 1.5;

@@ -1,7 +1,7 @@
 import { computed, onScopeDispose, ref, watch } from "vue";
 import { defineStore } from "pinia";
 import type { PlaybackQuality, Track } from "../../domain/music";
-import { normalizeResumePosition, type RepeatMode } from "../../domain/playbackState";
+import { normalizeResumePosition, type RepeatMode, type PlayMode, derivePlayMode, splitPlayMode, cyclePlayMode as nextPlayMode } from "../../domain/playbackState";
 import { keepCurrentTrack, nextTrackIndex, previousTrackIndex, removeTrackAtIndex, removeTrackFromQueue, selectTrack } from "../../domain/playbackQueue";
 import type { DesktopIntegration, DesktopPlaybackState } from "../../application/ports/DesktopIntegration";
 import type { Diagnostics } from "../../application/ports/Diagnostics";
@@ -59,6 +59,7 @@ export const usePlayerStore = defineStore("player", () => {
   const lyricsOpen = ref(false);
   const shuffled = ref(false);
   const repeatMode = ref<RepeatMode>("off");
+  const playMode = computed<PlayMode>(() => derivePlayMode(repeatMode.value, shuffled.value));
   const quality = ref<PlaybackQuality>(storedPreferences.quality);
   const hasStoredCrossfade = storedPreferences.hasCrossfadePreference;
   const crossfadeSeconds = ref(storedPreferences.crossfadeSeconds);
@@ -319,6 +320,17 @@ export const usePlayerStore = defineStore("player", () => {
         loadController = null;
       }
     }
+  }
+
+  function setPlayMode(mode: PlayMode): void {
+    const { repeatMode: nextRepeat, shuffled: nextShuffled } = splitPlayMode(mode);
+    // 互斥设置：确保 RepeatMode 与 shuffled 不会组合出 PlayMode 之外的歧义状态。
+    repeatMode.value = nextRepeat;
+    shuffled.value = nextShuffled;
+  }
+
+  function cyclePlayMode(): void {
+    setPlayMode(nextPlayMode(playMode.value));
   }
 
   async function toggle() {
@@ -836,6 +848,24 @@ export const usePlayerStore = defineStore("player", () => {
     });
   }
 
+  // 封面签名 URL 过期后，通过 catalog 重新获取 track 元数据刷新 coverUrl。
+  // 触发场景：重启后恢复队列使用旧签名 URL，或会话停留时间超过 URL TTL。
+  async function refreshCurrentTrackArtwork(): Promise<void> {
+    const track = currentTrack.value;
+    if (!track?.albumId) return;
+    try {
+      const tracks = await services.catalog.albumTracks(track.albumId);
+      const fresh = tracks.find((item) => item.id === track.id);
+      if (!fresh?.coverUrl || fresh.coverUrl === track.coverUrl) return;
+      const index = queue.value.findIndex((item) => item.id === track.id);
+      if (index < 0) return;
+      // 用 splice 替换元素以触发 Vue 响应式更新，currentTrack computed 会自动派生新 coverUrl。
+      queue.value.splice(index, 1, { ...queue.value[index]!, coverUrl: fresh.coverUrl });
+    } catch {
+      // 刷新失败时静默处理，ArtworkImage 已显示 fallback 图标。
+    }
+  }
+
   onScopeDispose(() => {
     flushPersistState();
     disposed = true;
@@ -851,7 +881,7 @@ export const usePlayerStore = defineStore("player", () => {
     window.removeEventListener("pagehide", flushPersistState);
   });
 
-  return { queue, queueVersion, playbackIntentVersion, currentIndex, currentTrack, isPlaying, loading, progress, currentTime, duration, volume, queueOpen, lyricsOpen, shuffled, repeatMode, quality, crossfadeSeconds, notificationsEnabled, miniMode, error, seed, restoreState, clearPersistedState, play, playAt, playFromIndex, startQueue, appendToQueue, setQueueExtending, toggle, next, previous, seek, seekTo, removeFromQueue, removeFromQueueAt, clearQueue, stopPlayback, reset, toggleQueue, toggleLyrics, setMiniMode };
+  return { queue, queueVersion, playbackIntentVersion, currentIndex, currentTrack, isPlaying, loading, progress, currentTime, duration, volume, queueOpen, lyricsOpen, shuffled, repeatMode, playMode, quality, crossfadeSeconds, notificationsEnabled, miniMode, error, seed, restoreState, clearPersistedState, play, playAt, playFromIndex, startQueue, appendToQueue, setQueueExtending, toggle, next, previous, seek, seekTo, removeFromQueue, removeFromQueueAt, clearQueue, stopPlayback, reset, toggleQueue, toggleLyrics, setMiniMode, setPlayMode, cyclePlayMode, refreshCurrentTrackArtwork };
 });
 
 function normalizeCrossfade(value: number): number {

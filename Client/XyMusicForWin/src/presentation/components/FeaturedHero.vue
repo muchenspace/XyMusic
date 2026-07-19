@@ -3,7 +3,7 @@ import { ArrowRight, Disc3, LoaderCircle, Play } from "@lucide/vue";
 import type { Album } from "../../domain/music";
 
 withDefaults(defineProps<{ album: Album; playLoading?: boolean }>(), { playLoading: false });
-defineEmits<{ play: [album: Album]; open: [album: Album] }>();
+defineEmits<{ play: [album: Album]; open: [album: Album]; "artwork-failed": [] }>();
 </script>
 
 <template>
@@ -13,6 +13,15 @@ defineEmits<{ play: [album: Album]; open: [album: Album] }>();
     :style="{ '--hero-image': album.coverUrl ? `url(${album.coverUrl})` : 'none' }"
     aria-labelledby="featured-album-title"
   >
+    <!-- 隐藏的 img 探针：CSS background 无法监听 error 事件，用独立 img 检测签名 URL 过期并通知上层刷新。 -->
+    <img
+      v-if="album.coverUrl"
+      :src="album.coverUrl"
+      class="hero-image-probe"
+      aria-hidden="true"
+      alt=""
+      @error="$emit('artwork-failed')"
+    />
     <Disc3 v-if="!album.coverUrl" class="hero-fallback-icon" aria-hidden="true" />
     <div class="hero-copy">
       <p class="eyebrow"><span aria-hidden="true"></span>最新专辑</p>

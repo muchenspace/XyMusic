@@ -17,7 +17,9 @@ export function useDesktopLyricsBridge(): void {
   let lastClockPosition = -1;
   let lastClockTrackId: string | null = null;
   let lastClockPlaying = false;
-  let snapshotRevision = 0;
+  // 初始化为时间戳，避免主窗口 F5 刷新后 revision 从 0 重新计数，
+  // 导致歌词窗口（未刷新）保留的旧 revision 比新 revision 大而丢弃新快照。
+  let snapshotRevision = Date.now();
   let snapshotSending = false;
   let snapshotPending = false;
   let snapshotTimer = 0;

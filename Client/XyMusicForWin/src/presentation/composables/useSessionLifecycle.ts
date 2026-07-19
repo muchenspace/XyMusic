@@ -46,6 +46,8 @@ export function useSessionLifecycle(resetDialogs: () => void, clearActionError: 
     await home.load();
     if (session.session?.user.id !== userId) return;
     if (home.feed) library.setPlaylists(home.feed.playlists);
+    // 重启后恢复的队列可能携带过期的封面签名 URL，主动刷新当前曲目以获取新 URL。
+    void player.refreshCurrentTrackArtwork();
   });
 
   onMounted(() => { void session.restore(); });
