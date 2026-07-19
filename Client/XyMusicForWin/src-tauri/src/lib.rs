@@ -1,6 +1,7 @@
 mod credentials;
 mod desktop_lyrics;
 mod media;
+mod tray;
 mod window;
 
 use tauri::{Manager, WindowEvent};
@@ -18,6 +19,7 @@ pub fn run() {
         .manage(window::MiniModeState::default())
         .setup(|app| {
             app.manage(media::MediaSessionState::initialize(app.handle())?);
+            tray::install(app)?;
             if let Some(window) = app.get_webview_window("desktop-lyrics") {
                 window
                     .set_ignore_cursor_events(false)
@@ -28,6 +30,8 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
                     return;
                 }
                 if window.label() == "desktop-lyrics" {
@@ -38,9 +42,6 @@ pub fn run() {
                     );
                     return;
                 }
-            }
-            if window.label() == "main" && matches!(event, WindowEvent::Destroyed) {
-                window.app_handle().exit(0);
             }
             if window.label() == "main" && matches!(event, WindowEvent::Resized(_)) {
                 let _ = desktop_lyrics::synchronize_fullscreen(window.app_handle());
@@ -58,7 +59,7 @@ pub fn run() {
             media::update_media_metadata,
             media::update_media_playback,
             media::clear_media_session,
-            window::exit_application,
+            window::hide_main_window,
             window::set_mini_mode,
         ])
         .run(tauri::generate_context!())

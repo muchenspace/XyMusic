@@ -10,6 +10,7 @@ import LyricsPlayerControls from "./LyricsPlayerControls.vue";
 import ArtworkImage from "./ui/ArtworkImage.vue";
 
 const player = usePlayerStore();
+const props = withDefaults(defineProps<{ fullscreen?: boolean }>(), { fullscreen: false });
 const emit = defineEmits<{ favorite: [track: Track] }>();
 const lyricsStore = useLyricsStore();
 const desktopWindow = useApplicationServices().desktopWindow;
@@ -42,6 +43,7 @@ const focusableSelector = [
 ].join(",");
 
 function toggleMaximizeWindow(): void {
+  if (props.fullscreen) return;
   void desktopWindow.toggleMaximize().catch(() => undefined);
 }
 

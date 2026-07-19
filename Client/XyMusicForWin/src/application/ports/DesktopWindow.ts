@@ -5,6 +5,7 @@ export interface DesktopWindow {
   toggleMaximize(): Promise<void>;
   toggleFullscreen(): Promise<void>;
   isMaximized(): Promise<boolean>;
+  isFullscreen(): Promise<boolean>;
   close(): Promise<void>;
   onResized(listener: () => void): Promise<() => void>;
   setTheme(theme: DesktopTheme): Promise<void>;

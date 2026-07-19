@@ -31,8 +31,12 @@ export class TauriDesktopWindow implements DesktopWindow {
     return isTauriRuntime() ? getCurrentWindow().isMaximized() : false;
   }
 
+  async isFullscreen(): Promise<boolean> {
+    return isTauriRuntime() ? getCurrentWindow().isFullscreen() : false;
+  }
+
   async close(): Promise<void> {
-    if (isTauriRuntime()) await invoke("exit_application");
+    if (isTauriRuntime()) await invoke("hide_main_window");
   }
 
   async onResized(listener: () => void): Promise<() => void> {

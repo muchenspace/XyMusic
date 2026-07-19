@@ -52,7 +52,7 @@ theme.initialize();
 void desktopLyrics.initialize();
 useDesktopLyricsBridge();
 usePlaybackShortcuts();
-useWindowFullscreen();
+const windowFullscreen = useWindowFullscreen();
 
 const {
   currentEntry,
@@ -179,7 +179,7 @@ function playCurrentCollection(): void {
 </script>
 
 <template>
-  <MiniPlayer v-if="player.miniMode && session.session" @favorite="toggleFavorite" />
+  <MiniPlayer v-if="player.miniMode && session.session" :fullscreen="windowFullscreen" @favorite="toggleFavorite" />
   <div v-else class="window-shell">
     <TopBar
       v-if="!player.lyricsOpen"
@@ -188,6 +188,7 @@ function playCurrentCollection(): void {
       :search-enabled="Boolean(session.session)"
       :can-go-back="navigation.canGoBack"
       :can-go-forward="navigation.canGoForward"
+      :fullscreen="windowFullscreen"
       @update:model-value="updateSearch"
       @back="goBack"
       @forward="goForward"
@@ -373,7 +374,7 @@ function playCurrentCollection(): void {
         <template #player><PlayerBar v-if="!player.lyricsOpen" @favorite="toggleFavorite" /></template>
         <template #overlays>
           <QueuePanel />
-          <LyricsView @favorite="toggleFavorite" />
+          <LyricsView :fullscreen="windowFullscreen" @favorite="toggleFavorite" />
           <PlaylistDialog :open="playlistDialogOpen" :playlist="editingPlaylist" :busy="dialogBusy" :error="dialogError" @close="playlistDialogOpen = false" @save="savePlaylist" />
           <AddToPlaylistDialog :track="addTrack" :playlists="addPlaylists" :busy="dialogBusy" :loading="addPlaylistsLoading" :retry-available="addPlaylistsRetryAvailable" :has-more="addPlaylistsHasMore" :error="addDialogError" @close="closeAddToPlaylist" @load-more="loadMoreAddPlaylists" @retry="retryAddPlaylists" @select="addToPlaylist" />
           <ToastHost :toasts="toast.messages" @dismiss="id => toast.dismiss(String(id))" />
