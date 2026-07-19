@@ -18,8 +18,11 @@ struct WindowSnapshot {
 pub struct MiniModeState(Mutex<Option<WindowSnapshot>>);
 
 #[tauri::command]
-pub fn exit_application(app: AppHandle) {
-    app.exit(0);
+pub fn hide_main_window(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window(MAIN_WINDOW)
+        .ok_or_else(|| "main window is unavailable".to_string())?;
+    window.hide().map_err(|error| error.to_string())
 }
 
 #[tauri::command]

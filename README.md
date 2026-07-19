@@ -72,7 +72,7 @@ http://服务器地址:3000
 | --- | --- | --- |
 | 服务端 | Go、Gin、PostgreSQL、MinIO SDK、FFmpeg | 提供 API、音乐库管理、对象存储与媒体处理能力 |
 | 管理后台 | Vue 3、TypeScript、Pinia、Vite | 负责首次配置、音乐库维护和系统管理 |
-| Windows 客户端 | Tauri 2、Rust、Vue 3、TypeScript | Windows 桌面播放、系统媒体控制与桌面歌词 |
+| Windows 客户端 | Tauri 2、Rust、Vue 3、TypeScript | Windows 桌面播放、系统媒体控制、桌面歌词与托盘后台播放 |
 | Android 客户端 | Kotlin、Jetpack Compose、Media3 | Android 原生音乐客户端 |
 
 仓库目录如下：

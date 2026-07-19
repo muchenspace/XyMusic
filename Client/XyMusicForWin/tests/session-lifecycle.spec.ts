@@ -111,6 +111,7 @@ function createServices(restorePlayback: () => unknown): ApplicationServices {
       async toggleMaximize() {},
       async toggleFullscreen() {},
       async isMaximized() { return false; },
+      async isFullscreen() { return false; },
       async close() {},
       async onResized() { return () => undefined; },
       async setTheme() {},

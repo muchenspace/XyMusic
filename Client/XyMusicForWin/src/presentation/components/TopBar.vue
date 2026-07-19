@@ -11,10 +11,12 @@ const props = withDefaults(defineProps<{
   searchEnabled?: boolean;
   canGoBack?: boolean;
   canGoForward?: boolean;
+  fullscreen?: boolean;
 }>(), {
   searchEnabled: true,
   canGoBack: false,
   canGoForward: false,
+  fullscreen: false,
 });
 const emit = defineEmits<{ "update:modelValue": [value: string]; back: []; forward: [] }>();
 const theme = useThemeStore();
@@ -34,23 +36,24 @@ function focusSearch(event: KeyboardEvent) {
 }
 
 function minimizeWindow() { void desktopWindow.minimize().catch(() => undefined); }
-async function syncMaximizedState() {
+async function syncWindowState() {
   try {
-    const value = await desktopWindow.isMaximized();
-    if (componentMounted) maximized.value = value;
+    const nextMaximized = await desktopWindow.isMaximized();
+    if (componentMounted) maximized.value = nextMaximized;
   } catch { /* Browser and test environments do not expose a native window. */ }
 }
-function scheduleMaximizedStateSync() {
+function scheduleWindowStateSync() {
   if (resizeSyncTimer !== undefined) window.clearTimeout(resizeSyncTimer);
   resizeSyncTimer = window.setTimeout(() => {
     resizeSyncTimer = undefined;
-    void syncMaximizedState();
+    void syncWindowState();
   }, MAXIMIZED_STATE_SYNC_DELAY_MS);
 }
 async function toggleMaximizeWindow() {
+  if (props.fullscreen) return;
   try {
     await desktopWindow.toggleMaximize();
-    await syncMaximizedState();
+    await syncWindowState();
   } catch { /* Browser and test environments do not expose a native window. */ }
 }
 function closeWindow() { void desktopWindow.close().catch(() => undefined); }
@@ -58,8 +61,8 @@ function closeWindow() { void desktopWindow.close().catch(() => undefined); }
 onMounted(() => {
   componentMounted = true;
   window.addEventListener("keydown", focusSearch);
-  void syncMaximizedState();
-  void desktopWindow.onResized(scheduleMaximizedStateSync)
+  void syncWindowState();
+  void desktopWindow.onResized(scheduleWindowStateSync)
     .then((unlisten) => {
       if (componentMounted) removeResizeListener = unlisten;
       else unlisten();
@@ -112,7 +115,7 @@ onUnmounted(() => {
     </div>
 
     <div class="titlebar-drag-region" data-tauri-drag-region @dblclick="toggleMaximizeWindow"></div>
-    <div class="window-controls" aria-label="窗口控制">
+    <div v-if="!props.fullscreen" class="window-controls" aria-label="窗口控制">
       <button type="button" class="window-control" title="最小化" aria-label="最小化" @click="minimizeWindow"><Minus :size="17" /></button>
       <button type="button" class="window-control" :title="maximized ? '还原' : '最大化'" :aria-label="maximized ? '还原' : '最大化'" @click="toggleMaximizeWindow"><Copy v-if="maximized" :size="13" /><Square v-else :size="13" /></button>
       <button type="button" class="window-control close" title="关闭" aria-label="关闭" @click="closeWindow"><X :size="18" /></button>
