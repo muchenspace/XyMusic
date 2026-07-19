@@ -10,8 +10,7 @@
 
 <p align="center">
   <a href="./docs/example.md">界面预览</a> ·
-  <a href="./docs/教程.md">部署教程</a> ·
-  <a href="https://wwbqc.lanzouv.com/b01eumnd5a">客户端以及服务端下载</a>
+  <a href="./docs/教程.md">部署教程</a>
 </p>
 
 XyMusic 用来集中管理和播放自己的音乐收藏。它可以扫描本地音乐目录，自动完成媒体分析与转码，并通过管理后台批量整理曲目、专辑、艺术家、封面和歌词等信息。
@@ -88,9 +87,3 @@ XyMusic/
 ├── docs/                      # 部署说明与界面截图
 └── install.sh                 # Linux 一键安装脚本
 ```
-
-## 下载
-
-Release 安装包也可以通过网盘获取：
-
-- [蓝奏云下载](https://wwbqc.lanzouv.com/b01eumnd5a)（密码：`6666`）
