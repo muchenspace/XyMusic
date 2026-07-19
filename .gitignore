@@ -38,6 +38,18 @@ signing.properties
 **/.vite/
 **/.vite-temp/
 **/.vue-global-types/
+**/.parcel-cache/
+**/.turbo/
+**/.next/
+**/.nuxt/
+**/.output/
+**/.svelte-kit/
+**/storybook-static/
+**/.npm/
+**/.pnpm-store/
+**/.yarn/cache/
+**/.yarn/unplugged/
+.pnp.*
 **/coverage/
 **/.nyc_output/
 **/playwright-report/
@@ -58,10 +70,17 @@ pnpm-debug.log*
 # Android、Gradle 与本机构建缓存
 **/.gradle/
 **/.kotlin/
+**/.android/
+**/.lint/
+**/.navigation/
 **/build/
+**/out/
+**/bin/
+**/obj/
 **/.cxx/
 **/.externalNativeBuild/
 **/captures/
+**/generated/baselineProfiles/
 *.apk
 *.aab
 *.ap_
@@ -73,6 +92,30 @@ lint-results*.xml
 
 # Rust/Tauri 构建目录（Cargo.lock 应提交）
 **/target/
+**/.cargo/
+/Client/XyMusicForWin/src-tauri/gen/schemas/
+/Client/XyMusicForWin/src-tauri/icons/android/
+/Client/XyMusicForWin/src-tauri/icons/ios/
+/Client/XyMusicForWin/src-tauri/icons/icon.icns
+
+# Python、本地虚拟环境与工具缓存
+**/__pycache__/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.tox/
+**/.venv/
+**/venv/
+*.py[cod]
+
+# CMake、Ninja 与本机原生构建目录
+**/cmake-build-*/
+**/CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+.ninja_deps
+.ninja_log
 
 # Go 本机工作区、测试与覆盖率产物
 go.work
@@ -140,6 +183,13 @@ coverage.out
 **/.cache/
 **/.tmp/
 **/.temp/
+**/tmp/
+**/temp/
+**/.sass-cache/
+**/.eslintcache/
+**/.stylelintcache/
+**/.scannerwork/
+**/reports/
 
 # IDE 与编辑器的用户状态
 .idea/
