@@ -56,10 +56,25 @@ download_and_extract() {
 # 3. 赋予权限并定位二进制文件
 setup_permissions() {
     # 查找解压出来的二进制文件（可能在根目录，也可能在子目录中）
-    local BINARY_PATH=$(find "$INSTALL_DIR" -name "${APP_NAME}" -type f | head -n 1)
+    local BINARY_PATH
+    local FFMPEG_PATH
+    local FFPROBE_PATH
+    local TOOLS_PATH
+    BINARY_PATH=$(find "$INSTALL_DIR" -name "${APP_NAME}" -type f -print -quit)
+    FFMPEG_PATH=$(find "$INSTALL_DIR" -path '*/tools/ffmpeg' -type f -print -quit)
+    FFPROBE_PATH=$(find "$INSTALL_DIR" -path '*/tools/ffprobe' -type f -print -quit)
     
     if [ -z "$BINARY_PATH" ]; then
         error "在解压后的文件中未找到二进制文件: ${APP_NAME}"
+    fi
+
+    if [ -z "$FFMPEG_PATH" ] || [ -z "$FFPROBE_PATH" ]; then
+        error "在解压后的 tools 目录中未找到 ffmpeg 和 ffprobe"
+    fi
+
+    TOOLS_PATH=$(dirname "$FFMPEG_PATH")
+    if [ "$TOOLS_PATH" != "$(dirname "$FFPROBE_PATH")" ]; then
+        error "ffmpeg 和 ffprobe 不在同一个 tools 目录中"
     fi
     
     # 如果二进制文件在子目录中，将其移动到 /opt/xymusic 根目录方便管理
@@ -67,8 +82,16 @@ setup_permissions() {
         mv "$BINARY_PATH" "${INSTALL_DIR}/${APP_NAME}"
     fi
 
-    info "为 ${INSTALL_DIR}/${APP_NAME} 赋予 777 权限..."
-    chmod 777 "${INSTALL_DIR}/${APP_NAME}"
+    # Release 压缩包可能带有外层目录，确保媒体工具始终位于固定路径。
+    if [ "$TOOLS_PATH" != "${INSTALL_DIR}/tools" ]; then
+        mv "$TOOLS_PATH" "${INSTALL_DIR}/tools"
+    fi
+
+    info "为主程序、ffmpeg 和 ffprobe 赋予 777 权限..."
+    chmod 777 \
+        "${INSTALL_DIR}/${APP_NAME}" \
+        "${INSTALL_DIR}/tools/ffmpeg" \
+        "${INSTALL_DIR}/tools/ffprobe"
 }
 
 # 4. 配置 Systemd 服务
