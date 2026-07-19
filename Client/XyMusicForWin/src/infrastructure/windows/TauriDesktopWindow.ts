@@ -32,7 +32,7 @@ export class TauriDesktopWindow implements DesktopWindow {
   }
 
   async close(): Promise<void> {
-    if (isTauriRuntime()) await getCurrentWindow().close();
+    if (isTauriRuntime()) await invoke("exit_application");
   }
 
   async onResized(listener: () => void): Promise<() => void> {
