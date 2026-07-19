@@ -176,6 +176,16 @@ function playCurrentCollection(): void {
   }
   play(firstTrack, library.tracks);
 }
+
+// 发现页封面签名 URL 过期时，防抖触发 home.load() 刷新 feed 与随机列表，获取新的签名 URL。
+let artworkRefreshTimer: number | null = null;
+function handleDiscoverArtworkFailed(): void {
+  if (artworkRefreshTimer !== null) return;
+  artworkRefreshTimer = window.setTimeout(() => {
+    artworkRefreshTimer = null;
+    void home.load();
+  }, 1000);
+}
 </script>
 
 <template>
@@ -282,6 +292,7 @@ function playCurrentCollection(): void {
             @open-playlist="openPlaylist"
             @retry-random-albums="home.loadRandomAlbums"
             @retry-random-tracks="home.loadRandomTracks"
+            @artwork-failed="handleDiscoverArtworkFailed"
           />
 
           <SettingsView

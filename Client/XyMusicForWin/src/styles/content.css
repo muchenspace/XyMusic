@@ -37,6 +37,9 @@
 .hero::before { content: ""; position: absolute; z-index: -2; inset: 0; background-image: var(--hero-image); background-position: center 38%; background-size: cover; }
 .hero::after { content: ""; position: absolute; z-index: -1; inset: 0; background: linear-gradient(90deg, var(--media-scrim-strong) 0%, var(--media-scrim-strong) 44%, var(--media-scrim-soft) 100%); }
 .hero--without-artwork::before { background: var(--media-fallback); }
+/* 探针 img 仅用于检测签名 URL 过期并触发 error 事件，必须完全隐藏不参与渲染。
+   display:none 的 img 仍会加载资源并触发 error，探针功能不受影响。 */
+.hero-image-probe { display: none; }
 .hero-fallback-icon { position: absolute; right: clamp(34px, 9vw, 130px); top: 50%; width: clamp(110px, 16vw, 210px); height: clamp(110px, 16vw, 210px); color: var(--media-icon); transform: translateY(-50%) rotate(-8deg); }
 .hero-copy { width: min(630px, 63%); padding: clamp(42px, 5vw, 68px); color: var(--media-text); }
 .hero .eyebrow { display: flex; align-items: center; gap: 9px; margin: 0 0 14px; color: var(--media-text-secondary); font-size: 13px; font-weight: 700; letter-spacing: 0; text-transform: uppercase; }

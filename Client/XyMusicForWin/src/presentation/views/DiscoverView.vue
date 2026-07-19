@@ -32,11 +32,12 @@ defineEmits<{
   openPlaylist: [playlist: Playlist];
   retryRandomAlbums: [];
   retryRandomTracks: [];
+  "artwork-failed": [];
 }>();
 </script>
 
 <template>
-  <FeaturedHero v-if="feed.featured" :album="feed.featured" :play-loading="albumPlayLoadingId === feed.featured.id" @play="$emit('playAlbum', $event)" @open="$emit('openAlbum', $event)" />
+  <FeaturedHero v-if="feed.featured" :album="feed.featured" :play-loading="albumPlayLoadingId === feed.featured.id" @play="$emit('playAlbum', $event)" @open="$emit('openAlbum', $event)" @artwork-failed="$emit('artwork-failed')" />
 
   <section v-if="randomAlbumsError" class="content-section" aria-labelledby="random-albums-heading">
     <div class="section-heading"><div><h2 id="random-albums-heading">随机专辑</h2><p>从资料库中随机选取</p></div></div>
@@ -44,7 +45,7 @@ defineEmits<{
       <template #actions><button type="button" class="secondary-button" @click="$emit('retryRandomAlbums')">重试</button></template>
     </EmptyState>
   </section>
-  <AlbumRow v-else-if="randomAlbums.length" :albums="randomAlbums" title="随机专辑" description="从资料库中随机选取" :play-loading-id="albumPlayLoadingId" @play="$emit('playAlbum', $event)" @open="$emit('openAlbum', $event)" />
+  <AlbumRow v-else-if="randomAlbums.length" :albums="randomAlbums" title="随机专辑" description="从资料库中随机选取" :play-loading-id="albumPlayLoadingId" @play="$emit('playAlbum', $event)" @open="$emit('openAlbum', $event)" @artwork-failed="$emit('artwork-failed')" />
   <section v-else class="content-section" aria-labelledby="random-albums-heading">
     <div class="section-heading"><div><h2 id="random-albums-heading">随机专辑</h2><p>从资料库中随机选取</p></div></div>
     <LoadingSkeleton v-if="randomAlbumsLoading" :count="3" label="正在加载随机专辑" compact />
@@ -57,7 +58,7 @@ defineEmits<{
       <template #actions><button type="button" class="secondary-button" @click="$emit('retryRandomTracks')">重试</button></template>
     </EmptyState>
   </section>
-  <RandomTrackGrid v-else-if="randomTracks.length" :tracks="randomTracks" :current-id="currentId" :is-playing="isPlaying" @play="$emit('playTrack', $event)" @toggle="$emit('toggle')" @favorite="$emit('favorite', $event)" @add="$emit('add', $event)" />
+  <RandomTrackGrid v-else-if="randomTracks.length" :tracks="randomTracks" :current-id="currentId" :is-playing="isPlaying" @play="$emit('playTrack', $event)" @toggle="$emit('toggle')" @favorite="$emit('favorite', $event)" @add="$emit('add', $event)" @artwork-failed="$emit('artwork-failed')" />
   <section v-else class="content-section random-tracks-section" aria-labelledby="random-tracks-heading">
     <div class="section-heading"><div><h2 id="random-tracks-heading">随机播放</h2><p>从资料库中随机选取的歌曲</p></div></div>
     <LoadingSkeleton v-if="randomTracksLoading" :count="2" label="正在加载随机歌曲" compact />
