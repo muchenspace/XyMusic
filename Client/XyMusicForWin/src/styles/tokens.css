@@ -1,0 +1,119 @@
+@property --range-progress {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 0%;
+}
+
+:root {
+  color-scheme: dark;
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  font-synthesis: none;
+  font-optical-sizing: auto;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: auto;
+
+  --titlebar-height: 48px;
+  --player-height: 92px;
+  --sidebar-width: 244px;
+
+  --bg: #121416;
+  --bg-elevated: #181b1e;
+  --surface: #1d2125;
+  --surface-solid: #20252a;
+  --surface-raised: #252a30;
+  --surface-hover: rgba(255, 255, 255, 0.06);
+  --surface-input: #171a1d;
+  --overlay: rgba(4, 6, 8, 0.72);
+
+  --text: #f2f3f5;
+  --text-secondary: #c8cbd0;
+  --text-muted: #9ca2aa;
+  --text-disabled: #7d838b;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.14);
+
+  --accent: #7294b7;
+  --accent-hover: #84a5c5;
+  --accent-pressed: #5f82a6;
+  --accent-soft: rgba(114, 148, 183, 0.16);
+  --accent-contrast: #101820;
+  --success: #78a888;
+  --danger: #d07a7a;
+  --danger-soft: rgba(208, 122, 122, 0.14);
+  --warning: #c3a36b;
+
+  --control-bg: #171a1d;
+  --control-bg-hover: #252a30;
+  --control-border: rgba(255, 255, 255, 0.14);
+  --control-track: rgba(255, 255, 255, 0.16);
+  --control-shadow: 0 1px 3px rgba(0, 0, 0, 0.24);
+
+  --media-surface: #23282e;
+  --media-fallback: #29323a;
+  --media-scrim-strong: rgba(10, 12, 14, 0.92);
+  --media-scrim-soft: rgba(10, 12, 14, 0.18);
+  --media-overlay: rgba(8, 10, 12, 0.28);
+  --media-text: #f6f7f8;
+  --media-text-secondary: #d9dcdf;
+  --media-text-muted: #b9bec4;
+  --media-icon: rgba(246, 247, 248, 0.12);
+  --media-control-border: rgba(255, 255, 255, 0.28);
+  --media-control-shadow: 0 2px 8px rgba(0, 0, 0, 0.24);
+  --window-close-hover: #c42b1c;
+
+  --focus: rgba(132, 165, 197, 0.88);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.18);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.24);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.34);
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 8px;
+  --radius-xl: 8px;
+  --motion-fast: 130ms;
+  --motion-base: 180ms;
+  --motion-slow: 260ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out: var(--ease-emphasized);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f3f0ea;
+  --bg-elevated: #faf8f4;
+  --surface: #fcfaf7;
+  --surface-solid: #fffefc;
+  --surface-raised: #ffffff;
+  --surface-hover: rgba(34, 38, 43, 0.055);
+  --surface-input: #f8f5f0;
+  --overlay: rgba(28, 31, 35, 0.34);
+
+  --text: #222428;
+  --text-secondary: #50545b;
+  --text-muted: #676c74;
+  --text-disabled: #7b8087;
+  --line: rgba(31, 34, 38, 0.1);
+  --line-strong: rgba(31, 34, 38, 0.17);
+
+  --accent: #486f97;
+  --accent-hover: #3d6289;
+  --accent-pressed: #315273;
+  --accent-soft: rgba(72, 111, 151, 0.11);
+  --accent-contrast: #ffffff;
+  --success: #356e4b;
+  --danger: #994545;
+  --danger-soft: rgba(153, 69, 69, 0.1);
+  --warning: #856429;
+
+  --control-bg: #f8f5f0;
+  --control-bg-hover: #ffffff;
+  --control-border: rgba(31, 34, 38, 0.17);
+  --control-track: rgba(31, 34, 38, 0.16);
+  --control-shadow: 0 1px 3px rgba(44, 38, 32, 0.09);
+
+  --focus: rgba(72, 111, 151, 0.78);
+  --shadow-sm: 0 1px 4px rgba(44, 38, 32, 0.08);
+  --shadow-md: 0 8px 24px rgba(44, 38, 32, 0.1);
+  --shadow-lg: 0 18px 44px rgba(44, 38, 32, 0.14);
+}

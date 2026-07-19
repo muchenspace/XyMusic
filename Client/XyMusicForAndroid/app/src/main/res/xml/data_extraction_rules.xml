@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="database" path="." />
+        <exclude domain="file" path="playback-media/" />
+        <exclude domain="sharedpref" path="secure_session.xml" />
+        <exclude domain="sharedpref" path="secure_refresh_attempt.xml" />
+        <exclude domain="sharedpref" path="auth_device_info.xml" />
+        <exclude domain="sharedpref" path="pending_account_cleanup.xml" />
+        <exclude domain="sharedpref" path="xy_music_server_config.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="database" path="." />
+        <exclude domain="file" path="playback-media/" />
+        <exclude domain="sharedpref" path="secure_session.xml" />
+        <exclude domain="sharedpref" path="secure_refresh_attempt.xml" />
+        <exclude domain="sharedpref" path="auth_device_info.xml" />
+        <exclude domain="sharedpref" path="pending_account_cleanup.xml" />
+        <exclude domain="sharedpref" path="xy_music_server_config.xml" />
+    </device-transfer>
+</data-extraction-rules>
