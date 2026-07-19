@@ -1,0 +1,1225 @@
+{
+  "schemaVersion": 1,
+  "contractName": "xymusic-legacy-http-api",
+  "authoritativeSources": {
+    "legacyBackendRoot": ".",
+    "apiBootstrapFile": "internal/platform/httpserver/engine.go",
+    "controlBootstrapFile": "internal/control/handler.go",
+    "routeFiles": [
+      {
+        "file": "internal/modules/setup/routes.go",
+        "scope": "setup"
+      },
+      {
+        "file": "internal/modules/identity/routes.go",
+        "scope": "identity"
+      },
+      {
+        "file": "internal/modules/profile/routes.go",
+        "scope": "profile"
+      },
+      {
+        "file": "internal/modules/catalog/routes.go",
+        "scope": "catalog"
+      },
+      {
+        "file": "internal/modules/playback/routes.go",
+        "scope": "playback"
+      },
+      {
+        "file": "internal/modules/library/routes.go",
+        "scope": "library"
+      },
+      {
+        "file": "internal/modules/playlist/routes.go",
+        "scope": "playlist"
+      },
+      {
+        "file": "internal/modules/adminauth/routes.go",
+        "scope": "admin-auth"
+      },
+      {
+        "file": "internal/modules/adminmanagement/routes.go",
+        "scope": "admin-management"
+      },
+      {
+        "file": "internal/modules/admincatalog/routes.go",
+        "scope": "admin-catalog-query"
+      },
+      {
+        "file": "internal/modules/adminmetadata/routes.go",
+        "scope": "admin-metadata"
+      },
+      {
+        "file": "internal/modules/admintagscraping/routes.go",
+        "scope": "admin-tag-scraping"
+      },
+      {
+        "file": "internal/modules/adminjobs/routes.go",
+        "scope": "admin-operations"
+      },
+      {
+        "file": "internal/modules/adminaudit/routes.go",
+        "scope": "admin-operations"
+      },
+      {
+        "file": "internal/modules/adminsettings/routes.go",
+        "scope": "admin-operations"
+      },
+      {
+        "file": "internal/modules/adminmutation/routes.go",
+        "scope": "admin-catalog-mutation"
+      },
+      {
+        "file": "internal/modules/adminsources/routes.go",
+        "scope": "admin-library-source"
+      },
+      {
+        "file": "internal/modules/adminmedia/routes.go",
+        "scope": "admin-media"
+      }
+    ]
+  },
+  "countingRules": {
+    "expectedAPIEndpoints": 135,
+    "includes": [
+      "Two health endpoints exposed by both control and configured runtime modes, counted once by method and path.",
+      "Setup endpoints exposed by the control application while setup is required.",
+      "All concrete /api/v1 endpoints implemented by the current Go route modules."
+    ],
+    "excludes": [
+      "The control application's /api/v1/* runtime forwarding wildcard.",
+      "Environment-conditional Swagger routes under /docs.",
+      "Static administration web and redirect entries listed separately."
+    ]
+  },
+  "definitions": {
+    "auth": {
+      "none": "No credential is consumed by the route; setup routes remain gated by setup runtime state.",
+      "bearer": "A user Authorization: Bearer access token is required.",
+      "refresh-token": "A user refresh token is supplied in the JSON request body.",
+      "admin-session": "An ADMIN bearer token or admin access cookie is required; cookie-authenticated mutations also require CSRF.",
+      "admin-refresh-cookie": "The admin refresh cookie and matching CSRF cookie/header are required."
+    },
+    "idempotency": {
+      "none": "The legacy route does not require Idempotency-Key.",
+      "required": "A syntactically valid Idempotency-Key header is required and replay is persisted."
+    },
+    "bodyKind": {
+      "none": "No request body is part of the route contract.",
+      "json": "A JSON request body is required, even when all object properties are optional.",
+      "json-optional": "The JSON request body may be omitted.",
+      "binary": "The request body is an opaque binary stream."
+    }
+  },
+  "apis": [
+    {
+      "method": "GET",
+      "path": "/health/live",
+      "scope": "health",
+      "auth": "none",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/health/ready",
+      "scope": "health",
+      "auth": "none",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/setup/status",
+      "scope": "setup",
+      "auth": "none",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/setup/http/test",
+      "scope": "setup",
+      "auth": "none",
+      "idempotency": "none",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/setup/paths/test",
+      "scope": "setup",
+      "auth": "none",
+      "idempotency": "none",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/setup/database/test",
+      "scope": "setup",
+      "auth": "none",
+      "idempotency": "none",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/setup/storage/test",
+      "scope": "setup",
+      "auth": "none",
+      "idempotency": "none",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/setup/media/test",
+      "scope": "setup",
+      "auth": "none",
+      "idempotency": "none",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/setup/source/test",
+      "scope": "setup",
+      "auth": "none",
+      "idempotency": "none",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/setup/administrator/test",
+      "scope": "setup",
+      "auth": "none",
+      "idempotency": "none",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/setup/complete",
+      "scope": "setup",
+      "auth": "none",
+      "idempotency": "none",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/register",
+      "scope": "identity",
+      "auth": "none",
+      "idempotency": "none",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/login",
+      "scope": "identity",
+      "auth": "none",
+      "idempotency": "none",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/refresh",
+      "scope": "identity",
+      "auth": "refresh-token",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/logout",
+      "scope": "identity",
+      "auth": "bearer",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/logout-all",
+      "scope": "identity",
+      "auth": "bearer",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/users/me",
+      "scope": "profile",
+      "auth": "bearer",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/users/me",
+      "scope": "profile",
+      "auth": "bearer",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users/me/avatar/uploads",
+      "scope": "profile",
+      "auth": "bearer",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users/me/avatar/uploads/:id/complete",
+      "scope": "profile",
+      "auth": "bearer",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/tracks",
+      "scope": "catalog",
+      "auth": "bearer",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/tracks/:id",
+      "scope": "catalog",
+      "auth": "bearer",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artists",
+      "scope": "catalog",
+      "auth": "bearer",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/artists/:id",
+      "scope": "catalog",
+      "auth": "bearer",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/albums",
+      "scope": "catalog",
+      "auth": "bearer",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/albums/:id",
+      "scope": "catalog",
+      "auth": "bearer",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/search",
+      "scope": "catalog",
+      "auth": "bearer",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tracks/random",
+      "scope": "catalog",
+      "auth": "bearer",
+      "idempotency": "none",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/albums/random",
+      "scope": "catalog",
+      "auth": "bearer",
+      "idempotency": "none",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tracks/:id/playback",
+      "scope": "playback",
+      "auth": "bearer",
+      "idempotency": "none",
+      "bodyKind": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/library/favorites",
+      "scope": "library",
+      "auth": "bearer",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/library/favorites/:trackId",
+      "scope": "library",
+      "auth": "bearer",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/library/favorites/:trackId",
+      "scope": "library",
+      "auth": "bearer",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/library/history",
+      "scope": "library",
+      "auth": "bearer",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/library/history/:trackId",
+      "scope": "library",
+      "auth": "bearer",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/playlists",
+      "scope": "playlist",
+      "auth": "bearer",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/playlists",
+      "scope": "playlist",
+      "auth": "bearer",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/playlists/:id",
+      "scope": "playlist",
+      "auth": "bearer",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/playlists/:id",
+      "scope": "playlist",
+      "auth": "bearer",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/playlists/:id",
+      "scope": "playlist",
+      "auth": "bearer",
+      "idempotency": "required",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/playlists/:id/tracks",
+      "scope": "playlist",
+      "auth": "bearer",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/playlists/:id/tracks/:entryId",
+      "scope": "playlist",
+      "auth": "bearer",
+      "idempotency": "required",
+      "bodyKind": "none"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/playlists/:id/tracks/order",
+      "scope": "playlist",
+      "auth": "bearer",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/auth/login",
+      "scope": "admin-auth",
+      "auth": "none",
+      "idempotency": "none",
+      "bodyKind": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/auth/session",
+      "scope": "admin-auth",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/auth/refresh",
+      "scope": "admin-auth",
+      "auth": "admin-refresh-cookie",
+      "idempotency": "required",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/auth/logout",
+      "scope": "admin-auth",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/dashboard",
+      "scope": "admin-management",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/users",
+      "scope": "admin-management",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/users",
+      "scope": "admin-management",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/users/:id",
+      "scope": "admin-management",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/admin/users/:id",
+      "scope": "admin-management",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/users/:id/password",
+      "scope": "admin-management",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/users/:id/sessions/:sessionId/revoke",
+      "scope": "admin-management",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/admin/users/:id",
+      "scope": "admin-management",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/users/:id/restore",
+      "scope": "admin-management",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/artists",
+      "scope": "admin-catalog-query",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/artists/:id",
+      "scope": "admin-catalog-query",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/albums",
+      "scope": "admin-catalog-query",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/albums/duplicates",
+      "scope": "admin-catalog-query",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/albums/:id",
+      "scope": "admin-catalog-query",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/tracks",
+      "scope": "admin-catalog-query",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/tracks/:id",
+      "scope": "admin-catalog-query",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/tracks/:id/metadata",
+      "scope": "admin-metadata",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/admin/tracks/:id/metadata",
+      "scope": "admin-metadata",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/metadata/batch",
+      "scope": "admin-metadata",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/tracks/:id/metadata/revisions",
+      "scope": "admin-metadata",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/tracks/:id/metadata/revisions/:revisionId",
+      "scope": "admin-metadata",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/tracks/:id/metadata/revisions/:revisionId/restore",
+      "scope": "admin-metadata",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/tracks/:id/metadata/writeback",
+      "scope": "admin-metadata",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/metadata/writeback-jobs",
+      "scope": "admin-metadata",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/metadata/writeback-jobs/:id",
+      "scope": "admin-metadata",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/metadata/writeback-jobs/:id/retry",
+      "scope": "admin-metadata",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/metadata/writeback-jobs/:id/cancel",
+      "scope": "admin-metadata",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/tag-scraping/search",
+      "scope": "admin-tag-scraping",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/tag-scraping/artists/search",
+      "scope": "admin-tag-scraping",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/tag-scraping/artists/batches",
+      "scope": "admin-tag-scraping",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/tag-scraping/artists/batches/:id",
+      "scope": "admin-tag-scraping",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/tag-scraping/artists/batches/:id/cancel",
+      "scope": "admin-tag-scraping",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/tag-scraping/artists/batches/:id/retry",
+      "scope": "admin-tag-scraping",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/tag-scraping/artists/:id/apply",
+      "scope": "admin-tag-scraping",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/tag-scraping/tracks/:id/fingerprint",
+      "scope": "admin-tag-scraping",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/tag-scraping/tracks/:id/apply",
+      "scope": "admin-tag-scraping",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/tag-scraping/artwork",
+      "scope": "admin-tag-scraping",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/tag-scraping/batches",
+      "scope": "admin-tag-scraping",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/tag-scraping/batches/:id",
+      "scope": "admin-tag-scraping",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/tag-scraping/batches/:id/cancel",
+      "scope": "admin-tag-scraping",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/tag-scraping/batches/:id/retry",
+      "scope": "admin-tag-scraping",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/jobs",
+      "scope": "admin-operations",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/jobs/events",
+      "scope": "admin-operations",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/jobs/:id",
+      "scope": "admin-operations",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/jobs/:id/retry",
+      "scope": "admin-operations",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json-optional"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/jobs/:id/cancel",
+      "scope": "admin-operations",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json-optional"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/audit",
+      "scope": "admin-operations",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/settings",
+      "scope": "admin-operations",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/admin/settings",
+      "scope": "admin-operations",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/settings/test/database",
+      "scope": "admin-operations",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/settings/test/storage",
+      "scope": "admin-operations",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/settings/test/media-tools",
+      "scope": "admin-operations",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/settings/test/local-library",
+      "scope": "admin-operations",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/system",
+      "scope": "admin-operations",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/artists",
+      "scope": "admin-catalog-mutation",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/admin/artists/:id",
+      "scope": "admin-catalog-mutation",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/albums",
+      "scope": "admin-catalog-mutation",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/admin/albums/:id",
+      "scope": "admin-catalog-mutation",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/albums/merge",
+      "scope": "admin-catalog-mutation",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/tracks",
+      "scope": "admin-catalog-mutation",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/tracks/batch/restore",
+      "scope": "admin-catalog-mutation",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/tracks/batch/delete-permanently",
+      "scope": "admin-catalog-mutation",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/tracks/batch/delete-permanently/:jobId",
+      "scope": "admin-catalog-mutation",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/admin/tracks/:id",
+      "scope": "admin-catalog-mutation",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/tracks/:id/publish",
+      "scope": "admin-catalog-mutation",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/tracks/:id/archive",
+      "scope": "admin-catalog-mutation",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/tracks/:id/restore",
+      "scope": "admin-catalog-mutation",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/admin/tracks/:id",
+      "scope": "admin-catalog-mutation",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/admin/tracks/:id/lyrics",
+      "scope": "admin-catalog-mutation",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/admin/users/:id/status",
+      "scope": "admin-catalog-mutation",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/sources/browse",
+      "scope": "admin-library-source",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/sources",
+      "scope": "admin-library-source",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/sources",
+      "scope": "admin-library-source",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/sources/:id",
+      "scope": "admin-library-source",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/admin/sources/:id",
+      "scope": "admin-library-source",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/admin/sources/:id",
+      "scope": "admin-library-source",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/sources/:id/files",
+      "scope": "admin-library-source",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/sources/:id/processing",
+      "scope": "admin-library-source",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/sources/:id/scans",
+      "scope": "admin-library-source",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/sources/:id/scans",
+      "scope": "admin-library-source",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/sources/:id/scans/:scanId",
+      "scope": "admin-library-source",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/sources/:id/scans/:scanId/cancel",
+      "scope": "admin-library-source",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/sources/:id/scans/:scanId/events",
+      "scope": "admin-library-source",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/media/uploads",
+      "scope": "admin-media",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/admin/media/uploads/:id/content",
+      "scope": "admin-media",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "binary"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/media/uploads/:id/complete",
+      "scope": "admin-media",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/media/jobs/:id",
+      "scope": "admin-media",
+      "auth": "admin-session",
+      "idempotency": "none",
+      "bodyKind": "none"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/media/jobs/:id/retry",
+      "scope": "admin-media",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    }
+  ],
+  "staticEntries": [
+    {
+      "methods": [
+        "GET"
+      ],
+      "path": "/",
+      "kind": "redirect",
+      "target": "/admin/"
+    },
+    {
+      "methods": [
+        "GET",
+        "HEAD"
+      ],
+      "path": "/admin",
+      "kind": "redirect",
+      "target": "/admin/"
+    },
+    {
+      "methods": [
+        "GET",
+        "HEAD"
+      ],
+      "path": "/admin/*",
+      "kind": "spa-static",
+      "target": "configured admin web directory with SPA fallback"
+    }
+  ]
+}

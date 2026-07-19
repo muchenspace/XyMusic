@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <exclude domain="database" path="." />
+    <exclude domain="file" path="playback-media/" />
+    <exclude domain="sharedpref" path="secure_session.xml" />
+    <exclude domain="sharedpref" path="secure_refresh_attempt.xml" />
+    <exclude domain="sharedpref" path="auth_device_info.xml" />
+    <exclude domain="sharedpref" path="pending_account_cleanup.xml" />
+    <exclude domain="sharedpref" path="xy_music_server_config.xml" />
+</full-backup-content>

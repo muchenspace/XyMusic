@@ -1,0 +1,202 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1783700000000,
+      "tag": "0000_initial",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1783785600000,
+      "tag": "0001_local_music_library",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783824000000,
+      "tag": "0002_user_avatar_upload",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1783830770857,
+      "tag": "0003_playlist_cover_lookup_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783843200000,
+      "tag": "0004_web_admin_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1783846800000,
+      "tag": "0005_managed_library_roots",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783850400000,
+      "tag": "0006_versioned_track_metadata",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1783854000000,
+      "tag": "0007_worker_fencing",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1783857600000,
+      "tag": "0008_upload_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1783861200000,
+      "tag": "0009_metadata_writeback_recovery",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783864800000,
+      "tag": "0010_query_performance_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1783868400000,
+      "tag": "0011_retention_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1783872000000,
+      "tag": "0012_windows_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1783875600000,
+      "tag": "0013_tag_scraping_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1783900800000,
+      "tag": "0014_track_status_and_empty_albums",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1783944000000,
+      "tag": "0015_remove_album_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1783947600000,
+      "tag": "0016_admin_query_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1783987200000,
+      "tag": "0017_catalog_random_keys",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1783990800000,
+      "tag": "0018_persistent_rate_limits",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1783994400000,
+      "tag": "0019_lyrics_origin",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1783998000000,
+      "tag": "0020_cue_source_tracks",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1784001600000,
+      "tag": "0021_reference_cleanup_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1784005200000,
+      "tag": "0022_library_root_tag_writeback",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1784008800000,
+      "tag": "0023_metadata_writeback_path_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1784012400000,
+      "tag": "0024_media_jobs_scan_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1784384949000,
+      "tag": "0025_track_permanent_delete_batches",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1784394000000,
+      "tag": "0026_remove_writeback_backup_references",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1784476800000,
+      "tag": "0027_artist_artwork_scraping_jobs",
+      "breakpoints": true
+    }
+  ]
+}

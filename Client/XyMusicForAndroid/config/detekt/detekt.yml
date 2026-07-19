@@ -1,0 +1,139 @@
+config:
+  validation: true
+  warningsAsErrors: false
+  checkExhaustiveness: false
+  excludes: []
+
+complexity:
+  CognitiveComplexMethod:
+    active: true
+    allowedComplexity: 20
+    excludes:
+      - '**/*Components.kt'
+      - '**/*Controls.kt'
+      - '**/*Lyrics.kt'
+      - '**/*Navigation.kt'
+      - '**/*NavHost.kt'
+      - '**/*NowPlaying.kt'
+      - '**/*Screen.kt'
+      - '**/*Screens.kt'
+      - '**/*Sheet.kt'
+      - '**/*TrackRow.kt'
+  ComplexCondition:
+    active: true
+    allowedConditions: 5
+  CyclomaticComplexMethod:
+    active: true
+    allowedComplexity: 20
+    excludes:
+      - '**/*Components.kt'
+      - '**/*Controls.kt'
+      - '**/*Lyrics.kt'
+      - '**/*Navigation.kt'
+      - '**/*NavHost.kt'
+      - '**/*NowPlaying.kt'
+      - '**/*Screen.kt'
+      - '**/*Screens.kt'
+      - '**/*Sheet.kt'
+      - '**/*TrackRow.kt'
+  LargeClass:
+    active: true
+    allowedLines: 600
+    excludes:
+      - '**/test/**'
+      - '**/androidTest/**'
+  LongMethod:
+    active: true
+    allowedLines: 120
+    excludes:
+      - '**/test/**'
+      - '**/androidTest/**'
+      - '**/*Components.kt'
+      - '**/*Controls.kt'
+      - '**/*Lyrics.kt'
+      - '**/*Navigation.kt'
+      - '**/*NavHost.kt'
+      - '**/*NowPlaying.kt'
+      - '**/*Screen.kt'
+      - '**/*Screens.kt'
+      - '**/*Sheet.kt'
+      - '**/*TrackRow.kt'
+  LongParameterList:
+    active: true
+    allowedFunctionParameters: 10
+    allowedConstructorParameters: 14
+    ignoreDefaultParameters: true
+    ignoreDataClasses: true
+  NestedBlockDepth:
+    active: true
+    allowedDepth: 5
+  TooManyFunctions:
+    active: true
+    excludes:
+      - '**/test/**'
+      - '**/androidTest/**'
+      - '**/CatalogDao.kt'
+    allowedFunctionsPerFile: 25
+    allowedFunctionsPerClass: 25
+    allowedFunctionsPerInterface: 20
+    allowedFunctionsPerObject: 20
+    allowedFunctionsPerEnum: 15
+    ignoreDeprecated: true
+    ignorePrivate: true
+    ignoreInternal: false
+    ignoreOverridden: true
+    ignoreAnnotatedFunctions: []
+
+coroutines:
+  GlobalCoroutineUsage:
+    active: true
+  InjectDispatcher:
+    active: false
+  RedundantSuspendModifier:
+    active: true
+  SleepInsteadOfDelay:
+    active: true
+  SuspendFunWithFlowReturnType:
+    active: true
+
+exceptions:
+  PrintStackTrace:
+    active: true
+  SwallowedException:
+    active: true
+  TooGenericExceptionCaught:
+    active: false
+  TooGenericExceptionThrown:
+    active: false
+
+naming:
+  FunctionNaming:
+    active: false
+  MatchingDeclarationName:
+    active: false
+
+style:
+  ForbiddenComment:
+    active: true
+  MagicNumber:
+    active: false
+  MaxLineLength:
+    active: false
+  ModifierOrder:
+    active: false
+  NewLineAtEndOfFile:
+    active: false
+  ReturnCount:
+    active: true
+    max: 4
+    excludedFunctions:
+      - 'equals'
+    excludeLabeled: false
+    excludeReturnFromLambda: true
+    excludeGuardClauses: true
+  ThrowsCount:
+    active: true
+    max: 3
+    excludeGuardClauses: true
+  WildcardImport:
+    active: false

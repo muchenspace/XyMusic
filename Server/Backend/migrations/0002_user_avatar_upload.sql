@@ -1,0 +1,1 @@
+ALTER TYPE "media_upload_purpose" ADD VALUE IF NOT EXISTS 'USER_AVATAR';

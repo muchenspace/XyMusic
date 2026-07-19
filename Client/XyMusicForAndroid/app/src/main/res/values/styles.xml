@@ -1,0 +1,13 @@
+<resources>
+    <style name="Theme.XyMusic" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/xy_window_background</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:fontFamily">sans-serif</item>
+    </style>
+    <style name="Theme.XyMusic.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/ic_launcher_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.XyMusic</item>
+    </style>
+</resources>
