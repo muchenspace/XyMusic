@@ -25,7 +25,6 @@ import { z } from "zod";
 import { ApiError, apiErrorMessage } from "@/shared/application/api-error";
 import type { SetupCompleteInput, SetupValidationResult } from "@/features/setup/domain/models";
 import {
-  isReachableStorageHost,
   setupStepSchemas,
   validateSetupComplete,
 } from "@/features/setup/application/setup-form";
@@ -97,10 +96,7 @@ const storagePublicConnection = reactive<{ protocol: EndpointProtocol; host: str
 });
 const storageConnectionSchema = z.object({
   protocol: z.enum(["http", "https"]),
-  host: z.string().trim().min(1, "请输入对象存储 IP").max(255).refine(
-    isReachableStorageHost,
-    "不能使用 localhost、127.0.0.0/8、0.0.0.0 或 IPv6 回环地址",
-  ),
+  host: z.string().trim().min(1, "请输入对象存储地址").max(255),
   port: z.coerce.number().int().min(1, "端口必须在 1–65535 之间").max(65_535, "端口必须在 1–65535 之间"),
 });
 
@@ -129,10 +125,6 @@ function validateStorageConnection(): boolean {
   const result = storageConnectionSchema.safeParse(storageConnection);
   if (!result.success) {
     fieldErrors.value.endpoint = result.error.issues[0]?.message ?? "对象存储地址无效";
-    return false;
-  }
-  if (storagePublicConnection.host.trim() && !isReachableStorageHost(storagePublicConnection.host)) {
-    fieldErrors.value.publicBaseUrl = "公开地址不能使用 localhost、127.0.0.0/8、0.0.0.0 或 IPv6 回环地址";
     return false;
   }
   return true;

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SetupCompleteInput } from "@/features/setup/domain/models";
 import {
-  isReachableStorageHost,
   setupCompleteSchema,
   setupStepSchemas,
   validateSetupComplete,
@@ -20,23 +19,6 @@ describe("setup administrator form", () => {
     expect(setupStepSchemas.http.safeParse({ ...listeners, ipv4Host: "::" }).success).toBe(false);
     expect(setupStepSchemas.http.safeParse({ ...listeners, ipv6Host: "0.0.0.0" }).success).toBe(false);
     expect(setupStepSchemas.http.safeParse({ ...listeners, ipv6Port: 65_536 }).success).toBe(false);
-  });
-
-  it("uses one host policy for storage form and URL validation", () => {
-    expect(isReachableStorageHost("storage.internal")).toBe(true);
-    expect(isReachableStorageHost("192.168.1.20")).toBe(true);
-    for (const host of [
-      "localhost",
-      "localhost.",
-      "127.0.0.1",
-      "127.1",
-      "2130706433",
-      "0.0.0.0",
-      "::1",
-      "[::1]",
-    ]) {
-      expect(isReachableStorageHost(host)).toBe(false);
-    }
   });
 
   it("accepts the required administrator credentials", () => {
@@ -147,7 +129,7 @@ describe("setup administrator form", () => {
     }).success).toBe(true);
   });
 
-  it("rejects loopback addresses for both object storage URLs", () => {
+  it("allows object storage on local, loopback, wildcard, and remote addresses", () => {
     const base = {
       endpoint: "http://minio.example.com:9000",
       region: "us-east-1",
@@ -159,9 +141,17 @@ describe("setup administrator form", () => {
       maxUploadBytes: 1024,
     };
     expect(setupStepSchemas.storage.safeParse(base).success).toBe(true);
-    for (const endpoint of ["http://127.0.0.1:9000", "http://127.1.2.3:9000", "http://localhost:9000", "http://[::1]:9000"]) {
-      expect(setupStepSchemas.storage.safeParse({ ...base, endpoint }).success).toBe(false);
-      expect(setupStepSchemas.storage.safeParse({ ...base, publicBaseUrl: endpoint }).success).toBe(false);
+    for (const endpoint of [
+      "http://127.0.0.1:9000",
+      "http://127.1.2.3:9000",
+      "http://localhost:9000",
+      "http://0.0.0.0:9000",
+      "http://[::1]:9000",
+      "http://[::]:9000",
+      "https://objects.example.com",
+    ]) {
+      expect(setupStepSchemas.storage.safeParse({ ...base, endpoint }).success).toBe(true);
+      expect(setupStepSchemas.storage.safeParse({ ...base, publicBaseUrl: endpoint }).success).toBe(true);
     }
   });
 });
