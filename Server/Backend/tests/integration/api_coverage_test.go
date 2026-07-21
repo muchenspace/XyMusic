@@ -74,6 +74,9 @@ func TestGinRoutesCoverEveryLegacyAPI(t *testing.T) {
 	defer runtime.Close()
 	actual := make(map[string]struct{})
 	for _, route := range runtime.Handler.Routes() {
+		if strings.HasPrefix(route.Path, "/api/v1/oss/") {
+			continue
+		}
 		if strings.HasPrefix(route.Path, "/api/") || strings.HasPrefix(route.Path, "/health/") {
 			actual[route.Method+" "+route.Path] = struct{}{}
 		}

@@ -15,6 +15,7 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
 	"xymusic/server/internal/config"
+	"xymusic/server/internal/platform/ossproxy"
 )
 
 type Client struct {
@@ -132,7 +133,11 @@ func (c *Client) PresignedGet(ctx context.Context, objectKey string, expires tim
 	if err != nil {
 		return "", fmt.Errorf("sign object URL %q: %w", objectKey, err)
 	}
-	return presigned.String(), nil
+	clientURL, err := ossproxy.ClientURL(presigned.String())
+	if err != nil {
+		return "", fmt.Errorf("create proxied object URL %q: %w", objectKey, err)
+	}
+	return clientURL, nil
 }
 
 func normalizeEndpoint(raw string) (endpoint string, secure bool, err error) {

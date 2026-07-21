@@ -89,6 +89,7 @@
     ],
     "excludes": [
       "The control application's /api/v1/* runtime forwarding wildcard.",
+      "The /api/v1/oss/* pre-signed object transport proxy.",
       "Environment-conditional Swagger routes under /docs.",
       "Static administration web and redirect entries listed separately."
     ]

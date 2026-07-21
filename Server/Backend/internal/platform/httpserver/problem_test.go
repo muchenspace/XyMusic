@@ -165,12 +165,19 @@ func TestMediaUploadMatcherIsStrict(t *testing.T) {
 	if !IsMediaContentUpload(valid) {
 		t.Fatal("expected UUID media upload path to match")
 	}
+	objectProxy := request(t, http.MethodPut, "/api/v1/oss/b2JqZWN0cy5leGFtcGxlLnRlc3Q/music/song.flac", nil)
+	if !IsMediaContentUpload(objectProxy) {
+		t.Fatal("expected object storage proxy upload path to match")
+	}
 
 	invalidRequests := []*http.Request{
 		request(t, http.MethodPost, valid.URL.Path, nil),
+		request(t, http.MethodPost, objectProxy.URL.Path, nil),
 		request(t, http.MethodPut, "/api/v1/admin/media/uploads/not-a-uuid/content", nil),
 		request(t, http.MethodPut, valid.URL.Path+"/extra", nil),
 		request(t, http.MethodPut, "/api/v1/admin/media/uploads/01234567-89ab-cdef-0123-456789abcdef", nil),
+		request(t, http.MethodPut, "/api/v1/oss/not+base64/music/song.flac", nil),
+		request(t, http.MethodPut, "/api/v1/oss/b2JqZWN0cy5leGFtcGxlLnRlc3Q", nil),
 	}
 	for _, invalid := range invalidRequests {
 		if IsMediaContentUpload(invalid) {

@@ -19,6 +19,7 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
 	"xymusic/server/internal/config"
+	"xymusic/server/internal/platform/ossproxy"
 )
 
 // MinIOObjectStorage is the production avatar-upload adapter. Presigned PUT
@@ -79,7 +80,11 @@ func (storage *MinIOObjectStorage) CreateUploadURL(
 	if err != nil {
 		return "", fmt.Errorf("sign avatar upload URL: %w", err)
 	}
-	return signed.String(), nil
+	clientURL, err := ossproxy.ClientURL(signed.String())
+	if err != nil {
+		return "", fmt.Errorf("create proxied avatar upload URL: %w", err)
+	}
+	return clientURL, nil
 }
 
 func (storage *MinIOObjectStorage) DownloadToFile(
