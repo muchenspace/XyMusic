@@ -127,7 +127,16 @@ func (c *Client) DownloadToFile(ctx context.Context, objectKey, destination stri
 
 func (c *Client) PresignedGet(ctx context.Context, objectKey string, expires time.Duration) (string, error) {
 	if c.publicBaseURL != "" {
-		return c.publicBaseURL + "/" + strings.TrimLeft(objectKey, "/"), nil
+		publicURL, err := url.Parse(c.publicBaseURL)
+		if err != nil {
+			return "", fmt.Errorf("parse public object URL: %w", err)
+		}
+		publicURL.Path = strings.TrimRight(publicURL.Path, "/") + "/" + strings.TrimLeft(objectKey, "/")
+		clientURL, err := ossproxy.ClientURL(publicURL.String())
+		if err != nil {
+			return "", fmt.Errorf("create proxied public object URL %q: %w", objectKey, err)
+		}
+		return clientURL, nil
 	}
 	presigned, err := c.client.PresignedGetObject(ctx, c.bucket, objectKey, expires, nil)
 	if err != nil {

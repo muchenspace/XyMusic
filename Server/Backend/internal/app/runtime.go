@@ -147,7 +147,7 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	if err != nil {
 		return nil, err
 	}
-	objectProxy, err := ossproxy.New(resolved.Storage.Endpoint)
+	objectProxy, err := ossproxy.New(resolved.Storage.Endpoint, resolved.Storage.PublicBaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("configure object storage proxy: %w", err)
 	}

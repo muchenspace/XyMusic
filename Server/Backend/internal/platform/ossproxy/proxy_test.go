@@ -1,6 +1,7 @@
 package ossproxy
 
 import (
+	"encoding/base64"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +16,8 @@ func TestClientURLPreservesSignedPathAndQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Prefix + "/b2JqZWN0cy5leGFtcGxlLnRlc3Q6OTQ0Mw/music/folder%20name/song.flac?X-Amz-Date=1&X-Amz-Signature=a%2Bb"
+	target := base64.RawURLEncoding.EncodeToString([]byte("https://objects.example.test:9443"))
+	want := Prefix + "/" + target + "/music/folder%20name/song.flac?X-Amz-Date=1&X-Amz-Signature=a%2Bb"
 	if got != want {
 		t.Fatalf("client URL = %q, want %q", got, want)
 	}
@@ -37,7 +39,7 @@ func TestProxyForwardsSignedRequestsToConfiguredStorage(t *testing.T) {
 	}))
 	defer storage.Close()
 
-	proxy, err := New(storage.URL)
+	proxy, err := New(storage.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +82,7 @@ func TestProxyForwardsSignedRequestsToConfiguredStorage(t *testing.T) {
 }
 
 func TestProxyRejectsAuthorityOutsideConfiguredEndpoint(t *testing.T) {
-	proxy, err := New("https://objects.example.test")
+	proxy, err := New("https://objects.example.test", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,5 +97,52 @@ func TestProxyRejectsAuthorityOutsideConfiguredEndpoint(t *testing.T) {
 	engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, clientURL, nil))
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+}
+
+func TestProxyForwardsConfiguredPublicBaseURLUsingItsOwnScheme(t *testing.T) {
+	publicStorage := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.EscapedPath() != "/cdn/music/song.flac" {
+			t.Fatalf("upstream path = %q", request.URL.EscapedPath())
+		}
+		_, _ = writer.Write([]byte("public object"))
+	}))
+	defer publicStorage.Close()
+
+	proxy, err := New("http://objects.example.test:9000", publicStorage.URL+"/cdn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy.proxy.Transport = publicStorage.Client().Transport
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	proxy.Register(engine)
+	backend := httptest.NewServer(engine)
+	defer backend.Close()
+	clientURL, err := ClientURL(publicStorage.URL + "/cdn/music/song.flac")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.Get(backend.URL + clientURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || string(body) != "public object" {
+		t.Fatalf("proxy response = %d %q", response.StatusCode, string(body))
+	}
+
+	outsideURL, err := ClientURL(publicStorage.URL + "/private/secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outsideResponse := httptest.NewRecorder()
+	engine.ServeHTTP(outsideResponse, httptest.NewRequest(http.MethodGet, outsideURL, nil))
+	if outsideResponse.Code != http.StatusBadRequest {
+		t.Fatalf("outside public base status = %d, want %d", outsideResponse.Code, http.StatusBadRequest)
 	}
 }
