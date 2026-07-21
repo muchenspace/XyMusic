@@ -2,7 +2,7 @@
 
 
 APP_NAME="xymusic"
-DOWNLOAD_URL="https://github.com/muchenspace/XyMusic/releases/download/v0.1/XyMusic_0.1_linux_amd64.zip" 
+DOWNLOAD_URL="https://github.com/muchenspace/XyMusic/releases/download/v0.1.1/XyMusic_0.1.1_linux_amd64.zip" 
 INSTALL_DIR="/opt/xymusic"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
 TMP_DIR=$(mktemp -d)
@@ -111,7 +111,7 @@ ExecStart=${INSTALL_DIR}/${APP_NAME}
 # 崩溃后自动重启
 Restart=on-failure
 RestartSec=5s
-# 安全限制 (按需开启或注释)
+# 安全限制
 # User=nobody
 # Group=nogroup
 
