@@ -18,6 +18,7 @@ func TestNormalizeEndpoint(t *testing.T) {
 	}{
 		{"", "s3.amazonaws.com", true, true},
 		{"http://127.0.0.1:9000", "127.0.0.1:9000", false, true},
+		{"http://[2001:db8::10]:9000", "[2001:db8::10]:9000", false, true},
 		{"https://minio.example.com/", "minio.example.com", true, true},
 		{"minio.example.com", "", false, false},
 		{"https://minio.example.com/prefix", "", false, false},

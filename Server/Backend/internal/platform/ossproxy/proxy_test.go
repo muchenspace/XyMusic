@@ -100,6 +100,29 @@ func TestProxyRejectsAuthorityOutsideConfiguredEndpoint(t *testing.T) {
 	}
 }
 
+func TestProxyAllowsConfiguredIPv6Endpoint(t *testing.T) {
+	proxy, err := New("http://[2001:db8::10]:9000", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := decodeTarget(base64.RawURLEncoding.EncodeToString([]byte("http://[2001:db8::10]:9000")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheme, allowed := proxy.upstreamScheme(target, "/music/song.flac")
+	if !allowed || scheme != "http" {
+		t.Fatalf("configured IPv6 endpoint = scheme %q allowed %v", scheme, allowed)
+	}
+
+	wrongPort, err := decodeTarget(base64.RawURLEncoding.EncodeToString([]byte("http://[2001:db8::10]:9001")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, allowed := proxy.upstreamScheme(wrongPort, "/music/song.flac"); allowed {
+		t.Fatal("IPv6 endpoint with a different port must be rejected")
+	}
+}
+
 func TestProxyForwardsConfiguredPublicBaseURLUsingItsOwnScheme(t *testing.T) {
 	publicStorage := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.EscapedPath() != "/cdn/music/song.flac" {
