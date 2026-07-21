@@ -28,13 +28,13 @@ describe("safe Chinese errors", () => {
 
   it("resolves nested OSS proxy URLs against the connected server", () => {
     expect(resolveServerResourceUrls({
-      artwork: { url: "/api/v1/oss/b2JqZWN0cw/cover.jpg?X-Amz-Signature=a%2Bb" },
+      artwork: { url: "/api/v1/oss/artwork/00000000-0000-4000-8000-000000000001/cover-version" },
       playback: { url: "https://cdn.example/track.flac" },
-      items: ["/api/v1/oss/b2JqZWN0cw/song.flac"],
+      items: ["/api/v1/oss/b2JqZWN0cw/song.flac?X-Amz-Signature=a%2Bb"],
     }, "https://music.example.com")).toEqual({
-      artwork: { url: "https://music.example.com/api/v1/oss/b2JqZWN0cw/cover.jpg?X-Amz-Signature=a%2Bb" },
+      artwork: { url: "https://music.example.com/api/v1/oss/artwork/00000000-0000-4000-8000-000000000001/cover-version" },
       playback: { url: "https://cdn.example/track.flac" },
-      items: ["https://music.example.com/api/v1/oss/b2JqZWN0cw/song.flac"],
+      items: ["https://music.example.com/api/v1/oss/b2JqZWN0cw/song.flac?X-Amz-Signature=a%2Bb"],
     });
   });
 });

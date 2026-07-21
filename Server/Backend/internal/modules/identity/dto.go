@@ -10,10 +10,11 @@ type RegistrationDTO struct {
 
 // ArtworkDTO describes an avatar that can be downloaded by an API client.
 type ArtworkDTO struct {
-	AssetID   string  `json:"assetId"`
-	URL       string  `json:"url"`
-	CacheKey  string  `json:"cacheKey"`
-	MimeType  string  `json:"mimeType"`
+	AssetID  string `json:"assetId"`
+	URL      string `json:"url"`
+	CacheKey string `json:"cacheKey"`
+	MimeType string `json:"mimeType"`
+	// ExpiresAt remains in API v1 for client compatibility. Stable artwork resources set it to null.
 	ExpiresAt *string `json:"expiresAt"`
 	Width     *int    `json:"width,omitempty"`
 	Height    *int    `json:"height,omitempty"`

@@ -15,12 +15,12 @@ func TestProductionUserPresenterBatchesUsersAndSignsReadyArtwork(t *testing.T) {
 			ID: "user-1", Username: "alice", DisplayName: "Alice", AvatarAssetID: &assetID,
 		}},
 		artworks: []artworkProjection{{
-			ID: assetID, ObjectKey: "avatars/user-1.webp", MimeType: "image/webp",
+			ID: assetID, MimeType: "image/webp",
 			ChecksumSHA256: &checksum, UpdatedAt: now,
 		}},
 	}
 	signer := &artworkSignerStub{url: "https://objects.test/avatar"}
-	presenter, err := newProductionUserPresenter(repository, signer, 5*time.Minute, presenterClock{now})
+	presenter, err := newProductionUserPresenter(repository, signer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,9 +35,6 @@ func TestProductionUserPresenterBatchesUsersAndSignsReadyArtwork(t *testing.T) {
 	}
 	if len(repository.requestedUsers) != 1 || len(repository.requestedArtworks) != 1 {
 		t.Fatalf("requested users/artworks = %#v/%#v", repository.requestedUsers, repository.requestedArtworks)
-	}
-	if signer.ttl != 5*time.Minute {
-		t.Fatalf("signed TTL = %s", signer.ttl)
 	}
 }
 
@@ -60,14 +57,16 @@ func (store *userProjectionStoreStub) Artworks(_ context.Context, ids []string) 
 
 type artworkSignerStub struct {
 	url string
-	ttl time.Duration
 }
 
-func (signer *artworkSignerStub) PresignedGet(_ context.Context, _ string, ttl time.Duration) (string, error) {
-	signer.ttl = ttl
-	return signer.url, nil
+func (signer *artworkSignerStub) PresentArtwork(
+	assetID string,
+	checksumSHA256 *string,
+	updatedAt time.Time,
+) (string, string, error) {
+	version := updatedAt.UTC().Format("20060102150405")
+	if checksumSHA256 != nil {
+		version = *checksumSHA256
+	}
+	return signer.url, assetID + ":" + version, nil
 }
-
-type presenterClock struct{ now time.Time }
-
-func (clock presenterClock) Now() time.Time { return clock.now }

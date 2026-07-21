@@ -628,7 +628,7 @@ const ReviewRow = defineComponent({
                       <FieldWrap label="公开地址协议"><select v-model="storagePublicConnection.protocol" class="ui-input"><option value="http">HTTP</option><option value="https">HTTPS</option></select></FieldWrap>
                       <FieldWrap label="公开地址 IP 或域名" :error="errorFor('publicBaseUrl')"><input v-model="storagePublicConnection.host" class="ui-input" placeholder="客户端可直接访问的地址" /></FieldWrap>
                       <FieldWrap label="公开地址端口"><input v-model.number="storagePublicConnection.port" class="ui-input" type="number" min="1" max="65535" /></FieldWrap>
-                      <FieldWrap label="签名 URL 有效秒数" :error="errorFor('signedUrlTtlSeconds')"><input v-model.number="form.storage.signedUrlTtlSeconds" class="ui-input" type="number" min="30" max="3600" /></FieldWrap>
+                      <FieldWrap label="播放/上传签名有效秒数" :error="errorFor('signedUrlTtlSeconds')"><input v-model.number="form.storage.signedUrlTtlSeconds" class="ui-input" type="number" min="30" max="3600" /></FieldWrap>
                       <FieldWrap label="最大上传字节数" :error="errorFor('maxUploadBytes')"><input v-model.number="form.storage.maxUploadBytes" class="ui-input" type="number" min="1" /></FieldWrap>
                       <label class="flex items-center justify-between gap-4 rounded-xl border border-[var(--border)] p-4"><span><span class="block font-semibold">Path-style 访问</span><span class="mt-1 block text-xs text-[var(--muted)]">MinIO 与多数自托管存储建议开启</span></span><button type="button" class="switch" role="switch" :aria-checked="form.storage.forcePathStyle" @click="form.storage.forcePathStyle = !form.storage.forcePathStyle" /></label>
                     </div>

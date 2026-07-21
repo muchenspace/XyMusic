@@ -467,7 +467,7 @@ func (r *Repository) attachAlbumCredits(ctx context.Context, records []AlbumReco
 func scanTrack(row pgx.Row) (TrackRecord, error) {
 	var record TrackRecord
 	var albumID, albumTitle *string
-	var assetID, objectKey, mimeType, checksum *string
+	var assetID, mimeType, checksum *string
 	var width, height *int
 	var assetUpdatedAt *time.Time
 	err := row.Scan(
@@ -483,7 +483,6 @@ func scanTrack(row pgx.Row) (TrackRecord, error) {
 		&albumTitle,
 		&record.Favorite,
 		&assetID,
-		&objectKey,
 		&mimeType,
 		&checksum,
 		&width,
@@ -496,14 +495,14 @@ func scanTrack(row pgx.Row) (TrackRecord, error) {
 	if albumID != nil && albumTitle != nil {
 		record.Album = &AlbumReferenceRecord{ID: *albumID, Title: *albumTitle}
 	}
-	record.Artwork = artworkFromScan(assetID, objectKey, mimeType, checksum, width, height, assetUpdatedAt)
+	record.Artwork = artworkFromScan(assetID, mimeType, checksum, width, height, assetUpdatedAt)
 	record.Artists = make([]ArtistReferenceRecord, 0)
 	return record, nil
 }
 
 func scanArtist(row pgx.Row) (ArtistRecord, error) {
 	var record ArtistRecord
-	var assetID, objectKey, mimeType, checksum *string
+	var assetID, mimeType, checksum *string
 	var width, height *int
 	var updatedAt *time.Time
 	err := row.Scan(
@@ -512,7 +511,6 @@ func scanArtist(row pgx.Row) (ArtistRecord, error) {
 		&record.NormalizedName,
 		&record.Description,
 		&assetID,
-		&objectKey,
 		&mimeType,
 		&checksum,
 		&width,
@@ -522,13 +520,13 @@ func scanArtist(row pgx.Row) (ArtistRecord, error) {
 	if err != nil {
 		return ArtistRecord{}, err
 	}
-	record.Artwork = artworkFromScan(assetID, objectKey, mimeType, checksum, width, height, updatedAt)
+	record.Artwork = artworkFromScan(assetID, mimeType, checksum, width, height, updatedAt)
 	return record, nil
 }
 
 func scanAlbum(row pgx.Row) (AlbumRecord, error) {
 	var record AlbumRecord
-	var assetID, objectKey, mimeType, checksum *string
+	var assetID, mimeType, checksum *string
 	var width, height *int
 	var updatedAt *time.Time
 	err := row.Scan(
@@ -539,7 +537,6 @@ func scanAlbum(row pgx.Row) (AlbumRecord, error) {
 		&record.ReleaseDate,
 		&record.TrackCount,
 		&assetID,
-		&objectKey,
 		&mimeType,
 		&checksum,
 		&width,
@@ -549,22 +546,21 @@ func scanAlbum(row pgx.Row) (AlbumRecord, error) {
 	if err != nil {
 		return AlbumRecord{}, err
 	}
-	record.Cover = artworkFromScan(assetID, objectKey, mimeType, checksum, width, height, updatedAt)
+	record.Cover = artworkFromScan(assetID, mimeType, checksum, width, height, updatedAt)
 	record.Artists = make([]ArtistReferenceRecord, 0)
 	return record, nil
 }
 
 func artworkFromScan(
-	assetID, objectKey, mimeType, checksum *string,
+	assetID, mimeType, checksum *string,
 	width, height *int,
 	updatedAt *time.Time,
 ) *ArtworkAsset {
-	if assetID == nil || objectKey == nil || mimeType == nil || updatedAt == nil {
+	if assetID == nil || mimeType == nil || updatedAt == nil {
 		return nil
 	}
 	return &ArtworkAsset{
 		ID:             *assetID,
-		ObjectKey:      *objectKey,
 		MimeType:       *mimeType,
 		ChecksumSHA256: checksum,
 		Width:          width,
@@ -716,7 +712,7 @@ const trackSelectSQL = `
 		t.disc_number, t.published_at, t.version,
 		al.id, al.title,
 		(favorite.track_id IS NOT NULL) AS is_favorite,
-		asset.id, asset.object_key, asset.mime_type, asset.checksum_sha256,
+		asset.id, asset.mime_type, asset.checksum_sha256,
 		asset.width, asset.height, asset.updated_at
 	FROM tracks t
 	LEFT JOIN albums al ON al.id = t.album_id
@@ -727,7 +723,7 @@ const trackSelectSQL = `
 const artistSelectSQL = `
 	SELECT
 		ar.id, ar.name, ar.normalized_name, ar.description,
-		asset.id, asset.object_key, asset.mime_type, asset.checksum_sha256,
+		asset.id, asset.mime_type, asset.checksum_sha256,
 		asset.width, asset.height, asset.updated_at
 	FROM artists ar
 	LEFT JOIN media_assets asset ON asset.id = ar.artwork_asset_id AND asset.status = 'READY'
@@ -737,7 +733,7 @@ const albumSelectSQL = `
 	SELECT
 		al.id, al.title, al.normalized_title, al.description, al.release_date::text,
 		(SELECT count(*)::int FROM tracks counted_track WHERE counted_track.album_id = al.id AND counted_track.status = 'READY') AS track_count,
-		asset.id, asset.object_key, asset.mime_type, asset.checksum_sha256,
+		asset.id, asset.mime_type, asset.checksum_sha256,
 		asset.width, asset.height, asset.updated_at
 	FROM albums al
 	LEFT JOIN media_assets asset ON asset.id = al.cover_asset_id AND asset.status = 'READY'

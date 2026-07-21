@@ -72,6 +72,22 @@ func (c *Client) Stat(ctx context.Context, objectKey string) (minio.ObjectInfo, 
 	return info, nil
 }
 
+func (c *Client) OpenForProxy(
+	ctx context.Context,
+	objectKey string,
+) (ossproxy.ReadSeekCloser, ossproxy.ObjectMetadata, error) {
+	object, err := c.client.GetObject(ctx, c.bucket, objectKey, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, ossproxy.ObjectMetadata{}, fmt.Errorf("open object %q: %w", objectKey, err)
+	}
+	info, err := object.Stat()
+	if err != nil {
+		_ = object.Close()
+		return nil, ossproxy.ObjectMetadata{}, fmt.Errorf("inspect object %q: %w", objectKey, err)
+	}
+	return object, ossproxy.ObjectMetadata{Size: info.Size, LastModified: info.LastModified}, nil
+}
+
 func (c *Client) Delete(ctx context.Context, objectKey string) error {
 	if err := c.client.RemoveObject(ctx, c.bucket, objectKey, minio.RemoveObjectOptions{}); err != nil {
 		return fmt.Errorf("delete object %q: %w", objectKey, err)

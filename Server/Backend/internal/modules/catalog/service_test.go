@@ -44,7 +44,6 @@ func TestListTracksUsesScopedCursorAndPresentsLegacyShape(t *testing.T) {
 					Album:           &AlbumReferenceRecord{ID: "album-1", Title: "Album"},
 					Artwork: &ArtworkAsset{
 						ID:             "asset-1",
-						ObjectKey:      "covers/one.jpg",
 						MimeType:       "image/jpeg",
 						ChecksumSHA256: &checksum,
 						Width:          intPointer(600),
@@ -81,8 +80,11 @@ func TestListTracksUsesScopedCursorAndPresentsLegacyShape(t *testing.T) {
 	if item.PublishedAt != "2026-07-15T12:34:56.789Z" || item.Artwork == nil || item.Artwork.CacheKey != "asset-1:abc123" {
 		t.Fatalf("presented track = %#v", item)
 	}
-	if item.Artwork.ExpiresAt == nil || *item.Artwork.ExpiresAt != "2026-07-16T08:05:00.000Z" {
-		t.Fatalf("artwork expiry = %#v", item.Artwork)
+	if item.Artwork.URL != "https://media.example/asset-1" {
+		t.Fatalf("artwork URL = %#v", item.Artwork)
+	}
+	if item.Artwork.ExpiresAt != nil {
+		t.Fatalf("stable artwork must not expire: %#v", item.Artwork)
 	}
 	input.Cursor = *result.NextCursor
 	if _, err := service.ListTracks(context.Background(), "user-1", input); err != nil {
@@ -279,18 +281,16 @@ func TestGetCatalogDetailsMapMissingRowsToNotFound(t *testing.T) {
 	}
 }
 
-func newTestService(t *testing.T, store Store, signer ArtworkURLSigner) *Service {
+func newTestService(t *testing.T, store Store, signer ArtworkURLProvider) *Service {
 	return newTestServiceWithRandom(t, store, signer, func() float64 { return 0.5 })
 }
 
-func newTestServiceWithRandom(t *testing.T, store Store, signer ArtworkURLSigner, random func() float64) *Service {
+func newTestServiceWithRandom(t *testing.T, store Store, signer ArtworkURLProvider, random func() float64) *Service {
 	t.Helper()
 	service, err := NewService(ServiceDependencies{
 		Repository:    store,
 		Cursors:       pagination.NewCursorCodec("catalog-test-secret"),
 		ArtworkURLs:   signer,
-		ArtworkURLTTL: 5 * time.Minute,
-		Clock:         fixedClock{value: time.Date(2026, 7, 16, 8, 0, 0, 0, time.UTC)},
 		RandomFloat64: random,
 	})
 	if err != nil {
@@ -299,21 +299,25 @@ func newTestServiceWithRandom(t *testing.T, store Store, signer ArtworkURLSigner
 	return service
 }
 
-type fixedClock struct{ value time.Time }
-
-func (clock fixedClock) Now() time.Time { return clock.value }
-
 type signerStub struct {
 	calls int
 	err   error
 }
 
-func (signer *signerStub) PresignedGet(_ context.Context, objectKey string, _ time.Duration) (string, error) {
+func (signer *signerStub) PresentArtwork(
+	assetID string,
+	checksumSHA256 *string,
+	updatedAt time.Time,
+) (string, string, error) {
 	signer.calls++
 	if signer.err != nil {
-		return "", signer.err
+		return "", "", signer.err
 	}
-	return "https://media.example/" + objectKey, nil
+	version := updatedAt.UTC().Format("20060102150405")
+	if checksumSHA256 != nil {
+		version = *checksumSHA256
+	}
+	return "https://media.example/" + assetID, assetID + ":" + version, nil
 }
 
 type storeStub struct {

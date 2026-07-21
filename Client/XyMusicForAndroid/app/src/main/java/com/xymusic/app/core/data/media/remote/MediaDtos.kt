@@ -12,7 +12,7 @@ data class ArtworkDto(
     val url: String,
     val cacheKey: String,
     val mimeType: String,
-    val expiresAt: String?,
+    val expiresAt: String? = null,
     val width: Int? = null,
     val height: Int? = null,
 )

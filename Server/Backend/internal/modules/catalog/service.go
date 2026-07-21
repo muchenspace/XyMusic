@@ -8,9 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf16"
 
@@ -25,46 +23,24 @@ const (
 	defaultLyricPageSize = 20
 	maximumPageLimit     = 100
 	maximumRandom        = 50
-	artworkCacheSize     = 1_000
 )
 
-type ArtworkURLSigner interface {
-	PresignedGet(ctx context.Context, objectKey string, expires time.Duration) (string, error)
+type ArtworkURLProvider interface {
+	PresentArtwork(assetID string, checksumSHA256 *string, updatedAt time.Time) (url string, cacheKey string, err error)
 }
-
-type Clock interface {
-	Now() time.Time
-}
-
-type SystemClock struct{}
-
-func (SystemClock) Now() time.Time { return time.Now() }
 
 type ServiceDependencies struct {
 	Repository    Store
 	Cursors       *pagination.CursorCodec
-	ArtworkURLs   ArtworkURLSigner
-	ArtworkURLTTL time.Duration
-	Clock         Clock
+	ArtworkURLs   ArtworkURLProvider
 	RandomFloat64 func() float64
-}
-
-type artworkCacheEntry struct {
-	value         ArtworkDTO
-	cacheKey      string
-	reusableUntil time.Time
 }
 
 type Service struct {
 	repository  Store
 	cursors     *pagination.CursorCodec
-	artworkURLs ArtworkURLSigner
-	artworkTTL  time.Duration
-	clock       Clock
+	artworkURLs ArtworkURLProvider
 	random      func() float64
-
-	cacheMu      sync.Mutex
-	artworkCache map[string]artworkCacheEntry
 }
 
 func NewService(dependencies ServiceDependencies) (*Service, error) {
@@ -75,25 +51,16 @@ func NewService(dependencies ServiceDependencies) (*Service, error) {
 		return nil, errors.New("catalog cursor codec is required")
 	}
 	if dependencies.ArtworkURLs == nil {
-		return nil, errors.New("catalog artwork URL signer is required")
-	}
-	if dependencies.ArtworkURLTTL <= 0 {
-		return nil, errors.New("catalog artwork URL TTL must be positive")
-	}
-	if dependencies.Clock == nil {
-		dependencies.Clock = SystemClock{}
+		return nil, errors.New("catalog artwork URL provider is required")
 	}
 	if dependencies.RandomFloat64 == nil {
 		dependencies.RandomFloat64 = rand.Float64
 	}
 	return &Service{
-		repository:   dependencies.Repository,
-		cursors:      dependencies.Cursors,
-		artworkURLs:  dependencies.ArtworkURLs,
-		artworkTTL:   dependencies.ArtworkURLTTL,
-		clock:        dependencies.Clock,
-		random:       dependencies.RandomFloat64,
-		artworkCache: make(map[string]artworkCacheEntry),
+		repository:  dependencies.Repository,
+		cursors:     dependencies.Cursors,
+		artworkURLs: dependencies.ArtworkURLs,
+		random:      dependencies.RandomFloat64,
 	}, nil
 }
 
@@ -618,52 +585,18 @@ func (s *Service) presentArtwork(ctx context.Context, asset *ArtworkAsset) (*Art
 	if asset == nil {
 		return nil, nil
 	}
-	now := s.clock.Now()
-	cacheValue := strconv.FormatInt(asset.UpdatedAt.UnixMilli(), 10)
-	if asset.ChecksumSHA256 != nil {
-		cacheValue = *asset.ChecksumSHA256
-	}
-	cacheKey := asset.ID + ":" + cacheValue
-	s.cacheMu.Lock()
-	cached, found := s.artworkCache[asset.ID]
-	s.cacheMu.Unlock()
-	if found && cached.cacheKey == cacheKey && cached.reusableUntil.After(now) {
-		value := cached.value
-		return &value, nil
-	}
-	url, err := s.artworkURLs.PresignedGet(ctx, asset.ObjectKey, s.artworkTTL)
+	url, cacheKey, err := s.artworkURLs.PresentArtwork(asset.ID, asset.ChecksumSHA256, asset.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
-	expiresAtTime := now.Add(s.artworkTTL)
-	expiresAt := formatTimestamp(expiresAtTime)
-	value := ArtworkDTO{
-		AssetID:   asset.ID,
-		URL:       url,
-		CacheKey:  cacheKey,
-		MimeType:  asset.MimeType,
-		ExpiresAt: &expiresAt,
-		Width:     asset.Width,
-		Height:    asset.Height,
-	}
-	reuseMargin := s.artworkTTL / 4
-	if reuseMargin > 30*time.Second {
-		reuseMargin = 30 * time.Second
-	}
-	s.cacheMu.Lock()
-	if len(s.artworkCache) >= artworkCacheSize {
-		for key := range s.artworkCache {
-			delete(s.artworkCache, key)
-			break
-		}
-	}
-	s.artworkCache[asset.ID] = artworkCacheEntry{
-		value:         value,
-		cacheKey:      cacheKey,
-		reusableUntil: expiresAtTime.Add(-reuseMargin),
-	}
-	s.cacheMu.Unlock()
-	return &value, nil
+	return &ArtworkDTO{
+		AssetID:  asset.ID,
+		URL:      url,
+		CacheKey: cacheKey,
+		MimeType: asset.MimeType,
+		Width:    asset.Width,
+		Height:   asset.Height,
+	}, nil
 }
 
 type trackCursorValue struct {

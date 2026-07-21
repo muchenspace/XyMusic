@@ -30,6 +30,7 @@ import (
 	"xymusic/server/internal/modules/playlist"
 	"xymusic/server/internal/modules/profile"
 	"xymusic/server/internal/modules/setup"
+	"xymusic/server/internal/platform/artworkstore"
 	"xymusic/server/internal/platform/database"
 	"xymusic/server/internal/platform/httpserver"
 	"xymusic/server/internal/platform/ossproxy"
@@ -147,7 +148,15 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	if err != nil {
 		return nil, err
 	}
-	objectProxy, err := ossproxy.New(resolved.Storage.Endpoint, resolved.Storage.PublicBaseURL)
+	artworkResolver, err := artworkstore.NewPostgresResolver(db.Pool)
+	if err != nil {
+		return nil, fmt.Errorf("configure artwork resolver: %w", err)
+	}
+	objectProxy, err := ossproxy.New(
+		resolved.Storage.Endpoint,
+		resolved.Storage.PublicBaseURL,
+		ossproxy.WithArtworkGateway(artworkResolver, objects),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("configure object storage proxy: %w", err)
 	}
@@ -170,7 +179,7 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 			time.Duration(resolved.Security.AccessTokenTTLSeconds)*time.Second,
 		),
 		Idempotency: identity.NewPersistentRefreshIdempotency(idempotencyService),
-		ArtworkURLs: objects,
+		ArtworkURLs: objectProxy,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create identity service: %w", err)
@@ -318,10 +327,9 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 		return nil, fmt.Errorf("create tag scraping routes: %w", err)
 	}
 	catalogService, err := catalog.NewService(catalog.ServiceDependencies{
-		Repository:    catalog.NewRepository(db.Pool),
-		Cursors:       pagination.NewCursorCodec(resolved.Security.CursorSigningSecret),
-		ArtworkURLs:   objects,
-		ArtworkURLTTL: time.Duration(resolved.Storage.SignedURLTTLSeconds) * time.Second,
+		Repository:  catalog.NewRepository(db.Pool),
+		Cursors:     pagination.NewCursorCodec(resolved.Security.CursorSigningSecret),
+		ArtworkURLs: objectProxy,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create catalog service: %w", err)
@@ -390,8 +398,7 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	}
 	playlistUsers, err := playlist.NewProductionUserPresenter(
 		db.Pool,
-		objects,
-		time.Duration(resolved.Storage.SignedURLTTLSeconds)*time.Second,
+		objectProxy,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create playlist user presenter: %w", err)
