@@ -109,11 +109,14 @@ describe("desktop authentication API contract", () => {
       .mockResolvedValueOnce(jsonResponse({
         id: "upload/1",
         method: "PUT",
-        uploadUrl: "https://storage.example/upload",
+        uploadUrl: "/api/v1/oss/c3RvcmFnZS5leGFtcGxl/upload?X-Amz-Signature=avatar",
         requiredHeaders: { "Content-Type": "image/png", "Content-Length": "3", "X-Upload-Token": "token" },
       }))
       .mockResolvedValueOnce(new Response(null, { status: 200, headers: { ETag: "etag-1" } }))
-      .mockResolvedValueOnce(jsonResponse(currentUser({ avatar: { url: "https://media.example/avatar" }, version: 2 })));
+      .mockResolvedValueOnce(jsonResponse(currentUser({
+        avatar: { url: "/api/v1/oss/c3RvcmFnZS5leGFtcGxl/avatar?X-Amz-Signature=image" },
+        version: 2,
+      })));
     vi.stubGlobal("fetch", fetchMock);
 
     const avatar = new File([new Uint8Array([1, 2, 3])], "avatar.png", { type: "image/png" });
@@ -122,7 +125,12 @@ describe("desktop authentication API contract", () => {
     });
 
     await expect(new HttpSessionRepository(api).uploadAvatar(avatar))
-      .resolves.toMatchObject({ user: { avatarUrl: "https://media.example/avatar", version: 2 } });
+      .resolves.toMatchObject({
+        user: {
+          avatarUrl: "https://music.example.com/api/v1/oss/c3RvcmFnZS5leGFtcGxl/avatar?X-Amz-Signature=image",
+          version: 2,
+        },
+      });
 
     const [reserve, upload, complete] = fetchMock.mock.calls.map(requestCall);
     expect(reserve.url).toBe("https://music.example.com/api/v1/users/me/avatar/uploads");
@@ -133,13 +141,14 @@ describe("desktop authentication API contract", () => {
       contentType: "image/png",
       sizeBytes: 3,
     });
-    expect(upload.url).toBe("https://storage.example/upload");
+    expect(upload.url).toBe("https://music.example.com/api/v1/oss/c3RvcmFnZS5leGFtcGxl/upload?X-Amz-Signature=avatar");
     expect(upload.init.method).toBe("PUT");
     expect(new Headers(upload.init.headers).get("Content-Length")).toBeNull();
     expect(new Headers(upload.init.headers).get("X-Upload-Token")).toBe("token");
     expect(complete.url).toBe("https://music.example.com/api/v1/users/me/avatar/uploads/upload%2F1/complete");
     expect(JSON.parse(String(complete.init.body))).toEqual({ observedEtag: "etag-1" });
-    expect(credentials.value?.user.avatarUrl).toBe("https://media.example/avatar");
+    expect(credentials.value?.user.avatarUrl)
+      .toBe("https://music.example.com/api/v1/oss/c3RvcmFnZS5leGFtcGxl/avatar?X-Amz-Signature=image");
   });
 
   it("rejects an unexpectedly large storage response before completing an avatar upload", async () => {

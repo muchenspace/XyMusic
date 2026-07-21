@@ -20,3 +20,20 @@ export function resolveApiUrl(path: string, serverUrl: string): URL {
   if (resolved.origin !== base.origin) throw new ApiError("请求地址不属于当前服务器", 0, "INVALID_REQUEST_URL");
   return resolved;
 }
+
+export function resolveServerResourceUrls<T>(value: T, serverUrl: string): T {
+  if (typeof value === "string") {
+    return (value.startsWith("/api/v1/oss/")
+      ? new URL(value, `${normalizeServerUrl(serverUrl)}/`).toString()
+      : value) as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => resolveServerResourceUrls(item, serverUrl)) as T;
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, resolveServerResourceUrls(item, serverUrl)]),
+    ) as T;
+  }
+  return value;
+}
