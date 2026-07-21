@@ -22,9 +22,23 @@ type Proxy struct {
 	endpoint  *url.URL
 	publicURL *url.URL
 	proxy     *httputil.ReverseProxy
+	artworks  *artworkGateway
 }
 
-func New(rawEndpoint, rawPublicBaseURL string) (*Proxy, error) {
+type Option func(*Proxy) error
+
+func WithArtworkGateway(resolver ArtworkResolver, objects ArtworkObjectStore) Option {
+	return func(proxy *Proxy) error {
+		gateway, err := newArtworkGateway(resolver, objects)
+		if err != nil {
+			return err
+		}
+		proxy.artworks = gateway
+		return nil
+	}
+}
+
+func New(rawEndpoint, rawPublicBaseURL string, options ...Option) (*Proxy, error) {
 	endpoint, err := parseEndpoint(rawEndpoint)
 	if err != nil {
 		return nil, err
@@ -40,7 +54,16 @@ func New(rawEndpoint, rawPublicBaseURL string) (*Proxy, error) {
 			http.Error(writer, "object storage is unavailable", http.StatusBadGateway)
 		},
 	}
-	return &Proxy{endpoint: endpoint, publicURL: publicBaseURL, proxy: reverse}, nil
+	result := &Proxy{endpoint: endpoint, publicURL: publicBaseURL, proxy: reverse}
+	for _, option := range options {
+		if option == nil {
+			continue
+		}
+		if err := option(result); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
 }
 
 func (proxy *Proxy) Register(router gin.IRouter) {
@@ -72,6 +95,14 @@ func ClientURL(rawSignedURL string) (string, error) {
 }
 
 func (proxy *Proxy) handle(c *gin.Context) {
+	if c.Param("authority") == artworkAuthority {
+		if proxy.artworks == nil {
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+		proxy.artworks.handle(c, c.Param("path"))
+		return
+	}
 	target, err := decodeTarget(c.Param("authority"))
 	if err != nil {
 		c.AbortWithStatus(http.StatusBadRequest)

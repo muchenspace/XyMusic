@@ -520,7 +520,7 @@ func TestCurrentUserPresentsAvatarAndLaterUpdateTimestamp(t *testing.T) {
 			},
 			DisplayName: "Alice", ProfileUpdatedAt: now,
 			Avatar: &AvatarAsset{
-				ID: "asset-1", ObjectKey: "avatars/a.webp", MimeType: "image/webp",
+				ID: "asset-1", MimeType: "image/webp",
 				ChecksumSHA256: &checksum, Width: &width, UpdatedAt: now.Add(-time.Hour),
 			},
 		}, nil
@@ -530,11 +530,14 @@ func TestCurrentUserPresentsAvatarAndLaterUpdateTimestamp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Avatar == nil || result.Avatar.URL != "https://objects.example/avatars/a.webp" {
+	if result.Avatar == nil || result.Avatar.URL != "https://objects.example/artwork/asset-1" {
 		t.Fatalf("avatar = %#v", result.Avatar)
 	}
-	if result.Avatar.CacheKey != "asset-1:"+checksum || result.Avatar.ExpiresAt == nil || *result.Avatar.ExpiresAt != "2026-07-16T08:05:00.000Z" {
+	if result.Avatar.CacheKey != "asset-1:"+checksum {
 		t.Fatalf("avatar metadata = %#v", result.Avatar)
+	}
+	if result.Avatar.ExpiresAt != nil {
+		t.Fatalf("stable avatar must not expire: %#v", result.Avatar)
 	}
 	if result.UpdatedAt != "2026-07-16T08:00:00.000Z" {
 		t.Fatalf("updatedAt = %q", result.UpdatedAt)
@@ -738,8 +741,16 @@ func (s *idempotencyStub) ExecuteRefresh(
 
 type artworkSignerStub struct{}
 
-func (artworkSignerStub) PresignedGet(_ context.Context, objectKey string, _ time.Duration) (string, error) {
-	return "https://objects.example/" + objectKey, nil
+func (artworkSignerStub) PresentArtwork(
+	assetID string,
+	checksumSHA256 *string,
+	updatedAt time.Time,
+) (string, string, error) {
+	version := updatedAt.UTC().Format("20060102150405")
+	if checksumSHA256 != nil {
+		version = *checksumSHA256
+	}
+	return "https://objects.example/artwork/" + assetID, assetID + ":" + version, nil
 }
 
 type fixedClock struct {

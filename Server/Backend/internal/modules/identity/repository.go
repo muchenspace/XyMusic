@@ -364,7 +364,6 @@ func (r *Repository) RevokeAllSessions(ctx context.Context, userID string, revok
 func (r *Repository) FindCurrentUser(ctx context.Context, userID string) (CurrentUserRecord, error) {
 	var record CurrentUserRecord
 	var avatarID *string
-	var avatarObjectKey *string
 	var avatarMimeType *string
 	var avatarChecksum *string
 	var avatarWidth *int
@@ -376,7 +375,6 @@ func (r *Repository) FindCurrentUser(ctx context.Context, userID string) (Curren
 		&record.Bio,
 		&record.ProfileUpdatedAt,
 		&avatarID,
-		&avatarObjectKey,
 		&avatarMimeType,
 		&avatarChecksum,
 		&avatarWidth,
@@ -388,7 +386,7 @@ func (r *Repository) FindCurrentUser(ctx context.Context, userID string) (Curren
 			u.id, u.username, u.normalized_username, u.password_hash, u.role,
 			u.status, u.auth_version, u.version, u.created_at, u.updated_at,
 			p.display_name, p.bio, p.updated_at,
-			a.id, a.object_key, a.mime_type, a.checksum_sha256,
+			a.id, a.mime_type, a.checksum_sha256,
 			a.width, a.height, a.updated_at
 		FROM users u
 		JOIN user_profiles p ON p.user_id = u.id
@@ -403,10 +401,9 @@ func (r *Repository) FindCurrentUser(ctx context.Context, userID string) (Curren
 	if err != nil {
 		return CurrentUserRecord{}, fmt.Errorf("find current user: %w", err)
 	}
-	if avatarID != nil && avatarObjectKey != nil && avatarMimeType != nil && avatarUpdatedAt != nil {
+	if avatarID != nil && avatarMimeType != nil && avatarUpdatedAt != nil {
 		record.Avatar = &AvatarAsset{
 			ID:             *avatarID,
-			ObjectKey:      *avatarObjectKey,
 			MimeType:       *avatarMimeType,
 			ChecksumSHA256: avatarChecksum,
 			Width:          avatarWidth,

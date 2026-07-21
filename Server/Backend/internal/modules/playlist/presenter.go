@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -12,8 +11,8 @@ import (
 	"xymusic/server/internal/shared/apperror"
 )
 
-type artworkURLSigner interface {
-	PresignedGet(context.Context, string, time.Duration) (string, error)
+type artworkURLProvider interface {
+	PresentArtwork(assetID string, checksumSHA256 *string, updatedAt time.Time) (url string, cacheKey string, err error)
 }
 
 type userProjection struct {
@@ -25,7 +24,6 @@ type userProjection struct {
 
 type artworkProjection struct {
 	ID             string
-	ObjectKey      string
 	MimeType       string
 	ChecksumSHA256 *string
 	Width          *int
@@ -75,7 +73,7 @@ func (store postgresUserProjectionStore) Artworks(ctx context.Context, assetIDs 
 		return []artworkProjection{}, nil
 	}
 	rows, err := store.pool.Query(ctx, `
-		SELECT id, object_key, mime_type, checksum_sha256, width, height, updated_at
+		SELECT id, mime_type, checksum_sha256, width, height, updated_at
 		FROM media_assets
 		WHERE id = ANY($1::uuid[]) AND status = 'READY'
 	`, assetIDs)
@@ -87,7 +85,7 @@ func (store postgresUserProjectionStore) Artworks(ctx context.Context, assetIDs 
 	for rows.Next() {
 		var record artworkProjection
 		if err := rows.Scan(
-			&record.ID, &record.ObjectKey, &record.MimeType, &record.ChecksumSHA256,
+			&record.ID, &record.MimeType, &record.ChecksumSHA256,
 			&record.Width, &record.Height, &record.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan playlist artwork: %w", err)
@@ -104,41 +102,30 @@ func (store postgresUserProjectionStore) Artworks(ctx context.Context, assetIDs 
 // by playlist responses without coupling playlist persistence to identity.
 type ProductionUserPresenter struct {
 	repository userProjectionStore
-	signer     artworkURLSigner
-	ttl        time.Duration
-	clock      Clock
+	artworks   artworkURLProvider
 }
 
 func NewProductionUserPresenter(
 	pool *pgxpool.Pool,
-	signer artworkURLSigner,
-	ttl time.Duration,
+	artworks artworkURLProvider,
 ) (*ProductionUserPresenter, error) {
 	if pool == nil {
 		return nil, errors.New("playlist user presenter database is required")
 	}
-	return newProductionUserPresenter(postgresUserProjectionStore{pool: pool}, signer, ttl, SystemClock{})
+	return newProductionUserPresenter(postgresUserProjectionStore{pool: pool}, artworks)
 }
 
 func newProductionUserPresenter(
 	repository userProjectionStore,
-	signer artworkURLSigner,
-	ttl time.Duration,
-	clock Clock,
+	artworks artworkURLProvider,
 ) (*ProductionUserPresenter, error) {
 	if repository == nil {
 		return nil, errors.New("playlist user projection repository is required")
 	}
-	if signer == nil {
-		return nil, errors.New("playlist artwork URL signer is required")
+	if artworks == nil {
+		return nil, errors.New("playlist artwork URL provider is required")
 	}
-	if ttl <= 0 {
-		return nil, errors.New("playlist artwork URL TTL must be positive")
-	}
-	if clock == nil {
-		clock = SystemClock{}
-	}
-	return &ProductionUserPresenter{repository: repository, signer: signer, ttl: ttl, clock: clock}, nil
+	return &ProductionUserPresenter{repository: repository, artworks: artworks}, nil
 }
 
 func (presenter *ProductionUserPresenter) UserSummary(ctx context.Context, userID string) (UserSummaryDTO, error) {
@@ -196,20 +183,19 @@ func (presenter *ProductionUserPresenter) Artworks(
 	if err != nil {
 		return nil, err
 	}
-	expiresAt := formatTimestamp(presenter.clock.Now().UTC().Add(presenter.ttl))
 	result := make(map[string]ArtworkDTO, len(records))
 	for _, record := range records {
-		url, err := presenter.signer.PresignedGet(ctx, record.ObjectKey, presenter.ttl)
+		url, cacheKey, err := presenter.artworks.PresentArtwork(
+			record.ID,
+			record.ChecksumSHA256,
+			record.UpdatedAt,
+		)
 		if err != nil {
-			return nil, fmt.Errorf("sign playlist artwork URL: %w", err)
-		}
-		cacheVersion := strconv.FormatInt(record.UpdatedAt.UnixMilli(), 10)
-		if record.ChecksumSHA256 != nil {
-			cacheVersion = *record.ChecksumSHA256
+			return nil, fmt.Errorf("create playlist artwork URL: %w", err)
 		}
 		result[record.ID] = ArtworkDTO{
-			AssetID: record.ID, URL: url, CacheKey: record.ID + ":" + cacheVersion,
-			MimeType: record.MimeType, ExpiresAt: &expiresAt, Width: record.Width, Height: record.Height,
+			AssetID: record.ID, URL: url, CacheKey: cacheKey,
+			MimeType: record.MimeType, Width: record.Width, Height: record.Height,
 		}
 	}
 	return result, nil

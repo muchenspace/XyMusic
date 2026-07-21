@@ -47,7 +47,6 @@ type AlbumReferenceRecord struct {
 
 type ArtworkAsset struct {
 	ID             string
-	ObjectKey      string
 	MimeType       string
 	ChecksumSHA256 *string
 	Width          *int

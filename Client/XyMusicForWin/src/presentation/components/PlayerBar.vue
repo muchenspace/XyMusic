@@ -47,14 +47,6 @@ function toggleFullscreen() {
   void desktopWindow.toggleFullscreen().catch(() => undefined);
 }
 
-// 同一曲目仅触发一次封面刷新，避免签名 URL 过期后反复请求。
-let lastRefreshedTrackId = "";
-function handleArtworkFailed(): void {
-  const trackId = player.currentTrack?.id;
-  if (!trackId || trackId === lastRefreshedTrackId) return;
-  lastRefreshedTrackId = trackId;
-  void player.refreshCurrentTrackArtwork();
-}
 </script>
 
 <template>
@@ -66,7 +58,7 @@ function handleArtworkFailed(): void {
       :aria-label="`${player.lyricsOpen ? '返回首页' : '打开歌词页'}：${player.currentTrack.title}`"
       @click="player.toggleLyrics"
     >
-      <ArtworkImage :src="player.currentTrack.coverUrl" :alt="`${player.currentTrack.title}封面`" kind="track" loading="eager" @load-failed="handleArtworkFailed" />
+      <ArtworkImage :src="player.currentTrack.coverUrl" :alt="`${player.currentTrack.title}封面`" kind="track" loading="eager" />
       <span class="now-playing-copy" aria-live="polite">
         <strong>{{ player.currentTrack.title }}</strong>
         <span>{{ player.currentTrack.artist }}</span>

@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,8 +25,8 @@ type PasswordManager interface {
 	Verify(password, encoded string) (bool, error)
 }
 
-type ArtworkURLSigner interface {
-	PresignedGet(ctx context.Context, objectKey string, expires time.Duration) (string, error)
+type ArtworkURLProvider interface {
+	PresentArtwork(assetID string, checksumSHA256 *string, updatedAt time.Time) (url string, cacheKey string, err error)
 }
 
 type Clock interface {
@@ -58,7 +57,7 @@ type ServiceDependencies struct {
 	Repository   Store
 	AccessTokens AccessTokenManager
 	Idempotency  RefreshIdempotency
-	ArtworkURLs  ArtworkURLSigner
+	ArtworkURLs  ArtworkURLProvider
 	Passwords    PasswordManager
 	Clock        Clock
 	IDGenerator  func() string
@@ -69,14 +68,13 @@ type Service struct {
 	repository          Store
 	accessTokens        AccessTokenManager
 	idempotency         RefreshIdempotency
-	artworkURLs         ArtworkURLSigner
+	artworkURLs         ArtworkURLProvider
 	passwords           PasswordManager
 	clock               Clock
 	newID               func() string
 	newOpaqueToken      func() (string, error)
 	registrationEnabled bool
 	refreshTokenTTL     time.Duration
-	artworkURLTTL       time.Duration
 	dummyPasswordHash   string
 }
 
@@ -93,7 +91,7 @@ func NewService(cfg config.Config, dependencies ServiceDependencies) (*Service, 
 		return nil, errors.New("identity refresh idempotency is required")
 	}
 	if dependencies.ArtworkURLs == nil {
-		return nil, errors.New("identity artwork URL signer is required")
+		return nil, errors.New("identity artwork URL provider is required")
 	}
 	if dependencies.Passwords == nil {
 		dependencies.Passwords = SecurityPasswordManager{}
@@ -111,10 +109,6 @@ func NewService(cfg config.Config, dependencies ServiceDependencies) (*Service, 
 	if refreshTokenTTL <= 0 {
 		return nil, errors.New("identity refresh-token TTL must be positive")
 	}
-	artworkURLTTL := time.Duration(cfg.Storage.SignedURLTTLSeconds) * time.Second
-	if artworkURLTTL <= 0 {
-		return nil, errors.New("identity artwork URL TTL must be positive")
-	}
 	dummyPasswordHash, err := dependencies.Passwords.Hash("not-a-real-user-password")
 	if err != nil {
 		return nil, fmt.Errorf("create identity timing-defense password hash: %w", err)
@@ -130,7 +124,6 @@ func NewService(cfg config.Config, dependencies ServiceDependencies) (*Service, 
 		newOpaqueToken:      dependencies.OpaqueToken,
 		registrationEnabled: cfg.Registration.Enabled,
 		refreshTokenTTL:     refreshTokenTTL,
-		artworkURLTTL:       artworkURLTTL,
 		dummyPasswordHash:   dummyPasswordHash,
 	}, nil
 }
@@ -440,23 +433,21 @@ func (s *Service) presentCurrentUser(
 ) (CurrentUserDTO, error) {
 	var avatar *ArtworkDTO
 	if record.Avatar != nil {
-		url, err := s.artworkURLs.PresignedGet(ctx, record.Avatar.ObjectKey, s.artworkURLTTL)
+		url, cacheKey, err := s.artworkURLs.PresentArtwork(
+			record.Avatar.ID,
+			record.Avatar.ChecksumSHA256,
+			record.Avatar.UpdatedAt,
+		)
 		if err != nil {
 			return CurrentUserDTO{}, fmt.Errorf("create avatar download URL: %w", err)
 		}
-		expiresAt := formatTimestamp(s.clock.Now().UTC().Add(s.artworkURLTTL))
-		cacheVersion := strconv.FormatInt(record.Avatar.UpdatedAt.UnixMilli(), 10)
-		if record.Avatar.ChecksumSHA256 != nil {
-			cacheVersion = *record.Avatar.ChecksumSHA256
-		}
 		avatar = &ArtworkDTO{
-			AssetID:   record.Avatar.ID,
-			URL:       url,
-			CacheKey:  record.Avatar.ID + ":" + cacheVersion,
-			MimeType:  record.Avatar.MimeType,
-			ExpiresAt: &expiresAt,
-			Width:     record.Avatar.Width,
-			Height:    record.Avatar.Height,
+			AssetID:  record.Avatar.ID,
+			URL:      url,
+			CacheKey: cacheKey,
+			MimeType: record.Avatar.MimeType,
+			Width:    record.Avatar.Width,
+			Height:   record.Avatar.Height,
 		}
 	}
 	updatedAt := record.User.UpdatedAt

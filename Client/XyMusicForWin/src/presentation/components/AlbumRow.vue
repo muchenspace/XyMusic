@@ -7,7 +7,7 @@ withDefaults(defineProps<{ albums: Album[]; title?: string; description?: string
   title: "最近专辑",
   description: "音乐库中最近收录的专辑",
 });
-defineEmits<{ play: [album: Album]; open: [album: Album]; "artwork-failed": [] }>();
+defineEmits<{ play: [album: Album]; open: [album: Album] }>();
 </script>
 
 <template>
@@ -19,7 +19,7 @@ defineEmits<{ play: [album: Album]; open: [album: Album]; "artwork-failed": [] }
       <article v-for="album in albums" :key="album.id" class="album-card">
         <button type="button" class="album-card-main" :aria-label="`打开专辑《${album.title}》`" @click="$emit('open', album)">
           <span class="album-cover-wrap">
-            <ArtworkImage :src="album.coverUrl" :alt="`${album.title}专辑封面`" @load-failed="$emit('artwork-failed')" />
+            <ArtworkImage :src="album.coverUrl" :alt="`${album.title}专辑封面`" />
           </span>
           <span class="album-card-copy"><strong>{{ album.title }}</strong><small>{{ album.artist }}</small></span>
         </button>

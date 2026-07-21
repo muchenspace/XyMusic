@@ -1,15 +1,134 @@
 package ossproxy
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
+
+func TestArtworkGatewayServesImmutableVersionedResource(t *testing.T) {
+	assetID := "00000000-0000-4000-8000-000000000001"
+	checksum := strings.Repeat("a", 64)
+	payload := []byte("image-bytes")
+	resolver := &artworkResolverStub{resource: ArtworkResource{
+		ObjectKey: "media/artwork/cover.webp", MimeType: "image/webp", SizeBytes: int64(len(payload)),
+		ChecksumSHA256: &checksum, UpdatedAt: time.Date(2026, 7, 22, 1, 2, 3, 0, time.UTC),
+	}}
+	objects := &artworkObjectStoreStub{payload: payload, modifiedAt: time.Date(2026, 7, 22, 1, 2, 3, 0, time.UTC)}
+	proxy, err := New(
+		"http://objects.example.test:9000",
+		"",
+		WithArtworkGateway(resolver, objects),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resourceURL, err := proxy.ArtworkURL(assetID, checksum)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gatewayURL, cacheKey, err := proxy.PresentArtwork(assetID, &checksum, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gatewayURL != resourceURL || cacheKey != assetID+":"+checksum {
+		t.Fatalf("presented artwork = %q %q", gatewayURL, cacheKey)
+	}
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	proxy.Register(engine)
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, resourceURL, nil))
+
+	if response.Code != http.StatusOK || response.Body.String() != string(payload) {
+		t.Fatalf("artwork response = %d %q", response.Code, response.Body.String())
+	}
+	if response.Header().Get("Content-Type") != "image/webp" ||
+		response.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" ||
+		response.Header().Get("ETag") != `"`+checksum+`"` {
+		t.Fatalf("artwork headers = %#v", response.Header())
+	}
+	if resolver.assetID != assetID || objects.objectKey != "media/artwork/cover.webp" {
+		t.Fatalf("resolved artwork = %q %q", resolver.assetID, objects.objectKey)
+	}
+}
+
+func TestArtworkGatewayRejectsStaleVersionWithoutOpeningStorage(t *testing.T) {
+	assetID := "00000000-0000-4000-8000-000000000001"
+	checksum := strings.Repeat("b", 64)
+	resolver := &artworkResolverStub{resource: ArtworkResource{
+		ObjectKey: "media/artwork/cover.webp", MimeType: "image/webp", SizeBytes: 1,
+		ChecksumSHA256: &checksum, UpdatedAt: time.Now(),
+	}}
+	objects := &artworkObjectStoreStub{payload: []byte("x")}
+	proxy, err := New(
+		"http://objects.example.test:9000",
+		"",
+		WithArtworkGateway(resolver, objects),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	proxy.Register(engine)
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(
+		response,
+		httptest.NewRequest(http.MethodGet, Prefix+"/artwork/"+assetID+"/"+strings.Repeat("c", 64), nil),
+	)
+	if response.Code != http.StatusNotFound || objects.openCalls != 0 {
+		t.Fatalf("stale artwork response = %d, opens = %d", response.Code, objects.openCalls)
+	}
+}
+
+type artworkResolverStub struct {
+	resource ArtworkResource
+	assetID  string
+	err      error
+}
+
+func (resolver *artworkResolverStub) ResolveArtwork(_ context.Context, assetID string) (ArtworkResource, error) {
+	resolver.assetID = assetID
+	return resolver.resource, resolver.err
+}
+
+type artworkObjectStoreStub struct {
+	payload    []byte
+	modifiedAt time.Time
+	objectKey  string
+	openCalls  int
+	err        error
+}
+
+func (store *artworkObjectStoreStub) OpenForProxy(
+	_ context.Context,
+	objectKey string,
+) (ReadSeekCloser, ObjectMetadata, error) {
+	store.objectKey = objectKey
+	store.openCalls++
+	if store.err != nil {
+		return nil, ObjectMetadata{}, store.err
+	}
+	return &readSeekCloser{Reader: bytes.NewReader(store.payload)}, ObjectMetadata{
+		Size: int64(len(store.payload)), LastModified: store.modifiedAt,
+	}, nil
+}
+
+type readSeekCloser struct {
+	*bytes.Reader
+}
+
+func (*readSeekCloser) Close() error { return nil }
 
 func TestClientURLPreservesSignedPathAndQuery(t *testing.T) {
 	got, err := ClientURL("https://objects.example.test:9443/music/folder%20name/song.flac?X-Amz-Date=1&X-Amz-Signature=a%2Bb")
