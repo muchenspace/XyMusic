@@ -16,6 +16,7 @@ import okhttp3.Call
 import okhttp3.Interceptor
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 
 class SessionRequestContextBinder
 @Inject
@@ -155,6 +156,46 @@ constructor(
             throw failure
         }
         return response
+    }
+}
+
+class ServerResourceUrlInterceptor
+@Inject
+constructor() : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val response = chain.proceed(chain.request())
+        val body = response.body
+        val mediaType = body.contentType()
+        if (mediaType?.subtype?.contains("json", ignoreCase = true) != true) return response
+
+        val content = body.string()
+        if (!content.contains(OSS_PROXY_JSON_PREFIX)) {
+            return response
+                .newBuilder()
+                .removeHeader(HEADER_CONTENT_LENGTH)
+                .body(content.toResponseBody(mediaType))
+                .build()
+        }
+        val serverOrigin =
+            response.request.url
+                .newBuilder()
+                .encodedPath("/")
+                .query(null)
+                .fragment(null)
+                .build()
+                .toString()
+                .removeSuffix("/")
+        val rewritten = content.replace(OSS_PROXY_JSON_PREFIX, "\"$serverOrigin/api/v1/oss/")
+        return response
+            .newBuilder()
+            .removeHeader(HEADER_CONTENT_LENGTH)
+            .body(rewritten.toResponseBody(mediaType))
+            .build()
+    }
+
+    private companion object {
+        const val OSS_PROXY_JSON_PREFIX = "\"/api/v1/oss/"
+        const val HEADER_CONTENT_LENGTH = "Content-Length"
     }
 }
 

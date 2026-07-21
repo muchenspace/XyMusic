@@ -14,6 +14,7 @@ import com.xymusic.app.data.network.NetworkEventLogger
 import com.xymusic.app.data.network.RemoveAuthorizationInterceptor
 import com.xymusic.app.data.network.SafeNetworkLoggingInterceptor
 import com.xymusic.app.data.network.ServerEndpointInterceptor
+import com.xymusic.app.data.network.ServerResourceUrlInterceptor
 import com.xymusic.app.data.network.SessionRequestContextBinder
 import com.xymusic.app.data.network.SessionRequestContextCallFactory
 import com.xymusic.app.data.network.SessionRequestContextInterceptor
@@ -81,11 +82,13 @@ object NetworkModule {
     @AuthHttpClient
     fun provideAuthHttpClient(
         serverEndpointInterceptor: ServerEndpointInterceptor,
+        serverResourceUrlInterceptor: ServerResourceUrlInterceptor,
         metadataInterceptor: ClientMetadataInterceptor,
         removeAuthorizationInterceptor: RemoveAuthorizationInterceptor,
         loggingInterceptor: SafeNetworkLoggingInterceptor,
     ): OkHttpClient = baseClientBuilder()
         .addInterceptor(serverEndpointInterceptor)
+        .addInterceptor(serverResourceUrlInterceptor)
         .addInterceptor(metadataInterceptor)
         .addInterceptor(removeAuthorizationInterceptor)
         .addInterceptor(loggingInterceptor)
@@ -99,6 +102,7 @@ object NetworkModule {
     fun provideApiHttpClient(
         sessionRequestContextInterceptor: SessionRequestContextInterceptor,
         serverEndpointInterceptor: ServerEndpointInterceptor,
+        serverResourceUrlInterceptor: ServerResourceUrlInterceptor,
         metadataInterceptor: ClientMetadataInterceptor,
         bearerTokenInterceptor: BearerTokenInterceptor,
         sessionRequestContextValidationInterceptor: SessionRequestContextValidationInterceptor,
@@ -107,6 +111,7 @@ object NetworkModule {
     ): OkHttpClient = baseClientBuilder()
         .addInterceptor(sessionRequestContextInterceptor)
         .addInterceptor(serverEndpointInterceptor)
+        .addInterceptor(serverResourceUrlInterceptor)
         .addInterceptor(metadataInterceptor)
         .addInterceptor(bearerTokenInterceptor)
         .addInterceptor(loggingInterceptor)
