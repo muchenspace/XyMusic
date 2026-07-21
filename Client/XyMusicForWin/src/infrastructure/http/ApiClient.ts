@@ -3,7 +3,7 @@ import type { UserProfile } from "../../application/ports/SessionRepository";
 import { ApiError } from "./ApiError";
 import { AuthSessionManager, type StoredSession } from "./AuthSessionManager";
 import { HttpTransport, type ApiRequestInit, type BufferedHttpResponse, normalizeTimeout, throwIfAborted } from "./HttpTransport";
-import { normalizeServerUrl, resolveApiUrl } from "./url";
+import { normalizeServerUrl, resolveApiUrl, resolveServerResourceUrls } from "./url";
 
 export interface ApiClientOptions {
   credentialStore?: SessionCredentialStore;
@@ -58,7 +58,7 @@ export class ApiClient {
     const first = await this.send(path, init, authenticated);
     if (authenticated) this.throwIfSessionChanged(first);
     if (first.response.status !== 401 || !authenticated || !this.storedSession?.refreshToken) {
-      return this.transport.parse<T>(first.response);
+      return this.parseResponse<T>(first);
     }
 
     throwIfAborted(init.signal);
@@ -76,12 +76,13 @@ export class ApiClient {
       await this.sessions.set(null);
       throw new ApiError("登录已失效，请重新登录", 401, "SESSION_EXPIRED");
     }
-    return this.transport.parse<T>(retried.response);
+    return this.parseResponse<T>(retried);
   }
 
   async requestFrom<T>(serverUrl: string, path: string, init: ApiRequestInit = {}): Promise<T> {
-    const response = await this.transport.send(resolveApiUrl(path, normalizeServerUrl(serverUrl)), init);
-    return this.transport.parse<T>(response);
+    const normalizedServerUrl = normalizeServerUrl(serverUrl);
+    const response = await this.transport.send(resolveApiUrl(path, normalizedServerUrl), init);
+    return resolveServerResourceUrls(await this.transport.parse<T>(response), normalizedServerUrl);
   }
 
   private async send(path: string, init: ApiRequestInit, authenticated: boolean, expected?: SentRequest): Promise<SentRequest> {
@@ -113,6 +114,10 @@ export class ApiClient {
       || session.user.id !== request.userId) {
       throw sessionChangedError();
     }
+  }
+
+  private async parseResponse<T>(request: SentRequest): Promise<T> {
+    return resolveServerResourceUrls(await this.transport.parse<T>(request.response), request.serverUrl);
   }
 }
 

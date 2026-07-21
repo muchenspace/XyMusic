@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../src/infrastructure/http/ApiError";
-import { normalizeServerUrl } from "../src/infrastructure/http/url";
+import { normalizeServerUrl, resolveServerResourceUrls } from "../src/infrastructure/http/url";
 import { errorMessage } from "../src/presentation/utils/errorMessage";
 
 describe("safe Chinese errors", () => {
@@ -24,5 +24,17 @@ describe("safe Chinese errors", () => {
       .toThrow("服务器地址不能包含路径");
     expect(normalizeServerUrl("https://music.example.com/"))
       .toBe("https://music.example.com");
+  });
+
+  it("resolves nested OSS proxy URLs against the connected server", () => {
+    expect(resolveServerResourceUrls({
+      artwork: { url: "/api/v1/oss/b2JqZWN0cw/cover.jpg?X-Amz-Signature=a%2Bb" },
+      playback: { url: "https://cdn.example/track.flac" },
+      items: ["/api/v1/oss/b2JqZWN0cw/song.flac"],
+    }, "https://music.example.com")).toEqual({
+      artwork: { url: "https://music.example.com/api/v1/oss/b2JqZWN0cw/cover.jpg?X-Amz-Signature=a%2Bb" },
+      playback: { url: "https://cdn.example/track.flac" },
+      items: ["https://music.example.com/api/v1/oss/b2JqZWN0cw/song.flac"],
+    });
   });
 });
