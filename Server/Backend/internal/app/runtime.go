@@ -32,6 +32,7 @@ import (
 	"xymusic/server/internal/modules/setup"
 	"xymusic/server/internal/platform/database"
 	"xymusic/server/internal/platform/httpserver"
+	"xymusic/server/internal/platform/ossproxy"
 	"xymusic/server/internal/platform/runtimemetrics"
 	platformsecurity "xymusic/server/internal/platform/security"
 	"xymusic/server/internal/platform/storage"
@@ -45,33 +46,33 @@ import (
 )
 
 type Runtime struct {
-	Config           config.Config
-	DB               *database.Pool
-	Storage          *storage.Client
-	Identity         *identity.Service
-	AdminAudit       *adminaudit.Service
-	AdminCatalog     *admincatalog.Service
-	AdminJobs        *adminjobs.Service
-	AdminManagement  *adminmanagement.Service
-	AdminMedia       *adminmedia.Service
-	AdminMetadata    *adminmetadata.Service
-	AdminMutation    *adminmutation.Service
-	AdminSettings    *adminsettings.Service
-	AdminSources     *adminsources.Service
-	AdminTagScraping *admintagscraping.Service
-	AdminTagBatches  *admintagscraping.BatchService
+	Config                    config.Config
+	DB                        *database.Pool
+	Storage                   *storage.Client
+	Identity                  *identity.Service
+	AdminAudit                *adminaudit.Service
+	AdminCatalog              *admincatalog.Service
+	AdminJobs                 *adminjobs.Service
+	AdminManagement           *adminmanagement.Service
+	AdminMedia                *adminmedia.Service
+	AdminMetadata             *adminmetadata.Service
+	AdminMutation             *adminmutation.Service
+	AdminSettings             *adminsettings.Service
+	AdminSources              *adminsources.Service
+	AdminTagScraping          *admintagscraping.Service
+	AdminTagBatches           *admintagscraping.BatchService
 	AdminArtistArtworkBatches *admintagscraping.ArtistArtworkBatchService
-	Catalog          *catalog.Service
-	Library          *library.Service
-	Playback         *playback.Service
-	Playlist         *playlist.Service
-	Profile          *profile.Service
-	Metrics          *runtimemetrics.Collector
-	Handler          *gin.Engine
-	ready            *dependencyReadiness
-	events           *sse.Broadcaster
-	background       *backgroundGroup
-	mediaWorker      *mediaworker.Worker
+	Catalog                   *catalog.Service
+	Library                   *library.Service
+	Playback                  *playback.Service
+	Playlist                  *playlist.Service
+	Profile                   *profile.Service
+	Metrics                   *runtimemetrics.Collector
+	Handler                   *gin.Engine
+	ready                     *dependencyReadiness
+	events                    *sse.Broadcaster
+	background                *backgroundGroup
+	mediaWorker               *mediaworker.Worker
 }
 
 type Options struct {
@@ -145,6 +146,10 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	objects, err := storage.Open(resolved.Storage)
 	if err != nil {
 		return nil, err
+	}
+	objectProxy, err := ossproxy.New(resolved.Storage.Endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("configure object storage proxy: %w", err)
 	}
 	if err := objects.Ping(ctx); err != nil {
 		return nil, err
@@ -519,6 +524,7 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 		TrustedProxies: append([]string(nil), resolved.HTTP.TrustedProxyAddresses...),
 		RegisterRoutes: func(engine *gin.Engine) {
 			adminAssets.Register(engine)
+			objectProxy.Register(engine)
 			identityRoutes.Register(engine)
 			adminMediaRoutes.Register(engine)
 			adminMetadataRoutes.Register(engine)
@@ -618,7 +624,7 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 		AdminSettings: adminSettingsService, AdminSources: adminSourcesService,
 		AdminTagScraping: tagScrapingService, AdminTagBatches: tagBatchService,
 		AdminArtistArtworkBatches: artistArtworkBatchService,
-		Catalog: catalogService, Library: libraryService, Playback: playbackService,
+		Catalog:                   catalogService, Library: libraryService, Playback: playbackService,
 		Playlist: playlistService, Profile: profileService, Metrics: metrics, Handler: engine, ready: readiness,
 		events: events, background: background, mediaWorker: mediaWorker,
 	}, nil
