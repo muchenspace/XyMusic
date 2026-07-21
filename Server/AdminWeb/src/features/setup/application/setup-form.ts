@@ -11,32 +11,6 @@ const optionalScanInterval = z.preprocess(
   z.coerce.number().int().min(5).max(10_080).nullable().optional(),
 );
 
-export function isReachableStorageHost(host: string): boolean {
-  const raw = host.trim().replace(/^\[|\]$/g, "");
-  if (!raw) return false;
-  const authority = raw.includes(":") ? `[${raw}]` : raw;
-  let normalized: string;
-  try {
-    normalized = new URL(`http://${authority}`).hostname
-      .replace(/^\[|\]$/g, "")
-      .replace(/\.$/, "")
-      .toLowerCase();
-  } catch {
-    return false;
-  }
-  if (["localhost", "0.0.0.0", "::", "::1"].includes(normalized)) return false;
-  const parts = normalized.split(".").map(Number);
-  return !(parts.length === 4 && parts.every(Number.isInteger) && parts[0] === 127);
-}
-
-function storageUrlHostIsReachable(value: string): boolean {
-  try {
-    return isReachableStorageHost(new URL(value).hostname);
-  } catch {
-    return false;
-  }
-}
-
 export const setupStepSchemas = {
   http: z.object({
     ipv4Host: z.string().trim().ip({ version: "v4", message: "请输入有效的 IPv4 监听 IP" }),
@@ -59,17 +33,13 @@ export const setupStepSchemas = {
     maxConnections: z.coerce.number().int().min(1).max(100),
   }),
   storage: z.object({
-    endpoint: z.string().trim().url("请输入对象存储的协议、IP 和端口").max(2_000)
-      .refine(storageUrlHostIsReachable, "对象存储地址不能使用 localhost、127.0.0.0/8、0.0.0.0 或 IPv6 回环地址"),
+    endpoint: z.string().trim().url("请输入对象存储的协议、IP 和端口").max(2_000),
     region: z.string().trim().min(1, "请输入区域").max(100),
     bucket: z.string().trim().min(1, "请输入 Bucket").max(255),
     accessKeyId: z.string().min(1, "请输入 Access Key").max(500),
     secretAccessKey: z.string().min(1, "请输入 Secret Key").max(2_000),
     forcePathStyle: z.boolean(),
-    publicBaseUrl: optionalPublicBaseUrl.refine(
-      (value) => !value || storageUrlHostIsReachable(value),
-      "公开地址不能使用 localhost、127.0.0.0/8、0.0.0.0 或 IPv6 回环地址",
-    ),
+    publicBaseUrl: optionalPublicBaseUrl,
     signedUrlTtlSeconds: z.coerce.number().int().min(30).max(3_600),
     maxUploadBytes: z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
   }),
