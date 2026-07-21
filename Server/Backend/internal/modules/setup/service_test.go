@@ -685,22 +685,21 @@ func TestStorageResetDoesNotClearDatabase(t *testing.T) {
 	}
 }
 
-func TestStorageConfigurationRejectsClientInaccessibleAddresses(t *testing.T) {
+func TestStorageConfigurationAllowsAddressesReachableFromBackend(t *testing.T) {
 	for _, endpoint := range []string{
 		"http://127.0.0.1:9000", "http://127.20.30.40:9000", "http://localhost:9000",
 		"http://0.0.0.0:9000", "http://[::1]:9000", "http://[::]:9000",
 	} {
 		input := validSetupInput().Storage
 		input.Endpoint = endpoint
-		if _, err := storageConfig(input); !apperror.IsCode(err, apperror.CodeValidationError) {
-			t.Fatalf("storage endpoint %q was accepted: %v", endpoint, err)
+		if _, err := storageConfig(input); err != nil {
+			t.Fatalf("storage endpoint %q was rejected: %v", endpoint, err)
 		}
-	}
-	input := validSetupInput().Storage
-	publicURL := "http://127.0.0.1:9000"
-	input.PublicBaseURL = &publicURL
-	if _, err := storageConfig(input); !apperror.IsCode(err, apperror.CodeValidationError) {
-		t.Fatalf("loopback public base URL was accepted: %v", err)
+		input = validSetupInput().Storage
+		input.PublicBaseURL = &endpoint
+		if _, err := storageConfig(input); err != nil {
+			t.Fatalf("storage public base URL %q was rejected: %v", endpoint, err)
+		}
 	}
 }
 
