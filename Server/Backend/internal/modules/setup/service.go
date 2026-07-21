@@ -1207,13 +1207,6 @@ func requiredHTTPURL(raw, label string, allowPath bool) (string, error) {
 	if len(candidate) < 8 || len(candidate) > 2000 {
 		return "", apperror.Validation(label + " is invalid")
 	}
-	hostname := strings.TrimSpace(strings.ToLower(parsed.Hostname()))
-	if hostname == "localhost" {
-		return "", apperror.Validation(label + " 不能使用 localhost，客户端无法通过该地址访问对象存储")
-	}
-	if address := net.ParseIP(hostname); address != nil && (address.IsLoopback() || address.IsUnspecified()) {
-		return "", apperror.Validation(label + " 不能使用回环或未指定地址，请填写客户端可直接访问的局域网 IP 或域名")
-	}
 	return candidate, nil
 }
 
