@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { Clipboard, RefreshCw, Trash2 } from "@lucide/vue";
 import type { ServerConfig } from "../../application/ports/SessionRepository";
 import { useApplicationServices } from "../services";
+import PageHeader from "../components/ui/PageHeader.vue";
 
 const props = defineProps<{ serverConfig: ServerConfig }>();
 const diagnostics = useApplicationServices().diagnostics;
@@ -58,10 +59,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="page-intro diagnostics-intro">
-    <p class="eyebrow">支持与排错</p><h1>诊断</h1>
-    <p>查看当前运行环境和本次启动期间的关键事件。日志不会记录密码或访问令牌。</p>
-  </section>
+  <PageHeader class="diagnostics-intro" title="诊断" description="查看当前运行环境和本次启动期间的关键事件。日志不会记录密码或访问令牌。" eyebrow="支持与排错" />
   <section class="diagnostics-summary" aria-label="运行信息">
     <div><span>运行环境</span><strong>{{ runtime }}</strong></div>
     <div><span>服务器</span><strong>{{ serverAddress }}</strong></div>
