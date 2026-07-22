@@ -1,4 +1,4 @@
-.page-content { --content-gutter: clamp(28px, 4vw, 60px); --content-top: 34px; width: 100%; max-width: 1500px; min-height: 100%; margin: 0 auto; padding: var(--content-top) var(--content-gutter) 72px; }
+.page-content { --content-gutter: clamp(28px, 4vw, 60px); --content-top: 34px; width: 100%; min-height: 100%; margin: 0; padding: var(--content-top) var(--content-gutter) 72px; }
 .page-intro { margin: 2px 0 32px; padding: 0; }
 .page-intro::after { display: none; }
 .page-intro .eyebrow, .collection-header .eyebrow { margin: 0 0 7px; color: var(--text-muted); font-size: 13px; font-weight: 600; letter-spacing: 0; }
