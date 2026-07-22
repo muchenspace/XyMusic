@@ -77,8 +77,8 @@ func TestLegacyAndGoRejectActiveUsersFromEveryAdminSessionAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	contractAPIs := loadAdminSessionContractAPIs(t)
-	if len(contractAPIs) != 84 {
-		t.Fatalf("admin-session contract endpoint count = %d, want 84", len(contractAPIs))
+	if len(contractAPIs) != 91 {
+		t.Fatalf("admin-session contract endpoint count = %d, want 91", len(contractAPIs))
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -169,7 +169,7 @@ func loadAdminSessionContractAPIs(t *testing.T) []adminForbiddenContractAPI {
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		t.Fatalf("decode %s: %v", manifestPath, err)
 	}
-	result := make([]adminForbiddenContractAPI, 0, 84)
+	result := make([]adminForbiddenContractAPI, 0, 91)
 	for _, api := range manifest.APIs {
 		if api.Auth == "admin-session" {
 			result = append(result, api)
@@ -263,6 +263,9 @@ var adminForbiddenJSONBodies = map[string]string{
 	}`,
 	"POST /api/v1/admin/tag-scraping/search": `{
 		"source":"smart","title":"Song","artist":"Artist"
+	}`,
+	"POST /api/v1/admin/tag-scraping/candidates/details": `{
+		"candidate":{"id":"song","name":"Song","artist":"Artist","artistId":"artist","album":"Album","albumId":"album","albumImg":"https://y.qq.com/cover.jpg","year":"2020","track":"1","disc":"1","genre":"Rock","source":"qmusic"}
 	}`,
 	"POST /api/v1/admin/tag-scraping/tracks/:id/apply": `{
 		"expectedVersion":1,
@@ -502,7 +505,8 @@ func isModernOnlyAdminForbiddenEndpoint(endpoint string) bool {
 	switch endpoint {
 	case "POST /api/v1/admin/tracks/batch/restore",
 		"POST /api/v1/admin/tracks/batch/delete-permanently",
-		"GET /api/v1/admin/tracks/batch/delete-permanently/:jobId":
+		"GET /api/v1/admin/tracks/batch/delete-permanently/:jobId",
+		"POST /api/v1/admin/tag-scraping/candidates/details":
 		return true
 	default:
 		return false

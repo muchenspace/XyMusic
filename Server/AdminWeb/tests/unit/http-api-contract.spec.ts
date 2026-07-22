@@ -13,6 +13,7 @@ import type {
   ArtistSearchInput,
   CreateArtistArtworkBatchInput,
   CreateBatchInput,
+  TagCandidateDetailInput,
   TagSearchInput,
 } from "@/features/scraping/domain/models";
 
@@ -64,7 +65,7 @@ describe("administrator HTTP API contract", () => {
     expect(publicMethods(HttpSetupGateway)).toEqual(["complete", "status", "testAdministrator", "testDatabase", "testHttp", "testMedia", "testPaths", "testSource", "testStorage"]);
     expect(publicMethods(HttpTagScrapingGateway)).toEqual([
       "apply", "applyArtistArtwork", "artistArtworkBatch", "artworkUrl", "batch",
-      "cancelArtistArtworkBatch", "cancelBatch", "createArtistArtworkBatch", "createBatch",
+      "cancelArtistArtworkBatch", "cancelBatch", "candidateDetail", "createArtistArtworkBatch", "createBatch",
       "fingerprint", "retryArtistArtworkBatch", "retryBatch", "search", "searchArtists",
     ]);
     expect(publicMethods(HttpMediaUploadGateway)).toEqual(["complete", "reserve", "upload"]);
@@ -184,10 +185,12 @@ describe("administrator HTTP API contract", () => {
     const scraping = new HttpTagScrapingGateway();
     const search: TagSearchInput = { source: "smart", query: "song" };
     const candidate = { id: "remote-1", name: "Song", artist: "Artist", artistId: "a", album: "Album", albumId: "b", albumImg: "https://img.example/1.jpg", year: "2026", track: "1", disc: "1", genre: "Pop", source: "qmusic" as const };
+    const candidateDetail: TagCandidateDetailInput = { candidate };
     const fields = { title: true, artist: true, album: true, year: true, genre: true, lyrics: true, cover: true, overwrite: false };
     const apply: ApplyTagInput = { expectedVersion: 2, candidate, fields, writeBack: false, reason: "test" };
     const batch: CreateBatchInput = { items: [{ trackId: "track-1", expectedVersion: 2 }], options: { sources: ["qmusic"], matchMode: "strict", missingFields: [], fields, writeBack: false, reason: "batch" } };
     await expectRequest(() => scraping.search(search, signal), "/api/v1/admin/tag-scraping/search", { method: "POST", body: search, signal });
+    await expectRequest(() => scraping.candidateDetail(candidateDetail, signal), "/api/v1/admin/tag-scraping/candidates/details", { method: "POST", body: candidateDetail, signal });
     await expectRequest(() => scraping.fingerprint("track-1", signal), "/api/v1/admin/tag-scraping/tracks/track-1/fingerprint", { method: "POST", signal });
     await expectRequest(() => scraping.apply("track-1", apply), "/api/v1/admin/tag-scraping/tracks/track-1/apply", { method: "POST", body: apply });
     await expectRequest(() => scraping.createBatch(batch), "/api/v1/admin/tag-scraping/batches", { method: "POST", body: batch });

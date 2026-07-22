@@ -20,7 +20,7 @@ import (
 
 func TestGinRoutesCoverEveryLegacyAPI(t *testing.T) {
 	if os.Getenv("XYMUSIC_REQUIRE_FULL_API_PARITY") != "1" {
-		t.Skip("set XYMUSIC_REQUIRE_FULL_API_PARITY=1 for the final 126-endpoint gate")
+		t.Skip("set XYMUSIC_REQUIRE_FULL_API_PARITY=1 for the final 136-endpoint gate")
 	}
 	environmentPath := os.Getenv("XYMUSIC_INTEGRATION_ENV")
 	if environmentPath == "" {
@@ -102,7 +102,7 @@ func TestGinRoutesCoverEveryLegacyAPI(t *testing.T) {
 	}
 	if len(differences) != 0 {
 		sort.Strings(differences)
-		t.Fatalf("Gin API coverage differs from the 126-endpoint manifest (%d registered, %d expected):\n%s", len(actual), len(expected), strings.Join(differences, "\n"))
+		t.Fatalf("Gin API coverage differs from the 136-endpoint manifest (%d registered, %d expected):\n%s", len(actual), len(expected), strings.Join(differences, "\n"))
 	}
 }
 

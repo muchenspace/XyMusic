@@ -22,6 +22,7 @@ import (
 
 type ScrapingAPI interface {
 	Search(context.Context, SearchInput) ([]Candidate, error)
+	CandidateDetails(context.Context, Candidate) (CandidateDetailsDTO, error)
 	SearchArtists(context.Context, ArtistSearchInput) ([]ArtistCandidate, error)
 	Fingerprint(context.Context, string) ([]Candidate, error)
 	Apply(context.Context, string, string, string, ApplyInput) (ApplyResult, error)
@@ -82,6 +83,7 @@ func NewRoutes(
 func (routes *Routes) Register(router gin.IRouter) {
 	group := router.Group("/api/v1/admin/tag-scraping")
 	group.POST("/search", httpserver.Handle(routes.search))
+	group.POST("/candidates/details", httpserver.Handle(routes.candidateDetails))
 	group.POST("/artists/search", httpserver.Handle(routes.searchArtists))
 	group.POST("/artists/batches", httpserver.Handle(routes.createArtistArtworkBatch))
 	group.GET("/artists/batches/:id", httpserver.Handle(routes.getArtistArtworkBatch))
@@ -110,6 +112,26 @@ func (routes *Routes) search(c *gin.Context) error {
 		return err
 	}
 	result, err := routes.scraping.Search(c.Request.Context(), input)
+	if err != nil {
+		return err
+	}
+	c.JSON(http.StatusOK, result)
+	return nil
+}
+
+func (routes *Routes) candidateDetails(c *gin.Context) error {
+	var input CandidateDetailsInput
+	shape, err := decodeContractJSON(c, &input, "candidate")
+	if err != nil {
+		return err
+	}
+	if err := validateCandidateDetailsInput(input, shape); err != nil {
+		return err
+	}
+	if _, err := adminauth.RequireAdmin(c, routes.identity, true); err != nil {
+		return err
+	}
+	result, err := routes.scraping.CandidateDetails(c.Request.Context(), input.Candidate)
 	if err != nil {
 		return err
 	}
@@ -341,6 +363,18 @@ func validateSearchInput(input SearchInput, shape map[string]json.RawMessage) er
 		}
 	}
 	return nil
+}
+
+func validateCandidateDetailsInput(input CandidateDetailsInput, shape map[string]json.RawMessage) error {
+	if err := requireNestedKeys(shape["candidate"],
+		"id", "name", "artist", "artistId", "album", "albumId", "albumImg", "year", "track", "disc", "genre", "source"); err != nil {
+		return err
+	}
+	var candidateShape map[string]json.RawMessage
+	if json.Unmarshal(shape["candidate"], &candidateShape) != nil || hasExplicitNull(candidateShape, "titleScore", "artistScore", "albumScore", "score") {
+		return contractError()
+	}
+	return validateCandidateContract(input.Candidate)
 }
 
 func validateApplyInput(input ApplyInput, shape map[string]json.RawMessage) error {
