@@ -2,6 +2,7 @@ package com.xymusic.app.feature.player.presentation
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -141,6 +142,42 @@ class PlayerLyricsComposeTest {
 
         composeRule.onNodeWithText("AB").assertIsNotSelected()
         composeRule.onNodeWithText("CD").assertIsSelected()
+    }
+
+    @Test
+    fun suppliedPlaybackPositionDrivesTheActiveLine() {
+        val playbackPosition = mutableFloatStateOf(0f)
+        val uiState =
+            PlayerUiState(
+                player = PlayerState(positionMs = 0, durationMs = 2_000),
+                lyrics =
+                listOf(
+                    PlayerLyricLineUi(0, "Shared position first lyric"),
+                    PlayerLyricLineUi(1_000, "Shared position second lyric"),
+                ),
+                synchronizedLyrics = true,
+            )
+        composeRule.setContent {
+            XyMusicTheme(dynamicColor = false) {
+                Box(modifier = Modifier.size(width = 480.dp, height = 300.dp)) {
+                    LyricsContent(
+                        uiState = uiState,
+                        onSeek = {},
+                        playbackPosition = playbackPosition,
+                        compact = true,
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Shared position first lyric").assertIsSelected()
+        composeRule.onNodeWithText("Shared position second lyric").assertIsNotSelected()
+
+        composeRule.runOnIdle { playbackPosition.floatValue = 1_000f }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Shared position first lyric").assertIsNotSelected()
+        composeRule.onNodeWithText("Shared position second lyric").assertIsSelected()
     }
 
     private fun secondLineCenter(): Float = composeRule

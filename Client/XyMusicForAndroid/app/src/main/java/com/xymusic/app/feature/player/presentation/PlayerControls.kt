@@ -20,6 +20,7 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,6 +44,7 @@ internal fun PlaybackControls(
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     compact: Boolean = false,
+    playbackPosition: State<Float>? = null,
 ) {
     val availability = rememberPlaybackControlAvailability(uiState.player)
     val horizontalPadding = if (compact) 22.dp else 28.dp
@@ -62,6 +64,7 @@ internal fun PlaybackControls(
             onPositionChange = onPositionChange,
             onPositionChangeFinished = onPositionChangeFinished,
             compact = compact,
+            playbackPosition = playbackPosition,
         )
         Spacer(modifier = Modifier.height(if (compact) 2.dp else 6.dp))
         Row(
@@ -156,9 +159,11 @@ private fun PlaybackTimeline(
     onPositionChange: (Float) -> Unit,
     onPositionChangeFinished: () -> Unit,
     compact: Boolean,
+    playbackPosition: State<Float>?,
 ) {
     val duration = player.durationMs.coerceAtLeast(0)
-    val displayPosition = rememberSmoothedPlaybackPosition(player)
+    val displayPosition =
+        (playbackPosition ?: rememberSmoothedPlaybackPositionState(player)).value
     val sliderValue = draggedPosition ?: displayPosition
     val elapsedSecond = sliderValue.toLong().coerceAtLeast(0) / 1_000L
     val remainingMs = (duration - sliderValue.toLong()).coerceAtLeast(0L)

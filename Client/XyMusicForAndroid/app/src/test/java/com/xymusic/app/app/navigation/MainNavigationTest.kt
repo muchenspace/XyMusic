@@ -19,4 +19,83 @@ class MainNavigationTest {
         assertThat(shouldShowMainBottomBar(CatalogDestination.ArtistDetail.route)).isFalse()
         assertThat(shouldShowMainBottomBar(null)).isFalse()
     }
+
+    @Test
+    fun routeContentLayoutMatchesDestinationType() {
+        assertThat(mainNavigationContentLayout(MainDestination.Home.route))
+            .isEqualTo(MainNavigationContentLayout.Primary)
+        assertThat(mainNavigationContentLayout(MainDestination.Mine.route))
+            .isEqualTo(MainNavigationContentLayout.Primary)
+        assertThat(mainNavigationContentLayout(PlayerDestination.NowPlaying.route))
+            .isEqualTo(MainNavigationContentLayout.FullScreen)
+        assertThat(mainNavigationContentLayout(PlaylistDestination.Detail.route))
+            .isEqualTo(MainNavigationContentLayout.EdgeToEdge)
+        assertThat(mainNavigationContentLayout(MainSecondaryDestination.Search.route))
+            .isEqualTo(MainNavigationContentLayout.Secondary)
+        assertThat(mainNavigationContentLayout(CatalogDestination.AlbumDetail.route))
+            .isEqualTo(MainNavigationContentLayout.Secondary)
+        assertThat(mainNavigationContentLayout(null))
+            .isEqualTo(MainNavigationContentLayout.Secondary)
+    }
+
+    @Test
+    fun chromeUsesVisibleRouteUnionOnlyForPlayerTransition() {
+        val config =
+            MainNavigationLayoutConfig(
+                useNavigationRail = false,
+                compactPlayerBar = false,
+                hasPlayerItem = true,
+            )
+
+        assertThat(
+            mainNavigationChromeState(
+                config = config,
+                currentRoute = PlayerDestination.NowPlaying.route,
+                visibleRoutes =
+                listOf(
+                    MainDestination.Home.route,
+                    PlayerDestination.NowPlaying.route,
+                ),
+            ),
+        ).isEqualTo(
+            MainNavigationChromeState(
+                showMainNavigation = true,
+                showMiniPlayer = true,
+                selectedMainDestination = MainDestination.Home,
+                placeChromeBehindContent = true,
+            ),
+        )
+        assertThat(
+            mainNavigationChromeState(
+                config = config,
+                currentRoute = PlayerDestination.NowPlaying.route,
+                visibleRoutes = listOf(PlayerDestination.NowPlaying.route),
+            ),
+        ).isEqualTo(
+            MainNavigationChromeState(
+                showMainNavigation = false,
+                showMiniPlayer = false,
+                selectedMainDestination = null,
+                placeChromeBehindContent = true,
+            ),
+        )
+        assertThat(
+            mainNavigationChromeState(
+                config = config,
+                currentRoute = PlaylistDestination.Detail.route,
+                visibleRoutes =
+                listOf(
+                    MainDestination.Home.route,
+                    PlaylistDestination.Detail.route,
+                ),
+            ),
+        ).isEqualTo(
+            MainNavigationChromeState(
+                showMainNavigation = false,
+                showMiniPlayer = true,
+                selectedMainDestination = null,
+                placeChromeBehindContent = false,
+            ),
+        )
+    }
 }

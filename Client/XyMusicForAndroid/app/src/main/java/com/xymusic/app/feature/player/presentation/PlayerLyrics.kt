@@ -30,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,10 +63,11 @@ internal fun LyricsContent(
     modifier: Modifier = Modifier,
     compact: Boolean = false,
     centerActiveLine: Boolean = false,
+    playbackPosition: State<Float>? = null,
 ) {
     val listState = rememberLazyListState()
     val isDragged by listState.interactionSource.collectIsDraggedAsState()
-    val displayPosition = rememberSmoothedPlaybackPositionState(uiState.player)
+    val displayPosition = playbackPosition ?: rememberSmoothedPlaybackPositionState(uiState.player)
     val currentLyricIndex by remember(
         uiState.lyrics,
         uiState.synchronizedLyrics,

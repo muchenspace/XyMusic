@@ -24,6 +24,7 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,6 +43,9 @@ import com.xymusic.app.core.ui.component.XyMarqueeText
 import com.xymusic.app.feature.player.domain.model.PlaybackState
 import com.xymusic.app.feature.player.domain.model.PlayerQueueItem
 import com.xymusic.app.feature.player.domain.model.PlayerState
+
+internal val PlayerMiniBarHeight = 64.dp
+internal val CompactPlayerMiniBarHeight = 52.dp
 
 @Composable
 fun PlayerMiniBar(
@@ -78,7 +82,7 @@ fun PlayerMiniBar(
             onNext = onNext,
         )
         MiniBarProgress(
-            positionMs = playbackPosition.value,
+            positionMs = playbackPosition,
             durationMs = uiState.player.durationMs,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
@@ -212,7 +216,7 @@ private fun MiniBarTopDivider(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun MiniBarProgress(positionMs: Float, durationMs: Long, modifier: Modifier = Modifier) {
+private fun MiniBarProgress(positionMs: State<Float>, durationMs: Long, modifier: Modifier = Modifier) {
     Box(
         modifier =
         modifier
@@ -226,7 +230,7 @@ private fun MiniBarProgress(positionMs: Float, durationMs: Long, modifier: Modif
                 .fillMaxSize()
                 .graphicsLayer {
                     transformOrigin = TransformOrigin(0f, 0.5f)
-                    scaleX = normalizedPlaybackProgress(positionMs = positionMs, durationMs = durationMs)
+                    scaleX = normalizedPlaybackProgress(positionMs = positionMs.value, durationMs = durationMs)
                 }.background(MaterialTheme.colorScheme.primary),
         )
     }
@@ -234,7 +238,7 @@ private fun MiniBarProgress(positionMs: Float, durationMs: Long, modifier: Modif
 
 private fun playerMiniBarMetrics(compact: Boolean): PlayerMiniBarMetrics = if (compact) {
     PlayerMiniBarMetrics(
-        barHeight = 52.dp,
+        barHeight = CompactPlayerMiniBarHeight,
         artworkSize = 40.dp,
         artworkCornerRadius = 7.dp,
         artworkGap = 8.dp,
@@ -246,7 +250,7 @@ private fun playerMiniBarMetrics(compact: Boolean): PlayerMiniBarMetrics = if (c
     )
 } else {
     PlayerMiniBarMetrics(
-        barHeight = 64.dp,
+        barHeight = PlayerMiniBarHeight,
         artworkSize = 48.dp,
         artworkCornerRadius = 8.dp,
         artworkGap = 10.dp,

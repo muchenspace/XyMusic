@@ -28,6 +28,8 @@ import com.xymusic.app.feature.settings.presentation.SettingsScreen
 import com.xymusic.app.ui.theme.XyMotion
 import com.xymusic.app.ui.theme.playerSlideInto
 import com.xymusic.app.ui.theme.playerSlideOutOf
+import com.xymusic.app.ui.theme.slideFadeBackInto
+import com.xymusic.app.ui.theme.slideFadeBackOutOf
 import com.xymusic.app.ui.theme.slideFadeInto
 import com.xymusic.app.ui.theme.slideFadeOutOf
 
@@ -46,6 +48,7 @@ internal fun MainNavHost(
     onDynamicColorChanged: (Boolean) -> Unit,
     serverEndpoint: ServerEndpoint,
     onServerEndpointChanged: (ServerEndpoint) -> Unit,
+    layoutConfig: MainNavigationLayoutConfig,
     modifier: Modifier = Modifier,
 ) {
     NavHost(
@@ -54,8 +57,8 @@ internal fun MainNavHost(
         modifier = modifier,
         enterTransition = { slideFadeInto() },
         exitTransition = { slideFadeOutOf() },
-        popEnterTransition = { slideFadeInto() },
-        popExitTransition = { slideFadeOutOf() },
+        popEnterTransition = { slideFadeBackInto() },
+        popExitTransition = { slideFadeBackOutOf() },
     ) {
         composable(
             route = MainDestination.Home.route,
@@ -64,20 +67,25 @@ internal fun MainNavHost(
             popEnterTransition = { fadeIn(tween(XyMotion.Quick)) },
             popExitTransition = { fadeOut(tween(XyMotion.Quick)) },
         ) {
-            HomeScreen(
-                onTrackMore = onTrackMore,
-                onAlbumClick = { albumId ->
-                    navController.navigate(CatalogDestination.AlbumDetail.createRoute(albumId))
-                },
-                onSearchClick = {
-                    navController.navigate(MainSecondaryDestination.Search.route) {
-                        launchSingleTop = true
-                    }
-                },
-                onProfileClick = {
-                    navController.navigateMain(MainDestination.Mine.route)
-                },
-            )
+            MainNavigationRouteLayout(
+                layout = MainNavigationContentLayout.Primary,
+                config = layoutConfig,
+            ) {
+                HomeScreen(
+                    onTrackMore = onTrackMore,
+                    onAlbumClick = { albumId ->
+                        navController.navigate(CatalogDestination.AlbumDetail.createRoute(albumId))
+                    },
+                    onSearchClick = {
+                        navController.navigate(MainSecondaryDestination.Search.route) {
+                            launchSingleTop = true
+                        }
+                    },
+                    onProfileClick = {
+                        navController.navigateMain(MainDestination.Mine.route)
+                    },
+                )
+            }
         }
         composable(
             route = MainSecondaryDestination.Search.route,
@@ -86,12 +94,17 @@ internal fun MainNavHost(
             popEnterTransition = { fadeIn(tween(XyMotion.Quick)) },
             popExitTransition = { fadeOut(tween(XyMotion.Quick)) },
         ) {
-            SearchScreen(
-                onTrackMore = onTrackMore,
-                onAlbumClick = { navController.navigate(CatalogDestination.AlbumDetail.createRoute(it)) },
-                onArtistClick = { navController.navigate(CatalogDestination.ArtistDetail.createRoute(it)) },
-                onBack = navController::navigateUp,
-            )
+            MainNavigationRouteLayout(
+                layout = MainNavigationContentLayout.Secondary,
+                config = layoutConfig,
+            ) {
+                SearchScreen(
+                    onTrackMore = onTrackMore,
+                    onAlbumClick = { navController.navigate(CatalogDestination.AlbumDetail.createRoute(it)) },
+                    onArtistClick = { navController.navigate(CatalogDestination.ArtistDetail.createRoute(it)) },
+                    onBack = navController::navigateUp,
+                )
+            }
         }
         composable(
             route = LIBRARY_ROUTE,
@@ -112,12 +125,17 @@ internal fun MainNavHost(
                     ?.getString(LIBRARY_TAB_ARGUMENT)
                     ?.let { value -> LibraryTab.entries.firstOrNull { it.name == value } }
                     ?: LibraryTab.Favorites
-            LibraryScreen(
-                onTrackMore = onTrackMore,
-                onPlaylistClick = { navController.navigate(PlaylistDestination.Detail.createRoute(it)) },
-                onBack = navController::navigateUp,
-                initialTab = initialTab,
-            )
+            MainNavigationRouteLayout(
+                layout = MainNavigationContentLayout.Secondary,
+                config = layoutConfig,
+            ) {
+                LibraryScreen(
+                    onTrackMore = onTrackMore,
+                    onPlaylistClick = { navController.navigate(PlaylistDestination.Detail.createRoute(it)) },
+                    onBack = navController::navigateUp,
+                    initialTab = initialTab,
+                )
+            }
         }
         composable(
             route = MainDestination.Mine.route,
@@ -126,34 +144,44 @@ internal fun MainNavHost(
             popEnterTransition = { fadeIn(tween(XyMotion.Quick)) },
             popExitTransition = { fadeOut(tween(XyMotion.Quick)) },
         ) {
-            MineScreen(
-                onPlaylistClick = { navController.navigate(PlaylistDestination.Detail.createRoute(it)) },
-                onOpenLibrary = { tab ->
-                    navController.navigate(libraryRoute(tab)) {
-                        launchSingleTop = true
-                    }
-                },
-                onOpenSettings = {
-                    navController.navigate(MainSecondaryDestination.Settings.route) {
-                        launchSingleTop = true
-                    }
-                },
-            )
+            MainNavigationRouteLayout(
+                layout = MainNavigationContentLayout.Primary,
+                config = layoutConfig,
+            ) {
+                MineScreen(
+                    onPlaylistClick = { navController.navigate(PlaylistDestination.Detail.createRoute(it)) },
+                    onOpenLibrary = { tab ->
+                        navController.navigate(libraryRoute(tab)) {
+                            launchSingleTop = true
+                        }
+                    },
+                    onOpenSettings = {
+                        navController.navigate(MainSecondaryDestination.Settings.route) {
+                            launchSingleTop = true
+                        }
+                    },
+                )
+            }
         }
         composable(
             route = MainSecondaryDestination.Settings.route,
             enterTransition = { slideFadeInto() },
             exitTransition = { slideFadeOutOf() },
-            popEnterTransition = { slideFadeInto() },
-            popExitTransition = { slideFadeOutOf() },
+            popEnterTransition = { slideFadeBackInto() },
+            popExitTransition = { slideFadeBackOutOf() },
         ) {
-            SettingsScreen(
-                dynamicColorEnabled = dynamicColorEnabled,
-                onDynamicColorChanged = onDynamicColorChanged,
-                serverEndpoint = serverEndpoint,
-                onServerEndpointChanged = onServerEndpointChanged,
-                onBack = navController::navigateUp,
-            )
+            MainNavigationRouteLayout(
+                layout = MainNavigationContentLayout.Secondary,
+                config = layoutConfig,
+            ) {
+                SettingsScreen(
+                    dynamicColorEnabled = dynamicColorEnabled,
+                    onDynamicColorChanged = onDynamicColorChanged,
+                    serverEndpoint = serverEndpoint,
+                    onServerEndpointChanged = onServerEndpointChanged,
+                    onBack = navController::navigateUp,
+                )
+            }
         }
         composable(
             route = PlayerDestination.NowPlaying.route,
@@ -162,23 +190,33 @@ internal fun MainNavHost(
             popEnterTransition = { playerSlideInto() },
             popExitTransition = { playerSlideOutOf() },
         ) {
-            PlayerScreenRoute(
-                playerViewModel = playerViewModel,
-                onBack = navController::navigateUp,
-                isFavorite = playerIsFavorite,
-                onToggleFavorite = onTogglePlayerFavorite,
-                onAddToPlaylist = onTrackMore,
-            )
+            MainNavigationRouteLayout(
+                layout = MainNavigationContentLayout.FullScreen,
+                config = layoutConfig,
+            ) {
+                PlayerScreenRoute(
+                    playerViewModel = playerViewModel,
+                    onBack = navController::navigateUp,
+                    isFavorite = playerIsFavorite,
+                    onToggleFavorite = onTogglePlayerFavorite,
+                    onAddToPlaylist = onTrackMore,
+                )
+            }
         }
         composable(
             route = PlaylistDestination.Detail.route,
             arguments = listOf(navArgument(PlaylistRouteArgs.PlaylistId) { type = NavType.StringType }),
         ) {
-            PlaylistRoute(
-                onBack = navController::navigateUp,
-                onDeleted = navController::navigateUp,
-                onTrackMore = onTrackMore,
-            )
+            MainNavigationRouteLayout(
+                layout = MainNavigationContentLayout.EdgeToEdge,
+                config = layoutConfig,
+            ) {
+                PlaylistRoute(
+                    onBack = navController::navigateUp,
+                    onDeleted = navController::navigateUp,
+                    onTrackMore = onTrackMore,
+                )
+            }
         }
         composable(
             route = CatalogDestination.AlbumDetail.route,
@@ -187,11 +225,16 @@ internal fun MainNavHost(
                 navArgument(CatalogDestination.AlbumDetail.argumentName) { type = NavType.StringType },
             ),
         ) {
-            AlbumDetailRoute(
-                onBack = navController::navigateUp,
-                onTrackMore = onTrackMore,
-                onArtistClick = { navController.navigate(CatalogDestination.ArtistDetail.createRoute(it)) },
-            )
+            MainNavigationRouteLayout(
+                layout = MainNavigationContentLayout.Secondary,
+                config = layoutConfig,
+            ) {
+                AlbumDetailRoute(
+                    onBack = navController::navigateUp,
+                    onTrackMore = onTrackMore,
+                    onArtistClick = { navController.navigate(CatalogDestination.ArtistDetail.createRoute(it)) },
+                )
+            }
         }
         composable(
             route = CatalogDestination.ArtistDetail.route,
@@ -200,11 +243,16 @@ internal fun MainNavHost(
                 navArgument(CatalogDestination.ArtistDetail.argumentName) { type = NavType.StringType },
             ),
         ) {
-            ArtistDetailRoute(
-                onBack = navController::navigateUp,
-                onTrackMore = onTrackMore,
-                onAlbumClick = { navController.navigate(CatalogDestination.AlbumDetail.createRoute(it)) },
-            )
+            MainNavigationRouteLayout(
+                layout = MainNavigationContentLayout.Secondary,
+                config = layoutConfig,
+            ) {
+                ArtistDetailRoute(
+                    onBack = navController::navigateUp,
+                    onTrackMore = onTrackMore,
+                    onAlbumClick = { navController.navigate(CatalogDestination.AlbumDetail.createRoute(it)) },
+                )
+            }
         }
     }
 }

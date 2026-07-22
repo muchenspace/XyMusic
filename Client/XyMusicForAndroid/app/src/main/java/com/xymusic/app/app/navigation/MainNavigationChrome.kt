@@ -40,6 +40,11 @@ import com.xymusic.app.feature.player.presentation.PlayerMiniBar
 import com.xymusic.app.feature.player.presentation.PlayerViewModel
 import com.xymusic.app.ui.theme.spacing
 
+internal val MainNavigationBarHeight = 56.5.dp
+internal val MainNavigationRailWidth = 72.dp
+
+private val MainNavigationBarDividerHeight = 0.5.dp
+
 private val PRIMARY_DESTINATIONS =
     listOf(
         MainDestination.Home,
@@ -83,14 +88,14 @@ internal fun GlassNavigationBar(
             modifier =
             Modifier
                 .fillMaxWidth()
-                .height(0.5.dp)
+                .height(MainNavigationBarDividerHeight)
                 .background(colorScheme.outlineVariant.copy(alpha = 0.55f)),
         )
         Row(
             modifier =
             Modifier
                 .fillMaxWidth()
-                .height(56.dp)
+                .height(MainNavigationBarHeight - MainNavigationBarDividerHeight)
                 .selectableGroup(),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
@@ -168,7 +173,7 @@ internal fun MainNavigationRail(
             .windowInsetsPadding(
                 WindowInsets.safeDrawing.only(WindowInsetsSides.Start),
             )
-            .width(72.dp)
+            .width(MainNavigationRailWidth)
             .fillMaxHeight(),
         color = colorScheme.surface,
     ) {
