@@ -113,7 +113,7 @@ export class HttpSessionRepository implements SessionRepository {
             installationId: installationId(),
             name: navigator.userAgent.includes("Windows") ? "Windows 客户端" : "桌面客户端",
             platform: "WINDOWS",
-            appVersion: "0.1.1",
+            appVersion: "0.1.2",
           },
         }),
         signal: operation.controller.signal,

@@ -45,7 +45,7 @@ describe("desktop authentication API contract", () => {
     expect(JSON.parse(String(login.init.body))).toMatchObject({
       username: "listener",
       password: "password-123",
-      device: { platform: "WINDOWS", appVersion: "0.1.1" },
+      device: { platform: "WINDOWS", appVersion: "0.1.2" },
     });
     expect(profile.url).toBe("https://music.example.com/api/v1/users/me");
     expect(profile.init.method).toBe("PATCH");
