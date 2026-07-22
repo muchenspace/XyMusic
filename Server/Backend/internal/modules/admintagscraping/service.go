@@ -130,6 +130,17 @@ func (service *Service) Search(ctx context.Context, input SearchInput) ([]Candid
 	return scored, nil
 }
 
+func (service *Service) CandidateDetails(ctx context.Context, candidate Candidate) (CandidateDetailsDTO, error) {
+	if err := validateCandidate(candidate); err != nil {
+		return CandidateDetailsDTO{}, err
+	}
+	content, err := service.lyrics(ctx, candidate)
+	if err != nil {
+		return CandidateDetailsDTO{}, err
+	}
+	return CandidateDetailsDTO{Candidate: candidate, Lyrics: metadataLyrics(content)}, nil
+}
+
 func (service *Service) Fingerprint(ctx context.Context, trackID string) ([]Candidate, error) {
 	if service.fingerprinter == nil {
 		return nil, apperror.DependencyUnavailable("Audio fingerprinting is not configured: install Chromaprint and configure fpcalc")
@@ -266,19 +277,15 @@ func (service *Service) Apply(
 	}
 	if input.Fields.Lyrics && (input.Fields.Overwrite || current.Effective.Lyrics == nil) {
 		content, lyricErr := service.lyrics(ctx, candidate)
+		lyrics := metadataLyrics(content)
 		switch {
 		case lyricErr != nil:
 			warnings = append(warnings, "Lyrics retrieval failed: "+messageOf(lyricErr))
-		case strings.TrimSpace(content) == "":
+		case lyrics == nil:
 			warnings = append(warnings, "No lyrics were returned")
 		default:
-			format := "PLAIN"
-			if lrcPattern.MatchString(content) {
-				format = "LRC"
-			}
-			lyrics := MetadataLyrics{Content: content, Format: format, Language: "und"}
-			if !sameMetadataValue(lyrics, current.Effective.Lyrics) {
-				patch["lyrics"] = lyrics
+			if !sameMetadataValue(*lyrics, current.Effective.Lyrics) {
+				patch["lyrics"] = *lyrics
 				appliedFields = append(appliedFields, "lyrics")
 			}
 		}
@@ -390,6 +397,17 @@ func (service *Service) lyrics(ctx context.Context, candidate Candidate) (string
 		}
 	}
 	return "", nil
+}
+
+func metadataLyrics(content string) *MetadataLyrics {
+	if strings.TrimSpace(content) == "" {
+		return nil
+	}
+	format := "PLAIN"
+	if lrcPattern.MatchString(content) {
+		format = "LRC"
+	}
+	return &MetadataLyrics{Content: content, Format: format, Language: "und"}
 }
 
 func validSmartSources(input []Source) []Source {

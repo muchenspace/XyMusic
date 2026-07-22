@@ -113,6 +113,42 @@ test.describe("administrator browser contract", () => {
     await expect(dialog.locator("input.ui-input").first()).toHaveValue("Mock track");
   });
 
+  test("previews and selects a single-track scraping candidate", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "chromium-desktop", "desktop scraping detail contract");
+    await installMockApi(page, true);
+    await page.goto("./music/tracks");
+
+    await page.locator("tbody tr").filter({ hasText: "Mock track" }).click();
+    const editor = page.getByRole("dialog", { name: "编辑音乐 Tag" });
+    await editor.getByRole("button", { name: "在线刮削" }).click();
+
+    const scraper = page.getByRole("dialog", { name: "在线 Tag 刮削" });
+    await scraper.getByRole("button", { name: "搜索", exact: true }).click();
+    const candidates = scraper.locator("[data-testid='tag-candidate']");
+    await expect(candidates).toHaveCount(2);
+    await expect(candidates.nth(0).getByRole("button", { name: "已选用" })).toBeVisible();
+
+    const detailTrigger = candidates.nth(1).getByRole("button", { name: "查看详情" });
+    await detailTrigger.click();
+    let detail = page.getByRole("dialog", { name: "Second candidate" });
+    await expect(detail).toBeVisible();
+    await expect(detail.getByText("Second artist", { exact: true })).toBeVisible();
+    await expect(detail.getByText("Second album", { exact: true })).toBeVisible();
+    await expect(detail.getByTestId("candidate-lyrics")).toContainText("第二候选歌词");
+
+    await page.keyboard.press("Escape");
+    await expect(detail).toHaveCount(0);
+    await expect(scraper).toBeVisible();
+    await expect(candidates.nth(0).getByRole("button", { name: "已选用" })).toBeVisible();
+    await expect(detailTrigger).toBeFocused();
+
+    await detailTrigger.click();
+    detail = page.getByRole("dialog", { name: "Second candidate" });
+    await detail.getByRole("button", { name: "选用此候选" }).click();
+    await expect(detail).toHaveCount(0);
+    await expect(candidates.nth(1).getByRole("button", { name: "已选用" })).toBeVisible();
+  });
+
   test("audio failures stay explicit and ERROR tracks can still enter the recycle bin", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "chromium-desktop", "desktop audio failure contract");
     const api = await installMockApi(page, true);
@@ -648,6 +684,19 @@ async function installMockApi(page: Page, initiallyAuthenticated: boolean, setup
     }
     if (path === "/api/v1/admin/tracks/track-1/metadata") return json(route, metadata());
     if (path === "/api/v1/admin/tracks/track-1/metadata/revisions") return json(route, pageResult([]));
+    if (path === "/api/v1/admin/tag-scraping/search" && method === "POST") {
+      return json(route, [
+        scrapingCandidate("candidate-1", "First candidate", "First artist", "First album"),
+        scrapingCandidate("candidate-2", "Second candidate", "Second artist", "Second album"),
+      ]);
+    }
+    if (path === "/api/v1/admin/tag-scraping/candidates/details" && method === "POST") {
+      const body = request.postDataJSON() as { candidate: ReturnType<typeof scrapingCandidate> };
+      return json(route, {
+        candidate: body.candidate,
+        lyrics: { content: "[00:01.00]第二候选歌词\n[00:05.00]用于核对弹窗内容", format: "LRC", language: "und" },
+      });
+    }
     if (path === "/api/v1/admin/albums") return json(route, pageResult([]));
     if (path === "/api/v1/admin/albums/duplicates") return json(route, { groupCount: 0, duplicateAlbumCount: 0, groups: [] });
     if (path === "/api/v1/admin/artists") return json(route, pageResult([]));
@@ -772,6 +821,15 @@ function tagValues() {
 
 function metadata() {
   return { trackId: "track-1", raw: tagValues(), overrides: {}, effective: tagValues(), overriddenFields: [], source: { id: "asset-1", rootId: "source-1", relativePath: "mock.flac", status: "READY", checksumSha256: null, mode: "READ_WRITE", canWriteBack: true, writebackBlockReason: null }, version: 1, lastScannedAt: "2026-01-01T00:00:00Z", updatedBy: null, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
+}
+
+function scrapingCandidate(id: string, name: string, artist: string, album: string) {
+  return {
+    id, name, artist, album,
+    artistId: `${id}-artist`, albumId: `${id}-album`, albumImg: "",
+    year: "2026", track: "1/10", disc: "1/1", genre: "Pop", source: "qmusic",
+    titleScore: 0.98, artistScore: 0.97, albumScore: 0.96, score: 0.95,
+  };
 }
 
 function settings() {

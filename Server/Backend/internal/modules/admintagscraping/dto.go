@@ -11,6 +11,15 @@ type SearchInput struct {
 	Sources []Source `json:"sources,omitempty"`
 }
 
+type CandidateDetailsInput struct {
+	Candidate Candidate `json:"candidate"`
+}
+
+type CandidateDetailsDTO struct {
+	Candidate Candidate       `json:"candidate"`
+	Lyrics    *MetadataLyrics `json:"lyrics"`
+}
+
 type ApplyInput struct {
 	ExpectedVersion   int         `json:"expectedVersion"`
 	Candidate         Candidate   `json:"candidate"`

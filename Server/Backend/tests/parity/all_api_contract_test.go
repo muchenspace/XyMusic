@@ -26,7 +26,7 @@ import (
 	"xymusic/server/internal/platform/workerstatus"
 )
 
-const expectedLegacyAPIProbeCount = 135
+const expectedLegacyAPIProbeCount = 136
 
 type fullAPIManifest struct {
 	CountingRules struct {
@@ -93,7 +93,7 @@ func TestLegacyAndGoEveryAPIReadOnlyParity(t *testing.T) {
 	environmentPath := strings.TrimSpace(os.Getenv("XYMUSIC_INTEGRATION_ENV"))
 	legacyBase := strings.TrimRight(strings.TrimSpace(os.Getenv("XYMUSIC_LEGACY_BASE_URL")), "/")
 	if environmentPath == "" || legacyBase == "" {
-		t.Skip("set XYMUSIC_INTEGRATION_ENV and XYMUSIC_LEGACY_BASE_URL to run the 135-endpoint read-only differential contract test")
+		t.Skip("set XYMUSIC_INTEGRATION_ENV and XYMUSIC_LEGACY_BASE_URL to run the 136-endpoint read-only differential contract test")
 	}
 	parsedLegacyBase, err := url.ParseRequestURI(legacyBase)
 	if err != nil || parsedLegacyBase.Scheme == "" || parsedLegacyBase.Host == "" {
@@ -233,7 +233,7 @@ func TestLegacyAndGoEveryAPIReadOnlyParity(t *testing.T) {
 	t.Logf("read-only probe coverage: %d/%d unique endpoints; shared endpoints compared against legacy and Go", len(probed), expectedLegacyAPIProbeCount)
 	if len(differences) != 0 {
 		sort.Strings(differences)
-		t.Fatalf("read-only 135-endpoint differential contract found %d difference(s):\n%s", len(differences), strings.Join(differences, "\n"))
+		t.Fatalf("read-only 136-endpoint differential contract found %d difference(s):\n%s", len(differences), strings.Join(differences, "\n"))
 	}
 }
 
@@ -333,7 +333,8 @@ func isModernOnlyFullAPIEndpoint(endpoint string) bool {
 	switch endpoint {
 	case "POST /api/v1/admin/tracks/batch/restore",
 		"POST /api/v1/admin/tracks/batch/delete-permanently",
-		"GET /api/v1/admin/tracks/batch/delete-permanently/:jobId":
+		"GET /api/v1/admin/tracks/batch/delete-permanently/:jobId",
+		"POST /api/v1/admin/tag-scraping/candidates/details":
 		return true
 	default:
 		return false

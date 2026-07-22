@@ -50,6 +50,54 @@ func TestSmartSearchToleratesFailedSourcesAndRanksCandidates(t *testing.T) {
 	}
 }
 
+func TestCandidateDetailsReturnsCandidateAndClassifiesLyrics(t *testing.T) {
+	lyricFailure := errors.New("lyrics unavailable")
+	candidate := Candidate{
+		ID: "song", Name: "Song", Artist: "Artist", Album: "Album", Source: SourceQMusic,
+	}
+	tests := []struct {
+		name     string
+		content  string
+		lyricErr error
+		want     *MetadataLyrics
+	}{
+		{
+			name: "LRC", content: "[00:01.00]line",
+			want: &MetadataLyrics{Content: "[00:01.00]line", Format: "LRC", Language: "und"},
+		},
+		{
+			name: "plain text", content: "first line\nsecond line",
+			want: &MetadataLyrics{Content: "first line\nsecond line", Format: "PLAIN", Language: "und"},
+		},
+		{name: "empty", content: "  \n\t", want: nil},
+		{name: "upstream error", lyricErr: lyricFailure},
+	}
+	for _, item := range tests {
+		t.Run(item.name, func(t *testing.T) {
+			service, err := NewService(ServiceDependencies{
+				Store: &storeStub{}, Music: &musicStub{lyrics: item.content, lyricErr: item.lyricErr},
+				Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := service.CandidateDetails(context.Background(), candidate)
+			if item.lyricErr != nil {
+				if !errors.Is(err, item.lyricErr) {
+					t.Fatalf("error = %v, want %v", err, item.lyricErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(result.Candidate, candidate) || !reflect.DeepEqual(result.Lyrics, item.want) {
+				t.Fatalf("details = %#v, want candidate=%#v lyrics=%#v", result, candidate, item.want)
+			}
+		})
+	}
+}
+
 func TestFingerprintConfigurationFailsBeforeDatabaseAccess(t *testing.T) {
 	store := &storeStub{}
 	service, _ := NewService(ServiceDependencies{

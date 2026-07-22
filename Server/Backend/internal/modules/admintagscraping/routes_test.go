@@ -18,7 +18,7 @@ import (
 	"xymusic/server/internal/shared/apperror"
 )
 
-func TestRoutesExposeAllFourteenTagScrapingAPIs(t *testing.T) {
+func TestRoutesExposeAllFifteenTagScrapingAPIs(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	scraping := &scrapingAPIStub{}
 	batches := &batchAPIStub{}
@@ -42,6 +42,7 @@ func TestRoutesExposeAllFourteenTagScrapingAPIs(t *testing.T) {
 		idempotent         bool
 	}{
 		{http.MethodPost, "/api/v1/admin/tag-scraping/search", `{"source":"smart","title":"Song","artist":"Artist"}`, http.StatusOK, false},
+		{http.MethodPost, "/api/v1/admin/tag-scraping/candidates/details", `{"candidate":` + candidate + `}`, http.StatusOK, false},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/artists/search", `{"source":"smart","query":"Artist"}`, http.StatusOK, false},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/artists/" + id + "/apply", `{"expectedVersion":1,"candidate":` + artistCandidate + `,"overwrite":false,"reason":"operator apply"}`, http.StatusOK, true},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/artists/batches", `{"items":[{"artistId":"` + id + `","expectedVersion":1}],"options":{"sources":["qmusic"],"overwrite":false,"reason":"batch avatar"}}`, http.StatusAccepted, true},
@@ -76,11 +77,18 @@ func TestRoutesExposeAllFourteenTagScrapingAPIs(t *testing.T) {
 		if item.idempotent && response.Header().Get("X-Idempotent-Replay") != "true" {
 			t.Fatalf("%s replay=%q", item.path, response.Header().Get("X-Idempotent-Replay"))
 		}
+		if item.path == "/api/v1/admin/tag-scraping/candidates/details" {
+			var details CandidateDetailsDTO
+			decodeJSON(t, response.Body.Bytes(), &details)
+			if details.Candidate.ID != "song" || details.Lyrics == nil || details.Lyrics.Format != "LRC" {
+				t.Fatalf("candidate details=%#v", details)
+			}
+		}
 	}
-	if scraping.searchCalls != 1 || scraping.artistSearchCalls != 1 || scraping.fingerprintCalls != 1 ||
+	if scraping.searchCalls != 1 || scraping.candidateDetailsCalls != 1 || scraping.artistSearchCalls != 1 || scraping.fingerprintCalls != 1 ||
 		scraping.applyCalls != 1 || scraping.artistApplyCalls != 1 || scraping.artworkCalls != 1 {
-		t.Fatalf("scraping calls=%d/%d/%d/%d/%d/%d", scraping.searchCalls, scraping.artistSearchCalls,
-			scraping.fingerprintCalls, scraping.applyCalls, scraping.artistApplyCalls, scraping.artworkCalls)
+		t.Fatalf("scraping calls=%d/%d/%d/%d/%d/%d/%d", scraping.searchCalls, scraping.candidateDetailsCalls,
+			scraping.artistSearchCalls, scraping.fingerprintCalls, scraping.applyCalls, scraping.artistApplyCalls, scraping.artworkCalls)
 	}
 	if batches.createCalls != 1 || batches.jobCalls != 1 || batches.cancelCalls != 1 || batches.retryCalls != 1 {
 		t.Fatalf("batch calls=%d/%d/%d/%d", batches.createCalls, batches.jobCalls, batches.cancelCalls, batches.retryCalls)
@@ -103,7 +111,7 @@ func TestRoutesExposeAllFourteenTagScrapingAPIs(t *testing.T) {
 	if !reflect.DeepEqual(idempotency.scopes, expectedScopes) {
 		t.Fatalf("idempotency scopes=%#v", idempotency.scopes)
 	}
-	if identityService.calls != 14 {
+	if identityService.calls != 15 {
 		t.Fatalf("authentication calls=%d", identityService.calls)
 	}
 	if response := scraping.artworkResponse; string(response.Bytes) != "JPEG" {
@@ -128,6 +136,7 @@ func TestRouteContractsRejectMalformedBodiesBeforeAuthentication(t *testing.T) {
 		method, path, body string
 	}{
 		{http.MethodPost, "/api/v1/admin/tag-scraping/search", `{"source":"invalid","title":"Song"}`},
+		{http.MethodPost, "/api/v1/admin/tag-scraping/candidates/details", `{"candidate":{}}`},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/artists/search", `{"source":"kugou","query":"Artist"}`},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/artists/" + id + "/apply", `{"expectedVersion":1,"candidate":{},"overwrite":false,"reason":"ok"}`},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/tracks/not-a-uuid/fingerprint", ""},
@@ -159,6 +168,7 @@ func TestReadOnlyContractProbesReturnLegacyValidationDetailBeforeAuthentication(
 		name, method, path, body string
 	}{
 		{"search", http.MethodPost, "/api/v1/admin/tag-scraping/search", `{}`},
+		{"candidate details", http.MethodPost, "/api/v1/admin/tag-scraping/candidates/details", `{}`},
 		{"artist search", http.MethodPost, "/api/v1/admin/tag-scraping/artists/search", `{}`},
 		{"artist apply", http.MethodPost, "/api/v1/admin/tag-scraping/artists/" + id + "/apply", `{}`},
 		{"apply", http.MethodPost, "/api/v1/admin/tag-scraping/tracks/" + id + "/apply", `{}`},
@@ -184,10 +194,10 @@ func TestReadOnlyContractProbesReturnLegacyValidationDetailBeforeAuthentication(
 			if identityService.calls != 0 || len(idempotency.scopes) != 0 {
 				t.Fatalf("authentication/idempotency calls = %d/%d", identityService.calls, len(idempotency.scopes))
 			}
-			if scraping.searchCalls != 0 || scraping.artistSearchCalls != 0 || scraping.applyCalls != 0 ||
+			if scraping.searchCalls != 0 || scraping.candidateDetailsCalls != 0 || scraping.artistSearchCalls != 0 || scraping.applyCalls != 0 ||
 				scraping.artistApplyCalls != 0 || scraping.artworkCalls != 0 || batches.createCalls != 0 {
-				t.Fatalf("service calls = %d/%d/%d/%d/%d/%d", scraping.searchCalls, scraping.artistSearchCalls,
-					scraping.applyCalls, scraping.artistApplyCalls, scraping.artworkCalls, batches.createCalls)
+				t.Fatalf("service calls = %d/%d/%d/%d/%d/%d/%d", scraping.searchCalls, scraping.candidateDetailsCalls,
+					scraping.artistSearchCalls, scraping.applyCalls, scraping.artistApplyCalls, scraping.artworkCalls, batches.createCalls)
 			}
 		})
 	}
@@ -321,14 +331,22 @@ func TestUnknownJSONFieldsAreStrippedFromIdempotentPayloads(t *testing.T) {
 }
 
 type scrapingAPIStub struct {
-	searchCalls, artistSearchCalls, fingerprintCalls, applyCalls, artistApplyCalls, artworkCalls int
-	artworkResponse                                                                              DownloadedArtwork
-	artworkURL                                                                                   string
+	searchCalls, candidateDetailsCalls, artistSearchCalls, fingerprintCalls int
+	applyCalls, artistApplyCalls, artworkCalls                              int
+	artworkResponse                                                         DownloadedArtwork
+	artworkURL                                                              string
 }
 
 func (stub *scrapingAPIStub) Search(context.Context, SearchInput) ([]Candidate, error) {
 	stub.searchCalls++
 	return []Candidate{}, nil
+}
+func (stub *scrapingAPIStub) CandidateDetails(_ context.Context, candidate Candidate) (CandidateDetailsDTO, error) {
+	stub.candidateDetailsCalls++
+	return CandidateDetailsDTO{
+		Candidate: candidate,
+		Lyrics:    &MetadataLyrics{Content: "[00:01.00]line", Format: "LRC", Language: "und"},
+	}, nil
 }
 func (stub *scrapingAPIStub) SearchArtists(context.Context, ArtistSearchInput) ([]ArtistCandidate, error) {
 	stub.artistSearchCalls++

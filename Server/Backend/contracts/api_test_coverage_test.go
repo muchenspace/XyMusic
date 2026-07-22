@@ -84,7 +84,7 @@ func successfulHTTPTest(api apiContract) (testReference, bool) {
 	case "admin-metadata":
 		return testReference{"internal/modules/adminmetadata/routes_test.go", "TestRoutesExposeElevenMetadataEndpoints"}, true
 	case "admin-tag-scraping":
-		return testReference{"internal/modules/admintagscraping/routes_test.go", "TestRoutesExposeAllFourteenTagScrapingAPIs"}, true
+		return testReference{"internal/modules/admintagscraping/routes_test.go", "TestRoutesExposeAllFifteenTagScrapingAPIs"}, true
 	case "admin-operations":
 		return adminOperationsSuccessTest(api.Path)
 	case "admin-catalog-mutation":
@@ -146,7 +146,7 @@ func idempotencyTest(api apiContract) (testReference, bool) {
 	case "admin-metadata":
 		return testReference{"internal/modules/adminmetadata/routes_test.go", "TestRoutesExposeElevenMetadataEndpoints"}, true
 	case "admin-tag-scraping":
-		return testReference{"internal/modules/admintagscraping/routes_test.go", "TestRoutesExposeAllFourteenTagScrapingAPIs"}, true
+		return testReference{"internal/modules/admintagscraping/routes_test.go", "TestRoutesExposeAllFifteenTagScrapingAPIs"}, true
 	case "admin-operations":
 		switch {
 		case strings.HasPrefix(api.Path, "/api/v1/admin/jobs"):

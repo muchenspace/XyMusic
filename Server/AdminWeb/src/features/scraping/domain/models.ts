@@ -9,6 +9,21 @@ export interface TagCandidate {
   source: TagSource | "acoustid"; titleScore?: number; artistScore?: number; albumScore?: number; score?: number;
 }
 
+export interface TagCandidateLyrics {
+  content: string;
+  format: "PLAIN" | "LRC";
+  language: string;
+}
+
+export interface TagCandidateDetailInput {
+  candidate: TagCandidate;
+}
+
+export interface TagCandidateDetail {
+  candidate: TagCandidate;
+  lyrics: TagCandidateLyrics | null;
+}
+
 export interface ScrapingFields {
   title: boolean; artist: boolean; album: boolean; year: boolean; genre: boolean;
   lyrics: boolean; cover: boolean; overwrite: boolean;

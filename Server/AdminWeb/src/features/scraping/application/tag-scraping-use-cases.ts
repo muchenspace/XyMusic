@@ -5,12 +5,14 @@ import type {
   CreateArtistArtworkBatchInput,
   ApplyTagInput,
   CreateBatchInput,
+  TagCandidateDetailInput,
   TagSearchInput,
 } from "../domain/models";
 
 export class TagScrapingUseCases {
   constructor(private readonly gateway: TagScrapingGateway) {}
   search(input: TagSearchInput, signal?: AbortSignal) { return this.gateway.search(input, signal); }
+  candidateDetail(input: TagCandidateDetailInput, signal?: AbortSignal) { return this.gateway.candidateDetail(input, signal); }
   fingerprint(trackId: string, signal?: AbortSignal) { return this.gateway.fingerprint(trackId, signal); }
   apply(trackId: string, input: ApplyTagInput) { return this.gateway.apply(trackId, input); }
   createBatch(input: CreateBatchInput) { return this.gateway.createBatch(input); }
