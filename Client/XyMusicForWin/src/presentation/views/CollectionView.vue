@@ -56,9 +56,11 @@ defineEmits<{
   <div class="collection-header">
     <button class="icon-button" type="button" title="返回" aria-label="返回" @click="$emit('back')"><ArrowLeft :size="18" /></button>
     <ArtworkImage v-if="artwork" :src="artwork" :alt="`${heading}封面`" :kind="artworkKind" loading="eager" />
-    <div><p class="eyebrow">{{ album ? "专辑" : artist ? "歌手" : playlist ? "歌单" : "音乐集合" }}</p><h1>{{ heading }}</h1><p class="collection-meta">{{ metadata }}</p><p v-if="description" class="collection-description">{{ description }}</p></div>
-    <button v-if="tracks.length" class="primary-button" type="button" :aria-busy="playAllLoading" :disabled="playAllLoading" @click="$emit('playAll')"><LoaderCircle v-if="playAllLoading" class="spin" :size="16" aria-hidden="true" />{{ playAllLoading ? "正在准备…" : "播放全部" }}</button>
-    <button v-if="playlist" class="secondary-button" type="button" @click="$emit('editPlaylist', playlist)">编辑歌单</button>
+    <div class="collection-copy"><p class="eyebrow">{{ album ? "专辑" : artist ? "歌手" : playlist ? "歌单" : "音乐集合" }}</p><h1>{{ heading }}</h1><p class="collection-meta">{{ metadata }}</p><p v-if="description" class="collection-description">{{ description }}</p></div>
+    <div v-if="tracks.length || playlist" class="collection-actions">
+      <button v-if="tracks.length" class="primary-button" type="button" :aria-busy="playAllLoading" :disabled="playAllLoading" @click="$emit('playAll')"><LoaderCircle v-if="playAllLoading" class="spin" :size="16" aria-hidden="true" />{{ playAllLoading ? "正在准备…" : "播放全部" }}</button>
+      <button v-if="playlist" class="secondary-button" type="button" @click="$emit('editPlaylist', playlist)">编辑歌单</button>
+    </div>
   </div>
   <TrackTable :tracks="tracks" :entries="entries" :current-id="currentId" :current-entry-id="currentEntryId" :is-playing="isPlaying" :busy="playlistBusy" :reorder-disabled="reorderDisabled" empty-title="这个集合还没有歌曲" empty-description="稍后添加歌曲或返回音乐库浏览其他内容。" @play="(track, index) => $emit('play', track, index)" @toggle="$emit('toggle')" @favorite="$emit('favorite', $event)" @add="$emit('add', $event)" @remove="$emit('remove', $event)" @remove-selected="$emit('removeSelected', $event)" @move="(id, direction) => $emit('move', id, direction)" @reorder="$emit('reorder', $event)" />
   <PaginationFooter :has-more="hasMore" :loading="loadingMore" :error="hasMore ? error : ''" :page-key="pageKey" @load-more="$emit('loadMore')" />

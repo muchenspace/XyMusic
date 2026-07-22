@@ -3,6 +3,7 @@ import type { Album, Artist, SearchResults, SearchScope, Track } from "../../dom
 import AlbumRow from "../components/AlbumRow.vue";
 import ArtistGrid from "../components/ArtistGrid.vue";
 import TrackTable from "../components/TrackTable.vue";
+import PageHeader from "../components/ui/PageHeader.vue";
 
 defineProps<{
   query: string;
@@ -28,11 +29,7 @@ defineEmits<{
 </script>
 
 <template>
-  <section class="page-intro search-intro">
-    <p class="eyebrow">搜索结果</p>
-    <h1>“{{ query }}”</h1>
-    <p>在歌曲、专辑和歌手中查找匹配内容。</p>
-  </section>
+  <PageHeader class="search-intro" :title="`“${query}”`" description="在歌曲、专辑和歌手中查找匹配内容。" eyebrow="搜索结果" />
   <div v-if="!results" class="empty-state" role="status" aria-live="polite">{{ searching ? "正在搜索…" : "没有可显示的搜索结果" }}</div>
   <template v-else>
     <p v-if="resultsQuery !== query.trim()" class="search-results-status" role="status" aria-live="polite">
