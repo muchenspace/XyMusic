@@ -50,7 +50,7 @@ func TestHealthEndpointsAndResponseHardening(t *testing.T) {
 	assertHeader(t, ready, "X-Content-Type-Options", "nosniff")
 	assertHeader(t, ready, "X-Frame-Options", "DENY")
 	assertHeader(t, ready, "Referrer-Policy", "no-referrer")
-	assertHeader(t, ready, "Cross-Origin-Resource-Policy", "same-site")
+	assertHeader(t, ready, "Cross-Origin-Resource-Policy", "cross-origin")
 	if got := ready.Header().Get("Content-Security-Policy"); !strings.Contains(got, "frame-ancestors 'none'") {
 		t.Fatalf("unexpected Content-Security-Policy: %q", got)
 	}
