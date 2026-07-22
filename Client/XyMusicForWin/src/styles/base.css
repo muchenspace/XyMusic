@@ -16,6 +16,8 @@ body {
   line-height: 1.55;
 }
 
+h1, h2, h3 { font-family: "Segoe UI Variable Display", "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", sans-serif; }
+
 button, input, select, textarea {
   font-family: inherit;
   font-size: 14px;
@@ -24,7 +26,7 @@ button, input, select, textarea {
 }
 button { color: inherit; }
 button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
-button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: not-allowed; opacity: 0.68; }
+button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: not-allowed; opacity: 0.62; }
 
 button:focus-visible,
 a:focus-visible,
@@ -39,8 +41,8 @@ textarea:focus-visible,
 ::selection { color: var(--accent-contrast); background: var(--accent); }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 99px; background: color-mix(in srgb, var(--text-muted) 48%, transparent); background-clip: padding-box; }
-::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--text-secondary) 64%, transparent); background-clip: padding-box; }
+::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 99px; background: color-mix(in srgb, var(--text-muted) 42%, transparent); background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--text-secondary) 58%, transparent); background-clip: padding-box; }
 
 h1, h2, h3, p { overflow-wrap: anywhere; }
 img { max-width: 100%; }
@@ -73,11 +75,11 @@ img { max-width: 100%; }
   letter-spacing: 0;
   transition: transform var(--motion-fast) var(--ease-emphasized), border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
 }
-.primary-button { border: 1px solid color-mix(in srgb, var(--accent-pressed) 80%, var(--line-strong)); color: var(--accent-contrast); background: var(--accent); box-shadow: var(--control-shadow); }
-.primary-button:hover:not(:disabled) { background: var(--accent-hover); transform: translateY(-1px); }
+.primary-button { border: 1px solid color-mix(in srgb, var(--accent-pressed) 82%, var(--line-strong)); color: var(--accent-contrast); background: var(--accent); box-shadow: inset 0 1px rgba(255, 255, 255, 0.16), var(--control-shadow); }
+.primary-button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent-pressed) 88%, var(--line-strong)); background: var(--accent-hover); transform: translateY(-1px); }
 .primary-button:active:not(:disabled) { background: var(--accent-pressed); transform: translateY(0); }
-.secondary-button { border: 1px solid var(--control-border); color: var(--text); background: var(--control-bg); box-shadow: none; }
-.secondary-button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 35%, var(--line-strong)); background: var(--surface-hover); }
+.secondary-button { border: 1px solid var(--control-border); color: var(--text); background: var(--control-bg); box-shadow: 0 1px 1px color-mix(in srgb, var(--text) 5%, transparent); }
+.secondary-button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 42%, var(--line-strong)); background: var(--control-bg-hover); }
 .secondary-button:active:not(:disabled), .danger-button:active:not(:disabled) { transform: scale(0.985); }
 .danger-button { border: 1px solid color-mix(in srgb, var(--danger) 38%, var(--line)); color: var(--danger); background: var(--danger-soft); }
 .danger-button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--danger) 60%, var(--line)); background: color-mix(in srgb, var(--danger) 18%, transparent); }
@@ -95,9 +97,9 @@ img { max-width: 100%; }
   cursor: pointer;
   transition: color var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-emphasized);
 }
-.icon-button { width: 34px; height: 34px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); box-shadow: none; }
+.icon-button { width: 34px; height: 34px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-solid); box-shadow: 0 1px 1px color-mix(in srgb, var(--text) 4%, transparent); }
 .icon-button:hover:not(:disabled), .bare-button:hover:not(:disabled) { color: var(--text); }
-.icon-button:hover:not(:disabled) { border-color: var(--line-strong); background: var(--surface-hover); }
+.icon-button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 30%, var(--line-strong)); background: var(--surface-hover); }
 .icon-button:active:not(:disabled) { transform: scale(0.96); }
 .bare-button:active:not(:disabled) { transform: scale(0.9); }
 .icon-button.small { width: 28px; height: 28px; border-radius: 8px; }
@@ -112,13 +114,15 @@ input:not([type="range"]), select, textarea {
   outline: 0;
   color: var(--text);
   background: var(--control-bg);
-  box-shadow: none;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 3%, transparent);
   transition: border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard);
 }
 input:not([type="range"]), select { min-height: 42px; padding: 0 12px; }
 textarea { min-height: 92px; padding: 10px 12px; resize: vertical; line-height: 1.55; }
-input:not([type="range"]):focus, select:focus, textarea:focus { border-color: var(--accent); background: var(--control-bg-hover); box-shadow: 0 0 0 3px var(--accent-soft); }
+input:not([type="range"]):hover:not(:disabled), select:hover:not(:disabled), textarea:hover:not(:disabled) { border-color: var(--line-strong); }
+input:not([type="range"]):focus, select:focus, textarea:focus { border-color: var(--accent); background: var(--control-bg-hover); box-shadow: 0 0 0 3px var(--accent-soft), inset 0 1px 0 color-mix(in srgb, var(--text) 3%, transparent); }
 input::placeholder, textarea::placeholder { color: var(--text-muted); }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 
 input[type="range"] {
   --range-progress: 0%;
@@ -131,13 +135,13 @@ input[type="range"] {
   cursor: pointer;
 }
 input[type="range"]::-webkit-slider-runnable-track { height: 5px; border-radius: 99px; background: linear-gradient(90deg, var(--accent) 0 var(--range-progress), var(--control-track) var(--range-progress) 100%); }
-input[type="range"]::-webkit-slider-thumb { width: 12px; height: 12px; margin-top: -3.5px; appearance: none; border: 2px solid var(--surface-solid); border-radius: 50%; background: var(--accent); box-shadow: var(--control-shadow); opacity: 1; transition: transform var(--motion-fast) var(--ease-emphasized), box-shadow var(--motion-fast); }
+input[type="range"]::-webkit-slider-thumb { width: 12px; height: 12px; margin-top: -3.5px; appearance: none; border: 2px solid var(--surface-solid); border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-pressed) 44%, transparent), var(--control-shadow); opacity: 1; transition: transform var(--motion-fast) var(--ease-emphasized), box-shadow var(--motion-fast); }
 input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.08); }
 input[type="range"]:focus-visible::-webkit-slider-thumb { transform: scale(1.08); box-shadow: 0 0 0 3px var(--accent-soft), var(--control-shadow); }
 input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.18); }
 input[type="range"]::-moz-range-track { height: 5px; border: 0; border-radius: 99px; background: var(--control-track); }
 input[type="range"]::-moz-range-progress { height: 5px; border-radius: 99px; background: var(--accent); }
-input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border: 2px solid var(--surface-solid); border-radius: 50%; background: var(--accent); box-shadow: var(--control-shadow); transition: transform var(--motion-fast) var(--ease-emphasized), box-shadow var(--motion-fast); }
+input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border: 2px solid var(--surface-solid); border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-pressed) 44%, transparent), var(--control-shadow); transition: transform var(--motion-fast) var(--ease-emphasized), box-shadow var(--motion-fast); }
 input[type="range"]:hover::-moz-range-thumb { transform: scale(1.08); }
 input[type="range"]:focus-visible::-moz-range-thumb { transform: scale(1.08); box-shadow: 0 0 0 3px var(--accent-soft), var(--control-shadow); }
 input[type="range"]:active::-moz-range-thumb { transform: scale(1.18); }
