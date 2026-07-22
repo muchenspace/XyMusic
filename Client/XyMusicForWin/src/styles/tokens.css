@@ -12,9 +12,9 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: auto;
 
-  --titlebar-height: 48px;
-  --player-height: 92px;
-  --sidebar-width: 244px;
+  --titlebar-height: 52px;
+  --player-height: 88px;
+  --sidebar-width: 224px;
 
   --bg: #0d0e10;
   --bg-elevated: #131416;

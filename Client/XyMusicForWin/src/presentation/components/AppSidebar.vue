@@ -20,7 +20,7 @@ const library = [
 
 <template>
   <aside class="sidebar" aria-label="应用侧栏">
-    <div class="brand" aria-label="XY Music">
+    <div class="brand" aria-label="XY Music" data-tauri-drag-region>
       <span class="brand-mark"><img :src="brandMark" alt="" /></span>
       <span>XY Music</span>
     </div>
