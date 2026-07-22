@@ -13,7 +13,7 @@ defineEmits<{ play: [album: Album]; open: [album: Album] }>();
 <template>
   <section v-if="albums.length" class="content-section" :aria-label="title">
     <div class="section-heading">
-      <div><h2>{{ title }}</h2><p>{{ description }}</p></div>
+      <div><h2>{{ title }}</h2><p v-if="description">{{ description }}</p></div>
     </div>
     <div class="album-grid">
       <article v-for="album in albums" :key="album.id" class="album-card">

@@ -29,8 +29,8 @@ function formatTime(seconds: number): string {
 </script>
 
 <template>
-  <section class="content-section random-tracks-section" aria-label="随心听">
-    <div class="section-heading"><div><h2>随机播放</h2><p>从资料库中随机选取的歌曲</p></div></div>
+  <section class="content-section random-tracks-section" aria-label="猜你喜欢">
+    <div class="section-heading"><div><h2>猜你喜欢</h2></div></div>
     <div class="random-track-grid">
       <article v-for="track in tracks" :key="track.id" class="random-track-card" :class="{ current: currentId === track.id }">
         <button type="button" class="random-track-main" :aria-label="currentId === track.id && isPlaying ? `暂停《${track.title}》` : `播放《${track.title}》`" @click="toggleTrack(track)">
