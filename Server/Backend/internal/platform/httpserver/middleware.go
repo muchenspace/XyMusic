@@ -90,7 +90,7 @@ func SecurityHeaders() gin.HandlerFunc {
 		c.Header("Referrer-Policy", "no-referrer")
 		c.Header("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'")
 		c.Header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		c.Header("Cross-Origin-Resource-Policy", "same-site")
+		c.Header("Cross-Origin-Resource-Policy", "cross-origin")
 		c.Next()
 	}
 }
