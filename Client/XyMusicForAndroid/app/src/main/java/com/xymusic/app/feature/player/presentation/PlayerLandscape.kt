@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -24,6 +25,7 @@ import com.xymusic.app.feature.player.domain.model.PlayerQueueItem
 internal fun LandscapeNowPlayingContent(
     item: PlayerQueueItem,
     uiState: PlayerUiState,
+    playbackPosition: State<Float>,
     onSeek: (Long) -> Unit,
     onTogglePlayback: () -> Unit,
     onPrevious: () -> Unit,
@@ -82,6 +84,7 @@ internal fun LandscapeNowPlayingContent(
                 LyricsContent(
                     uiState = uiState,
                     onSeek = onSeek,
+                    playbackPosition = playbackPosition,
                     compact = true,
                     centerActiveLine = true,
                     modifier = Modifier.fillMaxSize(),

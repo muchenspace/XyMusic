@@ -16,10 +16,6 @@ import kotlin.math.abs
 import kotlin.math.roundToLong
 
 @Composable
-internal fun rememberSmoothedPlaybackPosition(player: PlayerState): Float =
-    rememberSmoothedPlaybackPositionState(player).value
-
-@Composable
 internal fun rememberSmoothedPlaybackPositionState(player: PlayerState): State<Float> {
     var previousAnchor by remember(player.currentQueueItemId) {
         mutableLongStateOf(player.positionMs)

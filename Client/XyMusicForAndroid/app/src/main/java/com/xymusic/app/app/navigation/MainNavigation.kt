@@ -1,25 +1,12 @@
 package com.xymusic.app.app.navigation
 
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.consumeWindowInsets
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.ScaffoldDefaults
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.unit.dp
@@ -34,7 +21,6 @@ import com.xymusic.app.app.trackactions.TrackActionsUiEffect
 import com.xymusic.app.app.trackactions.TrackActionsViewModel
 import com.xymusic.app.core.network.ServerEndpoint
 import com.xymusic.app.core.ui.layout.isCompactLandscape
-import com.xymusic.app.core.ui.layout.isWideLandscape
 import com.xymusic.app.feature.player.presentation.PlayerUiEffect
 import com.xymusic.app.feature.player.presentation.PlayerViewModel
 import kotlinx.coroutines.flow.Flow
@@ -53,11 +39,30 @@ fun MainNavigation(
     val navController = rememberNavController()
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
-    val currentDestination = MainDestination.fromRoute(currentRoute)
     val resources = LocalResources.current
     val playerViewModel: PlayerViewModel = hiltViewModel()
     val trackActionsViewModel: TrackActionsViewModel = hiltViewModel()
-    val playerIsFavorite = playerFavoriteState(trackActionsViewModel)
+    val visibleEntries by navController.visibleEntries.collectAsStateWithLifecycle()
+    val playerIsFavoriteFlow =
+        remember(trackActionsViewModel) {
+            trackActionsViewModel.uiState
+                .map { state -> state.playerIsFavorite }
+                .distinctUntilChanged()
+        }
+    val playerIsFavorite by
+        playerIsFavoriteFlow.collectAsStateWithLifecycle(
+            initialValue = trackActionsViewModel.uiState.value.playerIsFavorite,
+        )
+    val hasPlayerItemFlow =
+        remember(playerViewModel) {
+            playerViewModel.uiState
+                .map { state -> state.player.currentItem != null }
+                .distinctUntilChanged()
+        }
+    val hasPlayerItem by
+        hasPlayerItemFlow.collectAsStateWithLifecycle(
+            initialValue = playerViewModel.uiState.value.player.currentItem != null,
+        )
 
     PlayerEffectSnackbar(playerViewModel.effects, snackbarHostState)
     LaunchedEffect(trackActionsViewModel, snackbarHostState, resources) {
@@ -77,94 +82,71 @@ fun MainNavigation(
     }
 
     BoxWithConstraints(modifier = modifier) {
-        val wideLandscape = isWideLandscape(maxWidth, maxHeight)
         val compactLandscape = isCompactLandscape(maxWidth, maxHeight)
-        val useNavigationRail = maxWidth >= 600.dp
-        val showMainChrome = shouldShowMainBottomBar(currentRoute)
-        val showNavigationRail = useNavigationRail && showMainChrome
-        val showBottomNavigation = !useNavigationRail && showMainChrome
-        val edgeToEdgeDetail =
-            currentRoute == PlayerDestination.NowPlaying.route ||
-                currentRoute == PlaylistDestination.Detail.route
-        val contentWindowInsets =
-            when {
-                edgeToEdgeDetail -> WindowInsets(0, 0, 0, 0)
-                showNavigationRail ->
-                    WindowInsets.safeDrawing.only(
-                        WindowInsetsSides.Top + WindowInsetsSides.End + WindowInsetsSides.Bottom,
-                    )
-                wideLandscape -> WindowInsets.safeDrawing
-                else -> ScaffoldDefaults.contentWindowInsets
+        val layoutConfig =
+            MainNavigationLayoutConfig(
+                useNavigationRail = maxWidth >= 600.dp,
+                compactPlayerBar = compactLandscape,
+                hasPlayerItem = hasPlayerItem,
+            )
+        val visibleRoutes =
+            remember(visibleEntries, currentRoute) {
+                visibleEntries
+                    .map { entry -> entry.destination.route }
+                    .ifEmpty { listOf(currentRoute ?: MainDestination.Home.route) }
             }
-        val miniBarModifier =
-            when {
-                showBottomNavigation ->
-                    Modifier.windowInsetsPadding(
-                        WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal),
-                    )
-                showNavigationRail ->
-                    Modifier.windowInsetsPadding(
-                        WindowInsets.navigationBars.only(
-                            WindowInsetsSides.End + WindowInsetsSides.Bottom,
-                        ),
-                    )
-                else -> Modifier.windowInsetsPadding(WindowInsets.navigationBars)
-            }
+        val chromeState =
+            mainNavigationChromeState(
+                config = layoutConfig,
+                currentRoute = currentRoute,
+                visibleRoutes = visibleRoutes,
+            )
         val navigateMain: (MainDestination) -> Unit = { destination ->
             navController.navigateMain(destination.route)
         }
 
-        Row(modifier = Modifier.fillMaxSize()) {
-            if (showNavigationRail) {
+        MainNavigationLayout(
+            config = layoutConfig,
+            chromeState = chromeState,
+            snackbarHostState = snackbarHostState,
+            navigationRail = {
                 MainNavigationRail(
-                    currentDestination = currentDestination,
+                    currentDestination = chromeState.selectedMainDestination,
                     onDestinationSelected = navigateMain,
                 )
-            }
-            Scaffold(
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-                contentWindowInsets = contentWindowInsets,
-                snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-                bottomBar = {
-                    Column {
-                        if (currentRoute != PlayerDestination.NowPlaying.route) {
-                            PlayerMiniBarRoute(
-                                playerViewModel = playerViewModel,
-                                onOpenPlayer = {
-                                    navController.navigate(PlayerDestination.NowPlaying.route) {
-                                        launchSingleTop = true
-                                    }
-                                },
-                                compact = compactLandscape,
-                                modifier = miniBarModifier,
-                            )
-                        }
-                        if (showBottomNavigation) {
-                            GlassNavigationBar(
-                                currentDestination = currentDestination,
-                                onDestinationSelected = navigateMain,
-                            )
-                        }
-                    }
-                },
-            ) { contentPadding ->
-                MainNavHost(
-                    navController = navController,
-                    playerViewModel = playerViewModel,
-                    playerIsFavorite = playerIsFavorite,
-                    onTrackMore = trackActionsViewModel::open,
-                    onTogglePlayerFavorite = trackActionsViewModel::togglePlayerFavorite,
-                    dynamicColorEnabled = dynamicColorEnabled,
-                    onDynamicColorChanged = onDynamicColorChanged,
-                    serverEndpoint = serverEndpoint,
-                    onServerEndpointChanged = onServerEndpointChanged,
-                    modifier =
-                    Modifier
-                        .fillMaxSize()
-                        .padding(contentPadding)
-                        .consumeWindowInsets(contentPadding),
+            },
+            bottomNavigation = {
+                GlassNavigationBar(
+                    currentDestination = chromeState.selectedMainDestination,
+                    onDestinationSelected = navigateMain,
                 )
-            }
+            },
+            miniPlayer = { miniPlayerModifier ->
+                PlayerMiniBarRoute(
+                    playerViewModel = playerViewModel,
+                    onOpenPlayer = {
+                        navController.navigate(PlayerDestination.NowPlaying.route) {
+                            launchSingleTop = true
+                        }
+                    },
+                    compact = layoutConfig.compactPlayerBar,
+                    modifier = miniPlayerModifier,
+                )
+            },
+        ) {
+            MainNavHost(
+                navController = navController,
+                playerViewModel = playerViewModel,
+                playerIsFavorite = playerIsFavorite,
+                onTrackMore = trackActionsViewModel::open,
+                onTogglePlayerFavorite = trackActionsViewModel::togglePlayerFavorite,
+                dynamicColorEnabled = dynamicColorEnabled,
+                onDynamicColorChanged = onDynamicColorChanged,
+                serverEndpoint = serverEndpoint,
+                onServerEndpointChanged = onServerEndpointChanged,
+                layoutConfig = layoutConfig,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
     TrackActionsSheetHost(viewModel = trackActionsViewModel)
@@ -205,10 +187,4 @@ private fun TrackActionsSheetHost(viewModel: TrackActionsViewModel) {
         onDownload = viewModel::downloadSelected,
         onRemoveDownload = viewModel::removeSelectedDownload,
     )
-}
-
-@Composable
-private fun playerFavoriteState(viewModel: TrackActionsViewModel): Boolean {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    return uiState.playerIsFavorite
 }

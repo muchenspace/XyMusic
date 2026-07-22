@@ -72,21 +72,31 @@ object XyMotion {
 
 // Navigation transition specs.
 fun AnimatedContentTransitionScope<*>.slideFadeInto() = slideInVertically(
-    animationSpec = tween(XyMotion.Emphasized, easing = XyMotion.EmphasizedDecel),
+    animationSpec = tween(XyMotion.Standard, easing = XyMotion.EmphasizedDecel),
     initialOffsetY = { it / 12 },
 ) + fadeIn(tween(XyMotion.Standard, easing = XyMotion.EaseOutQuart))
 
 fun AnimatedContentTransitionScope<*>.slideFadeOutOf() = slideOutVertically(
-    animationSpec = tween(XyMotion.Emphasized, easing = XyMotion.EmphasizedEasing),
+    animationSpec = tween(XyMotion.Standard, easing = XyMotion.EmphasizedEasing),
     targetOffsetY = { -it / 12 },
 ) + fadeOut(tween(XyMotion.Standard, easing = XyMotion.EaseOutQuart))
 
-fun AnimatedContentTransitionScope<*>.playerSlideInto() = slideInVertically(
-    animationSpec = tween(XyMotion.Slow, easing = XyMotion.EmphasizedDecel),
-    initialOffsetY = { it },
+fun AnimatedContentTransitionScope<*>.slideFadeBackInto() = slideInVertically(
+    animationSpec = tween(XyMotion.Standard, easing = XyMotion.EmphasizedDecel),
+    initialOffsetY = { -it / 12 },
 ) + fadeIn(tween(XyMotion.Standard, easing = XyMotion.EaseOutQuart))
 
-fun AnimatedContentTransitionScope<*>.playerSlideOutOf() = slideOutVertically(
-    animationSpec = tween(XyMotion.Slow, easing = XyMotion.EmphasizedEasing),
-    targetOffsetY = { it },
+fun AnimatedContentTransitionScope<*>.slideFadeBackOutOf() = slideOutVertically(
+    animationSpec = tween(XyMotion.Standard, easing = XyMotion.EmphasizedEasing),
+    targetOffsetY = { it / 12 },
 ) + fadeOut(tween(XyMotion.Standard, easing = XyMotion.EaseOutQuart))
+
+fun AnimatedContentTransitionScope<*>.playerSlideInto() = slideInVertically(
+    animationSpec = tween(XyMotion.Emphasized, easing = XyMotion.EmphasizedDecel),
+    initialOffsetY = { it },
+) + fadeIn(tween(XyMotion.Emphasized, easing = XyMotion.EaseOutQuart))
+
+fun AnimatedContentTransitionScope<*>.playerSlideOutOf() = slideOutVertically(
+    animationSpec = tween(XyMotion.Emphasized, easing = XyMotion.EmphasizedEasing),
+    targetOffsetY = { it },
+) + fadeOut(tween(XyMotion.Emphasized, easing = XyMotion.EaseOutQuart))

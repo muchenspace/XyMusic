@@ -4,12 +4,9 @@ package com.xymusic.app.feature.player.presentation
 
 import android.app.Activity
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -31,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -83,6 +81,7 @@ fun PlayerScreen(
     var showSpeedDialog by rememberSaveable { mutableStateOf(false) }
     var showSleepTimerDialog by rememberSaveable { mutableStateOf(false) }
     val current = uiState.player.currentItem
+    val playbackPosition = rememberSmoothedPlaybackPositionState(uiState.player)
     var draggedPosition by remember(current?.queueItemId) { mutableStateOf<Float?>(null) }
     val colorScheme = MaterialTheme.colorScheme
     val darkPlayer = colorScheme.background.luminance() < 0.5f
@@ -93,31 +92,29 @@ fun PlayerScreen(
         } else {
             colorScheme.primaryContainer
         }
-    val animatedBase by animateColorAsState(
+    val animatedBase = animateColorAsState(
         targetValue = targetBase,
         animationSpec = tween(XyMotion.Emphasized),
         label = "playerAmbientColor",
     )
-    val backgroundBrush =
-        remember(
-            animatedBase,
-            darkPlayer,
-            colorScheme.surface,
-            colorScheme.background,
-        ) {
-            if (darkPlayer) {
-                Brush.verticalGradient(
-                    0f to lerp(animatedBase, Color.Black, 0.30f),
-                    0.48f to lerp(animatedBase, Color.Black, 0.54f),
-                    1f to lerp(animatedBase, Color.Black, 0.82f),
-                )
-            } else {
-                Brush.verticalGradient(
-                    0f to animatedBase,
-                    0.46f to colorScheme.surface,
-                    1f to colorScheme.background,
-                )
-            }
+    val backgroundModifier =
+        Modifier.drawWithCache {
+            val currentBase = animatedBase.value
+            val backgroundBrush =
+                if (darkPlayer) {
+                    Brush.verticalGradient(
+                        0f to lerp(currentBase, Color.Black, 0.30f),
+                        0.48f to lerp(currentBase, Color.Black, 0.54f),
+                        1f to lerp(currentBase, Color.Black, 0.82f),
+                    )
+                } else {
+                    Brush.verticalGradient(
+                        0f to currentBase,
+                        0.46f to colorScheme.surface,
+                        1f to colorScheme.background,
+                    )
+                }
+            onDrawBehind { drawRect(backgroundBrush) }
         }
 
     val density = LocalDensity.current
@@ -130,10 +127,7 @@ fun PlayerScreen(
         if (isDraggingPlayer) {
             snap()
         } else {
-            spring(
-                dampingRatio = Spring.DampingRatioMediumBouncy,
-                stiffness = Spring.StiffnessMedium,
-            )
+            XyMotion.SnapSpring
         },
         label = "playerDragOffset",
     )
@@ -223,7 +217,7 @@ fun PlayerScreen(
                     } else {
                         Modifier
                     },
-                ).background(backgroundBrush),
+                ).then(backgroundModifier),
         ) {
             if (isLandscape) {
                 if (current == null) {
@@ -249,6 +243,7 @@ fun PlayerScreen(
                                 LandscapeNowPlayingContent(
                                     item = current,
                                     uiState = uiState,
+                                    playbackPosition = playbackPosition,
                                     onSeek = onSeek,
                                     onTogglePlayback = onTogglePlayback,
                                     onPrevious = onPrevious,
@@ -320,6 +315,7 @@ fun PlayerScreen(
                                             LyricsContent(
                                                 uiState = uiState,
                                                 onSeek = onSeek,
+                                                playbackPosition = playbackPosition,
                                                 modifier = Modifier.fillMaxSize(),
                                             )
                                         PlayerContentTab.Queue ->
@@ -339,6 +335,7 @@ fun PlayerScreen(
                                 }
                                 PlaybackControls(
                                     uiState = uiState,
+                                    playbackPosition = playbackPosition,
                                     draggedPosition = draggedPosition,
                                     onPositionChange = { draggedPosition = it },
                                     onPositionChangeFinished = {
