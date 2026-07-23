@@ -246,6 +246,7 @@ private fun PortraitMineContent(
                         PlaylistTile(
                             playlist = playlist,
                             onClick = { onPlaylistClick(playlist.id) },
+                            modifier = Modifier.width(164.dp),
                         )
                     }
                 }
@@ -645,7 +646,11 @@ private fun PlaylistHeader(
 }
 
 @Composable
-private fun PlaylistTile(playlist: PlaylistSummary, onClick: () -> Unit, modifier: Modifier = Modifier.width(164.dp)) {
+private fun PlaylistTile(
+    playlist: PlaylistSummary,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Column(
         modifier =
         modifier

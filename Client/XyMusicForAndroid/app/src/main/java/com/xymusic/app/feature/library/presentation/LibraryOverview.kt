@@ -52,8 +52,8 @@ internal fun LibraryOverview(
     onTabSelected: (LibraryTab) -> Unit,
     onPlaylistClick: (String) -> Unit,
     onCreatePlaylist: () -> Unit,
-    wideLandscape: Boolean = false,
     modifier: Modifier = Modifier,
+    wideLandscape: Boolean = false,
 ) {
     if (wideLandscape) {
         LandscapeLibraryOverview(

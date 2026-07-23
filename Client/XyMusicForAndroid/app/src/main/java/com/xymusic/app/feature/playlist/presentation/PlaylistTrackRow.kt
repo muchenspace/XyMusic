@@ -52,8 +52,8 @@ internal fun PlaylistTrackRow(
     onReorderCancelled: () -> Unit,
     onRemove: () -> Unit,
     onMore: () -> Unit,
-    compact: Boolean = false,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var dragDistance by remember(entry.entryId) { mutableFloatStateOf(0f) }

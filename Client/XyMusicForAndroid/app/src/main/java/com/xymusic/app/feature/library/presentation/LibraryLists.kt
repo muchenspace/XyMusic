@@ -114,8 +114,8 @@ internal fun Playlists(
     refreshFailed: Boolean,
     onRetry: () -> Unit,
     listState: LazyListState,
-    wideLandscape: Boolean = false,
     modifier: Modifier = Modifier,
+    wideLandscape: Boolean = false,
 ) {
     if (playlists.isEmpty()) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
