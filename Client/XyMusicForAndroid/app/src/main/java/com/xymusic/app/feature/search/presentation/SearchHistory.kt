@@ -47,12 +47,12 @@ import com.xymusic.app.feature.search.domain.model.SearchScope
 @Composable
 internal fun SearchIdleContent(
     history: List<SearchHistoryUi>,
-    wideLandscape: Boolean = false,
     onSelect: (SearchHistoryUi) -> Unit,
     onDelete: (SearchHistoryUi) -> Unit,
     onClear: () -> Unit,
     onScopeSelected: (SearchScope) -> Unit,
     modifier: Modifier = Modifier,
+    wideLandscape: Boolean = false,
 ) {
     val categories = searchBrowseCategories(MaterialTheme.colorScheme.primary)
     val categoryColumns = if (wideLandscape) 4 else 2

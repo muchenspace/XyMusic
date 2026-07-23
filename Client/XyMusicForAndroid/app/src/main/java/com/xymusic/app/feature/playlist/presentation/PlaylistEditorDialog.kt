@@ -30,8 +30,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -43,6 +45,7 @@ import com.xymusic.app.core.ui.layout.isCompactLandscape
 import com.xymusic.app.feature.playlist.domain.model.PlaylistVisibility
 import com.xymusic.app.ui.theme.spacing
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 internal fun PlaylistEditorDialog(
     onDismiss: () -> Unit,
@@ -56,10 +59,12 @@ internal fun PlaylistEditorDialog(
     var name by remember(initialName) { mutableStateOf(initialName) }
     var description by remember(initialDescription) { mutableStateOf(initialDescription) }
     var visibility by remember(initialVisibility) { mutableStateOf(initialVisibility) }
-    val configuration = LocalConfiguration.current
-    val screenWidth = configuration.screenWidthDp.dp
-    val screenHeight = configuration.screenHeightDp.dp
-    val compactLandscape = isCompactLandscape(screenWidth, screenHeight)
+    val containerSize = LocalWindowInfo.current.containerSize
+    val density = LocalDensity.current
+    val compactLandscape =
+        with(density) {
+            isCompactLandscape(containerSize.width.toDp(), containerSize.height.toDp())
+        }
     val submit = {
         onSubmit(
             name.trim(),

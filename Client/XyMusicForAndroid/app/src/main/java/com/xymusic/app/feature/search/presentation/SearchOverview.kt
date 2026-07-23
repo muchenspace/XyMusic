@@ -38,7 +38,6 @@ import com.xymusic.app.feature.search.domain.model.SearchScope
 @Composable
 internal fun SearchOverview(
     uiState: SearchUiState,
-    wideLandscape: Boolean = false,
     onRetry: () -> Unit,
     onScopeSelected: (SearchScope) -> Unit,
     onAlbumClick: (String) -> Unit,
@@ -46,6 +45,7 @@ internal fun SearchOverview(
     onTrackPlay: (List<CatalogTrackUi>, CatalogTrackUi) -> Unit,
     onTrackMore: (String) -> Unit,
     modifier: Modifier = Modifier,
+    wideLandscape: Boolean = false,
 ) {
     val overview = uiState.overview
     if (overview == null && uiState.isOverviewRefreshing) {
