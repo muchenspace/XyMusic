@@ -1,6 +1,8 @@
 package com.xymusic.app.feature.search.presentation
 
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -101,6 +103,63 @@ class SearchScreenComposeTest {
     }
 
     @Test
+    fun searchScopeTransitionKeepsTheOutgoingResultsComposed() {
+        val uiState =
+            mutableStateOf(
+                SearchUiState(
+                    input = "First",
+                    activeQuery = "First",
+                    overview =
+                    SearchOverviewUi(
+                        tracks = listOf(track(title = "Overview Track")),
+                        artists = emptyList(),
+                        albums = emptyList(),
+                    ),
+                ),
+            )
+        val scopeTracks = flowOf(PagingData.from(listOf(track(title = "Scoped Track"))))
+        composeRule.setContent {
+            XyMusicTheme(darkTheme = false) {
+                SearchContent(
+                    uiState = uiState.value,
+                    tracks = scopeTracks,
+                    artists = flowOf(PagingData.empty()),
+                    albums = flowOf(PagingData.empty()),
+                    snackbarHostState = remember { SnackbarHostState() },
+                    onQueryChanged = {},
+                    onSubmit = {},
+                    onClearQuery = {},
+                    onScopeSelected = { scope ->
+                        uiState.value = uiState.value.copy(selectedScope = scope)
+                    },
+                    onHistorySelected = {},
+                    onDeleteHistory = {},
+                    onClearHistory = {},
+                    onAlbumClick = {},
+                    onArtistClick = {},
+                    onTrackPlay = { _, _ -> },
+                    onTrackMore = {},
+                )
+            }
+        }
+
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        try {
+            composeRule.onNodeWithTag(SearchTestTags.scope(SearchScope.TRACKS)).performClick()
+            composeRule.mainClock.advanceTimeByFrame()
+            composeRule.mainClock.advanceTimeByFrame()
+            composeRule.waitForIdle()
+
+            composeRule.onNodeWithText("Overview Track").assertExists()
+        } finally {
+            composeRule.mainClock.autoAdvance = true
+            composeRule.waitForIdle()
+        }
+        composeRule.onNodeWithText("Scoped Track").assertIsDisplayed()
+    }
+
+    @Test
     fun secondarySearchBackInvokesCallback() {
         var backed = false
         composeRule.setSearchContent(
@@ -197,9 +256,9 @@ class SearchScreenComposeTest {
         }
     }
 
-    private fun track() = CatalogTrackUi(
+    private fun track(title: String = "First Track") = CatalogTrackUi(
         id = "track-1",
-        title = "First Track",
+        title = title,
         artists = listOf(CatalogArtistLinkUi("artist-1", "First Artist")),
         album = CatalogAlbumLinkUi("album-1", "First Album"),
         artwork = null,
