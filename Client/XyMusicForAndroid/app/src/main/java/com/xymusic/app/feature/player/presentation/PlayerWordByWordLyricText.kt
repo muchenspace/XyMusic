@@ -25,11 +25,13 @@ internal fun WordByWordLyricText(
     highlightEndOffsets: List<Int>,
     playbackPosition: State<Float>,
     lineStartTimeMs: Long,
-    lineEndTimeMs: Long,
+    lineEndTimeMs: Long?,
     modifier: Modifier = Modifier,
     baseColor: Color,
     highlightColor: Color,
     style: TextStyle,
+    highlightProgressOverride: WordByWordHighlightProgress? = null,
+    highlightAlpha: Float = 1f,
 ) {
     val normalizedHighlightEndOffsets =
         remember(text, highlightEndOffsets) {
@@ -58,15 +60,19 @@ internal fun WordByWordLyricText(
                 .clearAndSetSemantics {}
                 .drawWithContent {
                     val progress =
-                        calculateWordByWordHighlightProgress(
-                            playbackPositionMs = playbackPosition.value,
-                            lineStartTimeMs = lineStartTimeMs,
-                            lineEndTimeMs = lineEndTimeMs,
-                            graphemeCount = normalizedHighlightEndOffsets.size,
-                        )
+                        highlightProgressOverride
+                            ?: lineEndTimeMs?.let { endTimeMs ->
+                                calculateWordByWordHighlightProgress(
+                                    playbackPositionMs = playbackPosition.value,
+                                    lineStartTimeMs = lineStartTimeMs,
+                                    lineEndTimeMs = endTimeMs,
+                                    graphemeCount = normalizedHighlightEndOffsets.size,
+                                )
+                            }
+                            ?: WordByWordHighlightProgress(completedCount = 0, currentFraction = 0f)
                     drawCache.drawHighlight(this, progress)
                 },
-            color = highlightColor,
+            color = highlightColor.copy(alpha = highlightAlpha.coerceIn(0f, 1f)),
             style = style,
             onTextLayout = drawCache::updateLayout,
         )

@@ -1,7 +1,9 @@
 package com.xymusic.app.feature.player.presentation
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
@@ -103,10 +105,47 @@ internal fun LyricsContent(
         }
     }
     var autoFollow by rememberSaveable(uiState.player.currentItem?.trackId) { mutableStateOf(true) }
+    var previousWordByWordIndex by remember(uiState.player.currentItem?.trackId) { mutableStateOf<Int?>(null) }
+    var outgoingWordByWordIndex by remember(uiState.player.currentItem?.trackId) { mutableStateOf<Int?>(null) }
+    var observedPositionDiscontinuitySequence by
+        remember(uiState.player.currentItem?.trackId) {
+            mutableStateOf(uiState.player.positionDiscontinuitySequence)
+        }
+    val outgoingWordByWordAlpha = remember(uiState.player.currentItem?.trackId) { Animatable(0f) }
     val lyricLineStyle = lyricLineStyle(compact)
 
     LaunchedEffect(isDragged) {
         if (isDragged) autoFollow = false
+    }
+    LaunchedEffect(wordByWordHighlight?.first, uiState.player.positionDiscontinuitySequence) {
+        val currentWordByWordIndex = wordByWordHighlight?.first
+        val positionDiscontinuous =
+            observedPositionDiscontinuitySequence != uiState.player.positionDiscontinuitySequence
+        val outgoingIndex =
+            outgoingLyricHighlightIndex(
+                previousIndex = previousWordByWordIndex,
+                currentIndex = currentWordByWordIndex,
+                positionDiscontinuous = positionDiscontinuous,
+            )
+        previousWordByWordIndex = currentWordByWordIndex
+        observedPositionDiscontinuitySequence = uiState.player.positionDiscontinuitySequence
+        if (outgoingIndex == null) {
+            outgoingWordByWordIndex = null
+            outgoingWordByWordAlpha.snapTo(0f)
+            return@LaunchedEffect
+        }
+
+        outgoingWordByWordIndex = outgoingIndex
+        outgoingWordByWordAlpha.snapTo(1f)
+        outgoingWordByWordAlpha.animateTo(
+            targetValue = 0f,
+            animationSpec =
+                tween(
+                    durationMillis = LYRIC_OUTGOING_HIGHLIGHT_DURATION_MILLIS,
+                    easing = LinearOutSlowInEasing,
+                ),
+        )
+        if (outgoingWordByWordIndex == outgoingIndex) outgoingWordByWordIndex = null
     }
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         LaunchedEffect(
@@ -171,6 +210,7 @@ internal fun LyricsContent(
                     contentType = { _, _ -> "lyric-line" },
                 ) { index, line ->
                     val wordByWordActive = wordByWordHighlight?.first == index
+                    val wordByWordOutgoing = outgoingWordByWordIndex == index
                     val wordByWordAvailable = line.highlightEndOffsets.isNotEmpty()
                     val active =
                         uiState.synchronizedLyrics &&
@@ -225,14 +265,14 @@ internal fun LyricsContent(
                                 fontWeight = FontWeight.SemiBold,
                                 letterSpacing = 0.sp,
                             ),
-                        )
+                    )
                     val lineStartTimeMs = line.timeMs
                     val lineEndTimeMs = if (wordByWordActive) wordByWordHighlight?.second else null
                     if (
                         uiState.wordByWordLyricsEnabled &&
                         wordByWordAvailable &&
                         lineStartTimeMs != null &&
-                        lineEndTimeMs != null
+                        (lineEndTimeMs != null || wordByWordOutgoing)
                     ) {
                         WordByWordLyricText(
                             text = line.text,
@@ -244,6 +284,16 @@ internal fun LyricsContent(
                             baseColor = lineColor,
                             highlightColor = PlayerPrimaryContent,
                             style = lineTextStyle,
+                            highlightProgressOverride =
+                                if (wordByWordOutgoing) {
+                                    WordByWordHighlightProgress(
+                                        completedCount = line.highlightEndOffsets.size,
+                                        currentFraction = 0f,
+                                    )
+                                } else {
+                                    null
+                                },
+                            highlightAlpha = if (wordByWordOutgoing) outgoingWordByWordAlpha.value else 1f,
                         )
                     } else {
                         Text(
@@ -297,6 +347,15 @@ internal fun lyricFollowScrollMode(
         LyricFollowScrollMode.Snap
     } else {
         LyricFollowScrollMode.Animate
+    }
+
+internal fun outgoingLyricHighlightIndex(
+    previousIndex: Int?,
+    currentIndex: Int?,
+    positionDiscontinuous: Boolean,
+): Int? =
+    previousIndex?.takeIf { previous ->
+        !positionDiscontinuous && currentIndex == previous + 1
     }
 
 private suspend fun LazyListState.followLyricLine(
@@ -405,3 +464,4 @@ private data class LyricLineStyle(val fontSize: TextUnit, val lineHeight: TextUn
 
 private const val LYRIC_HIGHLIGHT_TRANSITION_DURATION_MILLIS = 200
 private const val LYRIC_SCROLL_TRANSITION_DURATION_MILLIS = 200
+private const val LYRIC_OUTGOING_HIGHLIGHT_DURATION_MILLIS = 140
