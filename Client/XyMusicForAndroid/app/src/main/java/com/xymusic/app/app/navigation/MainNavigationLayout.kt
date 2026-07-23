@@ -227,7 +227,7 @@ private fun BoxScope.MainNavigationChrome(
                 .zIndex(chromeZIndex)
                 .graphicsLayer { alpha = motion.miniPlayerAlpha },
         ) {
-            miniPlayer(mainNavigationMiniPlayerModifier(motion.miniPlayerStartPadding))
+            miniPlayer(Modifier.mainNavigationMiniPlayerModifier(motion.miniPlayerStartPadding))
         }
     }
     if (motion.showBottomNavigation) {
@@ -334,8 +334,8 @@ internal fun mainNavigationContentLayout(route: String?): MainNavigationContentL
 }
 
 @Composable
-private fun mainNavigationMiniPlayerModifier(startPadding: Dp): Modifier = Modifier
-    .windowInsetsPadding(
+private fun Modifier.mainNavigationMiniPlayerModifier(startPadding: Dp): Modifier =
+    this.windowInsetsPadding(
         WindowInsets.safeDrawing.only(
             WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom,
         ),

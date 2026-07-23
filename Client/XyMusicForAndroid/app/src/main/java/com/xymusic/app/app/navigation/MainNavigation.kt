@@ -21,6 +21,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.xymusic.app.app.trackactions.TrackActionsSheet
 import com.xymusic.app.app.trackactions.TrackActionsUiEffect
+import com.xymusic.app.app.trackactions.TrackActionsUiState
 import com.xymusic.app.app.trackactions.TrackActionsViewModel
 import com.xymusic.app.core.network.ServerEndpoint
 import com.xymusic.app.core.ui.layout.isCompactLandscape
@@ -52,16 +53,8 @@ fun MainNavigation(
     val playerViewModel: PlayerViewModel = hiltViewModel()
     val trackActionsViewModel: TrackActionsViewModel = hiltViewModel()
     val visibleEntries by navController.visibleEntries.collectAsStateWithLifecycle()
-    val playerIsFavoriteFlow =
-        remember(trackActionsViewModel) {
-            trackActionsViewModel.uiState
-                .map { state -> state.playerIsFavorite }
-                .distinctUntilChanged()
-        }
-    val playerIsFavorite by
-        playerIsFavoriteFlow.collectAsStateWithLifecycle(
-            initialValue = trackActionsViewModel.uiState.value.playerIsFavorite,
-        )
+    val trackActionsUiState by trackActionsViewModel.uiState.collectAsStateWithLifecycle()
+    val playerIsFavorite = trackActionsUiState.playerIsFavorite
     val playerUiState by playerViewModel.uiState.collectAsStateWithLifecycle()
     val playbackPosition = rememberPlaybackPositionState(playerUiState.player)
 
@@ -152,7 +145,10 @@ fun MainNavigation(
             )
         }
     }
-    TrackActionsSheetHost(viewModel = trackActionsViewModel)
+    TrackActionsSheetHost(
+        uiState = trackActionsUiState,
+        viewModel = trackActionsViewModel,
+    )
 }
 
 @Composable
@@ -179,8 +175,10 @@ internal fun NavHostController.navigateMain(route: String, restoreState: Boolean
 }
 
 @Composable
-private fun TrackActionsSheetHost(viewModel: TrackActionsViewModel) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+private fun TrackActionsSheetHost(
+    uiState: TrackActionsUiState,
+    viewModel: TrackActionsViewModel,
+) {
     TrackActionsSheet(
         uiState = uiState,
         onDismiss = viewModel::dismiss,
