@@ -90,13 +90,13 @@ class PlayerLyricsComposeTest {
         val transitionStartDistance = abs(secondLineCenter() - paneCenter)
         assertThat(transitionStartDistance).isGreaterThan(initialDistance * 0.7f)
 
-        composeRule.mainClock.advanceTimeBy(210)
+        composeRule.mainClock.advanceTimeBy(100)
         composeRule.waitForIdle()
         val midwayDistance = abs(secondLineCenter() - paneCenter)
         assertThat(midwayDistance).isLessThan(transitionStartDistance)
         assertThat(midwayDistance).isGreaterThan(2f)
 
-        composeRule.mainClock.advanceTimeBy(300)
+        composeRule.mainClock.advanceTimeBy(180)
         composeRule.mainClock.autoAdvance = true
         composeRule.waitForIdle()
         assertThat(abs(secondLineCenter() - paneCenter)).isLessThan(2f)
