@@ -103,6 +103,20 @@ class PlaylistRefreshOperationsTest {
         assertThat(database.playlistDao().playlist(OWNER_ID, PLAYLIST_ID)?.version).isEqualTo(2)
     }
 
+    @Test
+    fun pageLoadPersistsACompleteDetail() = runTest {
+        val operations =
+            operations(
+                remote = RefreshRemote(detail = detail(version = 2)),
+                dispatcher = UnconfinedTestDispatcher(testScheduler),
+            )
+
+        val result = operations.loadPlaylistPage(PLAYLIST_ID, cursor = null)
+
+        assertThat(result).isInstanceOf(PlaylistResult.Success::class.java)
+        assertThat(database.playlistDao().playlist(OWNER_ID, PLAYLIST_ID)?.version).isEqualTo(2)
+    }
+
     private fun operations(
         remote: PlaylistRemoteDataSource,
         dispatcher: kotlinx.coroutines.CoroutineDispatcher,

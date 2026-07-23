@@ -6,10 +6,12 @@ import com.xymusic.app.core.database.dao.PlaylistDao
 import com.xymusic.app.core.database.entity.PlaylistEntity
 import com.xymusic.app.core.network.ServerGeneration
 import com.xymusic.app.feature.playlist.data.remote.CreatePlaylistRequestDto
+import com.xymusic.app.feature.playlist.data.remote.PlaylistDetailDto
 import com.xymusic.app.feature.playlist.data.remote.PlaylistProtocolException
 import com.xymusic.app.feature.playlist.data.remote.PlaylistRemoteDataSource
 import com.xymusic.app.feature.playlist.domain.PlaylistResult
 import com.xymusic.app.feature.playlist.domain.model.CreatePlaylistCommand
+import com.xymusic.app.feature.playlist.domain.model.PlaylistDetailPage
 import com.xymusic.app.feature.playlist.domain.model.PlaylistSort
 import com.xymusic.app.feature.playlist.domain.model.PlaylistSummary
 import java.util.HashSet
@@ -97,63 +99,12 @@ internal class PlaylistRefreshOperations(
             PlaylistResult.Success(Unit)
         }
 
-    suspend fun loadPlaylistPage(playlistId: String, cursor: String?): PlaylistResult<com.xymusic.app.feature.playlist.domain.model.PlaylistDetailPage> =
+    suspend fun loadPlaylistPage(playlistId: String, cursor: String?): PlaylistResult<PlaylistDetailPage> =
         executionContext.serializePlaylistMutation(playlistId) {
-            val serverGeneration = executionContext.captureServerGeneration()
-            val owner = executionContext.requireOwner()
-            val sessionKey = "$owner:$playlistId"
-            val activeSession =
-                if (cursor == null) {
-                    null
-                } else {
-                    pageSessions[sessionKey]
-                        ?: throw PlaylistProtocolException("Playlist continuation page has no active session")
-                }
-            if (activeSession != null) {
-                if (activeSession.serverGeneration != serverGeneration) {
-                    pageSessions.remove(sessionKey)
-                    throw PlaylistProtocolException("Playlist continuation belongs to a stale server session")
-                }
-                val cachedVersion = playlistDao.playlist(owner, playlistId)?.version
-                if (cachedVersion != null && cachedVersion != activeSession.accumulator.resourceVersion) {
-                    pageSessions.remove(sessionKey)
-                    throw PlaylistProtocolException("Playlist changed while loading continuation pages")
-                }
-            }
-
+            val pageLoad = createPageLoad(playlistId, cursor)
             val page = remote.playlistPage(playlistId, cursor, PLAYLIST_PAGE_LIMIT)
-            if (page.owner.id != owner) {
-                pageSessions.remove(sessionKey)
-                throw PlaylistProtocolException("Playlist belongs to another owner")
-            }
-
-            try {
-                val (accumulator, mergeResult) =
-                    if (cursor == null) {
-                        PlaylistPageAccumulator.start(playlistId, page)
-                    } else {
-                        val current = requireNotNull(activeSession).accumulator
-                        current to current.append(cursor, page)
-                    }
-                val completeDetail = mergeResult.completeDetail
-                if (completeDetail == null) {
-                    localStore.persistPagePreview(owner, mergeResult.page, serverGeneration)
-                    storePageSession(
-                        sessionKey,
-                        PlaylistPageSession(
-                            serverGeneration = serverGeneration,
-                            accumulator = requireNotNull(accumulator),
-                        ),
-                    )
-                } else {
-                    localStore.persistDetail(owner, completeDetail, serverGeneration)
-                    pageSessions.remove(sessionKey)
-                }
-                PlaylistResult.Success(mergeResult.page.toDomainPage(owner))
-            } catch (failure: Exception) {
-                pageSessions.remove(sessionKey)
-                throw failure
-            }
+            validatePageOwner(page, pageLoad)
+            mergeAndPersistPage(playlistId, cursor, page, pageLoad)
         }
 
     suspend fun create(command: CreatePlaylistCommand): PlaylistResult<PlaylistSummary> = executionContext.ioCall {
@@ -175,6 +126,90 @@ internal class PlaylistRefreshOperations(
         PlaylistResult.Success(entity.toDomain())
     }
 
+    private suspend fun createPageLoad(playlistId: String, cursor: String?): PlaylistPageLoad {
+        val serverGeneration = executionContext.captureServerGeneration()
+        val owner = executionContext.requireOwner()
+        val sessionKey = "$owner:$playlistId"
+        val pageLoad =
+            PlaylistPageLoad(
+                owner = owner,
+                serverGeneration = serverGeneration,
+                sessionKey = sessionKey,
+                activeSession = activePageSession(cursor, sessionKey),
+            )
+        validateActivePageSession(pageLoad, playlistId)
+        return pageLoad
+    }
+
+    private fun activePageSession(cursor: String?, sessionKey: String): PlaylistPageSession? {
+        if (cursor == null) return null
+        return pageSessions[sessionKey]
+            ?: throw PlaylistProtocolException("Playlist continuation page has no active session")
+    }
+
+    private suspend fun validateActivePageSession(pageLoad: PlaylistPageLoad, playlistId: String) {
+        val activeSession = pageLoad.activeSession ?: return
+        if (activeSession.serverGeneration != pageLoad.serverGeneration) {
+            pageSessions.remove(pageLoad.sessionKey)
+            throw PlaylistProtocolException("Playlist continuation belongs to a stale server session")
+        }
+        val cachedVersion = playlistDao.playlist(pageLoad.owner, playlistId)?.version
+        if (cachedVersion != null && cachedVersion != activeSession.accumulator.resourceVersion) {
+            pageSessions.remove(pageLoad.sessionKey)
+            throw PlaylistProtocolException("Playlist changed while loading continuation pages")
+        }
+    }
+
+    private fun validatePageOwner(page: PlaylistDetailDto, pageLoad: PlaylistPageLoad) {
+        if (page.owner.id != pageLoad.owner) {
+            pageSessions.remove(pageLoad.sessionKey)
+            throw PlaylistProtocolException("Playlist belongs to another owner")
+        }
+    }
+
+    private suspend fun mergeAndPersistPage(
+        playlistId: String,
+        cursor: String?,
+        page: PlaylistDetailDto,
+        pageLoad: PlaylistPageLoad,
+    ): PlaylistResult<PlaylistDetailPage> {
+        try {
+            val (accumulator, mergeResult) =
+                if (cursor == null) {
+                    PlaylistPageAccumulator.start(playlistId, page)
+                } else {
+                    val current = requireNotNull(pageLoad.activeSession).accumulator
+                    current to current.append(cursor, page)
+                }
+            persistPageLoad(pageLoad, accumulator, mergeResult)
+            return PlaylistResult.Success(mergeResult.page.toDomainPage(pageLoad.owner))
+        } catch (failure: Exception) {
+            pageSessions.remove(pageLoad.sessionKey)
+            throw failure
+        }
+    }
+
+    private suspend fun persistPageLoad(
+        pageLoad: PlaylistPageLoad,
+        accumulator: PlaylistPageAccumulator?,
+        mergeResult: PlaylistPageMergeResult,
+    ) {
+        val completeDetail = mergeResult.completeDetail
+        if (completeDetail == null) {
+            localStore.persistPagePreview(pageLoad.owner, mergeResult.page, pageLoad.serverGeneration)
+            storePageSession(
+                pageLoad.sessionKey,
+                PlaylistPageSession(
+                    serverGeneration = pageLoad.serverGeneration,
+                    accumulator = requireNotNull(accumulator),
+                ),
+            )
+        } else {
+            localStore.persistDetail(pageLoad.owner, completeDetail, pageLoad.serverGeneration)
+            pageSessions.remove(pageLoad.sessionKey)
+        }
+    }
+
     private companion object {
         const val MAX_ACTIVE_PAGE_SESSIONS = 4
         const val PLAYLIST_PAGE_LIMIT = 100
@@ -194,5 +229,12 @@ internal class PlaylistRefreshOperations(
     private data class PlaylistPageSession(
         val serverGeneration: ServerGeneration,
         val accumulator: PlaylistPageAccumulator,
+    )
+
+    private data class PlaylistPageLoad(
+        val owner: String,
+        val serverGeneration: ServerGeneration,
+        val sessionKey: String,
+        val activeSession: PlaylistPageSession?,
     )
 }
