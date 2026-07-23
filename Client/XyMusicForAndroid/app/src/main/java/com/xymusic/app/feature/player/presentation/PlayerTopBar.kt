@@ -34,7 +34,7 @@ import com.xymusic.app.R
 
 @Composable
 internal fun PlayerTopBar(
-    onBack: () -> Unit,
+    onDismiss: () -> Unit,
     playbackSpeed: Float,
     sleepTimerRemainingMs: Long?,
     onShowSpeed: () -> Unit,
@@ -50,7 +50,7 @@ internal fun PlayerTopBar(
             .testTag(PlayerTestTags.TopBar),
     ) {
         IconButton(
-            onClick = onBack,
+            onClick = onDismiss,
             modifier = Modifier.size(44.dp).align(Alignment.CenterStart),
         ) {
             Icon(

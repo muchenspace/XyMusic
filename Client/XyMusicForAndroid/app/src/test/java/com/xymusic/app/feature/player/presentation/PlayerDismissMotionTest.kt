@@ -5,6 +5,36 @@ import org.junit.Test
 
 class PlayerDismissMotionTest {
     @Test
+    fun dragOffsetAccumulatesImmediatelyAndStaysWithinTheDismissBounds() {
+        val afterFirstDelta =
+            updatePlayerDismissOffset(
+                currentOffsetPx = 24f,
+                dragDeltaPx = 56f,
+                maxOffsetPx = 180f,
+            )
+        val afterSecondDelta =
+            updatePlayerDismissOffset(
+                currentOffsetPx = afterFirstDelta,
+                dragDeltaPx = 140f,
+                maxOffsetPx = 180f,
+            )
+
+        assertThat(afterFirstDelta).isEqualTo(80f)
+        assertThat(afterSecondDelta).isEqualTo(180f)
+    }
+
+    @Test
+    fun upwardDragCannotMoveThePlayerAboveItsRestingPosition() {
+        assertThat(
+            updatePlayerDismissOffset(
+                currentOffsetPx = 24f,
+                dragDeltaPx = -56f,
+                maxOffsetPx = 180f,
+            ),
+        ).isEqualTo(0f)
+    }
+
+    @Test
     fun shortSlowReleaseRestoresThePlayer() {
         assertThat(
             resolvePlayerDismissTarget(

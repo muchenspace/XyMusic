@@ -5,6 +5,16 @@ internal enum class PlayerDismissTarget {
     Dismiss,
 }
 
+internal fun updatePlayerDismissOffset(
+    currentOffsetPx: Float,
+    dragDeltaPx: Float,
+    maxOffsetPx: Float,
+): Float {
+    require(maxOffsetPx > 0f)
+
+    return (currentOffsetPx + dragDeltaPx).coerceIn(0f, maxOffsetPx)
+}
+
 internal fun resolvePlayerDismissTarget(
     offsetPx: Float,
     releaseVelocityPxPerSecond: Float,
