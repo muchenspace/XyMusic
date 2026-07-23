@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -125,6 +126,8 @@ fun PlayerScreen(
     val dismissThreshold = with(density) { 180.dp.toPx() }
     val dismissVelocityThreshold = with(density) { 1_000.dp.toPx() }
     val dismissOffset = remember { Animatable(0f) }
+    var dragDismissOffset by remember { mutableFloatStateOf(0f) }
+    var isDraggingToDismiss by remember { mutableStateOf(false) }
     var isDismissing by remember { mutableStateOf(false) }
     val dismissScope = rememberCoroutineScope()
 
@@ -145,7 +148,15 @@ fun PlayerScreen(
         val dismissPlayer: (Float) -> Unit = { releaseVelocity ->
             if (!isDismissing) {
                 isDismissing = true
+                val startingOffset =
+                    if (isDraggingToDismiss) {
+                        dragDismissOffset
+                    } else {
+                        dismissOffset.value
+                    }
                 dismissScope.launch {
+                    dismissOffset.snapTo(startingOffset)
+                    isDraggingToDismiss = false
                     dismissOffset.animateTo(
                         targetValue = dismissTargetOffset,
                         animationSpec = XyMotion.SnapSpring,
@@ -157,12 +168,13 @@ fun PlayerScreen(
         }
         val dismissGestureState =
             rememberDraggableState { dragDelta ->
-                if (!isDismissing) {
-                    dismissScope.launch {
-                        dismissOffset.snapTo(
-                            (dismissOffset.value + dragDelta).coerceIn(0f, dismissTargetOffset),
+                if (!isDismissing && isDraggingToDismiss) {
+                    dragDismissOffset =
+                        updatePlayerDismissOffset(
+                            currentOffsetPx = dragDismissOffset,
+                            dragDeltaPx = dragDelta,
+                            maxOffsetPx = dismissTargetOffset,
                         )
-                    }
                 }
             }
         val dismissGestureModifier =
@@ -172,13 +184,22 @@ fun PlayerScreen(
                 enabled = !isDismissing,
                 startDragImmediately = dismissOffset.isRunning,
                 onDragStarted = {
+                    val currentOffset =
+                        if (isDraggingToDismiss) {
+                            dragDismissOffset
+                        } else {
+                            dismissOffset.value
+                        }
+                    dragDismissOffset = currentOffset.coerceIn(0f, dismissTargetOffset)
+                    isDraggingToDismiss = true
                     dismissScope.launch { dismissOffset.stop() }
                 },
                 onDragStopped = { releaseVelocity ->
                     if (!isDismissing) {
+                        val releaseOffset = dragDismissOffset
                         when (
                             resolvePlayerDismissTarget(
-                                offsetPx = dismissOffset.value,
+                                offsetPx = releaseOffset,
                                 releaseVelocityPxPerSecond = releaseVelocity,
                                 distanceThresholdPx = dismissThreshold,
                                 velocityThresholdPxPerSecond = dismissVelocityThreshold,
@@ -187,6 +208,8 @@ fun PlayerScreen(
                             PlayerDismissTarget.Dismiss -> dismissPlayer(releaseVelocity)
                             PlayerDismissTarget.Restore ->
                                 dismissScope.launch {
+                                    dismissOffset.snapTo(releaseOffset)
+                                    isDraggingToDismiss = false
                                     dismissOffset.animateTo(
                                         targetValue = 0f,
                                         animationSpec = XyMotion.SnapSpring,
@@ -248,7 +271,12 @@ fun PlayerScreen(
             Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    translationY = dismissOffset.value
+                    translationY =
+                        if (isDraggingToDismiss) {
+                            dragDismissOffset
+                        } else {
+                            dismissOffset.value
+                        }
                 }.then(
                     if (!isLandscape &&
                         portraitPagerState.currentPage == PlayerContentTab.Artwork.ordinal
@@ -315,7 +343,7 @@ fun PlayerScreen(
                         .windowInsetsPadding(WindowInsets.systemBars),
                 ) {
                     PlayerTopBar(
-                        onBack = onBack,
+                        onDismiss = { dismissPlayer(0f) },
                         playbackSpeed = uiState.player.playbackSpeed,
                         sleepTimerRemainingMs = uiState.sleepTimerRemainingMs,
                         onShowSpeed = { showSpeedDialog = true },
