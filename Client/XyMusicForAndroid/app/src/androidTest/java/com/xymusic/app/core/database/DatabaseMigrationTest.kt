@@ -239,12 +239,7 @@ class DatabaseMigrationTest {
         )
     }
 
-    private fun assertCount(
-        database: SupportSQLiteDatabase,
-        table: String,
-        predicate: String,
-        expected: Int,
-    ) {
+    private fun assertCount(database: SupportSQLiteDatabase, table: String, predicate: String, expected: Int) {
         database.query("SELECT COUNT(*) FROM $table WHERE $predicate").use { cursor ->
             assertThat(cursor.moveToFirst()).isTrue()
             assertThat(cursor.getInt(0)).isEqualTo(expected)
