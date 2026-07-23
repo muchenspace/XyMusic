@@ -37,12 +37,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
@@ -53,8 +53,8 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xymusic.app.R
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 @Composable
 internal fun LyricsContent(
@@ -103,34 +103,44 @@ internal fun LyricsContent(
         }
     }
     var autoFollow by rememberSaveable(uiState.player.currentItem?.trackId) { mutableStateOf(true) }
-    var hasCenteredActiveLine by remember(uiState.player.currentItem?.trackId) { mutableStateOf(false) }
     val lyricLineStyle = lyricLineStyle(compact)
-    val density = LocalDensity.current
-    val approximateCenterOffset =
-        with(density) {
-            (lyricLineStyle.lineHeight.toPx() / 2f).roundToInt()
-        }
 
     LaunchedEffect(isDragged) {
         if (isDragged) autoFollow = false
     }
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        LaunchedEffect(currentLyricIndex, autoFollow, centerActiveLine, maxHeight) {
-            if (autoFollow && currentLyricIndex >= 0) {
-                if (centerActiveLine) {
-                    if (hasCenteredActiveLine) {
-                        listState.animateScrollToCenteredItem(
-                            index = currentLyricIndex,
-                            approximateCenterOffset = approximateCenterOffset,
-                        )
-                    } else {
-                        hasCenteredActiveLine = true
-                        listState.snapScrollToCenteredItem(currentLyricIndex)
+        LaunchedEffect(
+            autoFollow,
+            uiState.player.currentItem?.trackId,
+            uiState.player.positionDiscontinuitySequence,
+            uiState.lyrics,
+            centerActiveLine,
+            maxHeight,
+        ) {
+            if (!autoFollow) return@LaunchedEffect
+            var previousLyricIndex: Int? = null
+            snapshotFlow { currentLyricIndex }
+                .distinctUntilChanged()
+                .collect { lyricIndex ->
+                    if (lyricIndex < 0) {
+                        previousLyricIndex = null
+                        return@collect
                     }
-                } else {
-                    listState.animateScrollToItem((currentLyricIndex - 2).coerceAtLeast(0))
+                    val targetIndex =
+                        if (centerActiveLine) lyricIndex else (lyricIndex - 2).coerceAtLeast(0)
+                    val scrollMode =
+                        lyricFollowScrollMode(
+                            previousLyricIndex = previousLyricIndex,
+                            lyricIndex = lyricIndex,
+                            targetItemVisible = listState.isItemVisible(targetIndex),
+                        )
+                    listState.followLyricLine(
+                        index = targetIndex,
+                        centerActiveLine = centerActiveLine,
+                        scrollMode = scrollMode,
+                    )
+                    previousLyricIndex = lyricIndex
                 }
-            }
         }
         if (uiState.lyrics.isEmpty()) {
             Text(
@@ -178,12 +188,12 @@ internal fun LyricsContent(
                         }
                     val lineColor by animateColorAsState(
                         targetValue = targetColor,
-                        animationSpec = lyricTransitionSpec(),
+                        animationSpec = lyricHighlightTransitionSpec(),
                         label = "lyricColor",
                     )
                     val lineScale by animateFloatAsState(
                         targetValue = if (active) lyricLineStyle.activeScale else 1f,
-                        animationSpec = lyricTransitionSpec(),
+                        animationSpec = lyricHighlightTransitionSpec(),
                         label = "lyricScale",
                     )
                     val interactionSource = remember { MutableInteractionSource() }
@@ -269,6 +279,47 @@ internal fun LyricsContent(
     }
 }
 
+internal enum class LyricFollowScrollMode {
+    Snap,
+    Animate,
+}
+
+internal fun lyricFollowScrollMode(
+    previousLyricIndex: Int?,
+    lyricIndex: Int,
+    targetItemVisible: Boolean,
+): LyricFollowScrollMode =
+    if (
+        previousLyricIndex == null ||
+            abs(lyricIndex - previousLyricIndex) > 1 ||
+            !targetItemVisible
+    ) {
+        LyricFollowScrollMode.Snap
+    } else {
+        LyricFollowScrollMode.Animate
+    }
+
+private suspend fun LazyListState.followLyricLine(
+    index: Int,
+    centerActiveLine: Boolean,
+    scrollMode: LyricFollowScrollMode,
+) {
+    when (scrollMode) {
+        LyricFollowScrollMode.Snap ->
+            if (centerActiveLine) {
+                snapScrollToCenteredItem(index)
+            } else {
+                scrollToItem(index)
+            }
+        LyricFollowScrollMode.Animate ->
+            if (centerActiveLine) {
+                animateScrollToCenteredItem(index)
+            } else {
+                animateScrollToAlignedItem(index)
+            }
+    }
+}
+
 private suspend fun LazyListState.snapScrollToCenteredItem(index: Int) {
     scrollToItem(index)
     withFrameNanos {}
@@ -278,16 +329,37 @@ private suspend fun LazyListState.snapScrollToCenteredItem(index: Int) {
     if (abs(residual) > 0.5f) scrollBy(residual)
 }
 
-private suspend fun LazyListState.animateScrollToCenteredItem(index: Int, approximateCenterOffset: Int) {
-    val delta = centeredItemDelta(index)
-    if (delta == null) {
-        animateScrollToItem(index = index, scrollOffset = approximateCenterOffset)
-    } else if (abs(delta) > 0.5f) {
+private suspend fun LazyListState.animateScrollToCenteredItem(index: Int) {
+    val delta = centeredItemDelta(index) ?: run {
+        snapScrollToCenteredItem(index)
+        return
+    }
+    if (abs(delta) > 0.5f) {
         animateScrollBy(
             value = delta,
-            animationSpec = lyricTransitionSpec(),
+            animationSpec = lyricScrollTransitionSpec(),
         )
     }
+    correctCenteredItem(index)
+}
+
+private suspend fun LazyListState.animateScrollToAlignedItem(index: Int) {
+    val delta = alignedItemDelta(index) ?: run {
+        scrollToItem(index)
+        return
+    }
+    if (abs(delta) > 0.5f) {
+        animateScrollBy(
+            value = delta,
+            animationSpec = lyricScrollTransitionSpec(),
+        )
+    }
+}
+
+private suspend fun LazyListState.correctCenteredItem(index: Int) {
+    withFrameNanos {}
+    val residual = centeredItemDelta(index) ?: return
+    if (abs(residual) > 0.5f) scrollBy(residual)
 }
 
 private fun LazyListState.centeredItemDelta(index: Int): Float? {
@@ -295,6 +367,14 @@ private fun LazyListState.centeredItemDelta(index: Int): Float? {
     val viewportCenter = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2f
     val itemCenter = item.offset + item.size / 2f
     return itemCenter - viewportCenter
+}
+
+private fun LazyListState.isItemVisible(index: Int): Boolean =
+    layoutInfo.visibleItemsInfo.any { it.index == index }
+
+private fun LazyListState.alignedItemDelta(index: Int): Float? {
+    val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return null
+    return (item.offset - layoutInfo.viewportStartOffset).toFloat()
 }
 
 private fun lyricLineStyle(compact: Boolean): LyricLineStyle = if (compact) {
@@ -311,11 +391,17 @@ private fun lyricLineStyle(compact: Boolean): LyricLineStyle = if (compact) {
     )
 }
 
-private fun <T> lyricTransitionSpec() = tween<T>(
-    durationMillis = LYRIC_TRANSITION_DURATION_MILLIS,
+private fun <T> lyricHighlightTransitionSpec() = tween<T>(
+    durationMillis = LYRIC_HIGHLIGHT_TRANSITION_DURATION_MILLIS,
+    easing = FastOutSlowInEasing,
+)
+
+private fun lyricScrollTransitionSpec() = tween<Float>(
+    durationMillis = LYRIC_SCROLL_TRANSITION_DURATION_MILLIS,
     easing = FastOutSlowInEasing,
 )
 
 private data class LyricLineStyle(val fontSize: TextUnit, val lineHeight: TextUnit, val activeScale: Float)
 
-private const val LYRIC_TRANSITION_DURATION_MILLIS = 420
+private const val LYRIC_HIGHLIGHT_TRANSITION_DURATION_MILLIS = 200
+private const val LYRIC_SCROLL_TRANSITION_DURATION_MILLIS = 200
