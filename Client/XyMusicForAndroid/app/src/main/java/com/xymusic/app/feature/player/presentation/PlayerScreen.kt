@@ -68,8 +68,8 @@ fun PlayerScreen(
     onSleepTimerChange: (Int?) -> Unit,
     onToggleFavorite: () -> Unit,
     onAddToPlaylist: () -> Unit,
-    playbackPosition: State<Float>? = null,
     modifier: Modifier = Modifier,
+    playbackPosition: State<Float>? = null,
     isFavorite: Boolean = false,
 ) {
     val portraitPagerState =
