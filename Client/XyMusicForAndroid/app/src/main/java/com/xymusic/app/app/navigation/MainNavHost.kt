@@ -48,6 +48,7 @@ internal fun MainNavHost(
     serverEndpoint: ServerEndpoint,
     onServerEndpointChanged: (ServerEndpoint) -> Unit,
     layoutConfig: MainNavigationLayoutConfig,
+    chromeInsets: MainNavigationChromeInsets,
     modifier: Modifier = Modifier,
 ) {
     NavHost(
@@ -87,6 +88,7 @@ internal fun MainNavHost(
             MainNavigationRouteLayout(
                 layout = MainNavigationContentLayout.Primary,
                 config = layoutConfig,
+                chromeInsets = chromeInsets,
             ) {
                 HomeScreen(
                     onTrackMore = onTrackMore,
@@ -108,6 +110,7 @@ internal fun MainNavHost(
             MainNavigationRouteLayout(
                 layout = MainNavigationContentLayout.Secondary,
                 config = layoutConfig,
+                chromeInsets = chromeInsets,
             ) {
                 SearchScreen(
                     onTrackMore = onTrackMore,
@@ -135,6 +138,7 @@ internal fun MainNavHost(
             MainNavigationRouteLayout(
                 layout = MainNavigationContentLayout.Secondary,
                 config = layoutConfig,
+                chromeInsets = chromeInsets,
             ) {
                 LibraryScreen(
                     onTrackMore = onTrackMore,
@@ -148,6 +152,7 @@ internal fun MainNavHost(
             MainNavigationRouteLayout(
                 layout = MainNavigationContentLayout.Primary,
                 config = layoutConfig,
+                chromeInsets = chromeInsets,
             ) {
                 MineScreen(
                     onPlaylistClick = { navController.navigate(PlaylistDestination.Detail.createRoute(it)) },
@@ -168,6 +173,7 @@ internal fun MainNavHost(
             MainNavigationRouteLayout(
                 layout = MainNavigationContentLayout.Secondary,
                 config = layoutConfig,
+                chromeInsets = chromeInsets,
             ) {
                 SettingsScreen(
                     dynamicColorEnabled = dynamicColorEnabled,
@@ -182,6 +188,7 @@ internal fun MainNavHost(
             MainNavigationRouteLayout(
                 layout = MainNavigationContentLayout.FullScreen,
                 config = layoutConfig,
+                chromeInsets = chromeInsets,
             ) {
                 PlayerScreenRoute(
                     playerViewModel = playerViewModel,
@@ -201,6 +208,7 @@ internal fun MainNavHost(
             MainNavigationRouteLayout(
                 layout = MainNavigationContentLayout.EdgeToEdge,
                 config = layoutConfig,
+                chromeInsets = chromeInsets,
             ) {
                 PlaylistRoute(
                     onBack = navController::navigateUp,
@@ -219,6 +227,7 @@ internal fun MainNavHost(
             MainNavigationRouteLayout(
                 layout = MainNavigationContentLayout.Secondary,
                 config = layoutConfig,
+                chromeInsets = chromeInsets,
             ) {
                 AlbumDetailRoute(
                     onBack = navController::navigateUp,
@@ -237,6 +246,7 @@ internal fun MainNavHost(
             MainNavigationRouteLayout(
                 layout = MainNavigationContentLayout.Secondary,
                 config = layoutConfig,
+                chromeInsets = chromeInsets,
             ) {
                 ArtistDetailRoute(
                     onBack = navController::navigateUp,
