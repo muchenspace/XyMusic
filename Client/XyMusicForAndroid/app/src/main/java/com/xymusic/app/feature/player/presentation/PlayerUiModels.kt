@@ -28,7 +28,6 @@ data class PlayerUiState(
     val lyricsLanguage: String? = null,
     val synchronizedLyrics: Boolean = false,
     val wordByWordLyricsEnabled: Boolean = true,
-    val currentLyricIndex: Int = -1,
     val sleepTimerRemainingMs: Long? = null,
 )
 

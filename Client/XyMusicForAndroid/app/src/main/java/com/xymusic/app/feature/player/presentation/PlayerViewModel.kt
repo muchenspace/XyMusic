@@ -109,7 +109,6 @@ constructor(
                 lyricsLanguage = lyrics.language,
                 synchronizedLyrics = lyrics.synchronized,
                 wordByWordLyricsEnabled = settings.wordByWordLyricsEnabled,
-                currentLyricIndex = lyrics.currentLineIndex(player.positionMs),
                 sleepTimerRemainingMs = player.sleepTimerRemainingMs,
             )
         }.stateIn(

@@ -109,7 +109,7 @@ class PlayerViewModelTest {
     }
 
     @Test
-    fun positionUpdatesReuseParsedLyricsAndAdvanceCurrentLine() = runTest {
+    fun positionUpdatesReuseParsedLyrics() = runTest {
         val item = queueItem("track-1")
         val player =
             FakePlayerRepository(
@@ -132,7 +132,7 @@ class PlayerViewModelTest {
         advanceUntilIdle()
 
         assertThat(viewModel.uiState.value.lyrics).isSameInstanceAs(parsedLyrics)
-        assertThat(viewModel.uiState.value.currentLyricIndex).isEqualTo(1)
+        assertThat(viewModel.uiState.value.player.positionMs).isEqualTo(15_000)
     }
 
     @Test
