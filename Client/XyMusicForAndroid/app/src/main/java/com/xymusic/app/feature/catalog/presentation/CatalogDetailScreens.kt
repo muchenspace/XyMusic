@@ -3,12 +3,12 @@ package com.xymusic.app.feature.catalog.presentation
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -377,7 +377,7 @@ internal fun AnimatedContentTransitionScope<ArtistDetailTab>.artistDetailTabCont
             animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
             initialOffsetX = { fullWidth -> fullWidth / ARTIST_TAB_SLIDE_OFFSET_DIVISOR * slideDirection },
         ) + fadeIn(tween(XyMotion.Quick, easing = XyMotion.NavigationEasing))
-    ).togetherWith(
+        ).togetherWith(
         slideOutHorizontally(
             animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
             targetOffsetX = { fullWidth -> -(fullWidth / ARTIST_TAB_SLIDE_OFFSET_DIVISOR) * slideDirection },

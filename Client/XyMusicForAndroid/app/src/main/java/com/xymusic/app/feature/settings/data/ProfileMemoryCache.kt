@@ -26,12 +26,11 @@ constructor(private val serverRuntimeCoordinator: ServerRuntimeCoordinator) {
             }?.profile
     }
 
-    fun current(ownerUserId: String): UserProfile? =
-        cachedProfile.value
-            ?.takeIf { entry ->
-                entry.ownerUserId == ownerUserId &&
-                    serverRuntimeCoordinator.isCurrent(entry.serverGeneration)
-            }?.profile
+    fun current(ownerUserId: String): UserProfile? = cachedProfile.value
+        ?.takeIf { entry ->
+            entry.ownerUserId == ownerUserId &&
+                serverRuntimeCoordinator.isCurrent(entry.serverGeneration)
+        }?.profile
 
     fun put(ownerUserId: String, serverGeneration: ServerGeneration, profile: UserProfile) {
         serverRuntimeCoordinator.requireCurrent(serverGeneration)

@@ -321,17 +321,16 @@ private fun NarrowSettingsContent(
     }
 }
 
-private fun settingsPageTransition(forward: Boolean) =
-    (
-        slideInHorizontally(
-            animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
-            initialOffsetX = { width -> if (forward) width / 12 else -width / 12 },
-        ) + fadeIn(tween(XyMotion.Quick, easing = XyMotion.NavigationEasing))
+private fun settingsPageTransition(forward: Boolean) = (
+    slideInHorizontally(
+        animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
+        initialOffsetX = { width -> if (forward) width / 12 else -width / 12 },
+    ) + fadeIn(tween(XyMotion.Quick, easing = XyMotion.NavigationEasing))
     ) togetherWith (
-        slideOutHorizontally(
-            animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
-            targetOffsetX = { width -> if (forward) -width / 16 else width / 16 },
-        ) + fadeOut(tween(XyMotion.Quick, easing = XyMotion.NavigationEasing))
+    slideOutHorizontally(
+        animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
+        targetOffsetX = { width -> if (forward) -width / 16 else width / 16 },
+    ) + fadeOut(tween(XyMotion.Quick, easing = XyMotion.NavigationEasing))
     )
 
 @Composable

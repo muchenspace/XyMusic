@@ -79,11 +79,7 @@ class PlaylistPageAccumulatorTest {
         }
     }
 
-    private fun page(
-        trackCount: Int,
-        entries: List<PlaylistEntryDto>,
-        nextCursor: String?,
-    ) = PlaylistDetailDto(
+    private fun page(trackCount: Int, entries: List<PlaylistEntryDto>, nextCursor: String?) = PlaylistDetailDto(
         id = PLAYLIST_ID,
         owner = USER,
         name = "Long playlist",

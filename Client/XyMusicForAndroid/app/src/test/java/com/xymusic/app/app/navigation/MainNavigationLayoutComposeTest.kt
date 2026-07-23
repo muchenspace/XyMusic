@@ -489,10 +489,7 @@ class MainNavigationLayoutComposeTest {
         assertTargetSize(fixture, target, initialHostBounds)
     }
 
-    private fun assertShellFrame(
-        initialHostBounds: Rect,
-        expectedChrome: ChromeExpectation,
-    ) {
+    private fun assertShellFrame(initialHostBounds: Rect, expectedChrome: ChromeExpectation) {
         assertThat(navigationHostBounds()).isEqualTo(initialHostBounds)
         assertChrome(expectedChrome)
     }
@@ -527,7 +524,8 @@ class MainNavigationLayoutComposeTest {
     private fun navigationHostBounds(): Rect =
         composeRule.onNodeWithTag(NAVIGATION_HOST_TAG).fetchSemanticsNode().boundsInRoot
 
-    private fun miniPlayerTop(): Float = composeRule.onNodeWithTag(MINI_PLAYER_TAG).fetchSemanticsNode().boundsInRoot.top
+    private fun miniPlayerTop(): Float =
+        composeRule.onNodeWithTag(MINI_PLAYER_TAG).fetchSemanticsNode().boundsInRoot.top
 }
 
 @Composable

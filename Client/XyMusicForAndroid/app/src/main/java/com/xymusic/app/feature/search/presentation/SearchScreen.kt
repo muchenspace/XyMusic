@@ -3,12 +3,12 @@ package com.xymusic.app.feature.search.presentation
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -98,17 +98,16 @@ private enum class SearchResultMode {
     Albums,
 }
 
-private fun SearchUiState.toResultMode(): SearchResultMode =
-    if (isIdle) {
-        SearchResultMode.Idle
-    } else {
-        when (selectedScope) {
-            SearchScope.ALL -> SearchResultMode.All
-            SearchScope.TRACKS -> SearchResultMode.Tracks
-            SearchScope.ARTISTS -> SearchResultMode.Artists
-            SearchScope.ALBUMS -> SearchResultMode.Albums
-        }
+private fun SearchUiState.toResultMode(): SearchResultMode = if (isIdle) {
+    SearchResultMode.Idle
+} else {
+    when (selectedScope) {
+        SearchScope.ALL -> SearchResultMode.All
+        SearchScope.TRACKS -> SearchResultMode.Tracks
+        SearchScope.ARTISTS -> SearchResultMode.Artists
+        SearchScope.ALBUMS -> SearchResultMode.Albums
     }
+}
 
 private fun AnimatedContentTransitionScope<SearchResultMode>.searchResultTransition(): ContentTransform {
     if (initialState == SearchResultMode.Idle || targetState == SearchResultMode.Idle) {
@@ -122,7 +121,7 @@ private fun AnimatedContentTransitionScope<SearchResultMode>.searchResultTransit
             animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
             initialOffsetX = { fullWidth -> fullWidth / SEARCH_SCOPE_SLIDE_OFFSET_DIVISOR * slideDirection },
         ) + fadeIn(tween(XyMotion.Quick, easing = XyMotion.NavigationEasing))
-    ).togetherWith(
+        ).togetherWith(
         slideOutHorizontally(
             animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
             targetOffsetX = { fullWidth -> -(fullWidth / SEARCH_SCOPE_SLIDE_OFFSET_DIVISOR) * slideDirection },

@@ -244,10 +244,7 @@ private fun BoxScope.MainNavigationChrome(
 }
 
 @Composable
-private fun BoxScope.MainNavigationSnackbar(
-    snackbarHostState: SnackbarHostState,
-    insets: MainNavigationChromeInsets,
-) {
+private fun BoxScope.MainNavigationSnackbar(snackbarHostState: SnackbarHostState, insets: MainNavigationChromeInsets) {
     SnackbarHost(
         hostState = snackbarHostState,
         modifier =
@@ -334,22 +331,20 @@ internal fun mainNavigationContentLayout(route: String?): MainNavigationContentL
 }
 
 @Composable
-private fun Modifier.mainNavigationMiniPlayerModifier(startPadding: Dp): Modifier =
-    this.windowInsetsPadding(
-        WindowInsets.safeDrawing.only(
-            WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom,
-        ),
-    ).padding(start = startPadding)
+private fun Modifier.mainNavigationMiniPlayerModifier(startPadding: Dp): Modifier = this.windowInsetsPadding(
+    WindowInsets.safeDrawing.only(
+        WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom,
+    ),
+).padding(start = startPadding)
 
 private fun chromeTransitionDuration(
     initialState: MainNavigationChromeState,
     targetState: MainNavigationChromeState,
-): Int =
-    when {
-        targetState.isPlayerDestination -> XyMotion.Emphasized
-        initialState.isPlayerDestination -> XyMotion.Slow
-        else -> XyMotion.Standard
-    }
+): Int = when {
+    targetState.isPlayerDestination -> XyMotion.Emphasized
+    initialState.isPlayerDestination -> XyMotion.Slow
+    else -> XyMotion.Standard
+}
 
 private fun chromeZIndex(playerEntryStillVisible: Boolean, chromeIsExitingForPlayer: Boolean): Float =
     if (playerEntryStillVisible && !chromeIsExitingForPlayer) {
@@ -358,9 +353,8 @@ private fun chromeZIndex(playerEntryStillVisible: Boolean, chromeIsExitingForPla
         INTERACTIVE_CHROME_Z_INDEX
     }
 
-private fun MainNavigationChromeState.primaryNavigationBottomPadding(
-    config: MainNavigationLayoutConfig,
-): Dp = if (!config.useNavigationRail && showMainNavigation) MainNavigationBarHeight else 0.dp
+private fun MainNavigationChromeState.primaryNavigationBottomPadding(config: MainNavigationLayoutConfig): Dp =
+    if (!config.useNavigationRail && showMainNavigation) MainNavigationBarHeight else 0.dp
 
 private fun MainNavigationChromeState.primaryStartPadding(config: MainNavigationLayoutConfig): Dp =
     if (config.useNavigationRail && showMainNavigation) MainNavigationRailWidth else 0.dp

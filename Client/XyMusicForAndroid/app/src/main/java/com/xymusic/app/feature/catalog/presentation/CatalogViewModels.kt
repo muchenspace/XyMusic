@@ -29,9 +29,7 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class CatalogViewModel
 @Inject
-constructor(
-    private val useCases: CatalogUseCases,
-) : ViewModel() {
+constructor(private val useCases: CatalogUseCases) : ViewModel() {
     private val mutableRandomUiState = MutableStateFlow(CatalogRandomUiState())
     private var randomAlbumsJob: Job? = null
     private var randomTracksJob: Job? = null

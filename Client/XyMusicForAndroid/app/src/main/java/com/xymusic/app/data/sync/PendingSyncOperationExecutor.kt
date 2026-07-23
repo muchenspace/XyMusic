@@ -82,7 +82,8 @@ constructor(
             SyncOperationType.DELETE_PLAYLIST,
             SyncOperationType.ADD_PLAYLIST_ENTRY,
             SyncOperationType.REMOVE_PLAYLIST_ENTRY,
-            SyncOperationType.REORDER_PLAYLIST_ENTRIES -> PendingExecutionOutcome.Success
+            SyncOperationType.REORDER_PLAYLIST_ENTRIES,
+            -> PendingExecutionOutcome.Success
         }
     }
 

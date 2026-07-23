@@ -56,9 +56,9 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xymusic.app.R
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.collectLatest
 import kotlin.math.abs
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 @Composable
 internal fun LyricsContent(
@@ -142,10 +142,10 @@ internal fun LyricsContent(
         outgoingWordByWordAlpha.animateTo(
             targetValue = 0f,
             animationSpec =
-                tween(
-                    durationMillis = LYRIC_OUTGOING_HIGHLIGHT_DURATION_MILLIS,
-                    easing = LinearOutSlowInEasing,
-                ),
+            tween(
+                durationMillis = LYRIC_OUTGOING_HIGHLIGHT_DURATION_MILLIS,
+                easing = LinearOutSlowInEasing,
+            ),
         )
         if (outgoingWordByWordIndex == outgoingIndex) outgoingWordByWordIndex = null
     }
@@ -266,7 +266,7 @@ internal fun LyricsContent(
                                 fontWeight = FontWeight.SemiBold,
                                 letterSpacing = 0.sp,
                             ),
-                    )
+                        )
                     val lineStartTimeMs = line.timeMs
                     val lineEndTimeMs = if (wordByWordActive) wordByWordHighlight?.second else null
                     if (
@@ -286,14 +286,14 @@ internal fun LyricsContent(
                             highlightColor = PlayerPrimaryContent,
                             style = lineTextStyle,
                             highlightProgressOverride =
-                                if (wordByWordOutgoing) {
-                                    WordByWordHighlightProgress(
-                                        completedCount = line.highlightEndOffsets.size,
-                                        currentFraction = 0f,
-                                    )
-                                } else {
-                                    null
-                                },
+                            if (wordByWordOutgoing) {
+                                WordByWordHighlightProgress(
+                                    completedCount = line.highlightEndOffsets.size,
+                                    currentFraction = 0f,
+                                )
+                            } else {
+                                null
+                            },
                             highlightAlpha = if (wordByWordOutgoing) outgoingWordByWordAlpha.value else 1f,
                         )
                     } else {
@@ -335,27 +335,22 @@ internal enum class LyricFollowScrollMode {
     Animate,
 }
 
-internal fun lyricFollowScrollMode(
-    previousLyricIndex: Int?,
-    lyricIndex: Int,
-): LyricFollowScrollMode =
-    if (
-        previousLyricIndex == null ||
-            abs(lyricIndex - previousLyricIndex) > 1
-    ) {
-        LyricFollowScrollMode.Snap
-    } else {
-        LyricFollowScrollMode.Animate
-    }
+internal fun lyricFollowScrollMode(previousLyricIndex: Int?, lyricIndex: Int): LyricFollowScrollMode = if (
+    previousLyricIndex == null ||
+    abs(lyricIndex - previousLyricIndex) > 1
+) {
+    LyricFollowScrollMode.Snap
+} else {
+    LyricFollowScrollMode.Animate
+}
 
 internal fun outgoingLyricHighlightIndex(
     previousIndex: Int?,
     currentIndex: Int?,
     positionDiscontinuous: Boolean,
-): Int? =
-    previousIndex?.takeIf { previous ->
-        !positionDiscontinuous && currentIndex == previous + 1
-    }
+): Int? = previousIndex?.takeIf { previous ->
+    !positionDiscontinuous && currentIndex == previous + 1
+}
 
 private suspend fun LazyListState.followLyricLine(
     index: Int,

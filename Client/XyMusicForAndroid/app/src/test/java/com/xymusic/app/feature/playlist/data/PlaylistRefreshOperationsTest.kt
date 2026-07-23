@@ -242,10 +242,8 @@ class PlaylistRefreshOperationsTest {
 
         override suspend fun playlist(playlistId: String): PlaylistDetailDto = requireNotNull(detail)
 
-        override suspend fun create(
-            idempotencyKey: String,
-            request: CreatePlaylistRequestDto,
-        ): PlaylistSummaryDto = error("unused")
+        override suspend fun create(idempotencyKey: String, request: CreatePlaylistRequestDto): PlaylistSummaryDto =
+            error("unused")
 
         override suspend fun update(
             playlistId: String,
@@ -253,11 +251,7 @@ class PlaylistRefreshOperationsTest {
             payload: PlaylistUpdatePayload,
         ): PlaylistSummaryDto = error("unused")
 
-        override suspend fun delete(
-            playlistId: String,
-            expectedVersion: Long,
-            idempotencyKey: String,
-        ) = error("unused")
+        override suspend fun delete(playlistId: String, expectedVersion: Long, idempotencyKey: String) = error("unused")
 
         override suspend fun addTrack(
             playlistId: String,
