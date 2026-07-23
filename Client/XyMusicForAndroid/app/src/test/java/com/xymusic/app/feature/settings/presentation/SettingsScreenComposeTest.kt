@@ -97,7 +97,7 @@ class SettingsScreenComposeTest {
         composeRule.onNodeWithTag(SettingsTestTags.Root).assertExists()
         composeRule.onNodeWithText(context.getString(R.string.settings_theme)).assertExists()
 
-        composeRule.mainClock.advanceTimeBy(XyMotion.Quick + SettingsTransitionSettleMillis)
+        composeRule.mainClock.advanceTimeBy(XyMotion.Quick + SETTINGS_TRANSITION_SETTLE_MILLIS)
         composeRule.mainClock.autoAdvance = true
         composeRule.waitForIdle()
 
@@ -317,7 +317,7 @@ private class FakeProfileRepository(initialProfile: UserProfile) : ProfileReposi
     override suspend fun logoutAllSessions(): SettingsResult<Unit> = SettingsResult.Success(Unit)
 }
 
-private const val SettingsTransitionSettleMillis = 100L
+private const val SETTINGS_TRANSITION_SETTLE_MILLIS = 100L
 
 private class InMemoryAppSettingsRepository(initialSettings: AppSettings = AppSettings()) : AppSettingsRepository {
     private val settingsFlow = MutableStateFlow(initialSettings)
