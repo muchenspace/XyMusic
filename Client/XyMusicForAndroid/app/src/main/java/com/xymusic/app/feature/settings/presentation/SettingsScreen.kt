@@ -4,6 +4,13 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -51,6 +58,7 @@ import com.xymusic.app.core.ui.layout.isCompactLandscape
 import com.xymusic.app.core.ui.layout.isWideLandscape
 import com.xymusic.app.feature.server.presentation.ServerEndpointDialog
 import com.xymusic.app.feature.settings.domain.model.UserProfile
+import com.xymusic.app.ui.theme.XyMotion
 
 private data class SettingsDialogState(
     val editProfile: Boolean,
@@ -257,14 +265,10 @@ fun SettingsScreen(
                         compact = compactLandscape,
                         modifier = Modifier.weight(1f),
                     )
-                } else if (activePage == null) {
-                    SettingsRootContent(
-                        onPageSelected = { selectedPage = it },
-                        modifier = Modifier.weight(1f),
-                    )
                 } else {
-                    SettingsPageContent(
-                        page = activePage,
+                    NarrowSettingsContent(
+                        selectedPage = selectedPage,
+                        onPageSelected = { selectedPage = it },
                         uiState = uiState,
                         dynamicColorEnabled = dynamicColorEnabled,
                         onDynamicColorChanged = onDynamicColorChanged,
@@ -278,6 +282,57 @@ fun SettingsScreen(
         }
     }
 }
+
+@Composable
+private fun NarrowSettingsContent(
+    selectedPage: SettingsPage?,
+    onPageSelected: (SettingsPage) -> Unit,
+    uiState: SettingsUiState,
+    dynamicColorEnabled: Boolean,
+    onDynamicColorChanged: (Boolean) -> Unit,
+    serverEndpoint: ServerEndpoint,
+    viewModel: SettingsViewModel,
+    actions: SettingsActions,
+    modifier: Modifier = Modifier,
+) {
+    AnimatedContent(
+        targetState = selectedPage,
+        modifier = modifier,
+        transitionSpec = {
+            settingsPageTransition(forward = targetState != null)
+        },
+        label = "settings_page",
+    ) { page ->
+        if (page == null) {
+            SettingsRootContent(
+                onPageSelected = onPageSelected,
+            )
+        } else {
+            SettingsPageContent(
+                page = page,
+                uiState = uiState,
+                dynamicColorEnabled = dynamicColorEnabled,
+                onDynamicColorChanged = onDynamicColorChanged,
+                serverEndpoint = serverEndpoint,
+                viewModel = viewModel,
+                actions = actions,
+            )
+        }
+    }
+}
+
+private fun settingsPageTransition(forward: Boolean) =
+    (
+        slideInHorizontally(
+            animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
+            initialOffsetX = { width -> if (forward) width / 12 else -width / 12 },
+        ) + fadeIn(tween(XyMotion.Quick, easing = XyMotion.NavigationEasing))
+    ) togetherWith (
+        slideOutHorizontally(
+            animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
+            targetOffsetX = { width -> if (forward) -width / 16 else width / 16 },
+        ) + fadeOut(tween(XyMotion.Quick, easing = XyMotion.NavigationEasing))
+    )
 
 @Composable
 private fun SettingsLandscapeContent(

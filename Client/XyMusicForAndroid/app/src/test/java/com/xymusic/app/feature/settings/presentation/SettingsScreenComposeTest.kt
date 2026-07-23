@@ -36,6 +36,7 @@ import com.xymusic.app.feature.settings.domain.model.UserProfile
 import com.xymusic.app.feature.settings.domain.model.UserRole
 import com.xymusic.app.feature.settings.domain.model.UserStatus
 import com.xymusic.app.testing.ComposeTestApplication
+import com.xymusic.app.ui.theme.XyMotion
 import com.xymusic.app.ui.theme.XyMusicTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -79,6 +80,29 @@ class SettingsScreenComposeTest {
         assertThat(backCount).isEqualTo(1)
         assertThat(dynamicColorValue).isTrue()
         composeRule.onNodeWithTag(SettingsTestTags.Root).assertIsDisplayed()
+    }
+
+    @Test
+    fun narrowPageSelectionRetainsRootUntilTransitionCompletes() {
+        composeRule.setSettingsContent()
+
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNodeWithText(context.getString(R.string.settings_appearance)).performClick()
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag(SettingsTestTags.Root).assertExists()
+        composeRule.onNodeWithText(context.getString(R.string.settings_theme)).assertExists()
+
+        composeRule.mainClock.advanceTimeBy(XyMotion.Quick + SettingsTransitionSettleMillis)
+        composeRule.mainClock.autoAdvance = true
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag(SettingsTestTags.Root).assertDoesNotExist()
+        composeRule.onNodeWithText(context.getString(R.string.settings_theme)).assertIsDisplayed()
     }
 
     @Test
@@ -292,6 +316,8 @@ private class FakeProfileRepository(initialProfile: UserProfile) : ProfileReposi
 
     override suspend fun logoutAllSessions(): SettingsResult<Unit> = SettingsResult.Success(Unit)
 }
+
+private const val SettingsTransitionSettleMillis = 100L
 
 private class InMemoryAppSettingsRepository(initialSettings: AppSettings = AppSettings()) : AppSettingsRepository {
     private val settingsFlow = MutableStateFlow(initialSettings)
