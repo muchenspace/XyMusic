@@ -83,7 +83,7 @@ class Media3PlayerRepositoryTest {
     }
 
     @Test
-    fun positionDiscontinuitySequenceChangesForExplicitAndImplicitDiscontinuities() {
+    fun positionDiscontinuitySequenceChangesOnlyForTimelineDiscontinuities() {
         val previous =
             PlayerState(
                 currentQueueItemId = "queue-1",
@@ -95,7 +95,6 @@ class Media3PlayerRepositoryTest {
             nextPositionDiscontinuitySequence(
                 previous = previous,
                 currentQueueItemId = "queue-1",
-                isPlaying = true,
                 explicitDiscontinuity = false,
             ),
         ).isEqualTo(3)
@@ -103,7 +102,6 @@ class Media3PlayerRepositoryTest {
             nextPositionDiscontinuitySequence(
                 previous = previous,
                 currentQueueItemId = "queue-1",
-                isPlaying = true,
                 explicitDiscontinuity = true,
             ),
         ).isEqualTo(4)
@@ -111,7 +109,6 @@ class Media3PlayerRepositoryTest {
             nextPositionDiscontinuitySequence(
                 previous = previous,
                 currentQueueItemId = "queue-2",
-                isPlaying = true,
                 explicitDiscontinuity = false,
             ),
         ).isEqualTo(4)
@@ -119,10 +116,9 @@ class Media3PlayerRepositoryTest {
             nextPositionDiscontinuitySequence(
                 previous = previous,
                 currentQueueItemId = "queue-1",
-                isPlaying = false,
                 explicitDiscontinuity = false,
             ),
-        ).isEqualTo(4)
+        ).isEqualTo(3)
     }
 
     @Test

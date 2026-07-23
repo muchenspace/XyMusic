@@ -410,7 +410,6 @@ constructor(
                 nextPositionDiscontinuitySequence(
                     previous = previous,
                     currentQueueItemId = currentQueueItemId,
-                    isPlaying = isPlaying,
                     explicitDiscontinuity = positionDiscontinuity,
                 ),
                 bufferedPositionMs = player.bufferedPosition.coerceAtLeast(0),
@@ -664,14 +663,12 @@ internal fun playerStateWithProgressSample(
 internal fun nextPositionDiscontinuitySequence(
     previous: PlayerState,
     currentQueueItemId: String?,
-    isPlaying: Boolean,
     explicitDiscontinuity: Boolean,
 ): Long =
     previous.positionDiscontinuitySequence +
         if (
             explicitDiscontinuity ||
-                previous.currentQueueItemId != currentQueueItemId ||
-                previous.isPlaying != isPlaying
+                previous.currentQueueItemId != currentQueueItemId
         ) {
             1L
         } else {

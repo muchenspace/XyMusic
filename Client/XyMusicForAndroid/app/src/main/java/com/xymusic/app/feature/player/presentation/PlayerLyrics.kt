@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xymusic.app.R
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.collectLatest
 import kotlin.math.abs
 
 @Composable
@@ -160,10 +161,10 @@ internal fun LyricsContent(
             var previousLyricIndex: Int? = null
             snapshotFlow { currentLyricIndex }
                 .distinctUntilChanged()
-                .collect { lyricIndex ->
+                .collectLatest { lyricIndex ->
                     if (lyricIndex < 0) {
                         previousLyricIndex = null
-                        return@collect
+                        return@collectLatest
                     }
                     val targetIndex =
                         if (centerActiveLine) lyricIndex else (lyricIndex - 2).coerceAtLeast(0)
@@ -171,14 +172,13 @@ internal fun LyricsContent(
                         lyricFollowScrollMode(
                             previousLyricIndex = previousLyricIndex,
                             lyricIndex = lyricIndex,
-                            targetItemVisible = listState.isItemVisible(targetIndex),
                         )
+                    previousLyricIndex = lyricIndex
                     listState.followLyricLine(
                         index = targetIndex,
                         centerActiveLine = centerActiveLine,
                         scrollMode = scrollMode,
                     )
-                    previousLyricIndex = lyricIndex
                 }
         }
         if (uiState.lyrics.isEmpty()) {
@@ -337,12 +337,10 @@ internal enum class LyricFollowScrollMode {
 internal fun lyricFollowScrollMode(
     previousLyricIndex: Int?,
     lyricIndex: Int,
-    targetItemVisible: Boolean,
 ): LyricFollowScrollMode =
     if (
         previousLyricIndex == null ||
-            abs(lyricIndex - previousLyricIndex) > 1 ||
-            !targetItemVisible
+            abs(lyricIndex - previousLyricIndex) > 1
     ) {
         LyricFollowScrollMode.Snap
     } else {
@@ -389,10 +387,11 @@ private suspend fun LazyListState.snapScrollToCenteredItem(index: Int) {
 }
 
 private suspend fun LazyListState.animateScrollToCenteredItem(index: Int) {
-    val delta = centeredItemDelta(index) ?: run {
-        snapScrollToCenteredItem(index)
-        return
+    if (centeredItemDelta(index) == null) {
+        animateScrollToItem(index)
+        withFrameNanos {}
     }
+    val delta = centeredItemDelta(index) ?: return
     if (abs(delta) > 0.5f) {
         animateScrollBy(
             value = delta,
@@ -404,7 +403,7 @@ private suspend fun LazyListState.animateScrollToCenteredItem(index: Int) {
 
 private suspend fun LazyListState.animateScrollToAlignedItem(index: Int) {
     val delta = alignedItemDelta(index) ?: run {
-        scrollToItem(index)
+        animateScrollToItem(index)
         return
     }
     if (abs(delta) > 0.5f) {
@@ -427,9 +426,6 @@ private fun LazyListState.centeredItemDelta(index: Int): Float? {
     val itemCenter = item.offset + item.size / 2f
     return itemCenter - viewportCenter
 }
-
-private fun LazyListState.isItemVisible(index: Int): Boolean =
-    layoutInfo.visibleItemsInfo.any { it.index == index }
 
 private fun LazyListState.alignedItemDelta(index: Int): Float? {
     val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return null
@@ -457,7 +453,7 @@ private fun <T> lyricHighlightTransitionSpec() = tween<T>(
 
 private fun lyricScrollTransitionSpec() = tween<Float>(
     durationMillis = LYRIC_SCROLL_TRANSITION_DURATION_MILLIS,
-    easing = FastOutSlowInEasing,
+    easing = LinearOutSlowInEasing,
 )
 
 private data class LyricLineStyle(val fontSize: TextUnit, val lineHeight: TextUnit, val activeScale: Float)
