@@ -21,6 +21,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -64,6 +65,7 @@ fun PlayerScreen(
     onSleepTimerChange: (Int?) -> Unit,
     onToggleFavorite: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    playbackPosition: State<Float>? = null,
     modifier: Modifier = Modifier,
     isFavorite: Boolean = false,
 ) {
@@ -81,7 +83,7 @@ fun PlayerScreen(
     var showSpeedDialog by rememberSaveable { mutableStateOf(false) }
     var showSleepTimerDialog by rememberSaveable { mutableStateOf(false) }
     val current = uiState.player.currentItem
-    val playbackPosition = rememberSmoothedPlaybackPositionState(uiState.player)
+    val displayedPlaybackPosition = playbackPosition ?: rememberPlaybackPositionState(uiState.player)
     var draggedPosition by remember(current?.queueItemId) { mutableStateOf<Float?>(null) }
     val colorScheme = MaterialTheme.colorScheme
     val darkPlayer = colorScheme.background.luminance() < 0.5f
@@ -243,7 +245,7 @@ fun PlayerScreen(
                                 LandscapeNowPlayingContent(
                                     item = current,
                                     uiState = uiState,
-                                    playbackPosition = playbackPosition,
+                                    playbackPosition = displayedPlaybackPosition,
                                     onSeek = onSeek,
                                     onTogglePlayback = onTogglePlayback,
                                     onPrevious = onPrevious,
@@ -315,7 +317,7 @@ fun PlayerScreen(
                                             LyricsContent(
                                                 uiState = uiState,
                                                 onSeek = onSeek,
-                                                playbackPosition = playbackPosition,
+                                                playbackPosition = displayedPlaybackPosition,
                                                 modifier = Modifier.fillMaxSize(),
                                             )
                                         PlayerContentTab.Queue ->
@@ -335,7 +337,7 @@ fun PlayerScreen(
                                 }
                                 PlaybackControls(
                                     uiState = uiState,
-                                    playbackPosition = playbackPosition,
+                                    playbackPosition = displayedPlaybackPosition,
                                     draggedPosition = draggedPosition,
                                     onPositionChange = { draggedPosition = it },
                                     onPositionChangeFinished = {

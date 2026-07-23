@@ -50,6 +50,7 @@ internal val CompactPlayerMiniBarHeight = 52.dp
 @Composable
 fun PlayerMiniBar(
     uiState: PlayerUiState,
+    playbackPosition: State<Float>? = null,
     onOpenPlayer: () -> Unit,
     onTogglePlayback: () -> Unit,
     onNext: () -> Unit,
@@ -58,7 +59,7 @@ fun PlayerMiniBar(
 ) {
     val current = uiState.player.currentItem ?: return
     val colorScheme = MaterialTheme.colorScheme
-    val playbackPosition = rememberSmoothedPlaybackPositionState(uiState.player)
+    val displayedPlaybackPosition = playbackPosition ?: rememberPlaybackPositionState(uiState.player)
     val metrics = playerMiniBarMetrics(compact)
 
     Box(
@@ -82,7 +83,7 @@ fun PlayerMiniBar(
             onNext = onNext,
         )
         MiniBarProgress(
-            positionMs = playbackPosition,
+            positionMs = displayedPlaybackPosition,
             durationMs = uiState.player.durationMs,
             modifier = Modifier.align(Alignment.BottomCenter),
         )

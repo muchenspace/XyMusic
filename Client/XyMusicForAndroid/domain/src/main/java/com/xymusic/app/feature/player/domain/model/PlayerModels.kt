@@ -18,6 +18,8 @@ data class PlayerState(
     val currentQueueItemId: String? = null,
     val isPlaying: Boolean = false,
     val positionMs: Long = 0,
+    val positionAnchorElapsedRealtimeMs: Long? = null,
+    val positionDiscontinuitySequence: Long = 0,
     val bufferedPositionMs: Long = 0,
     val durationMs: Long = 0,
     val repeatMode: RepeatMode = RepeatMode.OFF,

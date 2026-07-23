@@ -26,6 +26,7 @@ import com.xymusic.app.core.network.ServerEndpoint
 import com.xymusic.app.core.ui.layout.isCompactLandscape
 import com.xymusic.app.feature.player.presentation.PlayerUiEffect
 import com.xymusic.app.feature.player.presentation.PlayerViewModel
+import com.xymusic.app.feature.player.presentation.rememberPlaybackPositionState
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -61,16 +62,8 @@ fun MainNavigation(
         playerIsFavoriteFlow.collectAsStateWithLifecycle(
             initialValue = trackActionsViewModel.uiState.value.playerIsFavorite,
         )
-    val hasPlayerItemFlow =
-        remember(playerViewModel) {
-            playerViewModel.uiState
-                .map { state -> state.player.currentItem != null }
-                .distinctUntilChanged()
-        }
-    val hasPlayerItem by
-        hasPlayerItemFlow.collectAsStateWithLifecycle(
-            initialValue = playerViewModel.uiState.value.player.currentItem != null,
-        )
+    val playerUiState by playerViewModel.uiState.collectAsStateWithLifecycle()
+    val playbackPosition = rememberPlaybackPositionState(playerUiState.player)
 
     PlayerEffectSnackbar(playerViewModel.effects, snackbarHostState)
     LaunchedEffect(trackActionsViewModel, snackbarHostState, resources) {
@@ -95,7 +88,7 @@ fun MainNavigation(
             MainNavigationLayoutConfig(
                 useNavigationRail = maxWidth >= 600.dp,
                 compactPlayerBar = compactLandscape,
-                hasPlayerItem = hasPlayerItem,
+                hasPlayerItem = playerUiState.player.currentItem != null,
             )
         val playerEntryStillVisible =
             visibleEntries.any { entry -> entry.destination.route == PlayerDestination.NowPlaying.route }
@@ -128,7 +121,9 @@ fun MainNavigation(
             },
             miniPlayer = { miniPlayerModifier ->
                 PlayerMiniBarRoute(
+                    uiState = playerUiState,
                     playerViewModel = playerViewModel,
+                    playbackPosition = playbackPosition,
                     onOpenPlayer = {
                         navController.navigate(PlayerDestination.NowPlaying.route) {
                             launchSingleTop = true
@@ -142,6 +137,8 @@ fun MainNavigation(
             MainNavHost(
                 navController = navController,
                 playerViewModel = playerViewModel,
+                playerUiState = playerUiState,
+                playbackPosition = playbackPosition,
                 playerIsFavorite = playerIsFavorite,
                 onTrackMore = trackActionsViewModel::open,
                 onTogglePlayerFavorite = trackActionsViewModel::togglePlayerFavorite,

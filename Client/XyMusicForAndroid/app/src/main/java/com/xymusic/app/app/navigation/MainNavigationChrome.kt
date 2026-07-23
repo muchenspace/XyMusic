@@ -28,15 +28,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xymusic.app.feature.player.presentation.PlayerMiniBar
+import com.xymusic.app.feature.player.presentation.PlayerUiState
 import com.xymusic.app.feature.player.presentation.PlayerViewModel
 import com.xymusic.app.ui.theme.spacing
 
@@ -53,15 +53,17 @@ private val PRIMARY_DESTINATIONS =
 
 @Composable
 internal fun PlayerMiniBarRoute(
+    uiState: PlayerUiState,
     playerViewModel: PlayerViewModel,
+    playbackPosition: State<Float>,
     onOpenPlayer: () -> Unit,
     compact: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    val uiState by playerViewModel.uiState.collectAsStateWithLifecycle()
     if (uiState.player.currentItem == null) return
     PlayerMiniBar(
         uiState = uiState,
+        playbackPosition = playbackPosition,
         onOpenPlayer = onOpenPlayer,
         onTogglePlayback = playerViewModel::togglePlayback,
         onNext = playerViewModel::skipToNext,
