@@ -1,8 +1,7 @@
 package com.xymusic.app.app.navigation
 
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -25,7 +24,6 @@ import com.xymusic.app.feature.playlist.presentation.PlaylistRoute
 import com.xymusic.app.feature.playlist.presentation.PlaylistRouteArgs
 import com.xymusic.app.feature.search.presentation.SearchScreen
 import com.xymusic.app.feature.settings.presentation.SettingsScreen
-import com.xymusic.app.ui.theme.XyMotion
 import com.xymusic.app.ui.theme.playerSlideInto
 import com.xymusic.app.ui.theme.playerSlideOutOf
 import com.xymusic.app.ui.theme.slideFadeBackInto
@@ -55,18 +53,36 @@ internal fun MainNavHost(
         navController = navController,
         startDestination = MainDestination.Home.route,
         modifier = modifier,
-        enterTransition = { slideFadeInto() },
-        exitTransition = { slideFadeOutOf() },
-        popEnterTransition = { slideFadeBackInto() },
-        popExitTransition = { slideFadeBackOutOf() },
+        enterTransition = {
+            if (targetState.destination.route == PlayerDestination.NowPlaying.route) {
+                playerSlideInto()
+            } else {
+                slideFadeInto()
+            }
+        },
+        exitTransition = {
+            if (targetState.destination.route == PlayerDestination.NowPlaying.route) {
+                ExitTransition.None
+            } else {
+                slideFadeOutOf()
+            }
+        },
+        popEnterTransition = {
+            when {
+                targetState.destination.route == PlayerDestination.NowPlaying.route -> playerSlideInto()
+                initialState.destination.route == PlayerDestination.NowPlaying.route -> EnterTransition.None
+                else -> slideFadeBackInto()
+            }
+        },
+        popExitTransition = {
+            if (initialState.destination.route == PlayerDestination.NowPlaying.route) {
+                playerSlideOutOf()
+            } else {
+                slideFadeBackOutOf()
+            }
+        },
     ) {
-        composable(
-            route = MainDestination.Home.route,
-            enterTransition = { fadeIn(tween(XyMotion.Quick)) },
-            exitTransition = { fadeOut(tween(XyMotion.Quick)) },
-            popEnterTransition = { fadeIn(tween(XyMotion.Quick)) },
-            popExitTransition = { fadeOut(tween(XyMotion.Quick)) },
-        ) {
+        composable(route = MainDestination.Home.route) {
             MainNavigationRouteLayout(
                 layout = MainNavigationContentLayout.Primary,
                 config = layoutConfig,
@@ -87,13 +103,7 @@ internal fun MainNavHost(
                 )
             }
         }
-        composable(
-            route = MainSecondaryDestination.Search.route,
-            enterTransition = { fadeIn(tween(XyMotion.Quick)) },
-            exitTransition = { fadeOut(tween(XyMotion.Quick)) },
-            popEnterTransition = { fadeIn(tween(XyMotion.Quick)) },
-            popExitTransition = { fadeOut(tween(XyMotion.Quick)) },
-        ) {
+        composable(route = MainSecondaryDestination.Search.route) {
             MainNavigationRouteLayout(
                 layout = MainNavigationContentLayout.Secondary,
                 config = layoutConfig,
@@ -115,10 +125,6 @@ internal fun MainNavHost(
                     defaultValue = LibraryTab.Favorites.name
                 },
             ),
-            enterTransition = { fadeIn(tween(XyMotion.Quick)) },
-            exitTransition = { fadeOut(tween(XyMotion.Quick)) },
-            popEnterTransition = { fadeIn(tween(XyMotion.Quick)) },
-            popExitTransition = { fadeOut(tween(XyMotion.Quick)) },
         ) { entry ->
             val initialTab =
                 entry.arguments
@@ -137,13 +143,7 @@ internal fun MainNavHost(
                 )
             }
         }
-        composable(
-            route = MainDestination.Mine.route,
-            enterTransition = { fadeIn(tween(XyMotion.Quick)) },
-            exitTransition = { fadeOut(tween(XyMotion.Quick)) },
-            popEnterTransition = { fadeIn(tween(XyMotion.Quick)) },
-            popExitTransition = { fadeOut(tween(XyMotion.Quick)) },
-        ) {
+        composable(route = MainDestination.Mine.route) {
             MainNavigationRouteLayout(
                 layout = MainNavigationContentLayout.Primary,
                 config = layoutConfig,
@@ -163,13 +163,7 @@ internal fun MainNavHost(
                 )
             }
         }
-        composable(
-            route = MainSecondaryDestination.Settings.route,
-            enterTransition = { slideFadeInto() },
-            exitTransition = { slideFadeOutOf() },
-            popEnterTransition = { slideFadeBackInto() },
-            popExitTransition = { slideFadeBackOutOf() },
-        ) {
+        composable(route = MainSecondaryDestination.Settings.route) {
             MainNavigationRouteLayout(
                 layout = MainNavigationContentLayout.Secondary,
                 config = layoutConfig,
@@ -183,13 +177,7 @@ internal fun MainNavHost(
                 )
             }
         }
-        composable(
-            route = PlayerDestination.NowPlaying.route,
-            enterTransition = { playerSlideInto() },
-            exitTransition = { playerSlideOutOf() },
-            popEnterTransition = { playerSlideInto() },
-            popExitTransition = { playerSlideOutOf() },
-        ) {
+        composable(route = PlayerDestination.NowPlaying.route) {
             MainNavigationRouteLayout(
                 layout = MainNavigationContentLayout.FullScreen,
                 config = layoutConfig,
