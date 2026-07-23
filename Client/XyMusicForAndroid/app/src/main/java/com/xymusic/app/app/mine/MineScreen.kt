@@ -646,11 +646,7 @@ private fun PlaylistHeader(
 }
 
 @Composable
-private fun PlaylistTile(
-    playlist: PlaylistSummary,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
+private fun PlaylistTile(playlist: PlaylistSummary, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Column(
         modifier =
         modifier

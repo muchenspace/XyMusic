@@ -156,10 +156,7 @@ internal class PlaylistMutationOperations(
         }
     }
 
-    private suspend fun requestAdd(
-        command: AddPlaylistTrackCommand,
-        expectedVersion: Long,
-    ): PlaylistEntryMutationDto =
+    private suspend fun requestAdd(command: AddPlaylistTrackCommand, expectedVersion: Long): PlaylistEntryMutationDto =
         remote.addTrack(
             command.playlistId,
             UUID.randomUUID().toString(),

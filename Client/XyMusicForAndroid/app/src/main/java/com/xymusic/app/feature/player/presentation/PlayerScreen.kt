@@ -222,7 +222,7 @@ fun PlayerScreen(
             )
         BackHandler(
             enabled =
-                !isDismissing && !confirmClearQueue && !showSpeedDialog && !showSleepTimerDialog,
+            !isDismissing && !confirmClearQueue && !showSpeedDialog && !showSleepTimerDialog,
         ) {
             dismissPlayer(0f)
         }

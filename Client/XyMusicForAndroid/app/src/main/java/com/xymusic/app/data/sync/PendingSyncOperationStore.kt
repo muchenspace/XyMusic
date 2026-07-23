@@ -5,9 +5,7 @@ import com.xymusic.app.core.database.entity.PendingSyncOperationEntity
 import com.xymusic.app.core.database.model.SyncOperationStatus
 import com.xymusic.app.core.database.model.SyncOperationType
 
-internal class PendingSyncOperationStore(
-    private val pendingDao: PendingSyncOperationDao,
-) {
+internal class PendingSyncOperationStore(private val pendingDao: PendingSyncOperationDao) {
     suspend fun hasLaterOperation(current: PendingSyncOperationEntity, operationType: SyncOperationType): Boolean =
         laterOperations(current).any { it.operationType == operationType }
 

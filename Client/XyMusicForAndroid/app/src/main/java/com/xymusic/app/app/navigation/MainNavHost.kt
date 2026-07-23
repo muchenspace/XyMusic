@@ -23,8 +23,8 @@ import com.xymusic.app.feature.playlist.presentation.PlaylistRoute
 import com.xymusic.app.feature.playlist.presentation.PlaylistRouteArgs
 import com.xymusic.app.feature.search.presentation.SearchScreen
 import com.xymusic.app.feature.settings.presentation.SettingsScreen
-import com.xymusic.app.ui.theme.playerSlideInto
 import com.xymusic.app.ui.theme.playerReturnInto
+import com.xymusic.app.ui.theme.playerSlideInto
 import com.xymusic.app.ui.theme.slideFadeBackInto
 import com.xymusic.app.ui.theme.slideFadeBackOutOf
 import com.xymusic.app.ui.theme.slideFadeInto

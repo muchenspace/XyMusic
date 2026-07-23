@@ -175,10 +175,7 @@ internal fun NavHostController.navigateMain(route: String, restoreState: Boolean
 }
 
 @Composable
-private fun TrackActionsSheetHost(
-    uiState: TrackActionsUiState,
-    viewModel: TrackActionsViewModel,
-) {
+private fun TrackActionsSheetHost(uiState: TrackActionsUiState, viewModel: TrackActionsViewModel) {
     TrackActionsSheet(
         uiState = uiState,
         onDismiss = viewModel::dismiss,

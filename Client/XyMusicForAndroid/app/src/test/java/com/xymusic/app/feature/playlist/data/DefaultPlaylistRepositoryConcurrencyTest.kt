@@ -33,11 +33,11 @@ import com.xymusic.app.feature.playlist.data.remote.ReorderPlaylistRequestDto
 import com.xymusic.app.feature.playlist.data.remote.UserSummaryDto
 import com.xymusic.app.feature.playlist.domain.PlaylistResult
 import com.xymusic.app.feature.playlist.domain.model.AddPlaylistTrackCommand
+import com.xymusic.app.feature.playlist.domain.model.PlaylistVersionConflict
 import com.xymusic.app.feature.playlist.domain.model.RemovePlaylistTrackCommand
 import com.xymusic.app.feature.playlist.domain.model.ReorderPlaylistCommand
 import com.xymusic.app.feature.playlist.domain.model.UpdatePlaylistCommand
 import com.xymusic.app.feature.playlist.domain.model.ValueChange
-import com.xymusic.app.feature.playlist.domain.model.PlaylistVersionConflict
 import java.io.IOException
 import java.time.Clock
 import java.time.Instant
@@ -655,10 +655,9 @@ class DefaultPlaylistRepositoryConcurrencyTest {
         }
     }
 
-    private suspend fun pendingForPlaylist() =
-        database
-            .pendingSyncOperationDao()
-            .forTarget(OWNER_ID, SyncTargetType.PLAYLIST, PLAYLIST_ID)
+    private suspend fun pendingForPlaylist() = database
+        .pendingSyncOperationDao()
+        .forTarget(OWNER_ID, SyncTargetType.PLAYLIST, PLAYLIST_ID)
 
     private fun repository(
         remote: PlaylistRemoteDataSource,
@@ -763,26 +762,25 @@ class DefaultPlaylistRepositoryConcurrencyTest {
 
     private fun ownerSummary() = UserSummaryDto(OWNER_ID, "owner", "Owner", null)
 
-    private fun playlistEntryDto(id: String, position: Int, trackId: String) =
-        PlaylistEntryDto(
-            id = id,
-            position = position,
-            track =
-            TrackSummaryDto(
-                id = trackId,
-                title = trackId,
-                artists = listOf(ArtistReferenceDto(ARTIST_ID, "Artist")),
-                album = null,
-                artwork = null,
-                durationMs = 180_000,
-                trackNumber = null,
-                discNumber = 1,
-                isFavorite = false,
-                publishedAt = NOW.toString(),
-            ),
-            addedBy = ownerSummary(),
-            addedAt = NOW.toString(),
-        )
+    private fun playlistEntryDto(id: String, position: Int, trackId: String) = PlaylistEntryDto(
+        id = id,
+        position = position,
+        track =
+        TrackSummaryDto(
+            id = trackId,
+            title = trackId,
+            artists = listOf(ArtistReferenceDto(ARTIST_ID, "Artist")),
+            album = null,
+            artwork = null,
+            durationMs = 180_000,
+            trackNumber = null,
+            discNumber = 1,
+            isFavorite = false,
+            publishedAt = NOW.toString(),
+        ),
+        addedBy = ownerSummary(),
+        addedAt = NOW.toString(),
+    )
 
     private class SignedInSessionProvider(ownerUserId: String) : AppSessionProvider {
         override val sessionState =
@@ -1029,11 +1027,8 @@ class DefaultPlaylistRepositoryConcurrencyTest {
             idempotencyKey: String,
         ) = PlaylistMutationDto(playlistId, expectedVersion + 1, NOW.plusSeconds(3).toString())
 
-        override suspend fun reorder(
-            playlistId: String,
-            idempotencyKey: String,
-            request: ReorderPlaylistRequestDto,
-        ) = PlaylistMutationDto(playlistId, request.expectedVersion + 1, NOW.plusSeconds(4).toString())
+        override suspend fun reorder(playlistId: String, idempotencyKey: String, request: ReorderPlaylistRequestDto) =
+            PlaylistMutationDto(playlistId, request.expectedVersion + 1, NOW.plusSeconds(4).toString())
     }
 
     private data object NetworkFailingMutationRemote : PlaylistRemoteStub() {
@@ -1081,16 +1076,15 @@ class DefaultPlaylistRepositoryConcurrencyTest {
         val NOW: Instant = Instant.parse("2026-07-12T00:00:00Z")
         val CLOCK: Clock = Clock.fixed(NOW, ZoneOffset.UTC)
 
-        fun versionConflict(expectedVersion: Long, currentVersion: Long) =
-            PlaylistRemoteException(
-                error = DomainError.Conflict("stale", null, ProblemCode.VersionConflict),
-                conflict =
-                PlaylistVersionConflict(
-                    playlistId = PLAYLIST_ID,
-                    expectedVersion = expectedVersion,
-                    currentVersion = currentVersion,
-                    conflictFields = emptySet(),
-                ),
-            )
+        fun versionConflict(expectedVersion: Long, currentVersion: Long) = PlaylistRemoteException(
+            error = DomainError.Conflict("stale", null, ProblemCode.VersionConflict),
+            conflict =
+            PlaylistVersionConflict(
+                playlistId = PLAYLIST_ID,
+                expectedVersion = expectedVersion,
+                currentVersion = currentVersion,
+                conflictFields = emptySet(),
+            ),
+        )
     }
 }

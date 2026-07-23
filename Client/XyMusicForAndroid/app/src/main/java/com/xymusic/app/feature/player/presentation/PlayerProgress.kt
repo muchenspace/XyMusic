@@ -12,8 +12,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import com.xymusic.app.feature.player.domain.model.PlayerState
-import kotlinx.coroutines.isActive
 import kotlin.math.abs
+import kotlinx.coroutines.isActive
 
 @Composable
 internal fun rememberPlaybackPositionState(player: PlayerState): State<Float> {
@@ -100,12 +100,11 @@ internal data class PlaybackPositionClockSample(
     val isPlaying: Boolean,
 ) {
     companion object {
-        fun from(player: PlayerState) =
-            PlaybackPositionClockSample(
-                currentQueueItemId = player.currentQueueItemId,
-                discontinuitySequence = player.positionDiscontinuitySequence,
-                isPlaying = player.isPlaying,
-            )
+        fun from(player: PlayerState) = PlaybackPositionClockSample(
+            currentQueueItemId = player.currentQueueItemId,
+            discontinuitySequence = player.positionDiscontinuitySequence,
+            isPlaying = player.isPlaying,
+        )
     }
 }
 
@@ -143,10 +142,7 @@ internal fun playbackLyricIndex(lines: List<PlayerLyricLineUi>, positionMs: Long
     return result
 }
 
-private data class PlaybackPositionCorrection(
-    val offsetMs: Float,
-    val startElapsedRealtimeMs: Long,
-) {
+private data class PlaybackPositionCorrection(val offsetMs: Float, val startElapsedRealtimeMs: Long) {
     fun remainingOffset(nowElapsedRealtimeMs: Long): Float {
         val progress =
             ((nowElapsedRealtimeMs - startElapsedRealtimeMs).toFloat() / PLAYBACK_POSITION_CORRECTION_MS)

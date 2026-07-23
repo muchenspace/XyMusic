@@ -4,10 +4,7 @@ import com.xymusic.app.feature.playlist.data.remote.PlaylistDetailDto
 import com.xymusic.app.feature.playlist.data.remote.PlaylistEntryDto
 import com.xymusic.app.feature.playlist.data.remote.PlaylistProtocolException
 
-internal data class PlaylistPageMergeResult(
-    val page: PlaylistDetailDto,
-    val completeDetail: PlaylistDetailDto?,
-)
+internal data class PlaylistPageMergeResult(val page: PlaylistDetailDto, val completeDetail: PlaylistDetailDto?)
 
 internal class PlaylistPageAccumulator private constructor(
     private val firstPage: PlaylistDetailDto,
@@ -58,18 +55,20 @@ internal class PlaylistPageAccumulator private constructor(
         }
     }
 
-    private fun completeDetailOrNull(): PlaylistDetailDto? =
-        if (nextCursor == null) {
-            firstPage.copy(
-                entries = entries.sortedBy(PlaylistEntryDto::position),
-                nextCursor = null,
-            )
-        } else {
-            null
-        }
+    private fun completeDetailOrNull(): PlaylistDetailDto? = if (nextCursor == null) {
+        firstPage.copy(
+            entries = entries.sortedBy(PlaylistEntryDto::position),
+            nextCursor = null,
+        )
+    } else {
+        null
+    }
 
     companion object {
-        fun start(playlistId: String, page: PlaylistDetailDto): Pair<PlaylistPageAccumulator?, PlaylistPageMergeResult> {
+        fun start(
+            playlistId: String,
+            page: PlaylistDetailDto,
+        ): Pair<PlaylistPageAccumulator?, PlaylistPageMergeResult> {
             if (page.id != playlistId) {
                 throw PlaylistProtocolException("Playlist detail ID does not match the request")
             }

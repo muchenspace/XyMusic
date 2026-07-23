@@ -90,11 +90,10 @@ class CatalogTrackLyricsPaginationTest {
         assertThat(failure).isInstanceOf(CatalogProtocolException::class.java)
     }
 
-    private fun dataSource(api: CatalogApi): HttpCatalogRemoteDataSource =
-        HttpCatalogRemoteDataSource(
-            api = api,
-            problemResponseParser = ProblemResponseParser(Json { ignoreUnknownKeys = true }, ProblemMapper()),
-        )
+    private fun dataSource(api: CatalogApi): HttpCatalogRemoteDataSource = HttpCatalogRemoteDataSource(
+        api = api,
+        problemResponseParser = ProblemResponseParser(Json { ignoreUnknownKeys = true }, ProblemMapper()),
+    )
 
     private fun detail(page: Int, lyrics: List<LyricsResourceDto>) = TrackDetailDto(
         id = TRACK_ID,
@@ -141,11 +140,8 @@ class CatalogTrackLyricsPaginationTest {
         override suspend fun randomTracks(request: RandomCatalogRequestDto): Response<RandomTracksResponseDto> =
             error("unused")
 
-        override suspend fun track(
-            trackId: String,
-            lyricPage: Int,
-            lyricPageSize: Int,
-        ): Response<TrackDetailDto> = trackHandler.invoke(trackId, lyricPage, lyricPageSize)
+        override suspend fun track(trackId: String, lyricPage: Int, lyricPageSize: Int): Response<TrackDetailDto> =
+            trackHandler.invoke(trackId, lyricPage, lyricPageSize)
 
         override suspend fun artists(cursor: String?, limit: Int, sort: String): Response<ArtistPageDto> =
             error("unused")

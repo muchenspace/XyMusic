@@ -11,17 +11,12 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-data class HomeProfileUiState(
-    val avatarUrl: String? = null,
-    val avatarCacheKey: String? = null,
-)
+data class HomeProfileUiState(val avatarUrl: String? = null, val avatarCacheKey: String? = null)
 
 @HiltViewModel
 class HomeProfileViewModel
 @Inject
-constructor(
-    private val profileUseCases: ProfileUseCases,
-) : ViewModel() {
+constructor(private val profileUseCases: ProfileUseCases) : ViewModel() {
     val uiState =
         profileUseCases.profile
             .map { profile ->
