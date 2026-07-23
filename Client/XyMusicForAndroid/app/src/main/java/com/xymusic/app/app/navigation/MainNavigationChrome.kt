@@ -57,8 +57,8 @@ internal fun PlayerMiniBarRoute(
     playerViewModel: PlayerViewModel,
     playbackPosition: State<Float>,
     onOpenPlayer: () -> Unit,
-    compact: Boolean = false,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
     if (uiState.player.currentItem == null) return
     PlayerMiniBar(
