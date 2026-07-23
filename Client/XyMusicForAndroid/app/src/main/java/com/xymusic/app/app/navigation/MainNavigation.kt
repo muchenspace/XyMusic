@@ -5,8 +5,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.unit.dp
@@ -39,6 +42,11 @@ fun MainNavigation(
     val navController = rememberNavController()
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
+    val selectedMainDestination = MainDestination.fromRoute(currentRoute)
+    var lastSelectedMainDestination by remember { mutableStateOf(MainDestination.Home) }
+    SideEffect {
+        selectedMainDestination?.let { lastSelectedMainDestination = it }
+    }
     val resources = LocalResources.current
     val playerViewModel: PlayerViewModel = hiltViewModel()
     val trackActionsViewModel: TrackActionsViewModel = hiltViewModel()
@@ -89,17 +97,13 @@ fun MainNavigation(
                 compactPlayerBar = compactLandscape,
                 hasPlayerItem = hasPlayerItem,
             )
-        val visibleRoutes =
-            remember(visibleEntries, currentRoute) {
-                visibleEntries
-                    .map { entry -> entry.destination.route }
-                    .ifEmpty { listOf(currentRoute ?: MainDestination.Home.route) }
-            }
+        val playerEntryStillVisible =
+            visibleEntries.any { entry -> entry.destination.route == PlayerDestination.NowPlaying.route }
         val chromeState =
             mainNavigationChromeState(
                 config = layoutConfig,
                 currentRoute = currentRoute,
-                visibleRoutes = visibleRoutes,
+                lastSelectedMainDestination = lastSelectedMainDestination,
             )
         val navigateMain: (MainDestination) -> Unit = { destination ->
             navController.navigateMain(destination.route)
@@ -108,6 +112,7 @@ fun MainNavigation(
         MainNavigationLayout(
             config = layoutConfig,
             chromeState = chromeState,
+            playerEntryStillVisible = playerEntryStillVisible,
             snackbarHostState = snackbarHostState,
             navigationRail = {
                 MainNavigationRail(

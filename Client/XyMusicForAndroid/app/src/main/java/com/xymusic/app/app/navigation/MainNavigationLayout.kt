@@ -1,10 +1,14 @@
 package com.xymusic.app.app.navigation
 
+import androidx.compose.animation.core.animateDp
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -13,13 +17,16 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.xymusic.app.feature.player.presentation.CompactPlayerMiniBarHeight
 import com.xymusic.app.feature.player.presentation.PlayerMiniBarHeight
+import com.xymusic.app.ui.theme.XyMotion
 
 @Immutable
 internal data class MainNavigationLayoutConfig(
@@ -40,8 +47,11 @@ internal data class MainNavigationChromeState(
     val showMainNavigation: Boolean,
     val showMiniPlayer: Boolean,
     val selectedMainDestination: MainDestination?,
-    val placeChromeBehindContent: Boolean,
+    val isPlayerDestination: Boolean,
 )
+
+private val MainNavigationChromeState.hasVisibleChrome: Boolean
+    get() = showMainNavigation || showMiniPlayer
 
 internal enum class MainNavigationContentLayout {
     Primary,
@@ -54,6 +64,7 @@ internal enum class MainNavigationContentLayout {
 internal fun MainNavigationLayout(
     config: MainNavigationLayoutConfig,
     chromeState: MainNavigationChromeState,
+    playerEntryStillVisible: Boolean,
     snackbarHostState: SnackbarHostState,
     navigationRail: @Composable () -> Unit,
     bottomNavigation: @Composable () -> Unit,
@@ -61,35 +72,130 @@ internal fun MainNavigationLayout(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    val showNavigationRail = config.useNavigationRail && chromeState.showMainNavigation
-    val showBottomNavigation = !config.useNavigationRail && chromeState.showMainNavigation
+    val chromeTransition = updateTransition(targetState = chromeState, label = "mainNavigationChrome")
+    val navigationAlpha by
+        chromeTransition.animateFloat(
+            transitionSpec = {
+                tween(
+                    durationMillis = chromeTransitionDuration(initialState, targetState),
+                    easing = XyMotion.NavigationEasing,
+                )
+            },
+            label = "mainNavigationAlpha",
+        ) { state ->
+            if (state.showMainNavigation) 1f else 0f
+        }
+    val miniPlayerAlpha by
+        chromeTransition.animateFloat(
+            transitionSpec = {
+                tween(
+                    durationMillis = chromeTransitionDuration(initialState, targetState),
+                    easing = XyMotion.NavigationEasing,
+                )
+            },
+            label = "miniPlayerAlpha",
+        ) { state ->
+            if (state.showMiniPlayer) 1f else 0f
+        }
+    val miniPlayerBottomOffset by
+        chromeTransition.animateDp(
+            transitionSpec = {
+                tween(
+                    durationMillis = chromeTransitionDuration(initialState, targetState),
+                    easing = XyMotion.NavigationEasing,
+                )
+            },
+            label = "miniPlayerBottomOffset",
+        ) { state ->
+            if (!config.useNavigationRail && state.showMainNavigation) MainNavigationBarHeight else 0.dp
+        }
+    val miniPlayerStartPadding by
+        chromeTransition.animateDp(
+            transitionSpec = {
+                tween(
+                    durationMillis = chromeTransitionDuration(initialState, targetState),
+                    easing = XyMotion.NavigationEasing,
+                )
+            },
+            label = "miniPlayerStartPadding",
+        ) { state ->
+            if (config.useNavigationRail && state.showMainNavigation) MainNavigationRailWidth else 0.dp
+        }
+    val snackbarBottomPadding by
+        chromeTransition.animateDp(
+            transitionSpec = {
+                tween(
+                    durationMillis = chromeTransitionDuration(initialState, targetState),
+                    easing = XyMotion.NavigationEasing,
+                )
+            },
+            label = "snackbarBottomPadding",
+        ) { state ->
+            (if (state.showMiniPlayer) config.miniPlayerHeight else 0.dp) +
+                if (!config.useNavigationRail && state.showMainNavigation) MainNavigationBarHeight else 0.dp
+        }
+    val snackbarStartPadding by
+        chromeTransition.animateDp(
+            transitionSpec = {
+                tween(
+                    durationMillis = chromeTransitionDuration(initialState, targetState),
+                    easing = XyMotion.NavigationEasing,
+                )
+            },
+            label = "snackbarStartPadding",
+        ) { state ->
+            if (config.useNavigationRail && state.showMainNavigation) MainNavigationRailWidth else 0.dp
+        }
+    val showNavigationRail =
+        config.useNavigationRail &&
+            (chromeTransition.currentState.showMainNavigation || chromeTransition.targetState.showMainNavigation)
+    val showBottomNavigation =
+        !config.useNavigationRail &&
+            (chromeTransition.currentState.showMainNavigation || chromeTransition.targetState.showMainNavigation)
+    val showMiniPlayer =
+        chromeTransition.currentState.showMiniPlayer || chromeTransition.targetState.showMiniPlayer
+    val chromeIsExitingForPlayer =
+        playerEntryStillVisible &&
+            chromeTransition.currentState.hasVisibleChrome &&
+            !chromeTransition.targetState.hasVisibleChrome
     val chromeZIndex =
-        if (chromeState.placeChromeBehindContent) ChromeBehindContentZIndex else InteractiveChromeZIndex
-    val snackbarBottomPadding =
-        (if (chromeState.showMiniPlayer) config.miniPlayerHeight else 0.dp) +
-            (if (showBottomNavigation) MainNavigationBarHeight else 0.dp)
+        if (playerEntryStillVisible && !chromeIsExitingForPlayer) {
+            ChromeBehindContentZIndex
+        } else {
+            InteractiveChromeZIndex
+        }
 
     Box(modifier = modifier.fillMaxSize()) {
         if (showNavigationRail) {
-            Box(modifier = Modifier.zIndex(chromeZIndex)) {
+            Box(
+                modifier =
+                Modifier
+                    .zIndex(chromeZIndex)
+                    .graphicsLayer { alpha = navigationAlpha },
+            ) {
                 navigationRail()
             }
         }
-        Column(
-            modifier =
-            Modifier
-                .align(Alignment.BottomCenter)
-                .zIndex(chromeZIndex),
-        ) {
-            if (chromeState.showMiniPlayer) {
-                miniPlayer(
-                    mainNavigationMiniPlayerModifier(
-                        showNavigationRail = showNavigationRail,
-                        showBottomNavigation = showBottomNavigation,
-                    ),
-                )
+        if (showMiniPlayer) {
+            Box(
+                modifier =
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(y = -miniPlayerBottomOffset)
+                    .zIndex(chromeZIndex)
+                    .graphicsLayer { alpha = miniPlayerAlpha },
+            ) {
+                miniPlayer(mainNavigationMiniPlayerModifier(miniPlayerStartPadding))
             }
-            if (showBottomNavigation) {
+        }
+        if (showBottomNavigation) {
+            Box(
+                modifier =
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .zIndex(chromeZIndex)
+                    .graphicsLayer { alpha = navigationAlpha },
+            ) {
                 bottomNavigation()
             }
         }
@@ -111,7 +217,7 @@ internal fun MainNavigationLayout(
                         WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom,
                     ),
                 ).padding(
-                    start = if (showNavigationRail) MainNavigationRailWidth else 0.dp,
+                    start = snackbarStartPadding,
                     bottom = snackbarBottomPadding,
                 ).zIndex(SnackbarZIndex),
         )
@@ -168,27 +274,16 @@ internal fun MainNavigationRouteLayout(
 internal fun mainNavigationChromeState(
     config: MainNavigationLayoutConfig,
     currentRoute: String?,
-    visibleRoutes: List<String?>,
+    lastSelectedMainDestination: MainDestination? = null,
 ): MainNavigationChromeState {
-    val foregroundRoute = currentRoute ?: visibleRoutes.lastOrNull() ?: MainDestination.Home.route
-    val transitionRoutes = (visibleRoutes + foregroundRoute).distinct()
-    val chromeRoutes =
-        if (transitionRoutes.any { route -> route == PlayerDestination.NowPlaying.route }) {
-            transitionRoutes
-        } else {
-            listOf(foregroundRoute)
-        }
+    val foregroundRoute = currentRoute ?: MainDestination.Home.route
+    val isPlayerDestination = foregroundRoute == PlayerDestination.NowPlaying.route
     return MainNavigationChromeState(
-        showMainNavigation = chromeRoutes.any(::shouldShowMainBottomBar),
-        showMiniPlayer =
-        config.hasPlayerItem &&
-            chromeRoutes.any { route -> route != null && route != PlayerDestination.NowPlaying.route },
+        showMainNavigation = !isPlayerDestination && shouldShowMainBottomBar(foregroundRoute),
+        showMiniPlayer = config.hasPlayerItem && !isPlayerDestination,
         selectedMainDestination =
-        chromeRoutes
-            .asReversed()
-            .firstNotNullOfOrNull { route -> MainDestination.fromRoute(route) },
-        placeChromeBehindContent =
-        transitionRoutes.any { route -> route == PlayerDestination.NowPlaying.route },
+        MainDestination.fromRoute(foregroundRoute) ?: lastSelectedMainDestination,
+        isPlayerDestination = isPlayerDestination,
     )
 }
 
@@ -200,28 +295,21 @@ internal fun mainNavigationContentLayout(route: String?): MainNavigationContentL
 }
 
 @Composable
-private fun mainNavigationMiniPlayerModifier(showNavigationRail: Boolean, showBottomNavigation: Boolean): Modifier =
-    when {
-        showNavigationRail ->
-            Modifier
-                .windowInsetsPadding(
-                    WindowInsets.safeDrawing.only(
-                        WindowInsetsSides.Start + WindowInsetsSides.End + WindowInsetsSides.Bottom,
-                    ),
-                ).padding(start = MainNavigationRailWidth)
+private fun mainNavigationMiniPlayerModifier(startPadding: Dp): Modifier = Modifier
+    .windowInsetsPadding(
+        WindowInsets.safeDrawing.only(
+            WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom,
+        ),
+    ).padding(start = startPadding)
 
-        showBottomNavigation ->
-            Modifier.windowInsetsPadding(
-                WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
-            )
-
-        else ->
-            Modifier.windowInsetsPadding(
-                WindowInsets.safeDrawing.only(
-                    WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom,
-                ),
-            )
-    }
+private fun chromeTransitionDuration(
+    initialState: MainNavigationChromeState,
+    targetState: MainNavigationChromeState,
+): Int = if (initialState.isPlayerDestination || targetState.isPlayerDestination) {
+    XyMotion.Emphasized
+} else {
+    XyMotion.Standard
+}
 
 private const val ChromeBehindContentZIndex = 0f
 private const val NavigationContentZIndex = 1f

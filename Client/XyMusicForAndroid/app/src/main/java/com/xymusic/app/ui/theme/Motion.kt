@@ -27,6 +27,7 @@ object XyMotion {
     val EaseOutExp: Easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
     val EmphasizedEasing: Easing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
     val EmphasizedDecel: Easing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
+    val NavigationEasing: Easing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
 
     val InteractiveSpring =
         spring<Float>(
@@ -72,31 +73,31 @@ object XyMotion {
 
 // Navigation transition specs.
 fun AnimatedContentTransitionScope<*>.slideFadeInto() = slideInVertically(
-    animationSpec = tween(XyMotion.Standard, easing = XyMotion.EmphasizedDecel),
-    initialOffsetY = { it / 12 },
-) + fadeIn(tween(XyMotion.Standard, easing = XyMotion.EaseOutQuart))
+    animationSpec = tween(XyMotion.Standard, easing = XyMotion.NavigationEasing),
+    initialOffsetY = { it / 24 },
+) + fadeIn(tween(XyMotion.Standard, easing = XyMotion.NavigationEasing))
 
 fun AnimatedContentTransitionScope<*>.slideFadeOutOf() = slideOutVertically(
-    animationSpec = tween(XyMotion.Standard, easing = XyMotion.EmphasizedEasing),
-    targetOffsetY = { -it / 12 },
-) + fadeOut(tween(XyMotion.Standard, easing = XyMotion.EaseOutQuart))
+    animationSpec = tween(XyMotion.Standard, easing = XyMotion.NavigationEasing),
+    targetOffsetY = { -it / 24 },
+) + fadeOut(tween(XyMotion.Standard, easing = XyMotion.NavigationEasing))
 
 fun AnimatedContentTransitionScope<*>.slideFadeBackInto() = slideInVertically(
-    animationSpec = tween(XyMotion.Standard, easing = XyMotion.EmphasizedDecel),
-    initialOffsetY = { -it / 12 },
-) + fadeIn(tween(XyMotion.Standard, easing = XyMotion.EaseOutQuart))
+    animationSpec = tween(XyMotion.Standard, easing = XyMotion.NavigationEasing),
+    initialOffsetY = { -it / 24 },
+) + fadeIn(tween(XyMotion.Standard, easing = XyMotion.NavigationEasing))
 
 fun AnimatedContentTransitionScope<*>.slideFadeBackOutOf() = slideOutVertically(
-    animationSpec = tween(XyMotion.Standard, easing = XyMotion.EmphasizedEasing),
-    targetOffsetY = { it / 12 },
-) + fadeOut(tween(XyMotion.Standard, easing = XyMotion.EaseOutQuart))
+    animationSpec = tween(XyMotion.Standard, easing = XyMotion.NavigationEasing),
+    targetOffsetY = { it / 24 },
+) + fadeOut(tween(XyMotion.Standard, easing = XyMotion.NavigationEasing))
 
 fun AnimatedContentTransitionScope<*>.playerSlideInto() = slideInVertically(
-    animationSpec = tween(XyMotion.Emphasized, easing = XyMotion.EmphasizedDecel),
+    animationSpec = tween(XyMotion.Emphasized, easing = XyMotion.NavigationEasing),
     initialOffsetY = { it },
-) + fadeIn(tween(XyMotion.Emphasized, easing = XyMotion.EaseOutQuart))
+)
 
 fun AnimatedContentTransitionScope<*>.playerSlideOutOf() = slideOutVertically(
-    animationSpec = tween(XyMotion.Emphasized, easing = XyMotion.EmphasizedEasing),
+    animationSpec = tween(XyMotion.Emphasized, easing = XyMotion.NavigationEasing),
     targetOffsetY = { it },
-) + fadeOut(tween(XyMotion.Emphasized, easing = XyMotion.EaseOutQuart))
+)

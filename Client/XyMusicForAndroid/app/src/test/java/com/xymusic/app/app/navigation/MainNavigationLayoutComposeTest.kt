@@ -1,8 +1,7 @@
 package com.xymusic.app.app.navigation
 
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -88,7 +87,7 @@ class MainNavigationLayoutComposeTest {
             durationMillis = XyMotion.Standard,
             target = FixtureTarget.Playlist,
             initialChrome = PhoneHomeWithoutMiniChrome,
-            inFlightChrome = HiddenChrome,
+            inFlightChrome = PhoneHomeWithoutMiniChrome,
             finalChrome = HiddenChrome,
         )
     }
@@ -107,9 +106,40 @@ class MainNavigationLayoutComposeTest {
             durationMillis = XyMotion.Standard,
             target = FixtureTarget.Playlist,
             initialChrome = PhoneHomeWithMiniChrome,
-            inFlightChrome = PlaylistWithMiniChrome,
+            inFlightChrome = PhoneHomeWithMiniChrome,
             finalChrome = PlaylistWithMiniChrome,
         )
+    }
+
+    @Test
+    @Config(qualifiers = PhoneQualifiers)
+    fun homeToPlaylistMovesMiniPlayerDownWithoutAReflowJump() {
+        val fixture =
+            setFixture(
+                MainNavigationLayoutConfig(
+                    useNavigationRail = false,
+                    compactPlayerBar = false,
+                    hasPlayerItem = true,
+                ),
+            )
+        val topPositions = mutableListOf(miniPlayerTop())
+
+        composeRule.mainClock.autoAdvance = false
+        composeRule.runOnIdle {
+            fixture.navController.navigate(PlaylistDestination.Detail.createRoute(FixturePlaylistId))
+        }
+        repeat(10) {
+            composeRule.mainClock.advanceTimeBy(32L)
+            composeRule.waitForIdle()
+            topPositions += miniPlayerTop()
+        }
+        composeRule.mainClock.autoAdvance = true
+        composeRule.waitForIdle()
+
+        topPositions.zipWithNext().forEach { (previous, next) ->
+            assertThat(next + PositionTolerancePx).isAtLeast(previous)
+        }
+        assertThat(topPositions.last()).isGreaterThan(topPositions.first() + PositionTolerancePx)
     }
 
     @Test
@@ -153,8 +183,9 @@ class MainNavigationLayoutComposeTest {
                         showMainNavigation = true,
                         showMiniPlayer = true,
                         selectedMainDestination = MainDestination.Home,
-                        placeChromeBehindContent = false,
+                        isPlayerDestination = false,
                     ),
+                    playerEntryStillVisible = false,
                     snackbarHostState = remember { SnackbarHostState() },
                     navigationRail = {
                         Box(
@@ -273,10 +304,8 @@ class MainNavigationLayoutComposeTest {
                 val currentBackStackEntry by navController.currentBackStackEntryAsState()
                 val visibleEntries by navController.visibleEntries.collectAsState()
                 val currentRoute = currentBackStackEntry?.destination?.route
-                val visibleRoutes =
-                    visibleEntries
-                        .map { entry -> entry.destination.route }
-                        .ifEmpty { listOf(currentRoute ?: MainDestination.Home.route) }
+                val playerEntryStillVisible =
+                    visibleEntries.any { entry -> entry.destination.route == PlayerDestination.NowPlaying.route }
 
                 MainNavigationLayout(
                     config = config,
@@ -284,8 +313,9 @@ class MainNavigationLayoutComposeTest {
                     mainNavigationChromeState(
                         config = config,
                         currentRoute = currentRoute,
-                        visibleRoutes = visibleRoutes,
+                        lastSelectedMainDestination = MainDestination.Home,
                     ),
+                    playerEntryStillVisible = playerEntryStillVisible,
                     snackbarHostState = remember { SnackbarHostState() },
                     navigationRail = {
                         Box(
@@ -385,6 +415,8 @@ class MainNavigationLayoutComposeTest {
 
     private fun navigationHostBounds(): Rect =
         composeRule.onNodeWithTag(NavigationHostTag).fetchSemanticsNode().boundsInRoot
+
+    private fun miniPlayerTop(): Float = composeRule.onNodeWithTag(MiniPlayerTag).fetchSemanticsNode().boundsInRoot.top
 }
 
 @Composable
@@ -396,18 +428,36 @@ private fun FixtureNavHost(navController: NavHostController, config: MainNavigat
         Modifier
             .fillMaxSize()
             .testTag(NavigationHostTag),
-        enterTransition = { slideFadeInto() },
-        exitTransition = { slideFadeOutOf() },
-        popEnterTransition = { slideFadeBackInto() },
-        popExitTransition = { slideFadeBackOutOf() },
+        enterTransition = {
+            if (targetState.destination.route == PlayerDestination.NowPlaying.route) {
+                playerSlideInto()
+            } else {
+                slideFadeInto()
+            }
+        },
+        exitTransition = {
+            if (targetState.destination.route == PlayerDestination.NowPlaying.route) {
+                ExitTransition.None
+            } else {
+                slideFadeOutOf()
+            }
+        },
+        popEnterTransition = {
+            when {
+                targetState.destination.route == PlayerDestination.NowPlaying.route -> playerSlideInto()
+                initialState.destination.route == PlayerDestination.NowPlaying.route -> EnterTransition.None
+                else -> slideFadeBackInto()
+            }
+        },
+        popExitTransition = {
+            if (initialState.destination.route == PlayerDestination.NowPlaying.route) {
+                playerSlideOutOf()
+            } else {
+                slideFadeBackOutOf()
+            }
+        },
     ) {
-        composable(
-            route = MainDestination.Home.route,
-            enterTransition = { fadeIn(tween(XyMotion.Quick)) },
-            exitTransition = { fadeOut(tween(XyMotion.Quick)) },
-            popEnterTransition = { fadeIn(tween(XyMotion.Quick)) },
-            popExitTransition = { fadeOut(tween(XyMotion.Quick)) },
-        ) {
+        composable(route = MainDestination.Home.route) {
             MainNavigationRouteLayout(
                 layout = MainNavigationContentLayout.Primary,
                 config = config,
@@ -418,13 +468,7 @@ private fun FixtureNavHost(navController: NavHostController, config: MainNavigat
                 )
             }
         }
-        composable(
-            route = PlayerDestination.NowPlaying.route,
-            enterTransition = { playerSlideInto() },
-            exitTransition = { playerSlideOutOf() },
-            popEnterTransition = { playerSlideInto() },
-            popExitTransition = { playerSlideOutOf() },
-        ) {
+        composable(route = PlayerDestination.NowPlaying.route) {
             MainNavigationRouteLayout(
                 layout = MainNavigationContentLayout.FullScreen,
                 config = config,
@@ -489,6 +533,7 @@ private const val PhoneQualifiers = "w360dp-h640dp"
 private const val CompactLandscapeQualifiers = "w740dp-h320dp-land"
 private const val FixturePlaylistId = "fixture"
 private const val TransitionSettleMillis = 100L
+private const val PositionTolerancePx = 0.5f
 
 private const val RootTag = "main_navigation_fixture_root"
 private const val NavigationHostTag = "main_navigation_fixture_host"

@@ -39,7 +39,7 @@ class MainNavigationTest {
     }
 
     @Test
-    fun chromeUsesVisibleRouteUnionOnlyForPlayerTransition() {
+    fun chromeTargetsCurrentRouteAndRetainsTheLastMainSelection() {
         val config =
             MainNavigationLayoutConfig(
                 useNavigationRail = false,
@@ -51,50 +51,42 @@ class MainNavigationTest {
             mainNavigationChromeState(
                 config = config,
                 currentRoute = PlayerDestination.NowPlaying.route,
-                visibleRoutes =
-                listOf(
-                    MainDestination.Home.route,
-                    PlayerDestination.NowPlaying.route,
-                ),
-            ),
-        ).isEqualTo(
-            MainNavigationChromeState(
-                showMainNavigation = true,
-                showMiniPlayer = true,
-                selectedMainDestination = MainDestination.Home,
-                placeChromeBehindContent = true,
-            ),
-        )
-        assertThat(
-            mainNavigationChromeState(
-                config = config,
-                currentRoute = PlayerDestination.NowPlaying.route,
-                visibleRoutes = listOf(PlayerDestination.NowPlaying.route),
+                lastSelectedMainDestination = MainDestination.Home,
             ),
         ).isEqualTo(
             MainNavigationChromeState(
                 showMainNavigation = false,
                 showMiniPlayer = false,
-                selectedMainDestination = null,
-                placeChromeBehindContent = true,
+                selectedMainDestination = MainDestination.Home,
+                isPlayerDestination = true,
             ),
         )
         assertThat(
             mainNavigationChromeState(
                 config = config,
                 currentRoute = PlaylistDestination.Detail.route,
-                visibleRoutes =
-                listOf(
-                    MainDestination.Home.route,
-                    PlaylistDestination.Detail.route,
-                ),
+                lastSelectedMainDestination = MainDestination.Home,
             ),
         ).isEqualTo(
             MainNavigationChromeState(
                 showMainNavigation = false,
                 showMiniPlayer = true,
-                selectedMainDestination = null,
-                placeChromeBehindContent = false,
+                selectedMainDestination = MainDestination.Home,
+                isPlayerDestination = false,
+            ),
+        )
+        assertThat(
+            mainNavigationChromeState(
+                config = config,
+                currentRoute = MainDestination.Mine.route,
+                lastSelectedMainDestination = MainDestination.Home,
+            ),
+        ).isEqualTo(
+            MainNavigationChromeState(
+                showMainNavigation = true,
+                showMiniPlayer = true,
+                selectedMainDestination = MainDestination.Mine,
+                isPlayerDestination = false,
             ),
         )
     }
