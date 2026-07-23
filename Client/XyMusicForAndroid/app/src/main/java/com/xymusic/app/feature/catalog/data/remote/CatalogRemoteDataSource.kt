@@ -88,22 +88,26 @@ constructor(
         for (pageNumber in 2..first.lyricTotalPages) {
             val page = body(api.track(trackId, lyricPage = pageNumber, lyricPageSize = LYRIC_PAGE_SIZE))
             validateLyricPage(page, trackId, pageNumber)
-            if (!page.sameTrackAs(first)) {
-                throw CatalogProtocolException("Track metadata changed while paging lyrics")
-            }
-            if (page.lyrics.any { lyric -> lyric.trackVersion != lyricTrackVersion }) {
-                throw CatalogProtocolException("Track lyrics changed version while paging")
-            }
+            requireCatalogProtocol(
+                page.sameTrackAs(first),
+                "Track metadata changed while paging lyrics",
+            )
+            requireCatalogProtocol(
+                page.lyrics.none { lyric -> lyric.trackVersion != lyricTrackVersion },
+                "Track lyrics changed version while paging",
+            )
             page.lyrics.forEach { lyric ->
-                if (!lyricIds.add(lyric.id)) {
-                    throw CatalogProtocolException("Track lyric paging returned duplicate lyric IDs")
-                }
+                requireCatalogProtocol(
+                    lyricIds.add(lyric.id),
+                    "Track lyric paging returned duplicate lyric IDs",
+                )
             }
             lyrics += page.lyrics
         }
-        if (lyrics.size != first.lyricTotal) {
-            throw CatalogProtocolException("Track lyric paging ended before every lyric was returned")
-        }
+        requireCatalogProtocol(
+            lyrics.size == first.lyricTotal,
+            "Track lyric paging ended before every lyric was returned",
+        )
         return first.copy(lyrics = lyrics)
     }
 
@@ -139,30 +143,33 @@ constructor(
         }
 
         fun validateLyricPage(detail: TrackDetailDto, trackId: String, page: Int) {
-            if (detail.id != trackId) {
-                throw CatalogProtocolException("Track detail ID mismatch while paging lyrics")
-            }
-            if (detail.lyricTotal < 0 || detail.lyricTotalPages < 0) {
-                throw CatalogProtocolException("Track lyric pagination totals cannot be negative")
-            }
-            if (detail.lyricPage != page || detail.lyricPageSize != LYRIC_PAGE_SIZE) {
-                throw CatalogProtocolException("Track lyric pagination did not return the requested page")
-            }
+            requireCatalogProtocol(
+                detail.id == trackId,
+                "Track detail ID mismatch while paging lyrics",
+            )
+            requireCatalogProtocol(
+                detail.lyricTotal >= 0 && detail.lyricTotalPages >= 0,
+                "Track lyric pagination totals cannot be negative",
+            )
+            requireCatalogProtocol(
+                detail.lyricPage == page && detail.lyricPageSize == LYRIC_PAGE_SIZE,
+                "Track lyric pagination did not return the requested page",
+            )
             val expectedPages =
                 if (detail.lyricTotal == 0) {
                     0
                 } else {
                     ((detail.lyricTotal.toLong() + LYRIC_PAGE_SIZE - 1) / LYRIC_PAGE_SIZE).toInt()
                 }
-            if (
-                detail.lyricTotalPages != expectedPages &&
-                !(detail.lyricTotal == 0 && detail.lyricTotalPages == 1)
-            ) {
-                throw CatalogProtocolException("Track lyric pagination totals are inconsistent")
-            }
-            if (detail.lyrics.size > LYRIC_PAGE_SIZE) {
-                throw CatalogProtocolException("Track lyric page exceeds the requested limit")
-            }
+            requireCatalogProtocol(
+                detail.lyricTotalPages == expectedPages ||
+                    (detail.lyricTotal == 0 && detail.lyricTotalPages == 1),
+                "Track lyric pagination totals are inconsistent",
+            )
+            requireCatalogProtocol(
+                detail.lyrics.size <= LYRIC_PAGE_SIZE,
+                "Track lyric page exceeds the requested limit",
+            )
             val expectedItemCount =
                 when {
                     detail.lyricTotal == 0 -> 0
@@ -173,33 +180,42 @@ constructor(
                                 (detail.lyricTotalPages - 1L) * LYRIC_PAGE_SIZE
                             ).toInt()
                 }
-            if (detail.lyrics.size != expectedItemCount) {
-                throw CatalogProtocolException("Track lyric page item count is inconsistent")
-            }
-            if (detail.lyrics.map(LyricsResourceDto::id).distinct().size != detail.lyrics.size) {
-                throw CatalogProtocolException("Track lyric page contains duplicate lyric IDs")
-            }
-            if (detail.lyrics.any { lyric -> lyric.trackId != trackId }) {
-                throw CatalogProtocolException("Track lyric page contains lyrics for another track")
-            }
-            if (detail.lyrics.map(LyricsResourceDto::trackVersion).distinct().size > 1) {
-                throw CatalogProtocolException("Track lyric page contains multiple track versions")
+            requireCatalogProtocol(
+                detail.lyrics.size == expectedItemCount,
+                "Track lyric page item count is inconsistent",
+            )
+            requireCatalogProtocol(
+                detail.lyrics.map(LyricsResourceDto::id).distinct().size == detail.lyrics.size,
+                "Track lyric page contains duplicate lyric IDs",
+            )
+            requireCatalogProtocol(
+                detail.lyrics.none { lyric -> lyric.trackId != trackId },
+                "Track lyric page contains lyrics for another track",
+            )
+            requireCatalogProtocol(
+                detail.lyrics.map(LyricsResourceDto::trackVersion).distinct().size <= 1,
+                "Track lyric page contains multiple track versions",
+            )
+        }
+
+        fun requireCatalogProtocol(condition: Boolean, message: String) {
+            if (!condition) {
+                throw CatalogProtocolException(message)
             }
         }
     }
 }
 
-private fun TrackDetailDto.sameTrackAs(other: TrackDetailDto): Boolean =
-    id == other.id &&
-        title == other.title &&
-        artists == other.artists &&
-        album == other.album &&
-        durationMs == other.durationMs &&
-        trackNumber == other.trackNumber &&
-        discNumber == other.discNumber &&
-        isFavorite == other.isFavorite &&
-        publishedAt == other.publishedAt &&
-        lyricTotal == other.lyricTotal &&
-        lyricTotalPages == other.lyricTotalPages
+private fun TrackDetailDto.sameTrackAs(other: TrackDetailDto): Boolean = id == other.id &&
+    title == other.title &&
+    artists == other.artists &&
+    album == other.album &&
+    durationMs == other.durationMs &&
+    trackNumber == other.trackNumber &&
+    discNumber == other.discNumber &&
+    isFavorite == other.isFavorite &&
+    publishedAt == other.publishedAt &&
+    lyricTotal == other.lyricTotal &&
+    lyricTotalPages == other.lyricTotalPages
 
 class CatalogRemoteException(val domainError: DomainError) : IOException("Catalog request was rejected")
