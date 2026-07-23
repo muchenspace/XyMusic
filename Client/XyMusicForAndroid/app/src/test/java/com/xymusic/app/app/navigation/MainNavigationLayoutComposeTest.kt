@@ -12,7 +12,9 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.onSizeChanged
@@ -54,7 +56,7 @@ class MainNavigationLayoutComposeTest {
     val composeRule = createComposeRule()
 
     @Test
-    @Config(qualifiers = PhoneQualifiers)
+    @Config(qualifiers = PHONE_QUALIFIERS)
     fun homeWithMiniPlayerToPlayerKeepsPhoneNavigationHostStable() {
         verifyTransition(
             config =
@@ -73,7 +75,7 @@ class MainNavigationLayoutComposeTest {
     }
 
     @Test
-    @Config(qualifiers = PhoneQualifiers)
+    @Config(qualifiers = PHONE_QUALIFIERS)
     fun playerPopKeepsThePlayerComposedUntilTheReturnTransitionCompletes() {
         val fixture =
             setFixture(
@@ -88,7 +90,7 @@ class MainNavigationLayoutComposeTest {
         composeRule.runOnIdle {
             fixture.navController.navigate(PlayerDestination.NowPlaying.route)
         }
-        composeRule.mainClock.advanceTimeBy(XyMotion.Emphasized + TransitionSettleMillis)
+        composeRule.mainClock.advanceTimeBy(XyMotion.Emphasized + TRANSITION_SETTLE_MILLIS)
         composeRule.waitForIdle()
 
         composeRule.runOnIdle { fixture.navController.navigateUp() }
@@ -97,19 +99,104 @@ class MainNavigationLayoutComposeTest {
         composeRule.mainClock.advanceTimeByFrame()
         composeRule.waitForIdle()
 
-        composeRule.onNodeWithTag(PlayerTag).assertExists()
-        composeRule.onNodeWithTag(HomeTag).assertExists()
+        composeRule.onNodeWithTag(PLAYER_TAG).assertExists()
+        composeRule.onNodeWithTag(HOME_TAG).assertExists()
 
-        composeRule.mainClock.advanceTimeBy(XyMotion.Slow + TransitionSettleMillis)
+        composeRule.mainClock.advanceTimeBy(XyMotion.Slow + TRANSITION_SETTLE_MILLIS)
         composeRule.mainClock.autoAdvance = true
         composeRule.waitForIdle()
 
-        composeRule.onNodeWithTag(PlayerTag).assertDoesNotExist()
-        composeRule.onNodeWithTag(HomeTag).assertExists()
+        composeRule.onNodeWithTag(PLAYER_TAG).assertDoesNotExist()
+        composeRule.onNodeWithTag(HOME_TAG).assertExists()
     }
 
     @Test
-    @Config(qualifiers = PhoneQualifiers)
+    @Config(qualifiers = PHONE_QUALIFIERS)
+    fun playerReturnAnimatesPrimaryContentInsetsWithChrome() {
+        val config =
+            MainNavigationLayoutConfig(
+                useNavigationRail = false,
+                compactPlayerBar = false,
+                hasPlayerItem = true,
+            )
+        var chromeState by
+            mutableStateOf(
+                MainNavigationChromeState(
+                    showMainNavigation = false,
+                    showMiniPlayer = false,
+                    selectedMainDestination = MainDestination.Home,
+                    isPlayerDestination = true,
+                ),
+            )
+        val contentHeights = mutableListOf<Int>()
+
+        composeRule.setContent {
+            XyMusicTheme(dynamicColor = false) {
+                MainNavigationLayout(
+                    config = config,
+                    chromeState = chromeState,
+                    playerEntryStillVisible = true,
+                    snackbarHostState = remember { SnackbarHostState() },
+                    navigationRail = {},
+                    bottomNavigation = {
+                        Box(
+                            modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .height(MainNavigationBarHeight),
+                        )
+                    },
+                    miniPlayer = { modifier ->
+                        Box(
+                            modifier =
+                            modifier
+                                .fillMaxWidth()
+                                .height(config.miniPlayerHeight),
+                        )
+                    },
+                ) { chromeInsets ->
+                    MainNavigationRouteLayout(
+                        layout = MainNavigationContentLayout.Primary,
+                        config = config,
+                        chromeInsets = chromeInsets,
+                    ) {
+                        FixturePage(
+                            tag = PRIMARY_INSET_PAGE_TAG,
+                            onSizeChanged = { size -> contentHeights += size.height },
+                        )
+                    }
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.mainClock.autoAdvance = false
+        composeRule.runOnIdle {
+            chromeState =
+                MainNavigationChromeState(
+                    showMainNavigation = true,
+                    showMiniPlayer = true,
+                    selectedMainDestination = MainDestination.Home,
+                    isPlayerDestination = false,
+                )
+        }
+        repeat(CHROME_MOTION_SAMPLE_COUNT) {
+            composeRule.mainClock.advanceTimeBy(CHROME_MOTION_SAMPLE_MILLIS)
+            composeRule.waitForIdle()
+        }
+        composeRule.mainClock.autoAdvance = true
+        composeRule.waitForIdle()
+
+        assertThat(contentHeights.first()).isGreaterThan(contentHeights.last())
+        assertThat(contentHeights.distinct().size).isGreaterThan(2)
+        contentHeights.zipWithNext().forEach { (previous, next) ->
+            assertThat(next).isAtMost(previous)
+        }
+        assertThat(contentHeights.drop(1).any { height -> height < contentHeights.first() }).isTrue()
+    }
+
+    @Test
+    @Config(qualifiers = PHONE_QUALIFIERS)
     fun homeWithoutMiniPlayerToPlaylistKeepsPhoneNavigationHostStable() {
         verifyTransition(
             config =
@@ -118,7 +205,7 @@ class MainNavigationLayoutComposeTest {
                 compactPlayerBar = false,
                 hasPlayerItem = false,
             ),
-            destinationRoute = PlaylistDestination.Detail.createRoute(FixturePlaylistId),
+            destinationRoute = PlaylistDestination.Detail.createRoute(FIXTURE_PLAYLIST_ID),
             durationMillis = XyMotion.Standard,
             target = FixtureTarget.Playlist,
             initialChrome = PhoneHomeWithoutMiniChrome,
@@ -128,7 +215,7 @@ class MainNavigationLayoutComposeTest {
     }
 
     @Test
-    @Config(qualifiers = PhoneQualifiers)
+    @Config(qualifiers = PHONE_QUALIFIERS)
     fun homeWithMiniPlayerToPlaylistKeepsPhoneNavigationHostStable() {
         verifyTransition(
             config =
@@ -137,7 +224,7 @@ class MainNavigationLayoutComposeTest {
                 compactPlayerBar = false,
                 hasPlayerItem = true,
             ),
-            destinationRoute = PlaylistDestination.Detail.createRoute(FixturePlaylistId),
+            destinationRoute = PlaylistDestination.Detail.createRoute(FIXTURE_PLAYLIST_ID),
             durationMillis = XyMotion.Standard,
             target = FixtureTarget.Playlist,
             initialChrome = PhoneHomeWithMiniChrome,
@@ -147,7 +234,7 @@ class MainNavigationLayoutComposeTest {
     }
 
     @Test
-    @Config(qualifiers = PhoneQualifiers)
+    @Config(qualifiers = PHONE_QUALIFIERS)
     fun homeToPlaylistMovesMiniPlayerDownWithoutAReflowJump() {
         val fixture =
             setFixture(
@@ -161,7 +248,7 @@ class MainNavigationLayoutComposeTest {
 
         composeRule.mainClock.autoAdvance = false
         composeRule.runOnIdle {
-            fixture.navController.navigate(PlaylistDestination.Detail.createRoute(FixturePlaylistId))
+            fixture.navController.navigate(PlaylistDestination.Detail.createRoute(FIXTURE_PLAYLIST_ID))
         }
         repeat(10) {
             composeRule.mainClock.advanceTimeBy(32L)
@@ -172,13 +259,13 @@ class MainNavigationLayoutComposeTest {
         composeRule.waitForIdle()
 
         topPositions.zipWithNext().forEach { (previous, next) ->
-            assertThat(next + PositionTolerancePx).isAtLeast(previous)
+            assertThat(next + POSITION_TOLERANCE_PX).isAtLeast(previous)
         }
-        assertThat(topPositions.last()).isGreaterThan(topPositions.first() + PositionTolerancePx)
+        assertThat(topPositions.last()).isGreaterThan(topPositions.first() + POSITION_TOLERANCE_PX)
     }
 
     @Test
-    @Config(qualifiers = CompactLandscapeQualifiers)
+    @Config(qualifiers = COMPACT_LANDSCAPE_QUALIFIERS)
     fun homeWithMiniPlayerToPlayerKeepsLandscapeNavigationHostStable() {
         verifyTransition(
             config =
@@ -197,7 +284,7 @@ class MainNavigationLayoutComposeTest {
     }
 
     @Test
-    @Config(qualifiers = CompactLandscapeQualifiers)
+    @Config(qualifiers = COMPACT_LANDSCAPE_QUALIFIERS)
     fun landscapeChromeReceivesTouchAboveNavigationContent() {
         val config =
             MainNavigationLayoutConfig(
@@ -229,7 +316,7 @@ class MainNavigationLayoutComposeTest {
                                 .width(MainNavigationRailWidth)
                                 .fillMaxHeight()
                                 .clickable { railClicks++ }
-                                .testTag(NavigationRailTouchTag),
+                                .testTag(NAVIGATION_RAIL_TOUCH_TAG),
                         )
                     },
                     bottomNavigation = {},
@@ -240,23 +327,23 @@ class MainNavigationLayoutComposeTest {
                                 .fillMaxWidth()
                                 .height(config.miniPlayerHeight)
                                 .clickable { miniPlayerClicks++ }
-                                .testTag(MiniPlayerTouchTag),
+                                .testTag(MINI_PLAYER_TOUCH_TAG),
                         )
                     },
-                ) {
+                ) { _ ->
                     Box(
                         modifier =
                         Modifier
                             .fillMaxSize()
                             .clickable { contentClicks++ }
-                            .testTag(NavigationContentTouchTag),
+                            .testTag(NAVIGATION_CONTENT_TOUCH_TAG),
                     )
                 }
             }
         }
 
-        composeRule.onNodeWithTag(NavigationRailTouchTag).performTouchInput { click() }
-        composeRule.onNodeWithTag(MiniPlayerTouchTag).performTouchInput { click() }
+        composeRule.onNodeWithTag(NAVIGATION_RAIL_TOUCH_TAG).performTouchInput { click() }
+        composeRule.onNodeWithTag(MINI_PLAYER_TOUCH_TAG).performTouchInput { click() }
 
         composeRule.runOnIdle {
             assertThat(railClicks).isEqualTo(1)
@@ -276,11 +363,9 @@ class MainNavigationLayoutComposeTest {
     ) {
         val fixture = setFixture(config)
         val initialHostBounds = navigationHostBounds()
-        val rootBounds = composeRule.onNodeWithTag(RootTag).fetchSemanticsNode().boundsInRoot
-        val initialHomeSize = fixture.probe.homeSize
+        val rootBounds = composeRule.onNodeWithTag(ROOT_TAG).fetchSemanticsNode().boundsInRoot
 
         assertThat(initialHostBounds).isEqualTo(rootBounds)
-        assertThat(initialHomeSize).isNotNull()
         assertChrome(initialChrome)
 
         composeRule.mainClock.autoAdvance = false
@@ -291,9 +376,7 @@ class MainNavigationLayoutComposeTest {
         composeRule.waitForIdle()
 
         assertShellFrame(
-            fixture = fixture,
             initialHostBounds = initialHostBounds,
-            initialHomeSize = initialHomeSize,
             expectedChrome = inFlightChrome,
         )
 
@@ -305,7 +388,6 @@ class MainNavigationLayoutComposeTest {
             fixture = fixture,
             target = target,
             initialHostBounds = initialHostBounds,
-            initialHomeSize = initialHomeSize,
             expectedChrome = inFlightChrome,
         )
 
@@ -316,11 +398,10 @@ class MainNavigationLayoutComposeTest {
             fixture = fixture,
             target = target,
             initialHostBounds = initialHostBounds,
-            initialHomeSize = initialHomeSize,
             expectedChrome = inFlightChrome,
         )
 
-        composeRule.mainClock.advanceTimeBy(durationMillis + TransitionSettleMillis)
+        composeRule.mainClock.advanceTimeBy(durationMillis + TRANSITION_SETTLE_MILLIS)
         composeRule.mainClock.autoAdvance = true
         composeRule.waitForIdle()
 
@@ -358,7 +439,7 @@ class MainNavigationLayoutComposeTest {
                             Modifier
                                 .width(MainNavigationRailWidth)
                                 .fillMaxHeight()
-                                .testTag(NavigationRailTag),
+                                .testTag(NAVIGATION_RAIL_TAG),
                         )
                     },
                     bottomNavigation = {
@@ -367,7 +448,7 @@ class MainNavigationLayoutComposeTest {
                             Modifier
                                 .fillMaxWidth()
                                 .height(MainNavigationBarHeight)
-                                .testTag(BottomNavigationTag),
+                                .testTag(BOTTOM_NAVIGATION_TAG),
                         )
                     },
                     miniPlayer = { modifier ->
@@ -376,14 +457,15 @@ class MainNavigationLayoutComposeTest {
                             modifier
                                 .fillMaxWidth()
                                 .height(config.miniPlayerHeight)
-                                .testTag(MiniPlayerTag),
+                                .testTag(MINI_PLAYER_TAG),
                         )
                     },
-                    modifier = Modifier.testTag(RootTag),
-                ) {
+                    modifier = Modifier.testTag(ROOT_TAG),
+                ) { chromeInsets ->
                     FixtureNavHost(
                         navController = navController,
                         config = config,
+                        chromeInsets = chromeInsets,
                         probe = probe,
                     )
                 }
@@ -398,26 +480,20 @@ class MainNavigationLayoutComposeTest {
         fixture: NavigationFixture,
         target: FixtureTarget,
         initialHostBounds: Rect,
-        initialHomeSize: IntSize?,
         expectedChrome: ChromeExpectation,
     ) {
         assertShellFrame(
-            fixture = fixture,
             initialHostBounds = initialHostBounds,
-            initialHomeSize = initialHomeSize,
             expectedChrome = expectedChrome,
         )
         assertTargetSize(fixture, target, initialHostBounds)
     }
 
     private fun assertShellFrame(
-        fixture: NavigationFixture,
         initialHostBounds: Rect,
-        initialHomeSize: IntSize?,
         expectedChrome: ChromeExpectation,
     ) {
         assertThat(navigationHostBounds()).isEqualTo(initialHostBounds)
-        assertThat(fixture.probe.homeSize).isEqualTo(initialHomeSize)
         assertChrome(expectedChrome)
     }
 
@@ -434,9 +510,9 @@ class MainNavigationLayoutComposeTest {
     }
 
     private fun assertChrome(expectation: ChromeExpectation) {
-        assertNodePresence(BottomNavigationTag, expectation.bottomNavigation)
-        assertNodePresence(NavigationRailTag, expectation.navigationRail)
-        assertNodePresence(MiniPlayerTag, expectation.miniPlayer)
+        assertNodePresence(BOTTOM_NAVIGATION_TAG, expectation.bottomNavigation)
+        assertNodePresence(NAVIGATION_RAIL_TAG, expectation.navigationRail)
+        assertNodePresence(MINI_PLAYER_TAG, expectation.miniPlayer)
     }
 
     private fun assertNodePresence(tag: String, expected: Boolean) {
@@ -449,20 +525,25 @@ class MainNavigationLayoutComposeTest {
     }
 
     private fun navigationHostBounds(): Rect =
-        composeRule.onNodeWithTag(NavigationHostTag).fetchSemanticsNode().boundsInRoot
+        composeRule.onNodeWithTag(NAVIGATION_HOST_TAG).fetchSemanticsNode().boundsInRoot
 
-    private fun miniPlayerTop(): Float = composeRule.onNodeWithTag(MiniPlayerTag).fetchSemanticsNode().boundsInRoot.top
+    private fun miniPlayerTop(): Float = composeRule.onNodeWithTag(MINI_PLAYER_TAG).fetchSemanticsNode().boundsInRoot.top
 }
 
 @Composable
-private fun FixtureNavHost(navController: NavHostController, config: MainNavigationLayoutConfig, probe: LayoutProbe) {
+private fun FixtureNavHost(
+    navController: NavHostController,
+    config: MainNavigationLayoutConfig,
+    chromeInsets: MainNavigationChromeInsets,
+    probe: LayoutProbe,
+) {
     NavHost(
         navController = navController,
         startDestination = MainDestination.Home.route,
         modifier =
         Modifier
             .fillMaxSize()
-            .testTag(NavigationHostTag),
+            .testTag(NAVIGATION_HOST_TAG),
         enterTransition = {
             if (targetState.destination.route == PlayerDestination.NowPlaying.route) {
                 playerSlideInto()
@@ -496,9 +577,10 @@ private fun FixtureNavHost(navController: NavHostController, config: MainNavigat
             MainNavigationRouteLayout(
                 layout = MainNavigationContentLayout.Primary,
                 config = config,
+                chromeInsets = chromeInsets,
             ) {
                 FixturePage(
-                    tag = HomeTag,
+                    tag = HOME_TAG,
                     onSizeChanged = { size -> probe.homeSize = size },
                 )
             }
@@ -507,9 +589,10 @@ private fun FixtureNavHost(navController: NavHostController, config: MainNavigat
             MainNavigationRouteLayout(
                 layout = MainNavigationContentLayout.FullScreen,
                 config = config,
+                chromeInsets = chromeInsets,
             ) {
                 FixturePage(
-                    tag = PlayerTag,
+                    tag = PLAYER_TAG,
                     onSizeChanged = { size -> probe.playerSize = size },
                 )
             }
@@ -524,9 +607,10 @@ private fun FixtureNavHost(navController: NavHostController, config: MainNavigat
             MainNavigationRouteLayout(
                 layout = MainNavigationContentLayout.EdgeToEdge,
                 config = config,
+                chromeInsets = chromeInsets,
             ) {
                 FixturePage(
-                    tag = PlaylistTag,
+                    tag = PLAYLIST_TAG,
                     onSizeChanged = { size -> probe.playlistSize = size },
                 )
             }
@@ -564,23 +648,26 @@ private data class ChromeExpectation(
     val miniPlayer: Boolean = false,
 )
 
-private const val PhoneQualifiers = "w360dp-h640dp"
-private const val CompactLandscapeQualifiers = "w740dp-h320dp-land"
-private const val FixturePlaylistId = "fixture"
-private const val TransitionSettleMillis = 100L
-private const val PositionTolerancePx = 0.5f
+private const val PHONE_QUALIFIERS = "w360dp-h640dp"
+private const val COMPACT_LANDSCAPE_QUALIFIERS = "w740dp-h320dp-land"
+private const val FIXTURE_PLAYLIST_ID = "fixture"
+private const val TRANSITION_SETTLE_MILLIS = 100L
+private const val POSITION_TOLERANCE_PX = 0.5f
+private const val CHROME_MOTION_SAMPLE_COUNT = 10
+private const val CHROME_MOTION_SAMPLE_MILLIS = 50L
 
-private const val RootTag = "main_navigation_fixture_root"
-private const val NavigationHostTag = "main_navigation_fixture_host"
-private const val HomeTag = "main_navigation_fixture_home"
-private const val PlayerTag = "main_navigation_fixture_player"
-private const val PlaylistTag = "main_navigation_fixture_playlist"
-private const val BottomNavigationTag = "main_navigation_fixture_bottom_navigation"
-private const val NavigationRailTag = "main_navigation_fixture_rail"
-private const val MiniPlayerTag = "main_navigation_fixture_mini_player"
-private const val NavigationRailTouchTag = "main_navigation_fixture_rail_touch"
-private const val MiniPlayerTouchTag = "main_navigation_fixture_mini_player_touch"
-private const val NavigationContentTouchTag = "main_navigation_fixture_content_touch"
+private const val ROOT_TAG = "main_navigation_fixture_root"
+private const val NAVIGATION_HOST_TAG = "main_navigation_fixture_host"
+private const val HOME_TAG = "main_navigation_fixture_home"
+private const val PLAYER_TAG = "main_navigation_fixture_player"
+private const val PLAYLIST_TAG = "main_navigation_fixture_playlist"
+private const val BOTTOM_NAVIGATION_TAG = "main_navigation_fixture_bottom_navigation"
+private const val NAVIGATION_RAIL_TAG = "main_navigation_fixture_rail"
+private const val MINI_PLAYER_TAG = "main_navigation_fixture_mini_player"
+private const val NAVIGATION_RAIL_TOUCH_TAG = "main_navigation_fixture_rail_touch"
+private const val MINI_PLAYER_TOUCH_TAG = "main_navigation_fixture_mini_player_touch"
+private const val NAVIGATION_CONTENT_TOUCH_TAG = "main_navigation_fixture_content_touch"
+private const val PRIMARY_INSET_PAGE_TAG = "main_navigation_fixture_primary_inset_page"
 
 private val HiddenChrome = ChromeExpectation()
 private val PhoneHomeWithoutMiniChrome = ChromeExpectation(bottomNavigation = true)

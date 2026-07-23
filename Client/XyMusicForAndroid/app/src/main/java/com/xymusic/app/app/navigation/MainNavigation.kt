@@ -133,7 +133,7 @@ fun MainNavigation(
                     modifier = miniPlayerModifier,
                 )
             },
-        ) {
+        ) { chromeInsets ->
             MainNavHost(
                 navController = navController,
                 playerViewModel = playerViewModel,
@@ -147,6 +147,7 @@ fun MainNavigation(
                 serverEndpoint = serverEndpoint,
                 onServerEndpointChanged = onServerEndpointChanged,
                 layoutConfig = layoutConfig,
+                chromeInsets = chromeInsets,
                 modifier = Modifier.fillMaxSize(),
             )
         }
