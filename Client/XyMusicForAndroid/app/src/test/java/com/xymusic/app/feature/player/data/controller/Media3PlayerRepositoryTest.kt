@@ -6,6 +6,7 @@ import com.xymusic.app.feature.player.domain.model.PlaybackState
 import com.xymusic.app.feature.player.domain.model.PlayerConnectionState
 import com.xymusic.app.feature.player.domain.model.PlayerFailure
 import com.xymusic.app.feature.player.domain.model.PlayerQueueItem
+import com.xymusic.app.feature.player.domain.model.PlayerState
 import com.xymusic.app.feature.player.service.PlaybackSessionCommands
 import org.junit.Test
 
@@ -52,6 +53,98 @@ class Media3PlayerRepositoryTest {
                 hasCurrentMediaItem = false,
             ),
         ).isFalse()
+    }
+
+    @Test
+    fun progressSampleRefreshesTheAnchorEvenWhenProgressValuesAreUnchanged() {
+        val previous =
+            PlayerState(
+                currentQueueItemId = "queue-1",
+                isPlaying = true,
+                positionMs = 1_000,
+                positionAnchorElapsedRealtimeMs = 10_000,
+                positionDiscontinuitySequence = 3,
+                bufferedPositionMs = 2_000,
+                durationMs = 10_000,
+            )
+
+        val sampled =
+            playerStateWithProgressSample(
+                previous = previous,
+                positionMs = 1_000,
+                bufferedPositionMs = 2_000,
+                durationMs = 10_000,
+                sampledAtElapsedRealtimeMs = 11_000,
+            )
+
+        assertThat(sampled).isNotEqualTo(previous)
+        assertThat(sampled.positionAnchorElapsedRealtimeMs).isEqualTo(11_000)
+        assertThat(sampled.positionDiscontinuitySequence).isEqualTo(3)
+    }
+
+    @Test
+    fun positionDiscontinuitySequenceChangesForExplicitAndImplicitDiscontinuities() {
+        val previous =
+            PlayerState(
+                currentQueueItemId = "queue-1",
+                isPlaying = true,
+                positionDiscontinuitySequence = 3,
+            )
+
+        assertThat(
+            nextPositionDiscontinuitySequence(
+                previous = previous,
+                currentQueueItemId = "queue-1",
+                isPlaying = true,
+                explicitDiscontinuity = false,
+            ),
+        ).isEqualTo(3)
+        assertThat(
+            nextPositionDiscontinuitySequence(
+                previous = previous,
+                currentQueueItemId = "queue-1",
+                isPlaying = true,
+                explicitDiscontinuity = true,
+            ),
+        ).isEqualTo(4)
+        assertThat(
+            nextPositionDiscontinuitySequence(
+                previous = previous,
+                currentQueueItemId = "queue-2",
+                isPlaying = true,
+                explicitDiscontinuity = false,
+            ),
+        ).isEqualTo(4)
+        assertThat(
+            nextPositionDiscontinuitySequence(
+                previous = previous,
+                currentQueueItemId = "queue-1",
+                isPlaying = false,
+                explicitDiscontinuity = false,
+            ),
+        ).isEqualTo(4)
+    }
+
+    @Test
+    fun positionDiscontinuityIsNotMarkedForNoOpOrFailedCommands() {
+        assertThat(
+            shouldMarkPositionDiscontinuity(
+                commandSucceeded = true,
+                didChangePosition = false,
+            ),
+        ).isFalse()
+        assertThat(
+            shouldMarkPositionDiscontinuity(
+                commandSucceeded = false,
+                didChangePosition = true,
+            ),
+        ).isFalse()
+        assertThat(
+            shouldMarkPositionDiscontinuity(
+                commandSucceeded = true,
+                didChangePosition = true,
+            ),
+        ).isTrue()
     }
 
     @Test

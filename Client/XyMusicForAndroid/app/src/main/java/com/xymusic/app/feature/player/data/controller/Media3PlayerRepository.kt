@@ -94,6 +94,9 @@ constructor(
                     rebuildQueue =
                     events.contains(Player.EVENT_TIMELINE_CHANGED) ||
                         events.contains(Player.EVENT_MEDIA_METADATA_CHANGED),
+                    positionDiscontinuity =
+                    events.contains(Player.EVENT_POSITION_DISCONTINUITY) ||
+                        events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION),
                 )
             }
         }
@@ -140,7 +143,10 @@ constructor(
                     null
                 }
             } ?: return PlayerResult.Failure(PlayerFailure.InvalidQueue)
-        return withController(rebuildQueueAfterCommand = true) { controller ->
+        return withController(
+            rebuildQueueAfterCommand = true,
+            positionDiscontinuity = { true },
+        ) { controller ->
             if (mediaItems.isEmpty()) {
                 controller.clearMediaItems()
             } else {
@@ -205,25 +211,48 @@ constructor(
 
     override suspend fun seekTo(positionMs: Long): PlayerResult<Unit> {
         if (positionMs < 0) return invalidQueue()
-        return withController { it.seekTo(positionMs) }
+        var didChangePosition = false
+        return withController(positionDiscontinuity = { didChangePosition }) { controller ->
+            didChangePosition = controller.currentPosition.coerceAtLeast(0) != positionMs
+            controller.seekTo(positionMs)
+        }
     }
 
     override suspend fun seekToQueueItem(queueItemId: String, positionMs: Long): PlayerResult<Unit> {
         if (positionMs < 0) return invalidQueue()
-        return withController {
-            val index = indexOf(it, queueItemId)
+        var didChangePosition = false
+        return withController(positionDiscontinuity = { didChangePosition }) { controller ->
+            val index = indexOf(controller, queueItemId)
             if (index < 0) return@withController invalidQueue()
-            it.seekTo(index, positionMs)
+            didChangePosition =
+                index != controller.currentMediaItemIndex ||
+                    controller.currentPosition.coerceAtLeast(0) != positionMs
+            controller.seekTo(index, positionMs)
             PlayerResult.Success(Unit)
         }
     }
 
-    override suspend fun skipToNext(): PlayerResult<Unit> = withController {
-        if (it.hasNextMediaItem()) it.seekToNextMediaItem()
+    override suspend fun skipToNext(): PlayerResult<Unit> {
+        var didChangePosition = false
+        return withController(positionDiscontinuity = { didChangePosition }) { controller ->
+            if (controller.hasNextMediaItem()) {
+                didChangePosition = true
+                controller.seekToNextMediaItem()
+            }
+        }
     }
 
-    override suspend fun skipToPrevious(): PlayerResult<Unit> = withController {
-        if (it.hasPreviousMediaItem()) it.seekToPreviousMediaItem() else it.seekTo(0)
+    override suspend fun skipToPrevious(): PlayerResult<Unit> {
+        var didChangePosition = false
+        return withController(positionDiscontinuity = { didChangePosition }) { controller ->
+            if (controller.hasPreviousMediaItem()) {
+                didChangePosition = true
+                controller.seekToPreviousMediaItem()
+            } else {
+                didChangePosition = controller.currentPosition.coerceAtLeast(0) != 0L
+                controller.seekTo(0)
+            }
+        }
     }
 
     override suspend fun setRepeatMode(mode: RepeatMode): PlayerResult<Unit> = withController {
@@ -279,6 +308,7 @@ constructor(
 
     private suspend fun withController(
         rebuildQueueAfterCommand: Boolean = false,
+        positionDiscontinuity: () -> Boolean = { false },
         command: suspend (MediaController) -> Any?,
     ): PlayerResult<Unit> = withContext(Dispatchers.Main.immediate) {
         val controller =
@@ -290,7 +320,15 @@ constructor(
             } ?: return@withContext PlayerResult.Failure(PlayerFailure.ConnectionUnavailable)
         try {
             val result = command(controller)
-            updateState(controller, rebuildQueueAfterCommand)
+            updateState(
+                player = controller,
+                rebuildQueue = rebuildQueueAfterCommand,
+                positionDiscontinuity =
+                    shouldMarkPositionDiscontinuity(
+                        commandSucceeded = result !is PlayerResult.Failure,
+                        didChangePosition = positionDiscontinuity(),
+                    ),
+            )
             if (result is PlayerResult.Failure) result else PlayerResult.Success(Unit)
         } catch (failure: CancellationException) {
             throw failure
@@ -333,23 +371,26 @@ constructor(
         val positionMs = player.currentPosition.coerceAtLeast(0)
         val bufferedPositionMs = player.bufferedPosition.coerceAtLeast(0)
         val durationMs = player.duration.takeUnless { it == C.TIME_UNSET }?.coerceAtLeast(0) ?: 0
-        if (
-            previous.positionMs != positionMs ||
-            previous.bufferedPositionMs != bufferedPositionMs ||
-            previous.durationMs != durationMs
-        ) {
-            mutableState.value =
-                previous.copy(
-                    positionMs = positionMs,
-                    bufferedPositionMs = bufferedPositionMs,
-                    durationMs = durationMs,
-                )
-        }
+        mutableState.value =
+            playerStateWithProgressSample(
+                previous = previous,
+                positionMs = positionMs,
+                bufferedPositionMs = bufferedPositionMs,
+                durationMs = durationMs,
+                sampledAtElapsedRealtimeMs = SystemClock.elapsedRealtime(),
+            )
     }
 
-    private fun updateState(player: Player, rebuildQueue: Boolean) {
+    private fun updateState(
+        player: Player,
+        rebuildQueue: Boolean,
+        positionDiscontinuity: Boolean = false,
+    ) {
         if (rebuildQueue) scheduleQueueMapping(player)
         val previous = mutableState.value
+        val currentQueueItemId = player.currentMediaItem?.mediaId
+        val isPlaying = player.isPlaying
+        val sampledAtElapsedRealtimeMs = SystemClock.elapsedRealtime()
         mutableState.value =
             PlayerState(
                 connectionState = PlayerConnectionState.CONNECTED,
@@ -361,9 +402,17 @@ constructor(
                     else -> PlaybackState.IDLE
                 },
                 queue = previous.queue,
-                currentQueueItemId = player.currentMediaItem?.mediaId,
-                isPlaying = player.isPlaying,
+                currentQueueItemId = currentQueueItemId,
+                isPlaying = isPlaying,
                 positionMs = player.currentPosition.coerceAtLeast(0),
+                positionAnchorElapsedRealtimeMs = sampledAtElapsedRealtimeMs,
+                positionDiscontinuitySequence =
+                nextPositionDiscontinuitySequence(
+                    previous = previous,
+                    currentQueueItemId = currentQueueItemId,
+                    isPlaying = isPlaying,
+                    explicitDiscontinuity = positionDiscontinuity,
+                ),
                 bufferedPositionMs = player.bufferedPosition.coerceAtLeast(0),
                 durationMs = player.duration.takeUnless { it == C.TIME_UNSET }?.coerceAtLeast(0) ?: 0,
                 repeatMode =
@@ -597,6 +646,42 @@ internal fun remainingSleepTimerMs(deadlineElapsedRealtimeMs: Long?, nowElapsedR
     deadlineElapsedRealtimeMs
         ?.takeIf { it > nowElapsedRealtimeMs }
         ?.minus(nowElapsedRealtimeMs)
+
+internal fun playerStateWithProgressSample(
+    previous: PlayerState,
+    positionMs: Long,
+    bufferedPositionMs: Long,
+    durationMs: Long,
+    sampledAtElapsedRealtimeMs: Long,
+): PlayerState =
+    previous.copy(
+        positionMs = positionMs.coerceAtLeast(0),
+        positionAnchorElapsedRealtimeMs = sampledAtElapsedRealtimeMs.coerceAtLeast(0),
+        bufferedPositionMs = bufferedPositionMs.coerceAtLeast(0),
+        durationMs = durationMs.coerceAtLeast(0),
+    )
+
+internal fun nextPositionDiscontinuitySequence(
+    previous: PlayerState,
+    currentQueueItemId: String?,
+    isPlaying: Boolean,
+    explicitDiscontinuity: Boolean,
+): Long =
+    previous.positionDiscontinuitySequence +
+        if (
+            explicitDiscontinuity ||
+                previous.currentQueueItemId != currentQueueItemId ||
+                previous.isPlaying != isPlaying
+        ) {
+            1L
+        } else {
+            0L
+        }
+
+internal fun shouldMarkPositionDiscontinuity(
+    commandSucceeded: Boolean,
+    didChangePosition: Boolean,
+): Boolean = commandSucceeded && didChangePosition
 
 internal fun disconnectedPlayerState(): PlayerState = PlayerState(
     failure = PlayerFailure.ConnectionUnavailable,

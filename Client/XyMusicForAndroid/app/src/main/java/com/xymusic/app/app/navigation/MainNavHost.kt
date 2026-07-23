@@ -3,9 +3,8 @@ package com.xymusic.app.app.navigation
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.State
 import androidx.compose.ui.Modifier
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -19,6 +18,7 @@ import com.xymusic.app.feature.catalog.presentation.ArtistDetailRoute
 import com.xymusic.app.feature.library.presentation.LibraryScreen
 import com.xymusic.app.feature.library.presentation.LibraryTab
 import com.xymusic.app.feature.player.presentation.PlayerScreen
+import com.xymusic.app.feature.player.presentation.PlayerUiState
 import com.xymusic.app.feature.player.presentation.PlayerViewModel
 import com.xymusic.app.feature.playlist.presentation.PlaylistRoute
 import com.xymusic.app.feature.playlist.presentation.PlaylistRouteArgs
@@ -39,6 +39,8 @@ private val LIBRARY_ROUTE =
 internal fun MainNavHost(
     navController: NavHostController,
     playerViewModel: PlayerViewModel,
+    playerUiState: PlayerUiState,
+    playbackPosition: State<Float>,
     playerIsFavorite: Boolean,
     onTrackMore: (String) -> Unit,
     onTogglePlayerFavorite: () -> Unit,
@@ -184,6 +186,8 @@ internal fun MainNavHost(
             ) {
                 PlayerScreenRoute(
                     playerViewModel = playerViewModel,
+                    uiState = playerUiState,
+                    playbackPosition = playbackPosition,
                     onBack = navController::navigateUp,
                     isFavorite = playerIsFavorite,
                     onToggleFavorite = onTogglePlayerFavorite,
@@ -248,12 +252,13 @@ internal fun MainNavHost(
 @Composable
 private fun PlayerScreenRoute(
     playerViewModel: PlayerViewModel,
+    uiState: PlayerUiState,
+    playbackPosition: State<Float>,
     onBack: () -> Unit,
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
     onAddToPlaylist: (String) -> Unit,
 ) {
-    val uiState by playerViewModel.uiState.collectAsStateWithLifecycle()
     PlayerScreen(
         uiState = uiState,
         onBack = onBack,
@@ -275,6 +280,7 @@ private fun PlayerScreenRoute(
                 ?.trackId
                 ?.let(onAddToPlaylist)
         },
+        playbackPosition = playbackPosition,
     )
 }
 

@@ -163,7 +163,7 @@ private fun PlaybackTimeline(
 ) {
     val duration = player.durationMs.coerceAtLeast(0)
     val displayPosition =
-        (playbackPosition ?: rememberSmoothedPlaybackPositionState(player)).value
+        (playbackPosition ?: rememberPlaybackPositionState(player)).value
     val sliderValue = draggedPosition ?: displayPosition
     val elapsedSecond = sliderValue.toLong().coerceAtLeast(0) / 1_000L
     val remainingMs = (duration - sliderValue.toLong()).coerceAtLeast(0L)

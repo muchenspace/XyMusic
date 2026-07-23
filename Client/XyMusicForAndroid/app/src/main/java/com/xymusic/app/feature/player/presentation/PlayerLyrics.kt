@@ -67,7 +67,7 @@ internal fun LyricsContent(
 ) {
     val listState = rememberLazyListState()
     val isDragged by listState.interactionSource.collectIsDraggedAsState()
-    val displayPosition = playbackPosition ?: rememberSmoothedPlaybackPositionState(uiState.player)
+    val displayPosition = playbackPosition ?: rememberPlaybackPositionState(uiState.player)
     val currentLyricIndex by remember(
         uiState.lyrics,
         uiState.synchronizedLyrics,
