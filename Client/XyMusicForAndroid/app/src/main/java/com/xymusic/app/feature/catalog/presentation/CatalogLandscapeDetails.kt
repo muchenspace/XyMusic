@@ -1,5 +1,6 @@
 package com.xymusic.app.feature.catalog.presentation
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -63,6 +64,8 @@ internal object CatalogDetailTestTags {
     const val AlbumLandscapeInfo = "catalog-album-landscape-info"
     const val ArtistLandscapeInfo = "catalog-artist-landscape-info"
     const val LandscapeContent = "catalog-landscape-content"
+
+    fun artistTab(tab: ArtistDetailTab): String = "catalog-artist-tab-${tab.name}"
 
     fun track(trackId: String): String = "catalog-landscape-track-$trackId"
 
@@ -203,21 +206,27 @@ internal fun ArtistLandscapeCollection(
     onTrackMore: (String) -> Unit,
     onTrackPlay: ((List<CatalogTrackUi>, CatalogTrackUi) -> Unit)?,
 ) {
-    when (selectedTab) {
-        ArtistDetailTab.Albums ->
-            ArtistLandscapeAlbums(
-                albums = albums.collectAsLazyPagingItems(),
-                compactLandscape = compactLandscape,
-                onAlbumClick = onAlbumClick,
-            )
+    AnimatedContent(
+        targetState = selectedTab,
+        transitionSpec = { artistDetailTabContentTransition() },
+        label = "artist-landscape-collection",
+    ) { tab ->
+        when (tab) {
+            ArtistDetailTab.Albums ->
+                ArtistLandscapeAlbums(
+                    albums = albums.collectAsLazyPagingItems(),
+                    compactLandscape = compactLandscape,
+                    onAlbumClick = onAlbumClick,
+                )
 
-        ArtistDetailTab.Tracks ->
-            ArtistLandscapeTracks(
-                tracks = tracks.collectAsLazyPagingItems(),
-                compactLandscape = compactLandscape,
-                onTrackMore = onTrackMore,
-                onTrackPlay = onTrackPlay,
-            )
+            ArtistDetailTab.Tracks ->
+                ArtistLandscapeTracks(
+                    tracks = tracks.collectAsLazyPagingItems(),
+                    compactLandscape = compactLandscape,
+                    onTrackMore = onTrackMore,
+                    onTrackPlay = onTrackPlay,
+                )
+        }
     }
 }
 
@@ -418,6 +427,7 @@ private fun ArtistLandscapeTabs(selectedTab: ArtistDetailTab, onTabSelected: (Ar
             Tab(
                 selected = selectedTab == tab,
                 onClick = { onTabSelected(tab) },
+                modifier = Modifier.testTag(CatalogDetailTestTags.artistTab(tab)),
                 text = {
                     Text(
                         stringResource(
