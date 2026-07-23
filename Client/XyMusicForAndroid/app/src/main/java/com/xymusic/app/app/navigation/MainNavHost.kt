@@ -1,6 +1,5 @@
 package com.xymusic.app.app.navigation
 
-import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
@@ -25,7 +24,7 @@ import com.xymusic.app.feature.playlist.presentation.PlaylistRouteArgs
 import com.xymusic.app.feature.search.presentation.SearchScreen
 import com.xymusic.app.feature.settings.presentation.SettingsScreen
 import com.xymusic.app.ui.theme.playerSlideInto
-import com.xymusic.app.ui.theme.playerSlideOutOf
+import com.xymusic.app.ui.theme.playerReturnInto
 import com.xymusic.app.ui.theme.slideFadeBackInto
 import com.xymusic.app.ui.theme.slideFadeBackOutOf
 import com.xymusic.app.ui.theme.slideFadeInto
@@ -72,13 +71,13 @@ internal fun MainNavHost(
         popEnterTransition = {
             when {
                 targetState.destination.route == PlayerDestination.NowPlaying.route -> playerSlideInto()
-                initialState.destination.route == PlayerDestination.NowPlaying.route -> EnterTransition.None
+                initialState.destination.route == PlayerDestination.NowPlaying.route -> playerReturnInto()
                 else -> slideFadeBackInto()
             }
         },
         popExitTransition = {
             if (initialState.destination.route == PlayerDestination.NowPlaying.route) {
-                playerSlideOutOf()
+                ExitTransition.KeepUntilTransitionsFinished
             } else {
                 slideFadeBackOutOf()
             }

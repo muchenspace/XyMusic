@@ -3,11 +3,13 @@
 package com.xymusic.app.feature.player.presentation
 
 import android.app.Activity
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -23,9 +25,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -35,7 +37,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
@@ -47,6 +48,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.xymusic.app.R
 import com.xymusic.app.core.ui.component.rememberArtworkAmbientColor
 import com.xymusic.app.ui.theme.XyMotion
+import kotlinx.coroutines.launch
 
 @Composable
 fun PlayerScreen(
@@ -121,18 +123,10 @@ fun PlayerScreen(
 
     val density = LocalDensity.current
     val dismissThreshold = with(density) { 180.dp.toPx() }
-    var dragOffset by remember { mutableFloatStateOf(0f) }
-    var isDraggingPlayer by remember { mutableStateOf(false) }
-    val animatedDragOffset by animateFloatAsState(
-        targetValue = dragOffset,
-        animationSpec =
-        if (isDraggingPlayer) {
-            snap()
-        } else {
-            XyMotion.SnapSpring
-        },
-        label = "playerDragOffset",
-    )
+    val dismissVelocityThreshold = with(density) { 1_000.dp.toPx() }
+    val dismissOffset = remember { Animatable(0f) }
+    var isDismissing by remember { mutableStateOf(false) }
+    val dismissScope = rememberCoroutineScope()
 
     if (confirmClearQueue) {
         PlayerAlertDialog(
@@ -147,6 +141,68 @@ fun PlayerScreen(
         )
     }
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val dismissTargetOffset = with(density) { maxHeight.toPx() }.coerceAtLeast(dismissThreshold)
+        val dismissPlayer: (Float) -> Unit = { releaseVelocity ->
+            if (!isDismissing) {
+                isDismissing = true
+                dismissScope.launch {
+                    dismissOffset.animateTo(
+                        targetValue = dismissTargetOffset,
+                        animationSpec = XyMotion.SnapSpring,
+                        initialVelocity = releaseVelocity.coerceAtLeast(0f),
+                    )
+                }
+                onBack()
+            }
+        }
+        val dismissGestureState =
+            rememberDraggableState { dragDelta ->
+                if (!isDismissing) {
+                    dismissScope.launch {
+                        dismissOffset.snapTo(
+                            (dismissOffset.value + dragDelta).coerceIn(0f, dismissTargetOffset),
+                        )
+                    }
+                }
+            }
+        val dismissGestureModifier =
+            Modifier.draggable(
+                state = dismissGestureState,
+                orientation = Orientation.Vertical,
+                enabled = !isDismissing,
+                startDragImmediately = dismissOffset.isRunning,
+                onDragStarted = {
+                    dismissScope.launch { dismissOffset.stop() }
+                },
+                onDragStopped = { releaseVelocity ->
+                    if (!isDismissing) {
+                        when (
+                            resolvePlayerDismissTarget(
+                                offsetPx = dismissOffset.value,
+                                releaseVelocityPxPerSecond = releaseVelocity,
+                                distanceThresholdPx = dismissThreshold,
+                                velocityThresholdPxPerSecond = dismissVelocityThreshold,
+                            )
+                        ) {
+                            PlayerDismissTarget.Dismiss -> dismissPlayer(releaseVelocity)
+                            PlayerDismissTarget.Restore ->
+                                dismissScope.launch {
+                                    dismissOffset.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = XyMotion.SnapSpring,
+                                        initialVelocity = releaseVelocity,
+                                    )
+                                }
+                        }
+                    }
+                },
+            )
+        BackHandler(
+            enabled =
+                !isDismissing && !confirmClearQueue && !showSpeedDialog && !showSleepTimerDialog,
+        ) {
+            dismissPlayer(0f)
+        }
         val isLandscape = maxWidth > maxHeight
         LandscapeStatusBarEffect(hidden = isLandscape)
         LandscapeKeepScreenOnEffect(enabled = isLandscape)
@@ -187,30 +243,12 @@ fun PlayerScreen(
                 onDismiss = { showSleepTimerDialog = false },
             )
         }
-        val dismissGestureModifier =
-            Modifier.pointerInput(dismissThreshold, onBack) {
-                detectVerticalDragGestures(
-                    onDragStart = { isDraggingPlayer = true },
-                    onDragEnd = {
-                        isDraggingPlayer = false
-                        if (dragOffset > dismissThreshold) onBack() else dragOffset = 0f
-                    },
-                    onDragCancel = {
-                        isDraggingPlayer = false
-                        dragOffset = 0f
-                    },
-                ) { _, dragAmount ->
-                    dragOffset = (dragOffset + dragAmount).coerceAtLeast(0f)
-                }
-            }
-
         Box(
             modifier =
             Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    translationY = animatedDragOffset
-                    alpha = 1f - (animatedDragOffset / (dismissThreshold * 2f)).coerceIn(0f, 0.35f)
+                    translationY = dismissOffset.value
                 }.then(
                     if (!isLandscape &&
                         portraitPagerState.currentPage == PlayerContentTab.Artwork.ordinal

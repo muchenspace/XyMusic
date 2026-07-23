@@ -97,7 +97,6 @@ fun AnimatedContentTransitionScope<*>.playerSlideInto() = slideInVertically(
     initialOffsetY = { it },
 )
 
-fun AnimatedContentTransitionScope<*>.playerSlideOutOf() = slideOutVertically(
-    animationSpec = tween(XyMotion.Emphasized, easing = XyMotion.NavigationEasing),
-    targetOffsetY = { it },
+fun AnimatedContentTransitionScope<*>.playerReturnInto() = fadeIn(
+    animationSpec = tween(XyMotion.Slow, easing = XyMotion.NavigationEasing),
 )
