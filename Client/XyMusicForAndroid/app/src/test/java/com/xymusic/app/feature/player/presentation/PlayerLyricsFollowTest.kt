@@ -5,6 +5,35 @@ import org.junit.Test
 
 class PlayerLyricsFollowTest {
     @Test
+    fun adjacentNaturalLyricsRetainTheOutgoingHighlight() {
+        assertThat(
+            outgoingLyricHighlightIndex(
+                previousIndex = 4,
+                currentIndex = 5,
+                positionDiscontinuous = false,
+            ),
+        ).isEqualTo(4)
+    }
+
+    @Test
+    fun seekAndNonAdjacentLyricsDoNotRetainAnOutgoingHighlight() {
+        assertThat(
+            outgoingLyricHighlightIndex(
+                previousIndex = 4,
+                currentIndex = 7,
+                positionDiscontinuous = false,
+            ),
+        ).isNull()
+        assertThat(
+            outgoingLyricHighlightIndex(
+                previousIndex = 4,
+                currentIndex = 5,
+                positionDiscontinuous = true,
+            ),
+        ).isNull()
+    }
+
+    @Test
     fun adjacentVisibleLyricsUseContinuousScrolling() {
         assertThat(
             lyricFollowScrollMode(
