@@ -117,6 +117,42 @@ class CatalogScreensComposeTest {
     }
 
     @Test
+    fun artistDetailKeepsTheOutgoingCollectionDuringTabTransition() {
+        composeRule.setCatalogContent {
+            ArtistDetailScreen(
+                uiState =
+                CatalogDetailUiState(
+                    item = CatalogArtistDetailUi(artist(), description = "Artist description"),
+                ),
+                albums = flowOf(PagingData.from(listOf(album()))),
+                tracks = flowOf(PagingData.from(listOf(track(albumTitle = "Track Album")))),
+                onBack = {},
+                onRefresh = {},
+                onTrackPlay = { _, _ -> },
+                onTrackMore = {},
+                onAlbumClick = {},
+            )
+        }
+
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+        try {
+            composeRule
+                .onNodeWithTag(CatalogDetailTestTags.artistTab(ArtistDetailTab.Tracks))
+                .performClick()
+            composeRule.mainClock.advanceTimeByFrame()
+            composeRule.mainClock.advanceTimeByFrame()
+            composeRule.waitForIdle()
+
+            composeRule.onNodeWithText("First Album").assertExists()
+        } finally {
+            composeRule.mainClock.autoAdvance = true
+            composeRule.waitForIdle()
+        }
+        composeRule.onNodeWithText("First Track").assertIsDisplayed()
+    }
+
+    @Test
     @Config(qualifiers = "w740dp-h320dp-land")
     fun compactLandscapeAlbumShowsInfoBesideFirstTrack() {
         composeRule.setCatalogContent {
@@ -203,11 +239,16 @@ class CatalogScreensComposeTest {
         assertThat(firstAlbum.bottom).isAtMost(content.bottom + 1f)
     }
 
-    private fun track(id: String = "track-1", title: String = "First Track", trackNumber: Int? = 1) = CatalogTrackUi(
+    private fun track(
+        id: String = "track-1",
+        title: String = "First Track",
+        trackNumber: Int? = 1,
+        albumTitle: String = "First Album",
+    ) = CatalogTrackUi(
         id = id,
         title = title,
         artists = listOf(CatalogArtistLinkUi("artist-1", "First Artist")),
-        album = CatalogAlbumLinkUi("album-1", "First Album"),
+        album = CatalogAlbumLinkUi("album-1", albumTitle),
         artwork = null,
         durationMs = 185_000,
         discNumber = 1,

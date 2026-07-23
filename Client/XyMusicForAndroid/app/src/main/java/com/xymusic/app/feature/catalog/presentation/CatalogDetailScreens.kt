@@ -1,5 +1,14 @@
 package com.xymusic.app.feature.catalog.presentation
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -42,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -64,8 +74,11 @@ import com.xymusic.app.core.ui.media.CatalogArtistLinks
 import com.xymusic.app.core.ui.media.CatalogPagedList
 import com.xymusic.app.core.ui.media.CatalogTrackRow
 import com.xymusic.app.core.ui.media.CatalogTrackUi
+import com.xymusic.app.ui.theme.XyMotion
 import com.xymusic.app.ui.theme.spacing
 import kotlinx.coroutines.flow.Flow
+
+private const val ARTIST_TAB_SLIDE_OFFSET_DIVISOR = 24
 
 @Composable
 fun AlbumDetailRoute(
@@ -259,66 +272,117 @@ fun ArtistDetailScreen(
                         )
                     }
 
-                selectedTab == ArtistDetailTab.Albums -> {
-                    val pagingItems = albums.collectAsLazyPagingItems()
-                    CatalogPagedList(
-                        items = pagingItems,
-                        emptyTitle = stringResource(R.string.catalog_albums_empty_title),
-                        emptyMessage = stringResource(R.string.catalog_albums_empty_message),
-                        emptyIcon = Icons.Outlined.Album,
-                        itemKey = CatalogAlbumUi::id,
-                        itemContent = { album ->
-                            CatalogAlbumRow(
-                                album = album,
-                                onClick = { onAlbumClick(album.id) },
-                            )
-                        },
-                        header = {
-                            ArtistDetailHeader(
-                                detail = detail,
-                                selectedTab = selectedTab,
-                                onTabSelected = { selectedTab = it },
-                                isRefreshing = uiState.isRefreshing,
-                                refreshFailed = uiState.refreshFailed,
-                            )
-                        },
+                else ->
+                    ArtistDetailCollection(
+                        detail = detail,
+                        selectedTab = selectedTab,
+                        albums = albums,
+                        tracks = tracks,
+                        isRefreshing = uiState.isRefreshing,
+                        refreshFailed = uiState.refreshFailed,
+                        onTabSelected = { selectedTab = it },
+                        onAlbumClick = onAlbumClick,
+                        onTrackMore = onTrackMore,
+                        onTrackPlay = onTrackPlay,
                     )
-                }
-
-                else -> {
-                    val pagingItems = tracks.collectAsLazyPagingItems()
-                    val loadedTracks = pagingItems.itemSnapshotList.items
-                    CatalogPagedList(
-                        items = pagingItems,
-                        emptyTitle = stringResource(R.string.catalog_tracks_empty_title),
-                        emptyMessage = stringResource(R.string.catalog_tracks_empty_message),
-                        emptyIcon = Icons.Outlined.MusicNote,
-                        itemKey = CatalogTrackUi::id,
-                        itemContent = { track ->
-                            CatalogTrackRow(
-                                track = track,
-                                onClick = { onTrackPlay?.invoke(loadedTracks, track) },
-                                onPlayClick =
-                                onTrackPlay?.let { play ->
-                                    { play(loadedTracks, track) }
-                                },
-                                onMoreClick = { onTrackMore(track.id) },
-                            )
-                        },
-                        header = {
-                            ArtistDetailHeader(
-                                detail = detail,
-                                selectedTab = selectedTab,
-                                onTabSelected = { selectedTab = it },
-                                isRefreshing = uiState.isRefreshing,
-                                refreshFailed = uiState.refreshFailed,
-                            )
-                        },
-                    )
-                }
             }
         }
     }
+}
+
+@Composable
+private fun ArtistDetailCollection(
+    detail: CatalogArtistDetailUi,
+    selectedTab: ArtistDetailTab,
+    albums: Flow<PagingData<CatalogAlbumUi>>,
+    tracks: Flow<PagingData<CatalogTrackUi>>,
+    isRefreshing: Boolean,
+    refreshFailed: Boolean,
+    onTabSelected: (ArtistDetailTab) -> Unit,
+    onAlbumClick: (String) -> Unit,
+    onTrackMore: (String) -> Unit,
+    onTrackPlay: ((List<CatalogTrackUi>, CatalogTrackUi) -> Unit)?,
+) {
+    AnimatedContent(
+        targetState = selectedTab,
+        transitionSpec = { artistDetailTabContentTransition() },
+        label = "artist-detail-collection",
+    ) { tab ->
+        when (tab) {
+            ArtistDetailTab.Albums -> {
+                val pagingItems = albums.collectAsLazyPagingItems()
+                CatalogPagedList(
+                    items = pagingItems,
+                    emptyTitle = stringResource(R.string.catalog_albums_empty_title),
+                    emptyMessage = stringResource(R.string.catalog_albums_empty_message),
+                    emptyIcon = Icons.Outlined.Album,
+                    itemKey = CatalogAlbumUi::id,
+                    itemContent = { album ->
+                        CatalogAlbumRow(
+                            album = album,
+                            onClick = { onAlbumClick(album.id) },
+                        )
+                    },
+                    header = {
+                        ArtistDetailHeader(
+                            detail = detail,
+                            selectedTab = selectedTab,
+                            onTabSelected = onTabSelected,
+                            isRefreshing = isRefreshing,
+                            refreshFailed = refreshFailed,
+                        )
+                    },
+                )
+            }
+
+            ArtistDetailTab.Tracks -> {
+                val pagingItems = tracks.collectAsLazyPagingItems()
+                val loadedTracks = pagingItems.itemSnapshotList.items
+                CatalogPagedList(
+                    items = pagingItems,
+                    emptyTitle = stringResource(R.string.catalog_tracks_empty_title),
+                    emptyMessage = stringResource(R.string.catalog_tracks_empty_message),
+                    emptyIcon = Icons.Outlined.MusicNote,
+                    itemKey = CatalogTrackUi::id,
+                    itemContent = { track ->
+                        CatalogTrackRow(
+                            track = track,
+                            onClick = { onTrackPlay?.invoke(loadedTracks, track) },
+                            onPlayClick =
+                            onTrackPlay?.let { play ->
+                                { play(loadedTracks, track) }
+                            },
+                            onMoreClick = { onTrackMore(track.id) },
+                        )
+                    },
+                    header = {
+                        ArtistDetailHeader(
+                            detail = detail,
+                            selectedTab = selectedTab,
+                            onTabSelected = onTabSelected,
+                            isRefreshing = isRefreshing,
+                            refreshFailed = refreshFailed,
+                        )
+                    },
+                )
+            }
+        }
+    }
+}
+
+internal fun AnimatedContentTransitionScope<ArtistDetailTab>.artistDetailTabContentTransition(): ContentTransform {
+    val slideDirection = if (targetState.ordinal > initialState.ordinal) 1 else -1
+    return (
+        slideInHorizontally(
+            animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
+            initialOffsetX = { fullWidth -> fullWidth / ARTIST_TAB_SLIDE_OFFSET_DIVISOR * slideDirection },
+        ) + fadeIn(tween(XyMotion.Quick, easing = XyMotion.NavigationEasing))
+    ).togetherWith(
+        slideOutHorizontally(
+            animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
+            targetOffsetX = { fullWidth -> -(fullWidth / ARTIST_TAB_SLIDE_OFFSET_DIVISOR) * slideDirection },
+        ) + fadeOut(tween(XyMotion.Quick, easing = XyMotion.NavigationEasing)),
+    )
 }
 
 @Composable
@@ -452,6 +516,7 @@ private fun ArtistDetailHeader(
                 Tab(
                     selected = selectedTab == tab,
                     onClick = { onTabSelected(tab) },
+                    modifier = Modifier.testTag(CatalogDetailTestTags.artistTab(tab)),
                     text = {
                         Text(
                             stringResource(
