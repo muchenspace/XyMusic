@@ -29,8 +29,8 @@ internal fun LandscapeTransportControls(
     onTogglePlayback: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    compact: Boolean = false,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
     val availability = rememberPlaybackControlAvailability(player)
     val controlHeight = if (compact) 52.dp else 60.dp

@@ -35,6 +35,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -110,7 +111,7 @@ internal fun LyricsContent(
     var outgoingWordByWordIndex by remember(uiState.player.currentItem?.trackId) { mutableStateOf<Int?>(null) }
     var observedPositionDiscontinuitySequence by
         remember(uiState.player.currentItem?.trackId) {
-            mutableStateOf(uiState.player.positionDiscontinuitySequence)
+            mutableLongStateOf(uiState.player.positionDiscontinuitySequence)
         }
     val outgoingWordByWordAlpha = remember(uiState.player.currentItem?.trackId) { Animatable(0f) }
     val lyricLineStyle = lyricLineStyle(compact)

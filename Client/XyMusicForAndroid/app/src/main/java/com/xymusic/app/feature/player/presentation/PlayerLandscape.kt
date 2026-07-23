@@ -30,8 +30,8 @@ internal fun LandscapeNowPlayingContent(
     onTogglePlayback: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    leftPaneModifier: Modifier = Modifier,
     modifier: Modifier = Modifier,
+    leftPaneModifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier) {
         Row(
