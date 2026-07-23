@@ -1,5 +1,14 @@
 package com.xymusic.app.feature.search.presentation
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -62,8 +71,11 @@ import com.xymusic.app.core.ui.media.CatalogPagedList
 import com.xymusic.app.core.ui.media.CatalogTrackRow
 import com.xymusic.app.core.ui.media.CatalogTrackUi
 import com.xymusic.app.feature.search.domain.model.SearchScope
+import com.xymusic.app.ui.theme.XyMotion
 import com.xymusic.app.ui.theme.spacing
 import kotlinx.coroutines.flow.Flow
+
+private const val SEARCH_SCOPE_SLIDE_OFFSET_DIVISOR = 24
 
 internal object SearchTestTags {
     const val Input = "search_input"
@@ -74,6 +86,48 @@ internal object SearchTestTags {
     const val LandscapeOverviewMedia = "search_landscape_overview_media"
 
     fun historyItem(item: SearchHistoryUi): String = "search_history_${item.scope}_${item.query.hashCode()}"
+
+    fun scope(scope: SearchScope): String = "search_scope_${scope.name}"
+}
+
+private enum class SearchResultMode {
+    Idle,
+    All,
+    Tracks,
+    Artists,
+    Albums,
+}
+
+private fun SearchUiState.toResultMode(): SearchResultMode =
+    if (isIdle) {
+        SearchResultMode.Idle
+    } else {
+        when (selectedScope) {
+            SearchScope.ALL -> SearchResultMode.All
+            SearchScope.TRACKS -> SearchResultMode.Tracks
+            SearchScope.ARTISTS -> SearchResultMode.Artists
+            SearchScope.ALBUMS -> SearchResultMode.Albums
+        }
+    }
+
+private fun AnimatedContentTransitionScope<SearchResultMode>.searchResultTransition(): ContentTransform {
+    if (initialState == SearchResultMode.Idle || targetState == SearchResultMode.Idle) {
+        return fadeIn(tween(XyMotion.Quick, easing = XyMotion.NavigationEasing)).togetherWith(
+            fadeOut(tween(XyMotion.Quick, easing = XyMotion.NavigationEasing)),
+        )
+    }
+    val slideDirection = if (targetState.ordinal > initialState.ordinal) 1 else -1
+    return (
+        slideInHorizontally(
+            animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
+            initialOffsetX = { fullWidth -> fullWidth / SEARCH_SCOPE_SLIDE_OFFSET_DIVISOR * slideDirection },
+        ) + fadeIn(tween(XyMotion.Quick, easing = XyMotion.NavigationEasing))
+    ).togetherWith(
+        slideOutHorizontally(
+            animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
+            targetOffsetX = { fullWidth -> -(fullWidth / SEARCH_SCOPE_SLIDE_OFFSET_DIVISOR) * slideDirection },
+        ) + fadeOut(tween(XyMotion.Quick, easing = XyMotion.NavigationEasing)),
+    )
 }
 
 @Composable
@@ -372,86 +426,93 @@ fun SearchContent(
                         } else {
                             Modifier.fillMaxSize()
                         }
-                    when {
-                        uiState.isIdle ->
-                            SearchIdleContent(
-                                history = uiState.history,
-                                wideLandscape = wideLandscape,
-                                onSelect = onHistorySelected,
-                                onDelete = onDeleteHistory,
-                                onClear = { confirmClearHistory = true },
-                                onScopeSelected = onScopeSelected,
-                                modifier = resultModifier,
-                            )
+                    AnimatedContent(
+                        targetState = uiState.toResultMode(),
+                        modifier = resultModifier,
+                        transitionSpec = { searchResultTransition() },
+                        label = "search-result-content",
+                    ) { resultMode ->
+                        when (resultMode) {
+                            SearchResultMode.Idle ->
+                                SearchIdleContent(
+                                    history = uiState.history,
+                                    wideLandscape = wideLandscape,
+                                    onSelect = onHistorySelected,
+                                    onDelete = onDeleteHistory,
+                                    onClear = { confirmClearHistory = true },
+                                    onScopeSelected = onScopeSelected,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
 
-                        uiState.selectedScope == SearchScope.ALL ->
-                            SearchOverview(
-                                uiState = uiState,
-                                wideLandscape = wideLandscape,
-                                onRetry = onSubmit,
-                                onScopeSelected = onScopeSelected,
-                                onAlbumClick = onAlbumClick,
-                                onArtistClick = onArtistClick,
-                                onTrackPlay = onTrackPlay,
-                                onTrackMore = onTrackMore,
-                                modifier = resultModifier,
-                            )
+                            SearchResultMode.All ->
+                                SearchOverview(
+                                    uiState = uiState,
+                                    wideLandscape = wideLandscape,
+                                    onRetry = onSubmit,
+                                    onScopeSelected = onScopeSelected,
+                                    onAlbumClick = onAlbumClick,
+                                    onArtistClick = onArtistClick,
+                                    onTrackPlay = onTrackPlay,
+                                    onTrackMore = onTrackMore,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
 
-                        uiState.selectedScope == SearchScope.TRACKS -> {
-                            val pagingItems = tracks.collectAsLazyPagingItems()
-                            val loadedTracks = pagingItems.itemSnapshotList.items
-                            CatalogPagedList(
-                                items = pagingItems,
-                                emptyTitle = stringResource(R.string.search_no_results_title),
-                                emptyMessage = stringResource(R.string.search_no_results_message),
-                                emptyIcon = Icons.Outlined.MusicNote,
-                                itemKey = CatalogTrackUi::id,
-                                itemContent = { track ->
-                                    CatalogTrackRow(
-                                        track = track,
-                                        onClick = { onTrackPlay(loadedTracks, track) },
-                                        onPlayClick = { onTrackPlay(loadedTracks, track) },
-                                        onMoreClick = { onTrackMore(track.id) },
-                                    )
-                                },
-                                modifier = resultModifier,
-                            )
-                        }
+                            SearchResultMode.Tracks -> {
+                                val pagingItems = tracks.collectAsLazyPagingItems()
+                                val loadedTracks = pagingItems.itemSnapshotList.items
+                                CatalogPagedList(
+                                    items = pagingItems,
+                                    emptyTitle = stringResource(R.string.search_no_results_title),
+                                    emptyMessage = stringResource(R.string.search_no_results_message),
+                                    emptyIcon = Icons.Outlined.MusicNote,
+                                    itemKey = CatalogTrackUi::id,
+                                    itemContent = { track ->
+                                        CatalogTrackRow(
+                                            track = track,
+                                            onClick = { onTrackPlay(loadedTracks, track) },
+                                            onPlayClick = { onTrackPlay(loadedTracks, track) },
+                                            onMoreClick = { onTrackMore(track.id) },
+                                        )
+                                    },
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
 
-                        uiState.selectedScope == SearchScope.ARTISTS -> {
-                            val pagingItems = artists.collectAsLazyPagingItems()
-                            CatalogPagedList(
-                                items = pagingItems,
-                                emptyTitle = stringResource(R.string.search_no_results_title),
-                                emptyMessage = stringResource(R.string.search_no_results_message),
-                                emptyIcon = Icons.Outlined.Person,
-                                itemKey = CatalogArtistUi::id,
-                                itemContent = { artist ->
-                                    CatalogArtistRow(
-                                        artist = artist,
-                                        onClick = { onArtistClick(artist.id) },
-                                    )
-                                },
-                                modifier = resultModifier,
-                            )
-                        }
+                            SearchResultMode.Artists -> {
+                                val pagingItems = artists.collectAsLazyPagingItems()
+                                CatalogPagedList(
+                                    items = pagingItems,
+                                    emptyTitle = stringResource(R.string.search_no_results_title),
+                                    emptyMessage = stringResource(R.string.search_no_results_message),
+                                    emptyIcon = Icons.Outlined.Person,
+                                    itemKey = CatalogArtistUi::id,
+                                    itemContent = { artist ->
+                                        CatalogArtistRow(
+                                            artist = artist,
+                                            onClick = { onArtistClick(artist.id) },
+                                        )
+                                    },
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
 
-                        else -> {
-                            val pagingItems = albums.collectAsLazyPagingItems()
-                            CatalogPagedList(
-                                items = pagingItems,
-                                emptyTitle = stringResource(R.string.search_no_results_title),
-                                emptyMessage = stringResource(R.string.search_no_results_message),
-                                emptyIcon = Icons.Outlined.Album,
-                                itemKey = CatalogAlbumUi::id,
-                                itemContent = { album ->
-                                    CatalogAlbumRow(
-                                        album = album,
-                                        onClick = { onAlbumClick(album.id) },
-                                    )
-                                },
-                                modifier = resultModifier,
-                            )
+                            SearchResultMode.Albums -> {
+                                val pagingItems = albums.collectAsLazyPagingItems()
+                                CatalogPagedList(
+                                    items = pagingItems,
+                                    emptyTitle = stringResource(R.string.search_no_results_title),
+                                    emptyMessage = stringResource(R.string.search_no_results_message),
+                                    emptyIcon = Icons.Outlined.Album,
+                                    itemKey = CatalogAlbumUi::id,
+                                    itemContent = { album ->
+                                        CatalogAlbumRow(
+                                            album = album,
+                                            onClick = { onAlbumClick(album.id) },
+                                        )
+                                    },
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
                         }
                     }
                 }
