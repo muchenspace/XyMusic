@@ -1,6 +1,5 @@
 package com.xymusic.app.app.navigation
 
-import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -35,8 +34,8 @@ import com.xymusic.app.feature.playlist.presentation.PlaylistRouteArgs
 import com.xymusic.app.testing.ComposeTestApplication
 import com.xymusic.app.ui.theme.XyMotion
 import com.xymusic.app.ui.theme.XyMusicTheme
+import com.xymusic.app.ui.theme.playerReturnInto
 import com.xymusic.app.ui.theme.playerSlideInto
-import com.xymusic.app.ui.theme.playerSlideOutOf
 import com.xymusic.app.ui.theme.slideFadeBackInto
 import com.xymusic.app.ui.theme.slideFadeBackOutOf
 import com.xymusic.app.ui.theme.slideFadeInto
@@ -71,6 +70,42 @@ class MainNavigationLayoutComposeTest {
             inFlightChrome = PhoneHomeWithMiniChrome,
             finalChrome = HiddenChrome,
         )
+    }
+
+    @Test
+    @Config(qualifiers = PhoneQualifiers)
+    fun playerPopKeepsThePlayerComposedUntilTheReturnTransitionCompletes() {
+        val fixture =
+            setFixture(
+                MainNavigationLayoutConfig(
+                    useNavigationRail = false,
+                    compactPlayerBar = false,
+                    hasPlayerItem = true,
+                ),
+            )
+
+        composeRule.mainClock.autoAdvance = false
+        composeRule.runOnIdle {
+            fixture.navController.navigate(PlayerDestination.NowPlaying.route)
+        }
+        composeRule.mainClock.advanceTimeBy(XyMotion.Emphasized + TransitionSettleMillis)
+        composeRule.waitForIdle()
+
+        composeRule.runOnIdle { fixture.navController.navigateUp() }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag(PlayerTag).assertExists()
+        composeRule.onNodeWithTag(HomeTag).assertExists()
+
+        composeRule.mainClock.advanceTimeBy(XyMotion.Slow + TransitionSettleMillis)
+        composeRule.mainClock.autoAdvance = true
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag(PlayerTag).assertDoesNotExist()
+        composeRule.onNodeWithTag(HomeTag).assertExists()
     }
 
     @Test
@@ -445,13 +480,13 @@ private fun FixtureNavHost(navController: NavHostController, config: MainNavigat
         popEnterTransition = {
             when {
                 targetState.destination.route == PlayerDestination.NowPlaying.route -> playerSlideInto()
-                initialState.destination.route == PlayerDestination.NowPlaying.route -> EnterTransition.None
+                initialState.destination.route == PlayerDestination.NowPlaying.route -> playerReturnInto()
                 else -> slideFadeBackInto()
             }
         },
         popExitTransition = {
             if (initialState.destination.route == PlayerDestination.NowPlaying.route) {
-                playerSlideOutOf()
+                ExitTransition.KeepUntilTransitionsFinished
             } else {
                 slideFadeBackOutOf()
             }
