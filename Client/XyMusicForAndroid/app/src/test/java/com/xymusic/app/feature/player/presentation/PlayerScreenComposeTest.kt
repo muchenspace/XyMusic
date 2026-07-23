@@ -457,7 +457,6 @@ class PlayerScreenComposeTest {
                     PlayerLyricLineUi(20_000, "Last lyric"),
                 ),
                 synchronizedLyrics = true,
-                currentLyricIndex = 1,
             ),
         )
 
