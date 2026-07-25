@@ -112,7 +112,7 @@ describe("BatchTagScrapeDialog", () => {
 
   it("separates condition exclusions, skipped items and failures", async () => {
     scraping.createBatch.mockResolvedValue(completedBatch());
-    const wrapper = mountDialog([track("1"), track("2"), track("3")]);
+    const wrapper = mountDialog([track("track-1"), track("2"), track("3")]);
 
     await startButton(wrapper).trigger("click");
     await flushPromises();
@@ -122,11 +122,13 @@ describe("BatchTagScrapeDialog", () => {
     expect(wrapper.text()).toContain("成功 0 · 已跳过 1 · 失败 0");
     expect(wrapper.text()).toContain("已跳过");
     expect(wrapper.text()).toContain("未找到可靠匹配");
+    expect(wrapper.text()).toContain("#1 · Track track-1");
     expect(wrapper.text()).not.toContain("未成功");
     expect(wrapper.text()).not.toContain("SKIPPED");
     expect(wrapper.get("[data-testid='batch-item-status']").classes()).not.toContain("text-rose-700");
 
     await wrapper.setProps({ tracks: [] });
+    expect(wrapper.text()).toContain("#1 · Track track-1");
     expect(wrapper.text()).toContain("共选择 3 首，1 首进入刮削任务");
     expect(wrapper.text()).toContain("批量刮削 3 首曲目");
   });
