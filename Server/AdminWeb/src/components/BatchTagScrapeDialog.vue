@@ -50,6 +50,7 @@ const loading = ref(false);
 const error = ref("");
 const notice = ref("");
 const submittedCount = ref(0);
+const submittedTrackTitles = ref(new Map<string, string>());
 const conditionExcluded = ref(0);
 let timer: ReturnType<typeof setTimeout> | undefined;
 let pollController: AbortController | undefined;
@@ -62,7 +63,7 @@ const sourceOptions: Array<{ value: TagSource; label: string }> = [{ value: "qmu
 watch(open, (value) => {
   actionGeneration += 1;
   stopPolling();
-  if (value) { job.value = undefined; writeBack.value = false; error.value = ""; notice.value = ""; submittedCount.value = 0; conditionExcluded.value = 0; completedEmitted = false; }
+  if (value) { job.value = undefined; writeBack.value = false; error.value = ""; notice.value = ""; submittedCount.value = 0; submittedTrackTitles.value = new Map(); conditionExcluded.value = 0; completedEmitted = false; }
 });
 onUnmounted(() => {
   actionGeneration += 1;
@@ -90,6 +91,9 @@ function finishIfTerminal(update: TagScrapingBatch): boolean {
   if (["PENDING", "RUNNING"].includes(update.status)) return false;
   if (!completedEmitted) { completedEmitted = true; emit("completed"); }
   return true;
+}
+function submittedTrackTitle(trackId: string): string {
+  return submittedTrackTitles.value.get(trackId) ?? "未知曲目";
 }
 async function refresh(id = job.value?.id, generation = pollGeneration) {
   if (!id || generation !== pollGeneration || !open.value) return;
@@ -134,6 +138,7 @@ async function start() {
   const action = ++actionGeneration;
   const selectedCount = props.tracks.length;
   submittedCount.value = selectedCount;
+  submittedTrackTitles.value = new Map(props.tracks.map((track) => [track.id, track.title]));
   try {
     const created = await scraping.createBatch({
       items: props.tracks.map((track) => ({ trackId: track.id, expectedVersion: track.metadataVersion! })),
@@ -211,7 +216,7 @@ async function retry() {
     </template>
     <template v-else>
       <div class="rounded-xl bg-[var(--surface-muted)] p-4"><div class="flex items-center justify-between gap-3"><StatusBadge :status="job.status" :label="batchJobStatusPresentation(job.status).label" :tone="batchJobStatusPresentation(job.status).tone" dot /><span>{{ job.processed }} / {{ job.total }}</span></div><div class="mt-3 h-2 overflow-hidden rounded bg-[var(--surface-solid)]"><div class="progress-fill h-full bg-violet-500" :style="{ width: `${job.total ? job.processed / job.total * 100 : 0}%` }" /></div><p class="mt-2 text-xs text-[var(--muted)]">条件排除 {{ conditionExcluded }} · 成功 {{ job.succeeded }} · 已跳过 {{ job.skipped }} · 失败 {{ job.failed }}</p><p class="mt-1 text-[10px] text-[var(--muted)]">共选择 {{ submittedCount }} 首，{{ job.total }} 首进入刮削任务</p></div>
-      <div class="mt-4 max-h-80 overflow-y-auto rounded-xl border border-[var(--border)]"><div v-for="item in job.items" :key="item.id" v-memo="[item.status, item.source, item.message]" class="flex items-center justify-between gap-3 border-b border-[var(--border)] p-3 text-sm last:border-0"><span>#{{ item.position + 1 }} · {{ item.source ?? (item.status === 'PENDING' || item.status === 'RUNNING' ? '等待来源' : '未使用来源') }}</span><span class="flex items-center gap-2 text-right"><StatusBadge data-testid="batch-item-status" :status="item.status" :label="batchItemStatusPresentation(item.status).label" :tone="batchItemStatusPresentation(item.status).tone" /><span class="text-[var(--muted)]">{{ batchItemMessage(item.status, item.message) }}</span></span></div></div>
+      <div class="mt-4 max-h-80 overflow-y-auto rounded-xl border border-[var(--border)]"><div v-for="item in job.items" :key="item.id" v-memo="[item.status, item.source, item.message]" class="flex items-center justify-between gap-3 border-b border-[var(--border)] p-3 text-sm last:border-0"><span class="min-w-0 flex-1 [overflow-wrap:anywhere]">#{{ item.position + 1 }} · {{ submittedTrackTitle(item.trackId) }} · {{ item.source ?? (item.status === 'PENDING' || item.status === 'RUNNING' ? '等待来源' : '未使用来源') }}</span><span class="flex shrink-0 items-center gap-2 text-right"><StatusBadge data-testid="batch-item-status" :status="item.status" :label="batchItemStatusPresentation(item.status).label" :tone="batchItemStatusPresentation(item.status).tone" /><span class="text-[var(--muted)]">{{ batchItemMessage(item.status, item.message) }}</span></span></div></div>
     </template>
     <div v-if="notice" class="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-4 text-sm"><p class="font-semibold">无需刮削</p><p class="mt-1 text-xs leading-5 text-[var(--muted)]">{{ notice }}</p><p class="mt-2 text-xs font-semibold text-[var(--muted)]">条件排除 {{ conditionExcluded }} 首</p></div>
     <p v-if="archivedTrack" class="mt-4 rounded-xl bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">已归档曲目“{{ archivedTrack.title }}”需先恢复后才能批量刮削。</p>
