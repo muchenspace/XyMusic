@@ -1,10 +1,10 @@
 package com.xymusic.app.feature.search.domain
 
-import androidx.paging.PagingData
 import com.xymusic.app.core.model.media.Album
 import com.xymusic.app.core.model.media.Artist
 import com.xymusic.app.core.model.media.Track
 import com.xymusic.app.domain.error.DomainError
+import com.xymusic.app.domain.paging.PagedStream
 import com.xymusic.app.feature.search.domain.model.SearchHistoryItem
 import com.xymusic.app.feature.search.domain.model.SearchOverview
 import com.xymusic.app.feature.search.domain.model.SearchQuery
@@ -16,11 +16,11 @@ interface SearchRepository {
 
     suspend fun refreshOverview(query: SearchQuery): SearchResult<Unit>
 
-    fun pagedTracks(query: SearchQuery): Flow<PagingData<Track>>
+    fun pagedTracks(query: SearchQuery): PagedStream<Track>
 
-    fun pagedArtists(query: SearchQuery): Flow<PagingData<Artist>>
+    fun pagedArtists(query: SearchQuery): PagedStream<Artist>
 
-    fun pagedAlbums(query: SearchQuery): Flow<PagingData<Album>>
+    fun pagedAlbums(query: SearchQuery): PagedStream<Album>
 
     fun observeHistory(): Flow<List<SearchHistoryItem>>
 

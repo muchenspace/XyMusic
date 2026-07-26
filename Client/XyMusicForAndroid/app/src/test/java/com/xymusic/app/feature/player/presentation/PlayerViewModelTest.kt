@@ -11,6 +11,8 @@ import com.xymusic.app.core.model.media.Lyrics
 import com.xymusic.app.core.model.media.LyricsFormat
 import com.xymusic.app.core.model.media.Track
 import com.xymusic.app.core.model.media.TrackDetail
+import com.xymusic.app.core.paging.asPagedStream
+import com.xymusic.app.domain.paging.PagedStream
 import com.xymusic.app.domain.settings.AppSettings
 import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.feature.catalog.domain.CatalogRepository
@@ -448,11 +450,12 @@ private class RefreshingCatalogRepository : CatalogRepository {
         return CatalogResult.Success(Unit)
     }
 
-    override fun pagedTracks(query: TrackQuery): Flow<PagingData<Track>> = flowOf(PagingData.empty())
+    override fun pagedTracks(query: TrackQuery): PagedStream<Track> = flowOf(PagingData.empty<Track>()).asPagedStream()
 
-    override fun pagedArtists(query: ArtistQuery): Flow<PagingData<Artist>> = flowOf(PagingData.empty())
+    override fun pagedArtists(query: ArtistQuery): PagedStream<Artist> =
+        flowOf(PagingData.empty<Artist>()).asPagedStream()
 
-    override fun pagedAlbums(query: AlbumQuery): Flow<PagingData<Album>> = flowOf(PagingData.empty())
+    override fun pagedAlbums(query: AlbumQuery): PagedStream<Album> = flowOf(PagingData.empty<Album>()).asPagedStream()
 
     override suspend fun randomAlbums(limit: Int): CatalogResult<List<Album>> = CatalogResult.Success(emptyList())
 
@@ -509,11 +512,12 @@ private class BlockingRefreshCatalogRepository(trackId: String) : CatalogReposit
         return CatalogResult.Success(Unit)
     }
 
-    override fun pagedTracks(query: TrackQuery): Flow<PagingData<Track>> = flowOf(PagingData.empty())
+    override fun pagedTracks(query: TrackQuery): PagedStream<Track> = flowOf(PagingData.empty<Track>()).asPagedStream()
 
-    override fun pagedArtists(query: ArtistQuery): Flow<PagingData<Artist>> = flowOf(PagingData.empty())
+    override fun pagedArtists(query: ArtistQuery): PagedStream<Artist> =
+        flowOf(PagingData.empty<Artist>()).asPagedStream()
 
-    override fun pagedAlbums(query: AlbumQuery): Flow<PagingData<Album>> = flowOf(PagingData.empty())
+    override fun pagedAlbums(query: AlbumQuery): PagedStream<Album> = flowOf(PagingData.empty<Album>()).asPagedStream()
 
     override suspend fun randomAlbums(limit: Int): CatalogResult<List<Album>> = CatalogResult.Success(emptyList())
 

@@ -18,6 +18,8 @@ import com.xymusic.app.R
 import com.xymusic.app.core.model.media.AlbumReference
 import com.xymusic.app.core.model.media.ArtistReference
 import com.xymusic.app.core.model.media.Track
+import com.xymusic.app.core.paging.asPagedStream
+import com.xymusic.app.domain.paging.PagedStream
 import com.xymusic.app.feature.library.domain.LibraryRepository
 import com.xymusic.app.feature.library.domain.LibraryResult
 import com.xymusic.app.feature.library.domain.LibraryUseCases
@@ -281,9 +283,9 @@ private class FakeLibraryRepository(history: List<PlaybackHistoryItem>) : Librar
 
     override fun observeIsFavorite(trackId: String): Flow<Boolean> = flowOf(false)
 
-    override fun favoriteTracks(): Flow<PagingData<Track>> = flowOf(PagingData.empty())
+    override fun favoriteTracks(): PagedStream<Track> = flowOf(PagingData.empty<Track>()).asPagedStream()
 
-    override fun playbackHistory(): Flow<PagingData<PlaybackHistoryItem>> = historyFlow
+    override fun playbackHistory(): PagedStream<PlaybackHistoryItem> = historyFlow.asPagedStream()
 
     override suspend fun refreshFavorites(sort: FavoriteSort): LibraryResult<Unit> {
         favoriteRefreshes += 1

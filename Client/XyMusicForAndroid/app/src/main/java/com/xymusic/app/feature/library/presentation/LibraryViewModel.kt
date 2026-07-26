@@ -9,6 +9,7 @@ import com.xymusic.app.R
 import com.xymusic.app.core.common.DefaultDispatcher
 import com.xymusic.app.core.common.runCatchingPreservingCancellation
 import com.xymusic.app.core.model.media.Track
+import com.xymusic.app.core.paging.pagingDataFlow
 import com.xymusic.app.core.ui.media.CatalogAlbumLinkUi
 import com.xymusic.app.core.ui.media.CatalogArtistLinkUi
 import com.xymusic.app.core.ui.media.CatalogArtworkUi
@@ -100,12 +101,14 @@ constructor(
     val favorites =
         libraryUseCases
             .favorites()
+            .pagingDataFlow()
             .map { paging -> paging.map(Track::toCatalogUi) }
             .cachedIn(viewModelScope)
 
     val history =
         libraryUseCases
             .history()
+            .pagingDataFlow()
             .map { paging -> paging.map(PlaybackHistoryItem::toUi) }
             .cachedIn(viewModelScope)
 
