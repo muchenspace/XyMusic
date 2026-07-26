@@ -19,6 +19,7 @@ import com.xymusic.app.R
 import com.xymusic.app.domain.server.ServerEndpoint
 import com.xymusic.app.domain.settings.AppSettings
 import com.xymusic.app.domain.settings.AppSettingsRepository
+import com.xymusic.app.domain.settings.AppSettingsUseCases
 import com.xymusic.app.domain.settings.MobileDataPolicy
 import com.xymusic.app.domain.settings.ThemePreference
 import com.xymusic.app.feature.auth.domain.AuthRepository
@@ -26,7 +27,6 @@ import com.xymusic.app.feature.auth.domain.AuthResult
 import com.xymusic.app.feature.auth.domain.AuthUseCases
 import com.xymusic.app.feature.auth.domain.model.LoginCommand
 import com.xymusic.app.feature.auth.domain.model.RegisterCommand
-import com.xymusic.app.feature.settings.domain.AppSettingsUseCases
 import com.xymusic.app.feature.settings.domain.ProfileRepository
 import com.xymusic.app.feature.settings.domain.ProfileUseCases
 import com.xymusic.app.feature.settings.domain.SettingsResult

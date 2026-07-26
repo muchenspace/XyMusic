@@ -18,7 +18,7 @@ import com.xymusic.app.feature.library.domain.LibraryResult
 import com.xymusic.app.feature.library.domain.LibraryUseCases
 import com.xymusic.app.feature.library.domain.model.PlaybackHistoryItem
 import com.xymusic.app.feature.player.domain.OfflineTrack
-import com.xymusic.app.feature.player.domain.OfflineTrackRepository
+import com.xymusic.app.feature.player.domain.OfflineTrackUseCases
 import com.xymusic.app.feature.player.domain.PlayerResult
 import com.xymusic.app.feature.player.domain.PlayerUseCases
 import com.xymusic.app.feature.player.domain.model.PlayerQueueItem
@@ -78,7 +78,7 @@ constructor(
     private val libraryUseCases: LibraryUseCases,
     private val playlistUseCases: PlaylistUseCases,
     private val playerUseCases: PlayerUseCases,
-    private val offlineTrackRepository: OfflineTrackRepository,
+    private val offlineTrackUseCases: OfflineTrackUseCases,
     private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
     @DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
@@ -113,7 +113,7 @@ constructor(
             .cachedIn(viewModelScope)
 
     val downloads =
-        offlineTrackRepository
+        offlineTrackUseCases
             .observeAll()
             .map { tracks -> tracks.map(OfflineTrack::toCatalogUi) }
 

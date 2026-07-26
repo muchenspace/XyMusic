@@ -8,8 +8,8 @@ import com.xymusic.app.domain.error.DomainError
 import com.xymusic.app.domain.error.DomainErrorReason
 import com.xymusic.app.feature.library.domain.LibraryResult
 import com.xymusic.app.feature.library.domain.LibraryUseCases
-import com.xymusic.app.feature.player.domain.OfflineTrackRepository
 import com.xymusic.app.feature.player.domain.OfflineTrackResult
+import com.xymusic.app.feature.player.domain.OfflineTrackUseCases
 import com.xymusic.app.feature.playlist.domain.PlaylistResult
 import com.xymusic.app.feature.playlist.domain.PlaylistUseCases
 import com.xymusic.app.feature.playlist.domain.model.AddPlaylistTrackCommand
@@ -51,7 +51,7 @@ class TrackActionsViewModel
 constructor(
     private val libraryUseCases: LibraryUseCases,
     private val playlistUseCases: PlaylistUseCases,
-    private val offlineTrackRepository: OfflineTrackRepository,
+    private val offlineTrackUseCases: OfflineTrackUseCases,
 ) : ViewModel() {
     private val selectedTrackId = MutableStateFlow<String?>(null)
     private val playerTrackId = MutableStateFlow<String?>(null)
@@ -64,7 +64,7 @@ constructor(
     private val playerIsFavorite = playerTrackId.favoriteState()
     private val selectedIsDownloaded =
         selectedTrackId.flatMapLatest { trackId ->
-            trackId?.let(offlineTrackRepository::observeDownloaded) ?: flowOf(false)
+            trackId?.let(offlineTrackUseCases::observeDownloaded) ?: flowOf(false)
         }
 
     private val baseState =
@@ -132,7 +132,7 @@ constructor(
             downloadingTrackId.value = trackId
             try {
                 show(
-                    when (offlineTrackRepository.download(trackId)) {
+                    when (offlineTrackUseCases.download(trackId)) {
                         OfflineTrackResult.Success -> R.string.offline_download_complete
                         OfflineTrackResult.Unavailable -> R.string.offline_download_failed
                     },
@@ -147,7 +147,7 @@ constructor(
         val trackId = selectedTrackId.value ?: return
         mutate {
             show(
-                when (offlineTrackRepository.remove(trackId)) {
+                when (offlineTrackUseCases.remove(trackId)) {
                     OfflineTrackResult.Success -> R.string.offline_download_removed
                     OfflineTrackResult.Unavailable -> R.string.offline_download_remove_failed
                 },

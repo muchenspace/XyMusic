@@ -15,6 +15,7 @@ import com.xymusic.app.core.paging.asPagedStream
 import com.xymusic.app.domain.paging.PagedStream
 import com.xymusic.app.domain.settings.AppSettings
 import com.xymusic.app.domain.settings.AppSettingsRepository
+import com.xymusic.app.domain.settings.AppSettingsUseCases
 import com.xymusic.app.feature.catalog.domain.CatalogRepository
 import com.xymusic.app.feature.catalog.domain.CatalogResult
 import com.xymusic.app.feature.catalog.domain.model.AlbumQuery
@@ -22,6 +23,7 @@ import com.xymusic.app.feature.catalog.domain.model.ArtistQuery
 import com.xymusic.app.feature.catalog.domain.model.TrackQuery
 import com.xymusic.app.feature.player.domain.LyricsSource
 import com.xymusic.app.feature.player.domain.PlaybackQueueStore
+import com.xymusic.app.feature.player.domain.PlaybackQueueUseCases
 import com.xymusic.app.feature.player.domain.PlayerEvent
 import com.xymusic.app.feature.player.domain.PlayerRepository
 import com.xymusic.app.feature.player.domain.PlayerResult
@@ -66,8 +68,8 @@ class PlayerViewModelTest {
             PlayerViewModel(
                 PlayerUseCases(player),
                 lyricsSource(catalog),
-                EmptyPlaybackQueueStore,
-                FakeAppSettingsRepository(),
+                PlaybackQueueUseCases(EmptyPlaybackQueueStore),
+                AppSettingsUseCases(FakeAppSettingsRepository()),
                 mainDispatcherRule.dispatcher,
             )
         backgroundScope.launch { viewModel.uiState.collect() }
@@ -94,8 +96,8 @@ class PlayerViewModelTest {
             PlayerViewModel(
                 PlayerUseCases(player),
                 lyricsSource(catalog),
-                EmptyPlaybackQueueStore,
-                FakeAppSettingsRepository(),
+                PlaybackQueueUseCases(EmptyPlaybackQueueStore),
+                AppSettingsUseCases(FakeAppSettingsRepository()),
                 mainDispatcherRule.dispatcher,
             )
         backgroundScope.launch { viewModel.uiState.collect() }
@@ -122,8 +124,8 @@ class PlayerViewModelTest {
             PlayerViewModel(
                 PlayerUseCases(player),
                 lyricsSource(catalog),
-                EmptyPlaybackQueueStore,
-                FakeAppSettingsRepository(),
+                PlaybackQueueUseCases(EmptyPlaybackQueueStore),
+                AppSettingsUseCases(FakeAppSettingsRepository()),
                 mainDispatcherRule.dispatcher,
             )
         backgroundScope.launch { viewModel.uiState.collect() }
@@ -149,8 +151,8 @@ class PlayerViewModelTest {
             PlayerViewModel(
                 PlayerUseCases(player),
                 lyricsSource(RefreshingCatalogRepository()),
-                EmptyPlaybackQueueStore,
-                settingsRepository,
+                PlaybackQueueUseCases(EmptyPlaybackQueueStore),
+                AppSettingsUseCases(settingsRepository),
                 mainDispatcherRule.dispatcher,
             )
         backgroundScope.launch { viewModel.uiState.collect() }
@@ -174,8 +176,8 @@ class PlayerViewModelTest {
             PlayerViewModel(
                 PlayerUseCases(player),
                 lyricsSource(RefreshingCatalogRepository()),
-                EmptyPlaybackQueueStore,
-                FakeAppSettingsRepository(),
+                PlaybackQueueUseCases(EmptyPlaybackQueueStore),
+                AppSettingsUseCases(FakeAppSettingsRepository()),
                 mainDispatcherRule.dispatcher,
             )
 
@@ -192,8 +194,8 @@ class PlayerViewModelTest {
             PlayerViewModel(
                 PlayerUseCases(player),
                 lyricsSource(RefreshingCatalogRepository()),
-                EmptyPlaybackQueueStore,
-                FakeAppSettingsRepository(),
+                PlaybackQueueUseCases(EmptyPlaybackQueueStore),
+                AppSettingsUseCases(FakeAppSettingsRepository()),
                 mainDispatcherRule.dispatcher,
             )
         backgroundScope.launch { viewModel.uiState.collect() }
@@ -227,8 +229,8 @@ class PlayerViewModelTest {
             PlayerViewModel(
                 PlayerUseCases(player),
                 lyricsSource(RefreshingCatalogRepository()),
-                EmptyPlaybackQueueStore,
-                FakeAppSettingsRepository(),
+                PlaybackQueueUseCases(EmptyPlaybackQueueStore),
+                AppSettingsUseCases(FakeAppSettingsRepository()),
                 mainDispatcherRule.dispatcher,
             )
         backgroundScope.launch { firstViewModel.uiState.collect() }
@@ -244,8 +246,8 @@ class PlayerViewModelTest {
             PlayerViewModel(
                 PlayerUseCases(player),
                 lyricsSource(RefreshingCatalogRepository()),
-                EmptyPlaybackQueueStore,
-                FakeAppSettingsRepository(),
+                PlaybackQueueUseCases(EmptyPlaybackQueueStore),
+                AppSettingsUseCases(FakeAppSettingsRepository()),
                 mainDispatcherRule.dispatcher,
             )
         backgroundScope.launch { recreatedViewModel.uiState.collect() }
@@ -270,8 +272,8 @@ class PlayerViewModelTest {
             PlayerViewModel(
                 PlayerUseCases(player),
                 lyricsSource(RefreshingCatalogRepository()),
-                EmptyPlaybackQueueStore,
-                FakeAppSettingsRepository(),
+                PlaybackQueueUseCases(EmptyPlaybackQueueStore),
+                AppSettingsUseCases(FakeAppSettingsRepository()),
                 mainDispatcherRule.dispatcher,
             )
 
@@ -317,8 +319,8 @@ class PlayerViewModelTest {
             PlayerViewModel(
                 PlayerUseCases(player),
                 lyricsSource(RefreshingCatalogRepository()),
-                EmptyPlaybackQueueStore,
-                FakeAppSettingsRepository(),
+                PlaybackQueueUseCases(EmptyPlaybackQueueStore),
+                AppSettingsUseCases(FakeAppSettingsRepository()),
                 mainDispatcherRule.dispatcher,
             )
 
@@ -338,8 +340,8 @@ class PlayerViewModelTest {
             PlayerViewModel(
                 PlayerUseCases(player),
                 lyricsSource(RefreshingCatalogRepository()),
-                EmptyPlaybackQueueStore,
-                FakeAppSettingsRepository(),
+                PlaybackQueueUseCases(EmptyPlaybackQueueStore),
+                AppSettingsUseCases(FakeAppSettingsRepository()),
                 mainDispatcherRule.dispatcher,
             )
 

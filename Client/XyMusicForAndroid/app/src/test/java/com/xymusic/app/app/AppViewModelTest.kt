@@ -10,7 +10,7 @@ import com.xymusic.app.core.session.SessionMutationCoordinator
 import com.xymusic.app.domain.server.ServerConfigUseCases
 import com.xymusic.app.domain.settings.AppSettings
 import com.xymusic.app.domain.settings.AppSettingsRepository
-import com.xymusic.app.feature.settings.domain.AppSettingsUseCases
+import com.xymusic.app.domain.settings.AppSettingsUseCases
 import com.xymusic.app.support.InMemoryServerConfigRepository
 import dagger.Lazy
 import kotlinx.coroutines.ExperimentalCoroutinesApi
