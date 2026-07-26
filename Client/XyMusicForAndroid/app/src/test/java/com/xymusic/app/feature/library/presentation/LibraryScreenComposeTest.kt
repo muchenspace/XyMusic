@@ -29,6 +29,7 @@ import com.xymusic.app.feature.library.domain.model.PlaybackProgressCommand
 import com.xymusic.app.feature.player.domain.OfflineTrack
 import com.xymusic.app.feature.player.domain.OfflineTrackRepository
 import com.xymusic.app.feature.player.domain.OfflineTrackResult
+import com.xymusic.app.feature.player.domain.OfflineTrackUseCases
 import com.xymusic.app.feature.player.domain.PlayerRepository
 import com.xymusic.app.feature.player.domain.PlayerResult
 import com.xymusic.app.feature.player.domain.PlayerUseCases
@@ -141,7 +142,7 @@ class LibraryScreenComposeTest {
                 libraryUseCases = LibraryUseCases(libraryRepository),
                 playlistUseCases = PlaylistUseCases(playlistRepository),
                 playerUseCases = PlayerUseCases(RecordingPlayerRepository()),
-                offlineTrackRepository = EmptyOfflineTrackRepository,
+                offlineTrackUseCases = OfflineTrackUseCases(EmptyOfflineTrackRepository),
                 defaultDispatcher = Dispatchers.Unconfined,
             )
         composeRule.setContent {
@@ -234,7 +235,7 @@ class LibraryScreenComposeTest {
                 libraryUseCases = LibraryUseCases(FakeLibraryRepository(history)),
                 playlistUseCases = PlaylistUseCases(FakePlaylistRepository(playlists)),
                 playerUseCases = PlayerUseCases(playerRepository),
-                offlineTrackRepository = EmptyOfflineTrackRepository,
+                offlineTrackUseCases = OfflineTrackUseCases(EmptyOfflineTrackRepository),
                 defaultDispatcher = Dispatchers.Unconfined,
             )
         setContent {

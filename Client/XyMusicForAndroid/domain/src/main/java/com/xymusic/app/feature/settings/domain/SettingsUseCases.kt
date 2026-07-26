@@ -1,7 +1,5 @@
 package com.xymusic.app.feature.settings.domain
 
-import com.xymusic.app.domain.settings.AppSettings
-import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.feature.settings.domain.model.AvatarUploadCommand
 import com.xymusic.app.feature.settings.domain.model.UpdateProfileCommand
 
@@ -17,14 +15,4 @@ class ProfileUseCases(private val repository: ProfileRepository) {
     suspend fun uploadAvatar(command: AvatarUploadCommand) = repository.uploadAvatar(command)
 
     suspend fun logoutAllSessions() = repository.logoutAllSessions()
-}
-
-class AppSettingsUseCases(private val repository: AppSettingsRepository) {
-    val settings = repository.settings
-
-    suspend fun update(settings: AppSettings) = repository.update(settings)
-
-    suspend fun mutate(transform: (AppSettings) -> AppSettings) = repository.mutate(transform)
-
-    suspend fun reset() = repository.reset()
 }

@@ -7,9 +7,9 @@ import com.xymusic.app.core.common.DefaultDispatcher
 import com.xymusic.app.core.common.runCatchingPreservingCancellation
 import com.xymusic.app.core.model.media.Lyrics
 import com.xymusic.app.core.model.media.LyricsFormat
-import com.xymusic.app.domain.settings.AppSettingsRepository
+import com.xymusic.app.domain.settings.AppSettingsUseCases
 import com.xymusic.app.feature.player.domain.LyricsSource
-import com.xymusic.app.feature.player.domain.PlaybackQueueStore
+import com.xymusic.app.feature.player.domain.PlaybackQueueUseCases
 import com.xymusic.app.feature.player.domain.PlayerEvent
 import com.xymusic.app.feature.player.domain.PlayerResult
 import com.xymusic.app.feature.player.domain.PlayerUseCases
@@ -45,8 +45,8 @@ class PlayerViewModel
 constructor(
     private val playerUseCases: PlayerUseCases,
     private val lyricsSource: LyricsSource,
-    private val playbackQueueStore: PlaybackQueueStore,
-    private val appSettingsRepository: AppSettingsRepository,
+    private val playbackQueueUseCases: PlaybackQueueUseCases,
+    private val appSettingsUseCases: AppSettingsUseCases,
     @DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
     private val mutableEffects = MutableSharedFlow<PlayerUiEffect>(extraBufferCapacity = 1)
@@ -101,7 +101,7 @@ constructor(
         combine(
             playerUseCases.state,
             parsedLyrics,
-            appSettingsRepository.settings,
+            appSettingsUseCases.settings,
         ) { player, lyrics, settings ->
             PlayerUiState(
                 player = player,
@@ -119,7 +119,7 @@ constructor(
 
     init {
         viewModelScope.launch {
-            if (playbackQueueStore.observe().first().isNotEmpty()) playerUseCases.connect()
+            if (playbackQueueUseCases.observe().first().isNotEmpty()) playerUseCases.connect()
         }
         viewModelScope.launch {
             playerUseCases.state

@@ -7,7 +7,7 @@ import com.xymusic.app.core.common.runCatchingPreservingCancellation
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.domain.server.ServerConfigUseCases
 import com.xymusic.app.domain.server.ServerEndpoint
-import com.xymusic.app.feature.settings.domain.AppSettingsUseCases
+import com.xymusic.app.domain.settings.AppSettingsUseCases
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableSharedFlow
