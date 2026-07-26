@@ -2,11 +2,8 @@ package com.xymusic.app.feature.search.domain
 
 import com.xymusic.app.feature.search.domain.model.SearchQuery
 import com.xymusic.app.feature.search.domain.model.SearchScope
-import javax.inject.Inject
 
-class SearchUseCases
-@Inject
-constructor(private val repository: SearchRepository) {
+class SearchUseCases(private val repository: SearchRepository) {
     fun observeOverview(query: SearchQuery) = repository.observeOverview(query)
 
     suspend fun refreshOverview(query: SearchQuery) = repository.refreshOverview(query)

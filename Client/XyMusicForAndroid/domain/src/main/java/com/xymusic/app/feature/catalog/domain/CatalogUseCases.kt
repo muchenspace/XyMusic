@@ -3,11 +3,8 @@ package com.xymusic.app.feature.catalog.domain
 import com.xymusic.app.feature.catalog.domain.model.AlbumQuery
 import com.xymusic.app.feature.catalog.domain.model.ArtistQuery
 import com.xymusic.app.feature.catalog.domain.model.TrackQuery
-import javax.inject.Inject
 
-class CatalogUseCases
-@Inject
-constructor(private val repository: CatalogRepository) {
+class CatalogUseCases(private val repository: CatalogRepository) {
     fun tracks(query: TrackQuery = TrackQuery()) = repository.pagedTracks(query)
 
     fun artists(query: ArtistQuery = ArtistQuery()) = repository.pagedArtists(query)

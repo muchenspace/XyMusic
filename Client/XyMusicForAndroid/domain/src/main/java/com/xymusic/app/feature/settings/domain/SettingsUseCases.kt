@@ -4,11 +4,8 @@ import com.xymusic.app.domain.settings.AppSettings
 import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.feature.settings.domain.model.AvatarUploadCommand
 import com.xymusic.app.feature.settings.domain.model.UpdateProfileCommand
-import javax.inject.Inject
 
-class ProfileUseCases
-@Inject
-constructor(private val repository: ProfileRepository) {
+class ProfileUseCases(private val repository: ProfileRepository) {
     val profile = repository.profile
 
     suspend fun ensureLoaded() = repository.ensureLoaded()
@@ -22,9 +19,7 @@ constructor(private val repository: ProfileRepository) {
     suspend fun logoutAllSessions() = repository.logoutAllSessions()
 }
 
-class AppSettingsUseCases
-@Inject
-constructor(private val repository: AppSettingsRepository) {
+class AppSettingsUseCases(private val repository: AppSettingsRepository) {
     val settings = repository.settings
 
     suspend fun update(settings: AppSettings) = repository.update(settings)
