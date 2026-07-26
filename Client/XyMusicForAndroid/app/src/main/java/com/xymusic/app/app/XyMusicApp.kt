@@ -17,9 +17,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import com.xymusic.app.R
 import com.xymusic.app.app.navigation.AuthNavigation
 import com.xymusic.app.app.navigation.MainNavigation
-import com.xymusic.app.core.network.ServerEndpoint
 import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.ui.component.LoadingState
+import com.xymusic.app.domain.server.ServerEndpoint
 import com.xymusic.app.feature.server.presentation.ServerSetupScreen
 import com.xymusic.app.ui.theme.XyMusicTheme
 import kotlinx.coroutines.flow.Flow

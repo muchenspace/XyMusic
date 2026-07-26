@@ -1,7 +1,7 @@
 package com.xymusic.app.app.di
 
-import com.xymusic.app.core.network.ServerConfigRepository
 import com.xymusic.app.data.network.SharedPreferencesServerConfigRepository
+import com.xymusic.app.domain.server.ServerConfigRepository
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn

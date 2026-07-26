@@ -4,9 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xymusic.app.R
 import com.xymusic.app.core.common.runCatchingPreservingCancellation
-import com.xymusic.app.core.network.ServerConfigRepository
-import com.xymusic.app.core.network.ServerEndpoint
 import com.xymusic.app.core.session.AppSessionProvider
+import com.xymusic.app.domain.server.ServerConfigUseCases
+import com.xymusic.app.domain.server.ServerEndpoint
 import com.xymusic.app.feature.settings.domain.AppSettingsUseCases
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -23,7 +23,7 @@ class AppViewModel
 constructor(
     private val sessionProvider: AppSessionProvider,
     private val appSettingsUseCases: AppSettingsUseCases,
-    private val serverConfigRepository: ServerConfigRepository,
+    private val serverConfigUseCases: ServerConfigUseCases,
     private val serverSwitchCoordinator: ServerSwitchCoordinator,
 ) : ViewModel() {
     private val mutableEffects = MutableSharedFlow<AppUiEffect>(extraBufferCapacity = 1)
@@ -33,7 +33,7 @@ constructor(
         combine(
             sessionProvider.sessionState,
             appSettingsUseCases.settings,
-            serverConfigRepository.endpoint,
+            serverConfigUseCases.endpoint,
             serverSwitchCoordinator.state,
         ) { sessionState, settings, serverEndpoint, serverSwitchState ->
             AppUiState(
@@ -48,14 +48,14 @@ constructor(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue =
             AppUiState(
-                serverEndpoint = serverConfigRepository.currentEndpoint(),
+                serverEndpoint = serverConfigUseCases.currentEndpoint(),
                 serverSwitchState = serverSwitchCoordinator.state.value,
             ),
         )
 
     init {
         viewModelScope.launch {
-            serverConfigRepository.load()
+            serverConfigUseCases.load()
             sessionProvider.restoreSession()
         }
     }
@@ -86,7 +86,7 @@ constructor(
     }
 
     fun setServerEndpoint(endpoint: ServerEndpoint) {
-        if (serverConfigRepository.currentEndpoint() == endpoint) return
+        if (serverConfigUseCases.currentEndpoint() == endpoint) return
         viewModelScope.launch {
             serverSwitchCoordinator.switchTo(endpoint)
         }

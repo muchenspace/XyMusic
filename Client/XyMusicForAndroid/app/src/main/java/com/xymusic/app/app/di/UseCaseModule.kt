@@ -1,5 +1,7 @@
 package com.xymusic.app.app.di
 
+import com.xymusic.app.domain.server.ServerConfigRepository
+import com.xymusic.app.domain.server.ServerConfigUseCases
 import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.feature.auth.domain.AuthRepository
 import com.xymusic.app.feature.auth.domain.AuthUseCases
@@ -52,4 +54,8 @@ object UseCaseModule {
     @Provides
     fun provideAppSettingsUseCases(repository: AppSettingsRepository): AppSettingsUseCases =
         AppSettingsUseCases(repository)
+
+    @Provides
+    fun provideServerConfigUseCases(repository: ServerConfigRepository): ServerConfigUseCases =
+        ServerConfigUseCases(repository)
 }

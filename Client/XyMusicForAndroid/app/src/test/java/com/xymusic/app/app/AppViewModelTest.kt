@@ -7,6 +7,7 @@ import com.xymusic.app.core.network.ServerRuntimeCoordinator
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.session.SessionMutationCoordinator
+import com.xymusic.app.domain.server.ServerConfigUseCases
 import com.xymusic.app.domain.settings.AppSettings
 import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.feature.settings.domain.AppSettingsUseCases
@@ -30,7 +31,7 @@ class AppViewModelTest {
                 override suspend fun restoreSession() = Unit
             },
             appSettingsUseCases = AppSettingsUseCases(settings),
-            serverConfigRepository = repository,
+            serverConfigUseCases = ServerConfigUseCases(repository),
             serverSwitchCoordinator = ServerSwitchCoordinator(
                 serverConfigRepository = repository,
                 serverRuntimeCoordinator = ServerRuntimeCoordinator(),

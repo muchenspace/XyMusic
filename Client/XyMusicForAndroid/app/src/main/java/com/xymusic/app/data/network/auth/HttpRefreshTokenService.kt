@@ -1,7 +1,6 @@
 package com.xymusic.app.data.network.auth
 
 import com.xymusic.app.core.network.ApiBaseUrl
-import com.xymusic.app.core.network.ServerConfigRepository
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
 import com.xymusic.app.core.network.ServerSwitchInProgressException
 import com.xymusic.app.core.network.StaleServerGenerationException
@@ -14,6 +13,7 @@ import com.xymusic.app.data.network.ExpectedServerRequestContext
 import com.xymusic.app.data.network.ProblemResponseParser
 import com.xymusic.app.data.network.auth.model.AuthSessionDto
 import com.xymusic.app.data.network.auth.model.toSessionTokens
+import com.xymusic.app.domain.server.ServerConfigRepository
 import java.io.IOException
 import java.time.Clock
 import javax.inject.Inject

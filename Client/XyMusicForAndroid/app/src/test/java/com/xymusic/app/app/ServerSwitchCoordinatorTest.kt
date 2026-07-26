@@ -1,9 +1,9 @@
 package com.xymusic.app.app
 
 import com.google.common.truth.Truth.assertThat
-import com.xymusic.app.core.network.ServerEndpoint
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
 import com.xymusic.app.core.session.SessionMutationCoordinator
+import com.xymusic.app.domain.server.ServerEndpoint
 import com.xymusic.app.support.InMemoryServerConfigRepository
 import dagger.Lazy
 import kotlinx.coroutines.ExperimentalCoroutinesApi

@@ -9,7 +9,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import com.google.common.truth.Truth.assertThat
-import com.xymusic.app.core.network.ServerEndpoint
+import com.xymusic.app.domain.server.ServerEndpoint
 import com.xymusic.app.testing.ComposeTestApplication
 import com.xymusic.app.ui.theme.XyMusicTheme
 import org.junit.Rule
