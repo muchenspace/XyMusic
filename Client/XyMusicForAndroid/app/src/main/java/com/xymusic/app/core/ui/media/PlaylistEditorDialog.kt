@@ -1,4 +1,4 @@
-package com.xymusic.app.feature.playlist.presentation
+package com.xymusic.app.core.ui.media
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box

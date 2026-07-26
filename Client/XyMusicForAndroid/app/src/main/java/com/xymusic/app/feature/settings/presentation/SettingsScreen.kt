@@ -55,8 +55,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xymusic.app.R
 import com.xymusic.app.core.ui.layout.isCompactLandscape
 import com.xymusic.app.core.ui.layout.isWideLandscape
+import com.xymusic.app.core.ui.server.ServerEndpointDialog
 import com.xymusic.app.domain.server.ServerEndpoint
-import com.xymusic.app.feature.server.presentation.ServerEndpointDialog
 import com.xymusic.app.feature.settings.domain.model.UserProfile
 import com.xymusic.app.ui.theme.XyMotion
 

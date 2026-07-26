@@ -22,6 +22,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navigation
+import com.xymusic.app.core.ui.server.ServerEndpointDialog
 import com.xymusic.app.domain.server.ServerEndpoint
 import com.xymusic.app.feature.auth.presentation.AuthEffect
 import com.xymusic.app.feature.auth.presentation.AuthEntryScreen
@@ -30,7 +31,6 @@ import com.xymusic.app.feature.auth.presentation.AuthViewModel
 import com.xymusic.app.feature.auth.presentation.RegisterScreen
 import com.xymusic.app.feature.auth.presentation.SignInScreen
 import com.xymusic.app.feature.auth.presentation.resolve
-import com.xymusic.app.feature.server.presentation.ServerEndpointDialog
 import com.xymusic.app.ui.theme.slideFadeBackInto
 import com.xymusic.app.ui.theme.slideFadeBackOutOf
 import com.xymusic.app.ui.theme.slideFadeInto
