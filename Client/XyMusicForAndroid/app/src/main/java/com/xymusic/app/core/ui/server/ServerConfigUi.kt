@@ -1,4 +1,4 @@
-package com.xymusic.app.feature.server.presentation
+package com.xymusic.app.core.ui.server
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement

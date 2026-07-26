@@ -52,9 +52,9 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xymusic.app.R
 import com.xymusic.app.core.ui.layout.isWideLandscape
+import com.xymusic.app.core.ui.media.PlaylistEditorDialog
+import com.xymusic.app.core.ui.media.labelRes
 import com.xymusic.app.feature.playlist.domain.model.PlaylistSummary
-import com.xymusic.app.feature.playlist.presentation.PlaylistEditorDialog
-import com.xymusic.app.feature.playlist.presentation.labelRes
 import com.xymusic.app.ui.theme.spacing
 
 internal object LibraryTestTags {

@@ -54,8 +54,8 @@ import com.xymusic.app.core.ui.media.CachedCatalogBanner
 import com.xymusic.app.core.ui.media.CatalogPagedList
 import com.xymusic.app.core.ui.media.CatalogTrackRow
 import com.xymusic.app.core.ui.media.CatalogTrackUi
+import com.xymusic.app.core.ui.media.labelRes
 import com.xymusic.app.feature.playlist.domain.model.PlaylistSummary
-import com.xymusic.app.feature.playlist.presentation.labelRes
 import com.xymusic.app.ui.theme.spacing
 import kotlinx.coroutines.flow.Flow
 

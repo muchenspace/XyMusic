@@ -1,4 +1,4 @@
-package com.xymusic.app.feature.server.presentation
+package com.xymusic.app.core.ui.server
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule

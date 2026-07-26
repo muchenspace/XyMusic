@@ -50,9 +50,9 @@ import androidx.compose.ui.unit.dp
 import com.xymusic.app.R
 import com.xymusic.app.core.ui.component.MediaArtwork
 import com.xymusic.app.core.ui.layout.isCompactLandscape
+import com.xymusic.app.core.ui.media.PlaylistEditorDialog
 import com.xymusic.app.feature.playlist.domain.model.PlaylistSummary
 import com.xymusic.app.feature.playlist.domain.model.PlaylistVisibility
-import com.xymusic.app.feature.playlist.presentation.PlaylistEditorDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
