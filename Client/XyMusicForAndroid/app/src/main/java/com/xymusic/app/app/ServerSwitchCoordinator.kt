@@ -1,10 +1,10 @@
 package com.xymusic.app.app
 
 import com.xymusic.app.core.common.IoDispatcher
-import com.xymusic.app.core.network.ServerConfigRepository
-import com.xymusic.app.core.network.ServerEndpoint
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
 import com.xymusic.app.core.session.SessionMutationCoordinator
+import com.xymusic.app.domain.server.ServerConfigRepository
+import com.xymusic.app.domain.server.ServerEndpoint
 import dagger.Lazy
 import java.util.concurrent.CancellationException
 import javax.inject.Inject

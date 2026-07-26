@@ -4,8 +4,8 @@ import android.app.Application
 import android.os.StrictMode
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
-import com.xymusic.app.core.network.ServerConfigRepository
 import com.xymusic.app.core.session.AppSessionProvider
+import com.xymusic.app.domain.server.ServerConfigRepository
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope

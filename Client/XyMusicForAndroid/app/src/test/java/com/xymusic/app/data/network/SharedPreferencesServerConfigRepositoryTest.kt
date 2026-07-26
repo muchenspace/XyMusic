@@ -5,8 +5,8 @@ import android.content.ContextWrapper
 import android.content.SharedPreferences
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
-import com.xymusic.app.core.network.ServerEndpoint
-import com.xymusic.app.core.network.ServerProtocol
+import com.xymusic.app.domain.server.ServerEndpoint
+import com.xymusic.app.domain.server.ServerProtocol
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import org.junit.runner.RunWith

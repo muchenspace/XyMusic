@@ -2,9 +2,9 @@ package com.xymusic.app.data.network
 
 import android.content.Context
 import com.xymusic.app.core.common.IoDispatcher
-import com.xymusic.app.core.network.ServerConfigRepository
-import com.xymusic.app.core.network.ServerEndpoint
-import com.xymusic.app.core.network.ServerProtocol
+import com.xymusic.app.domain.server.ServerConfigRepository
+import com.xymusic.app.domain.server.ServerEndpoint
+import com.xymusic.app.domain.server.ServerProtocol
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.IOException
 import java.util.concurrent.CancellationException

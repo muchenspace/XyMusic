@@ -1,6 +1,8 @@
 package com.xymusic.app.core.network
 
 import com.google.common.truth.Truth.assertThat
+import com.xymusic.app.domain.server.ServerEndpoint
+import com.xymusic.app.domain.server.ServerProtocol
 import org.junit.Test
 
 class ServerEndpointTest {

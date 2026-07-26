@@ -18,7 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.xymusic.app.R
-import com.xymusic.app.core.network.ServerEndpoint
+import com.xymusic.app.domain.server.ServerEndpoint
 import com.xymusic.app.domain.settings.MobileDataPolicy
 import com.xymusic.app.domain.settings.StreamingQuality
 import com.xymusic.app.domain.settings.ThemePreference

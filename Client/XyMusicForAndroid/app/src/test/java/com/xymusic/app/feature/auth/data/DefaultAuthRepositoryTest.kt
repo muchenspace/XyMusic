@@ -5,9 +5,6 @@ import com.xymusic.app.core.database.AccountDataCleaner
 import com.xymusic.app.core.database.PendingAccountCleanupStore
 import com.xymusic.app.core.database.dao.AccountDataDeletion
 import com.xymusic.app.core.network.ProblemMapper
-import com.xymusic.app.core.network.ServerConfigRepository
-import com.xymusic.app.core.network.ServerEndpoint
-import com.xymusic.app.core.network.ServerProtocol
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
 import com.xymusic.app.core.network.auth.RefreshAttemptStore
 import com.xymusic.app.core.security.AccessToken
@@ -34,6 +31,9 @@ import com.xymusic.app.data.network.auth.model.TokenPairDto
 import com.xymusic.app.data.network.auth.model.toSessionTokens
 import com.xymusic.app.domain.error.DomainError
 import com.xymusic.app.domain.error.NetworkFailureReason
+import com.xymusic.app.domain.server.ServerConfigRepository
+import com.xymusic.app.domain.server.ServerEndpoint
+import com.xymusic.app.domain.server.ServerProtocol
 import com.xymusic.app.feature.auth.data.remote.LoginRequestDto
 import com.xymusic.app.feature.auth.data.remote.PublicAuthApi
 import com.xymusic.app.feature.auth.data.remote.RegisterRequestDto

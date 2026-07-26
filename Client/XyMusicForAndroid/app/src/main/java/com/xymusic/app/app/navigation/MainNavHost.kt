@@ -11,7 +11,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.xymusic.app.app.home.HomeScreen
 import com.xymusic.app.app.mine.MineScreen
-import com.xymusic.app.core.network.ServerEndpoint
+import com.xymusic.app.domain.server.ServerEndpoint
 import com.xymusic.app.feature.catalog.presentation.AlbumDetailRoute
 import com.xymusic.app.feature.catalog.presentation.ArtistDetailRoute
 import com.xymusic.app.feature.library.presentation.LibraryScreen

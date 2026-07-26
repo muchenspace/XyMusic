@@ -42,10 +42,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.xymusic.app.R
-import com.xymusic.app.core.network.ServerEndpoint
-import com.xymusic.app.core.network.ServerProtocol
 import com.xymusic.app.core.ui.layout.isCompactLandscape
 import com.xymusic.app.core.ui.layout.isWideLandscape
+import com.xymusic.app.domain.server.ServerEndpoint
+import com.xymusic.app.domain.server.ServerProtocol
 import com.xymusic.app.ui.theme.spacing
 
 object ServerConfigTestTags {

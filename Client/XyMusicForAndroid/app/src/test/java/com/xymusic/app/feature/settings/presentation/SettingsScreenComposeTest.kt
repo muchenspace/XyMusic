@@ -16,7 +16,7 @@ import androidx.compose.ui.test.performScrollToIndex
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import com.xymusic.app.R
-import com.xymusic.app.core.network.ServerEndpoint
+import com.xymusic.app.domain.server.ServerEndpoint
 import com.xymusic.app.domain.settings.AppSettings
 import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.domain.settings.MobileDataPolicy

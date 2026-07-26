@@ -1,8 +1,8 @@
 package com.xymusic.app.support
 
-import com.xymusic.app.core.network.ServerConfigRepository
-import com.xymusic.app.core.network.ServerEndpoint
-import com.xymusic.app.core.network.ServerProtocol
+import com.xymusic.app.domain.server.ServerConfigRepository
+import com.xymusic.app.domain.server.ServerEndpoint
+import com.xymusic.app.domain.server.ServerProtocol
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import okhttp3.HttpUrl

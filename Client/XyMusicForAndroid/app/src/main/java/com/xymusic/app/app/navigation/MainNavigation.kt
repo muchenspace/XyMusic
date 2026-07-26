@@ -23,8 +23,8 @@ import com.xymusic.app.app.trackactions.TrackActionsSheet
 import com.xymusic.app.app.trackactions.TrackActionsUiEffect
 import com.xymusic.app.app.trackactions.TrackActionsUiState
 import com.xymusic.app.app.trackactions.TrackActionsViewModel
-import com.xymusic.app.core.network.ServerEndpoint
 import com.xymusic.app.core.ui.layout.isCompactLandscape
+import com.xymusic.app.domain.server.ServerEndpoint
 import com.xymusic.app.feature.player.presentation.PlayerUiEffect
 import com.xymusic.app.feature.player.presentation.PlayerViewModel
 import com.xymusic.app.feature.player.presentation.rememberPlaybackPositionState

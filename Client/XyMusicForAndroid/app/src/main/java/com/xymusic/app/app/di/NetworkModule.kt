@@ -6,8 +6,8 @@ import com.xymusic.app.core.network.ApiCallFactory
 import com.xymusic.app.core.network.ApiHttpClient
 import com.xymusic.app.core.network.AuthHttpClient
 import com.xymusic.app.core.network.MediaHttpClient
-import com.xymusic.app.core.network.ServerConfigRepository
 import com.xymusic.app.core.network.ServerSynchronizedClock
+import com.xymusic.app.core.network.baseUrl
 import com.xymusic.app.data.network.BearerTokenInterceptor
 import com.xymusic.app.data.network.ClientMetadataInterceptor
 import com.xymusic.app.data.network.NetworkEventLogger
@@ -20,6 +20,7 @@ import com.xymusic.app.data.network.SessionRequestContextCallFactory
 import com.xymusic.app.data.network.SessionRequestContextInterceptor
 import com.xymusic.app.data.network.SessionRequestContextValidationInterceptor
 import com.xymusic.app.data.network.auth.RefreshingAuthenticator
+import com.xymusic.app.domain.server.ServerConfigRepository
 import com.xymusic.app.feature.auth.data.remote.PublicAuthApi
 import com.xymusic.app.feature.auth.data.remote.SessionAuthApi
 import com.xymusic.app.feature.catalog.data.remote.CatalogApi

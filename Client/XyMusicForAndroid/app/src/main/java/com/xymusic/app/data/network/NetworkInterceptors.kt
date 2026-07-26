@@ -1,8 +1,6 @@
 package com.xymusic.app.data.network
 
 import com.xymusic.app.BuildConfig
-import com.xymusic.app.core.network.ServerConfigRepository
-import com.xymusic.app.core.network.ServerEndpoint
 import com.xymusic.app.core.network.ServerGeneration
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
 import com.xymusic.app.core.network.StaleServerGenerationException
@@ -10,6 +8,8 @@ import com.xymusic.app.core.security.AccessToken
 import com.xymusic.app.core.security.TokenVault
 import com.xymusic.app.core.session.ActiveSessionIdentity
 import com.xymusic.app.core.session.SessionIdentityProvider
+import com.xymusic.app.domain.server.ServerConfigRepository
+import com.xymusic.app.domain.server.ServerEndpoint
 import java.io.IOException
 import javax.inject.Inject
 import okhttp3.Call
