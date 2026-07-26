@@ -3,11 +3,11 @@ package com.xymusic.app.feature.player.data.remote
 import com.xymusic.app.core.network.ServerConfigRepository
 import com.xymusic.app.core.network.ServerProtocol
 import com.xymusic.app.core.network.ServerSynchronizedClock
-import com.xymusic.app.core.preferences.AppSettingsRepository
-import com.xymusic.app.core.preferences.StreamingQuality
 import com.xymusic.app.core.session.ActiveSessionIdentity
 import com.xymusic.app.core.session.SessionIdentityProvider
 import com.xymusic.app.data.network.ProblemResponseParser
+import com.xymusic.app.domain.settings.AppSettingsRepository
+import com.xymusic.app.domain.settings.StreamingQuality
 import com.xymusic.app.feature.player.data.media.PlaybackGrantKey
 import com.xymusic.app.feature.player.data.media.PlaybackGrantStore
 import com.xymusic.app.feature.player.domain.PlaybackGrant

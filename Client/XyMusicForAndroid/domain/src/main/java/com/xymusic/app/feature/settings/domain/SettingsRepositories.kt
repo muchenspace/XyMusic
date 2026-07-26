@@ -1,6 +1,6 @@
 package com.xymusic.app.feature.settings.domain
 
-import com.xymusic.app.core.network.DomainError
+import com.xymusic.app.domain.error.DomainError
 import com.xymusic.app.feature.settings.domain.model.AvatarUploadCommand
 import com.xymusic.app.feature.settings.domain.model.UpdateProfileCommand
 import com.xymusic.app.feature.settings.domain.model.UserProfile

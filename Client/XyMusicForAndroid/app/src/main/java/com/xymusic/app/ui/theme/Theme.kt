@@ -13,7 +13,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
-import com.xymusic.app.core.preferences.ThemePreference
+import com.xymusic.app.domain.settings.ThemePreference
 
 val MaterialTheme.spacing: Spacing
     @Composable get() = LocalSpacing.current

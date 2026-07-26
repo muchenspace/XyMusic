@@ -19,12 +19,12 @@ import com.xymusic.app.core.database.model.SearchScope as DatabaseSearchScope
 import com.xymusic.app.core.model.media.Album
 import com.xymusic.app.core.model.media.Artist
 import com.xymusic.app.core.model.media.Track
-import com.xymusic.app.core.network.DomainError
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
-import com.xymusic.app.core.network.model.ProblemCode
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.session.SessionMutationCoordinator
+import com.xymusic.app.domain.error.DomainError
+import com.xymusic.app.domain.error.DomainErrorReason
 import com.xymusic.app.feature.search.data.remote.SearchRemoteDataSource
 import com.xymusic.app.feature.search.domain.SearchRepository
 import com.xymusic.app.feature.search.domain.SearchResult
@@ -198,7 +198,7 @@ constructor(
         DomainError.Authentication(
             detail = "Authentication is required",
             traceId = null,
-            reason = ProblemCode.AuthenticationRequired,
+            reason = DomainErrorReason.AuthenticationRequired,
         ),
     )
 

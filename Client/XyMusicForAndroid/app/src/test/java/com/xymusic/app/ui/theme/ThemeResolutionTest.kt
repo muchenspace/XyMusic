@@ -1,7 +1,7 @@
 package com.xymusic.app.ui.theme
 
 import com.google.common.truth.Truth.assertThat
-import com.xymusic.app.core.preferences.ThemePreference
+import com.xymusic.app.domain.settings.ThemePreference
 import org.junit.Test
 
 class ThemeResolutionTest {

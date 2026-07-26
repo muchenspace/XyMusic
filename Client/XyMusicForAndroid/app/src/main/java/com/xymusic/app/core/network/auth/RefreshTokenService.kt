@@ -1,9 +1,9 @@
 package com.xymusic.app.core.network.auth
 
-import com.xymusic.app.core.network.DomainError
 import com.xymusic.app.core.security.RefreshToken
 import com.xymusic.app.core.security.SessionTokens
 import com.xymusic.app.core.session.ActiveSessionIdentity
+import com.xymusic.app.domain.error.DomainError
 import java.io.IOException
 
 fun interface RefreshTokenService {

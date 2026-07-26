@@ -7,7 +7,7 @@ import com.xymusic.app.core.common.DefaultDispatcher
 import com.xymusic.app.core.common.runCatchingPreservingCancellation
 import com.xymusic.app.core.model.media.Lyrics
 import com.xymusic.app.core.model.media.LyricsFormat
-import com.xymusic.app.core.preferences.AppSettingsRepository
+import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.feature.player.domain.LyricsSource
 import com.xymusic.app.feature.player.domain.PlaybackQueueStore
 import com.xymusic.app.feature.player.domain.PlayerEvent

@@ -1,8 +1,8 @@
 package com.xymusic.app.feature.catalog.data
 
 import com.google.common.truth.Truth.assertThat
-import com.xymusic.app.core.network.DomainError
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
+import com.xymusic.app.domain.error.DomainError
 import com.xymusic.app.feature.catalog.domain.CatalogResult
 import java.io.IOException
 import java.time.Clock

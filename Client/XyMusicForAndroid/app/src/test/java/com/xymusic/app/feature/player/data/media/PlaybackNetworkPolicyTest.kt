@@ -7,7 +7,7 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
 import com.google.common.truth.Truth.assertThat
-import com.xymusic.app.core.preferences.MobileDataPolicy
+import com.xymusic.app.domain.settings.MobileDataPolicy
 import java.io.IOException
 import org.junit.Assert.assertThrows
 import org.junit.Test

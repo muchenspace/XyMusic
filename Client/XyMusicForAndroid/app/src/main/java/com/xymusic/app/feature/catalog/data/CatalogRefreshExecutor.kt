@@ -1,8 +1,8 @@
 package com.xymusic.app.feature.catalog.data
 
 import com.xymusic.app.core.data.media.remote.CatalogProtocolException
-import com.xymusic.app.core.network.DomainError
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
+import com.xymusic.app.domain.error.DomainError
 import com.xymusic.app.feature.catalog.data.remote.CatalogRemoteException
 import com.xymusic.app.feature.catalog.domain.CatalogResult
 import java.io.IOException

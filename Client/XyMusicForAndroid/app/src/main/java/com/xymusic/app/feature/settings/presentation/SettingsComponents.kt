@@ -47,10 +47,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.xymusic.app.R
-import com.xymusic.app.core.preferences.StreamingQuality
-import com.xymusic.app.core.preferences.ThemePreference
 import com.xymusic.app.core.ui.component.MediaArtwork
 import com.xymusic.app.core.ui.component.XySlider
+import com.xymusic.app.domain.settings.StreamingQuality
+import com.xymusic.app.domain.settings.ThemePreference
 import com.xymusic.app.feature.settings.domain.model.UserProfile
 import kotlin.math.roundToInt
 

@@ -6,9 +6,10 @@ import com.xymusic.app.core.database.dao.LibraryDao
 import com.xymusic.app.core.database.dao.PendingSyncOperationDao
 import com.xymusic.app.core.database.entity.PendingSyncOperationEntity
 import com.xymusic.app.core.database.model.SyncOperationType
-import com.xymusic.app.core.network.DomainError
+import com.xymusic.app.core.network.toWireValue
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.SessionMutationCoordinator
+import com.xymusic.app.domain.error.DomainError
 import com.xymusic.app.feature.library.data.remote.LibraryProtocolException
 import com.xymusic.app.feature.library.data.remote.LibraryRemoteDataSource
 import com.xymusic.app.feature.library.data.remote.LibraryRemoteException
@@ -115,10 +116,10 @@ constructor(
         is DomainError.ServiceUnavailable -> PendingExecutionOutcome.Retry("SERVICE_UNAVAILABLE")
         is DomainError.Server -> PendingExecutionOutcome.Retry("SERVER_ERROR")
         is DomainError.Network -> PendingExecutionOutcome.Retry(ERROR_NETWORK)
-        is DomainError.Authentication -> PendingExecutionOutcome.Retry(reason.wireValue)
-        is DomainError.Conflict -> PendingExecutionOutcome.Conflict(reason.wireValue)
-        is DomainError.Validation -> PendingExecutionOutcome.Conflict(reason.wireValue)
-        is DomainError.PermissionDenied -> PendingExecutionOutcome.Conflict(reason.wireValue)
+        is DomainError.Authentication -> PendingExecutionOutcome.Retry(reason.toWireValue())
+        is DomainError.Conflict -> PendingExecutionOutcome.Conflict(reason.toWireValue())
+        is DomainError.Validation -> PendingExecutionOutcome.Conflict(reason.toWireValue())
+        is DomainError.PermissionDenied -> PendingExecutionOutcome.Conflict(reason.toWireValue())
         is DomainError.NotFound -> PendingExecutionOutcome.Conflict("RESOURCE_NOT_FOUND")
         is DomainError.Protocol -> PendingExecutionOutcome.Conflict("PROTOCOL_ERROR")
         is DomainError.Local -> PendingExecutionOutcome.Conflict("LOCAL_DATA_ERROR")

@@ -1,7 +1,7 @@
 package com.xymusic.app.feature.settings.domain
 
-import com.xymusic.app.core.preferences.AppSettings
-import com.xymusic.app.core.preferences.AppSettingsRepository
+import com.xymusic.app.domain.settings.AppSettings
+import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.feature.settings.domain.model.AvatarUploadCommand
 import com.xymusic.app.feature.settings.domain.model.UpdateProfileCommand
 import javax.inject.Inject

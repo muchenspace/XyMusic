@@ -9,8 +9,8 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
 import com.xymusic.app.core.common.IoDispatcher
-import com.xymusic.app.core.preferences.AppSettingsRepository
-import com.xymusic.app.core.preferences.MobileDataPolicy
+import com.xymusic.app.domain.settings.AppSettingsRepository
+import com.xymusic.app.domain.settings.MobileDataPolicy
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.IOException
 import javax.inject.Inject

@@ -7,7 +7,7 @@ import com.xymusic.app.core.model.media.Album
 import com.xymusic.app.core.model.media.Artist
 import com.xymusic.app.core.model.media.Track
 import com.xymusic.app.core.model.media.TrackDetail
-import com.xymusic.app.core.network.DomainError
+import com.xymusic.app.domain.error.DomainError
 import com.xymusic.app.feature.catalog.domain.CatalogRepository
 import com.xymusic.app.feature.catalog.domain.CatalogResult
 import com.xymusic.app.feature.catalog.domain.CatalogUseCases

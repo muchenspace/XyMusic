@@ -2,8 +2,8 @@ package com.xymusic.app.app
 
 import androidx.compose.runtime.Immutable
 import com.xymusic.app.core.network.ServerEndpoint
-import com.xymusic.app.core.preferences.ThemePreference
 import com.xymusic.app.core.session.AppSessionState
+import com.xymusic.app.domain.settings.ThemePreference
 
 @Immutable
 data class AppUiState(

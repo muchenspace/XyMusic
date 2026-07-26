@@ -8,11 +8,11 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import com.xymusic.app.core.preferences.AppSettings
-import com.xymusic.app.core.preferences.AppSettingsRepository
-import com.xymusic.app.core.preferences.MobileDataPolicy
-import com.xymusic.app.core.preferences.StreamingQuality
-import com.xymusic.app.core.preferences.ThemePreference
+import com.xymusic.app.domain.settings.AppSettings
+import com.xymusic.app.domain.settings.AppSettingsRepository
+import com.xymusic.app.domain.settings.MobileDataPolicy
+import com.xymusic.app.domain.settings.StreamingQuality
+import com.xymusic.app.domain.settings.ThemePreference
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.IOException
 import javax.inject.Inject

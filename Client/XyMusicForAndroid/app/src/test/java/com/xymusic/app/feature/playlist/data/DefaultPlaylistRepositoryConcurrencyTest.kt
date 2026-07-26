@@ -13,12 +13,12 @@ import com.xymusic.app.core.database.entity.PlaylistEntryEntity
 import com.xymusic.app.core.database.entity.TrackEntity
 import com.xymusic.app.core.database.model.PlaylistVisibility as StoredPlaylistVisibility
 import com.xymusic.app.core.database.model.SyncTargetType
-import com.xymusic.app.core.network.DomainError
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
-import com.xymusic.app.core.network.model.ProblemCode
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.session.SessionMutationCoordinator
+import com.xymusic.app.domain.error.DomainError
+import com.xymusic.app.domain.error.DomainErrorReason
 import com.xymusic.app.feature.playlist.data.remote.AddPlaylistTrackRequestDto
 import com.xymusic.app.feature.playlist.data.remote.CreatePlaylistRequestDto
 import com.xymusic.app.feature.playlist.data.remote.PlaylistDetailDto
@@ -1077,7 +1077,7 @@ class DefaultPlaylistRepositoryConcurrencyTest {
         val CLOCK: Clock = Clock.fixed(NOW, ZoneOffset.UTC)
 
         fun versionConflict(expectedVersion: Long, currentVersion: Long) = PlaylistRemoteException(
-            error = DomainError.Conflict("stale", null, ProblemCode.VersionConflict),
+            error = DomainError.Conflict("stale", null, DomainErrorReason.VersionConflict),
             conflict =
             PlaylistVersionConflict(
                 playlistId = PLAYLIST_ID,

@@ -1,5 +1,7 @@
 package com.xymusic.app.core.network
 
+import com.xymusic.app.domain.error.DomainError
+import com.xymusic.app.domain.error.NetworkFailureReason
 import java.io.EOFException
 import java.io.IOException
 import java.io.InterruptedIOException

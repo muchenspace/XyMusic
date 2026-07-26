@@ -1,4 +1,4 @@
-package com.xymusic.app.core.preferences
+package com.xymusic.app.domain.settings
 
 data class AppSettings(
     val theme: ThemePreference = ThemePreference.SYSTEM,

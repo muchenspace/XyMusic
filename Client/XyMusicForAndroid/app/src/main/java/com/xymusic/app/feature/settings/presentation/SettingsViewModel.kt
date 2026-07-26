@@ -6,10 +6,10 @@ import androidx.lifecycle.viewModelScope
 import com.xymusic.app.R
 import com.xymusic.app.core.common.IoDispatcher
 import com.xymusic.app.core.common.runCatchingPreservingCancellation
-import com.xymusic.app.core.preferences.AppSettings
-import com.xymusic.app.core.preferences.MobileDataPolicy
-import com.xymusic.app.core.preferences.StreamingQuality
-import com.xymusic.app.core.preferences.ThemePreference
+import com.xymusic.app.domain.settings.AppSettings
+import com.xymusic.app.domain.settings.MobileDataPolicy
+import com.xymusic.app.domain.settings.StreamingQuality
+import com.xymusic.app.domain.settings.ThemePreference
 import com.xymusic.app.feature.auth.domain.AuthResult
 import com.xymusic.app.feature.auth.domain.AuthUseCases
 import com.xymusic.app.feature.settings.domain.AppSettingsUseCases

@@ -19,9 +19,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.xymusic.app.R
 import com.xymusic.app.core.network.ServerEndpoint
-import com.xymusic.app.core.preferences.MobileDataPolicy
-import com.xymusic.app.core.preferences.StreamingQuality
-import com.xymusic.app.core.preferences.ThemePreference
+import com.xymusic.app.domain.settings.MobileDataPolicy
+import com.xymusic.app.domain.settings.StreamingQuality
+import com.xymusic.app.domain.settings.ThemePreference
 
 internal data class SettingsActions(
     val onEditProfile: () -> Unit,

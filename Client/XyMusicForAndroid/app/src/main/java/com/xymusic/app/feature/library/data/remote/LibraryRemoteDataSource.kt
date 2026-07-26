@@ -1,7 +1,7 @@
 package com.xymusic.app.feature.library.data.remote
 
-import com.xymusic.app.core.network.DomainError
 import com.xymusic.app.data.network.ProblemResponseParser
+import com.xymusic.app.domain.error.DomainError
 import java.io.IOException
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow

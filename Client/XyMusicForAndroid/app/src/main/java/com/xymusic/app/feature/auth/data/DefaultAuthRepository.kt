@@ -4,7 +4,6 @@ import com.xymusic.app.core.common.IoDispatcher
 import com.xymusic.app.core.common.runCatchingPreservingCancellation
 import com.xymusic.app.core.database.AccountDataCleaner
 import com.xymusic.app.core.database.PendingAccountCleanupStore
-import com.xymusic.app.core.network.DomainError
 import com.xymusic.app.core.network.ServerConfigRepository
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
 import com.xymusic.app.core.network.auth.RefreshAttemptStore
@@ -19,6 +18,7 @@ import com.xymusic.app.core.session.SessionStateController
 import com.xymusic.app.data.network.ProblemResponseParser
 import com.xymusic.app.data.network.SessionRequestContext
 import com.xymusic.app.data.network.auth.model.toSessionTokens
+import com.xymusic.app.domain.error.DomainError
 import com.xymusic.app.feature.auth.data.remote.ACTIVE_STATUS
 import com.xymusic.app.feature.auth.data.remote.LoginRequestDto
 import com.xymusic.app.feature.auth.data.remote.PublicAuthApi

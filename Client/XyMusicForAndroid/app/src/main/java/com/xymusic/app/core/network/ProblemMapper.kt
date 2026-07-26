@@ -2,6 +2,8 @@ package com.xymusic.app.core.network
 
 import com.xymusic.app.core.network.model.ProblemCode
 import com.xymusic.app.core.network.model.ProblemDetailsDto
+import com.xymusic.app.domain.error.DomainError
+import com.xymusic.app.domain.error.DomainErrorReason
 import javax.inject.Inject
 
 class ProblemMapper
@@ -20,18 +22,18 @@ constructor() {
                     detail = problem.detail,
                     traceId = problem.traceId,
                     fieldErrors = problem.fieldErrors,
-                    reason = code,
+                    reason = code.toDomainReason(),
                 )
 
             ProblemCode.AuthenticationRequired,
             ProblemCode.AccessTokenExpired,
             ProblemCode.SessionRevoked,
             ProblemCode.InvalidCredentials,
-            -> DomainError.Authentication(problem.detail, problem.traceId, code)
+            -> DomainError.Authentication(problem.detail, problem.traceId, code.toDomainReason())
 
             ProblemCode.AccountSuspended,
             ProblemCode.Forbidden,
-            -> DomainError.PermissionDenied(problem.detail, problem.traceId, code)
+            -> DomainError.PermissionDenied(problem.detail, problem.traceId, code.toDomainReason())
 
             ProblemCode.ResourceNotFound ->
                 DomainError.NotFound(problem.detail, problem.traceId)
@@ -45,7 +47,7 @@ constructor() {
             ProblemCode.TrackAlreadyInPlaylist,
             ProblemCode.MediaUploadMismatch,
             ProblemCode.PayloadTooLarge,
-            -> DomainError.Conflict(problem.detail, problem.traceId, code)
+            -> DomainError.Conflict(problem.detail, problem.traceId, code.toDomainReason())
 
             ProblemCode.RateLimited ->
                 DomainError.RateLimited(problem.detail, problem.traceId, retryAfterSeconds)
@@ -66,13 +68,13 @@ constructor() {
             DomainError.Authentication(
                 detail = problem.detail,
                 traceId = problem.traceId,
-                reason = ProblemCode.Unknown,
+                reason = DomainErrorReason.Unknown,
             )
         problem.status == 403 ->
             DomainError.PermissionDenied(
                 detail = problem.detail,
                 traceId = problem.traceId,
-                reason = ProblemCode.Unknown,
+                reason = DomainErrorReason.Unknown,
             )
         problem.status == 404 -> DomainError.NotFound(problem.detail, problem.traceId)
         else -> DomainError.Protocol(problem.detail, problem.traceId, problem.status)

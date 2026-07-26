@@ -4,8 +4,8 @@ import com.xymusic.app.core.data.media.remote.AlbumSummaryDto
 import com.xymusic.app.core.data.media.remote.ArtistSummaryDto
 import com.xymusic.app.core.data.media.remote.RemotePage
 import com.xymusic.app.core.data.media.remote.TrackSummaryDto
-import com.xymusic.app.core.network.DomainError
 import com.xymusic.app.data.network.ProblemResponseParser
+import com.xymusic.app.domain.error.DomainError
 import com.xymusic.app.feature.search.domain.model.SearchQuery
 import com.xymusic.app.feature.search.domain.model.SearchScope
 import java.io.IOException

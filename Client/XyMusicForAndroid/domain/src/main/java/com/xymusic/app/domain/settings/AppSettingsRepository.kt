@@ -1,5 +1,4 @@
-package com.xymusic.app.core.preferences
-
+package com.xymusic.app.domain.settings
 import kotlinx.coroutines.flow.Flow
 
 interface AppSettingsRepository {

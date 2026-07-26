@@ -1,6 +1,6 @@
 package com.xymusic.app.feature.auth.domain
 
-import com.xymusic.app.core.network.DomainError
+import com.xymusic.app.domain.error.DomainError
 import com.xymusic.app.feature.auth.domain.model.LoginCommand
 import com.xymusic.app.feature.auth.domain.model.RegisterCommand
 import com.xymusic.app.feature.auth.domain.model.RegistrationResult

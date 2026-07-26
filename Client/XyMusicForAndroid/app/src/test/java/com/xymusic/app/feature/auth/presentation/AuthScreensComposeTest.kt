@@ -14,7 +14,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import com.xymusic.app.R
-import com.xymusic.app.core.network.NetworkFailureReason
+import com.xymusic.app.domain.error.NetworkFailureReason
 import com.xymusic.app.testing.ComposeTestApplication
 import com.xymusic.app.ui.theme.XyMusicTheme
 import org.junit.Rule

@@ -4,8 +4,8 @@ import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xymusic.app.R
-import com.xymusic.app.core.network.DomainError
-import com.xymusic.app.core.network.model.ProblemCode
+import com.xymusic.app.domain.error.DomainError
+import com.xymusic.app.domain.error.DomainErrorReason
 import com.xymusic.app.feature.library.domain.LibraryResult
 import com.xymusic.app.feature.library.domain.LibraryUseCases
 import com.xymusic.app.feature.player.domain.OfflineTrackRepository
@@ -210,7 +210,7 @@ constructor(
                 val error = result.error
                 show(
                     if (error is DomainError.Conflict &&
-                        error.reason == ProblemCode.TrackAlreadyInPlaylist
+                        error.reason == DomainErrorReason.TrackAlreadyInPlaylist
                     ) {
                         R.string.playlist_track_already_added
                     } else {

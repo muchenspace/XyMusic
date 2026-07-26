@@ -11,8 +11,8 @@ import com.xymusic.app.core.model.media.Lyrics
 import com.xymusic.app.core.model.media.LyricsFormat
 import com.xymusic.app.core.model.media.Track
 import com.xymusic.app.core.model.media.TrackDetail
-import com.xymusic.app.core.preferences.AppSettings
-import com.xymusic.app.core.preferences.AppSettingsRepository
+import com.xymusic.app.domain.settings.AppSettings
+import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.feature.catalog.domain.CatalogRepository
 import com.xymusic.app.feature.catalog.domain.CatalogResult
 import com.xymusic.app.feature.catalog.domain.model.AlbumQuery
