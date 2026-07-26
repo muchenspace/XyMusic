@@ -1,22 +1,22 @@
 package com.xymusic.app.feature.catalog.domain
 
-import androidx.paging.PagingData
 import com.xymusic.app.core.model.media.Album
 import com.xymusic.app.core.model.media.Artist
 import com.xymusic.app.core.model.media.Track
 import com.xymusic.app.core.model.media.TrackDetail
 import com.xymusic.app.domain.error.DomainError
+import com.xymusic.app.domain.paging.PagedStream
 import com.xymusic.app.feature.catalog.domain.model.AlbumQuery
 import com.xymusic.app.feature.catalog.domain.model.ArtistQuery
 import com.xymusic.app.feature.catalog.domain.model.TrackQuery
 import kotlinx.coroutines.flow.Flow
 
 interface CatalogRepository {
-    fun pagedTracks(query: TrackQuery): Flow<PagingData<Track>>
+    fun pagedTracks(query: TrackQuery): PagedStream<Track>
 
-    fun pagedArtists(query: ArtistQuery): Flow<PagingData<Artist>>
+    fun pagedArtists(query: ArtistQuery): PagedStream<Artist>
 
-    fun pagedAlbums(query: AlbumQuery): Flow<PagingData<Album>>
+    fun pagedAlbums(query: AlbumQuery): PagedStream<Album>
 
     suspend fun randomAlbums(limit: Int): CatalogResult<List<Album>>
 

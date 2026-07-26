@@ -6,6 +6,8 @@ import com.google.common.truth.Truth.assertThat
 import com.xymusic.app.core.model.media.Album
 import com.xymusic.app.core.model.media.Artist
 import com.xymusic.app.core.model.media.Track
+import com.xymusic.app.core.paging.asPagedStream
+import com.xymusic.app.domain.paging.PagedStream
 import com.xymusic.app.feature.search.domain.SearchRepository
 import com.xymusic.app.feature.search.domain.SearchResult
 import com.xymusic.app.feature.search.domain.SearchUseCases
@@ -91,11 +93,12 @@ private class FakeSearchRepository : SearchRepository {
         return SearchResult.Success(Unit)
     }
 
-    override fun pagedTracks(query: SearchQuery): Flow<PagingData<Track>> = flowOf(PagingData.empty())
+    override fun pagedTracks(query: SearchQuery): PagedStream<Track> = flowOf(PagingData.empty<Track>()).asPagedStream()
 
-    override fun pagedArtists(query: SearchQuery): Flow<PagingData<Artist>> = flowOf(PagingData.empty())
+    override fun pagedArtists(query: SearchQuery): PagedStream<Artist> =
+        flowOf(PagingData.empty<Artist>()).asPagedStream()
 
-    override fun pagedAlbums(query: SearchQuery): Flow<PagingData<Album>> = flowOf(PagingData.empty())
+    override fun pagedAlbums(query: SearchQuery): PagedStream<Album> = flowOf(PagingData.empty<Album>()).asPagedStream()
 
     override fun observeHistory(): Flow<List<SearchHistoryItem>> = history
 

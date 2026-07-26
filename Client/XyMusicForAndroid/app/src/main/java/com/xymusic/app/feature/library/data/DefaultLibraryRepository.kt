@@ -1,6 +1,5 @@
 package com.xymusic.app.feature.library.data
 
-import androidx.paging.PagingData
 import com.xymusic.app.core.common.IoDispatcher
 import com.xymusic.app.core.data.media.CatalogLocalDataSource
 import com.xymusic.app.core.database.XyMusicDatabase
@@ -9,9 +8,11 @@ import com.xymusic.app.core.database.dao.LibraryDao
 import com.xymusic.app.core.database.dao.PendingSyncOperationDao
 import com.xymusic.app.core.model.media.Track
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
+import com.xymusic.app.core.paging.asPagedStream
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.SessionMutationCoordinator
 import com.xymusic.app.core.sync.PendingSyncScheduler
+import com.xymusic.app.domain.paging.PagedStream
 import com.xymusic.app.feature.library.data.remote.LibraryRemoteDataSource
 import com.xymusic.app.feature.library.domain.LibraryRepository
 import com.xymusic.app.feature.library.domain.LibraryResult
@@ -85,9 +86,9 @@ constructor(
 
     override fun observeIsFavorite(trackId: String): Flow<Boolean> = queries.observeIsFavorite(trackId)
 
-    override fun favoriteTracks(): Flow<PagingData<Track>> = queries.favoriteTracks()
+    override fun favoriteTracks(): PagedStream<Track> = queries.favoriteTracks().asPagedStream()
 
-    override fun playbackHistory(): Flow<PagingData<PlaybackHistoryItem>> = queries.playbackHistory()
+    override fun playbackHistory(): PagedStream<PlaybackHistoryItem> = queries.playbackHistory().asPagedStream()
 
     override suspend fun refreshFavorites(sort: FavoriteSort): LibraryResult<Unit> =
         favoriteOperations.refreshFavorites(sort)

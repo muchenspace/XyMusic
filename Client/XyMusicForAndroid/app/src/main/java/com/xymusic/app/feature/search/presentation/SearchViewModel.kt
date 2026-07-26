@@ -9,6 +9,7 @@ import androidx.paging.map
 import com.xymusic.app.core.model.media.Album
 import com.xymusic.app.core.model.media.Artist
 import com.xymusic.app.core.model.media.Track
+import com.xymusic.app.core.paging.pagingDataFlow
 import com.xymusic.app.core.ui.media.toUi
 import com.xymusic.app.feature.search.domain.SearchResult
 import com.xymusic.app.feature.search.domain.SearchUseCases
@@ -72,7 +73,7 @@ constructor(
         activeSearch
             .flatMapLatest { active ->
                 if (active?.request?.scope == SearchScope.TRACKS) {
-                    useCases.tracks(active.request.query)
+                    useCases.tracks(active.request.query).pagingDataFlow()
                 } else {
                     flowOf(PagingData.empty<Track>())
                 }
@@ -83,7 +84,7 @@ constructor(
         activeSearch
             .flatMapLatest { active ->
                 if (active?.request?.scope == SearchScope.ARTISTS) {
-                    useCases.artists(active.request.query)
+                    useCases.artists(active.request.query).pagingDataFlow()
                 } else {
                     flowOf(PagingData.empty<Artist>())
                 }
@@ -94,7 +95,7 @@ constructor(
         activeSearch
             .flatMapLatest { active ->
                 if (active?.request?.scope == SearchScope.ALBUMS) {
-                    useCases.albums(active.request.query)
+                    useCases.albums(active.request.query).pagingDataFlow()
                 } else {
                     flowOf(PagingData.empty<Album>())
                 }

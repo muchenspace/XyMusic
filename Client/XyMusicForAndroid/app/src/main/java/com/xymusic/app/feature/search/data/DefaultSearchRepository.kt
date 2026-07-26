@@ -3,7 +3,6 @@ package com.xymusic.app.feature.search.data
 import androidx.paging.ExperimentalPagingApi
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
-import androidx.paging.PagingData
 import androidx.paging.map
 import com.xymusic.app.core.data.media.CatalogLocalDataSource
 import com.xymusic.app.core.data.media.remote.AlbumSummaryDto
@@ -20,11 +19,13 @@ import com.xymusic.app.core.model.media.Album
 import com.xymusic.app.core.model.media.Artist
 import com.xymusic.app.core.model.media.Track
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
+import com.xymusic.app.core.paging.asPagedStream
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.session.SessionMutationCoordinator
 import com.xymusic.app.domain.error.DomainError
 import com.xymusic.app.domain.error.DomainErrorReason
+import com.xymusic.app.domain.paging.PagedStream
 import com.xymusic.app.feature.search.data.remote.SearchRemoteDataSource
 import com.xymusic.app.feature.search.domain.SearchRepository
 import com.xymusic.app.feature.search.domain.SearchResult
@@ -63,7 +64,7 @@ constructor(
 
     override suspend fun refreshOverview(query: SearchQuery): SearchResult<Unit> = overviewRefresher.refresh(query)
 
-    override fun pagedTracks(query: SearchQuery): Flow<PagingData<Track>> {
+    override fun pagedTracks(query: SearchQuery): PagedStream<Track> {
         val collectionKey = query.searchCollectionKey()
         return Pager(
             config = pagingConfig(),
@@ -80,10 +81,10 @@ constructor(
                 mergeItems = catalogLocal::mergeTrackSummaries,
             ),
             pagingSourceFactory = { catalogLocal.pagedTracks(collectionKey) },
-        ).flow.map { page -> page.map { it.toDomain() } }
+        ).flow.map { page -> page.map { it.toDomain() } }.asPagedStream()
     }
 
-    override fun pagedArtists(query: SearchQuery): Flow<PagingData<Artist>> {
+    override fun pagedArtists(query: SearchQuery): PagedStream<Artist> {
         val collectionKey = query.searchCollectionKey()
         return Pager(
             config = pagingConfig(),
@@ -100,10 +101,10 @@ constructor(
                 mergeItems = catalogLocal::mergeArtistSummaries,
             ),
             pagingSourceFactory = { catalogLocal.pagedArtists(collectionKey) },
-        ).flow.map { page -> page.map { it.toDomain() } }
+        ).flow.map { page -> page.map { it.toDomain() } }.asPagedStream()
     }
 
-    override fun pagedAlbums(query: SearchQuery): Flow<PagingData<Album>> {
+    override fun pagedAlbums(query: SearchQuery): PagedStream<Album> {
         val collectionKey = query.searchCollectionKey()
         return Pager(
             config = pagingConfig(),
@@ -120,7 +121,7 @@ constructor(
                 mergeItems = catalogLocal::mergeAlbumSummaries,
             ),
             pagingSourceFactory = { catalogLocal.pagedAlbums(collectionKey) },
-        ).flow.map { page -> page.map { it.toDomain() } }
+        ).flow.map { page -> page.map { it.toDomain() } }.asPagedStream()
     }
 
     override fun observeHistory(): Flow<List<SearchHistoryItem>> = sessionProvider.sessionState.flatMapLatest { state ->

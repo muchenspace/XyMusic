@@ -7,7 +7,9 @@ import com.xymusic.app.core.model.media.Album
 import com.xymusic.app.core.model.media.Artist
 import com.xymusic.app.core.model.media.Track
 import com.xymusic.app.core.model.media.TrackDetail
+import com.xymusic.app.core.paging.asPagedStream
 import com.xymusic.app.domain.error.DomainError
+import com.xymusic.app.domain.paging.PagedStream
 import com.xymusic.app.feature.catalog.domain.CatalogRepository
 import com.xymusic.app.feature.catalog.domain.CatalogResult
 import com.xymusic.app.feature.catalog.domain.CatalogUseCases
@@ -244,14 +246,15 @@ private class RecordingCatalogRepository(
     val randomAlbumRequestLimits = mutableListOf<Int>()
     val randomTrackRequestLimits = mutableListOf<Int>()
 
-    override fun pagedTracks(query: TrackQuery): Flow<PagingData<Track>> {
+    override fun pagedTracks(query: TrackQuery): PagedStream<Track> {
         lastTrackQuery = query
-        return flowOf(PagingData.empty())
+        return flowOf(PagingData.empty<Track>()).asPagedStream()
     }
 
-    override fun pagedArtists(query: ArtistQuery): Flow<PagingData<Artist>> = flowOf(PagingData.empty())
+    override fun pagedArtists(query: ArtistQuery): PagedStream<Artist> =
+        flowOf(PagingData.empty<Artist>()).asPagedStream()
 
-    override fun pagedAlbums(query: AlbumQuery): Flow<PagingData<Album>> = flowOf(PagingData.empty())
+    override fun pagedAlbums(query: AlbumQuery): PagedStream<Album> = flowOf(PagingData.empty<Album>()).asPagedStream()
 
     override fun observeTrack(trackId: String): Flow<TrackDetail?> = flowOf(null)
 

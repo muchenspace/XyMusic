@@ -3,7 +3,6 @@ package com.xymusic.app.feature.catalog.data
 import androidx.paging.ExperimentalPagingApi
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
-import androidx.paging.PagingData
 import androidx.paging.map
 import com.xymusic.app.core.data.media.CatalogLocalDataSource
 import com.xymusic.app.core.data.media.CatalogRemoteMediator
@@ -27,6 +26,8 @@ import com.xymusic.app.core.model.media.Artwork
 import com.xymusic.app.core.model.media.Track
 import com.xymusic.app.core.model.media.TrackDetail
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
+import com.xymusic.app.core.paging.asPagedStream
+import com.xymusic.app.domain.paging.PagedStream
 import com.xymusic.app.feature.catalog.data.remote.CatalogRemoteDataSource
 import com.xymusic.app.feature.catalog.domain.CatalogRepository
 import com.xymusic.app.feature.catalog.domain.CatalogResult
@@ -55,7 +56,7 @@ constructor(
     private val refreshExecutor: CatalogRefreshExecutor,
     private val serverRuntimeCoordinator: ServerRuntimeCoordinator,
 ) : CatalogRepository {
-    override fun pagedTracks(query: TrackQuery): Flow<PagingData<Track>> {
+    override fun pagedTracks(query: TrackQuery): PagedStream<Track> {
         val collectionKey = query.collectionKey()
         return Pager(
             config = pagingConfig(),
@@ -72,10 +73,10 @@ constructor(
                 mergeItems = local::mergeTrackSummaries,
             ),
             pagingSourceFactory = { local.pagedTracks(collectionKey) },
-        ).flow.map { pagingData -> pagingData.map { it.toDomain() } }
+        ).flow.map { pagingData -> pagingData.map { it.toDomain() } }.asPagedStream()
     }
 
-    override fun pagedArtists(query: ArtistQuery): Flow<PagingData<Artist>> {
+    override fun pagedArtists(query: ArtistQuery): PagedStream<Artist> {
         val collectionKey = query.collectionKey()
         return Pager(
             config = pagingConfig(),
@@ -92,10 +93,10 @@ constructor(
                 mergeItems = local::mergeArtistSummaries,
             ),
             pagingSourceFactory = { local.pagedArtists(collectionKey) },
-        ).flow.map { pagingData -> pagingData.map { it.toDomain() } }
+        ).flow.map { pagingData -> pagingData.map { it.toDomain() } }.asPagedStream()
     }
 
-    override fun pagedAlbums(query: AlbumQuery): Flow<PagingData<Album>> {
+    override fun pagedAlbums(query: AlbumQuery): PagedStream<Album> {
         val collectionKey = query.collectionKey()
         return Pager(
             config = pagingConfig(),
@@ -112,7 +113,7 @@ constructor(
                 mergeItems = local::mergeAlbumSummaries,
             ),
             pagingSourceFactory = { local.pagedAlbums(collectionKey) },
-        ).flow.map { pagingData -> pagingData.map { it.toDomain() } }
+        ).flow.map { pagingData -> pagingData.map { it.toDomain() } }.asPagedStream()
     }
 
     override suspend fun randomAlbums(limit: Int): CatalogResult<List<Album>> {
