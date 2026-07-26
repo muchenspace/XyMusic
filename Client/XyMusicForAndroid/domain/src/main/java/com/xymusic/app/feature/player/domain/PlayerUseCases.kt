@@ -2,11 +2,8 @@ package com.xymusic.app.feature.player.domain
 
 import com.xymusic.app.feature.player.domain.model.PlayerQueueItem
 import com.xymusic.app.feature.player.domain.model.RepeatMode
-import javax.inject.Inject
 
-class PlayerUseCases
-@Inject
-constructor(private val repository: PlayerRepository) {
+class PlayerUseCases(private val repository: PlayerRepository) {
     val state = repository.state
     val events = repository.events
 

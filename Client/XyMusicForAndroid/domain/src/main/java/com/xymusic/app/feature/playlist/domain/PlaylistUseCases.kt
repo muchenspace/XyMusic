@@ -6,11 +6,8 @@ import com.xymusic.app.feature.playlist.domain.model.PlaylistSort
 import com.xymusic.app.feature.playlist.domain.model.RemovePlaylistTrackCommand
 import com.xymusic.app.feature.playlist.domain.model.ReorderPlaylistCommand
 import com.xymusic.app.feature.playlist.domain.model.UpdatePlaylistCommand
-import javax.inject.Inject
 
-class PlaylistUseCases
-@Inject
-constructor(private val repository: PlaylistRepository) {
+class PlaylistUseCases(private val repository: PlaylistRepository) {
     fun playlists() = repository.observePlaylists()
 
     fun playlist(playlistId: String) = repository.observePlaylist(playlistId)
