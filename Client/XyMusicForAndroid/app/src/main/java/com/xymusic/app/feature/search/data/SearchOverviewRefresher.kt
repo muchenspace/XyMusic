@@ -1,7 +1,7 @@
 package com.xymusic.app.feature.search.data
 
-import com.xymusic.app.core.network.DomainError
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
+import com.xymusic.app.domain.error.DomainError
 import com.xymusic.app.feature.search.data.remote.SearchProtocolException
 import com.xymusic.app.feature.search.data.remote.SearchRemoteDataSource
 import com.xymusic.app.feature.search.data.remote.SearchRemoteException

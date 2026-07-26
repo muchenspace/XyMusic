@@ -11,8 +11,8 @@ import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import com.xymusic.app.core.database.dao.OfflineTrackDao
 import com.xymusic.app.core.database.entity.OfflineTrackEntity
-import com.xymusic.app.core.preferences.AppSettings
-import com.xymusic.app.core.preferences.AppSettingsRepository
+import com.xymusic.app.domain.settings.AppSettings
+import com.xymusic.app.domain.settings.AppSettingsRepository
 import java.io.File
 import java.lang.reflect.Proxy
 import kotlinx.coroutines.Dispatchers

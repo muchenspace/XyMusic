@@ -4,8 +4,6 @@ import com.google.common.truth.Truth.assertThat
 import com.xymusic.app.core.database.AccountDataCleaner
 import com.xymusic.app.core.database.PendingAccountCleanupStore
 import com.xymusic.app.core.database.dao.AccountDataDeletion
-import com.xymusic.app.core.network.DomainError
-import com.xymusic.app.core.network.NetworkFailureReason
 import com.xymusic.app.core.network.ProblemMapper
 import com.xymusic.app.core.network.ServerConfigRepository
 import com.xymusic.app.core.network.ServerEndpoint
@@ -34,6 +32,8 @@ import com.xymusic.app.data.network.auth.model.AuthSessionInfoDto
 import com.xymusic.app.data.network.auth.model.AuthUserDto
 import com.xymusic.app.data.network.auth.model.TokenPairDto
 import com.xymusic.app.data.network.auth.model.toSessionTokens
+import com.xymusic.app.domain.error.DomainError
+import com.xymusic.app.domain.error.NetworkFailureReason
 import com.xymusic.app.feature.auth.data.remote.LoginRequestDto
 import com.xymusic.app.feature.auth.data.remote.PublicAuthApi
 import com.xymusic.app.feature.auth.data.remote.RegisterRequestDto

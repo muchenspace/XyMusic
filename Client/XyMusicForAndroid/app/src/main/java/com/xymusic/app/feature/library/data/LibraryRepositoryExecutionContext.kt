@@ -1,12 +1,12 @@
 package com.xymusic.app.feature.library.data
 
-import com.xymusic.app.core.network.DomainError
 import com.xymusic.app.core.network.ServerGeneration
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
-import com.xymusic.app.core.network.model.ProblemCode
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.session.SessionMutationCoordinator
+import com.xymusic.app.domain.error.DomainError
+import com.xymusic.app.domain.error.DomainErrorReason
 import com.xymusic.app.feature.library.data.remote.LibraryRemoteException
 import com.xymusic.app.feature.library.domain.LibraryResult
 import java.io.IOException
@@ -58,7 +58,7 @@ internal class LibraryRepositoryExecutionContext(
     private fun authenticationFailure() = DomainError.Authentication(
         detail = "Authentication is required",
         traceId = null,
-        reason = ProblemCode.AuthenticationRequired,
+        reason = DomainErrorReason.AuthenticationRequired,
     )
 
     private fun localFailure(detail: String) = LibraryResult.Failure(

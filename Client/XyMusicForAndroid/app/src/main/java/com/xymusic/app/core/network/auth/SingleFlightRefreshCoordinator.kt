@@ -1,9 +1,7 @@
 package com.xymusic.app.core.network.auth
 
 import com.xymusic.app.core.common.IoDispatcher
-import com.xymusic.app.core.network.DomainError
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
-import com.xymusic.app.core.network.model.ProblemCode
 import com.xymusic.app.core.security.AccessToken
 import com.xymusic.app.core.security.SessionTokens
 import com.xymusic.app.core.security.TokenVault
@@ -12,6 +10,8 @@ import com.xymusic.app.core.session.SessionIdentityProvider
 import com.xymusic.app.core.session.SessionInvalidator
 import com.xymusic.app.core.session.SessionMutationCoordinator
 import com.xymusic.app.core.session.SessionStateController
+import com.xymusic.app.domain.error.DomainError
+import com.xymusic.app.domain.error.DomainErrorReason
 import java.time.Clock
 import java.util.concurrent.CancellationException
 import javax.inject.Inject
@@ -278,7 +278,7 @@ constructor(
         is DomainError.PermissionDenied,
         -> true
 
-        is DomainError.Conflict -> reason == ProblemCode.IdempotencyKeyReused
+        is DomainError.Conflict -> reason == DomainErrorReason.IdempotencyKeyReused
         else -> false
     }
 

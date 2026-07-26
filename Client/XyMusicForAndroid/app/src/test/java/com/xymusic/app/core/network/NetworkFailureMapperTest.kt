@@ -1,6 +1,7 @@
 package com.xymusic.app.core.network
 
 import com.google.common.truth.Truth.assertThat
+import com.xymusic.app.domain.error.NetworkFailureReason
 import java.io.EOFException
 import java.io.IOException
 import java.net.ConnectException

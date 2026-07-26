@@ -3,17 +3,17 @@ package com.xymusic.app.feature.settings.data
 import com.xymusic.app.core.common.IoDispatcher
 import com.xymusic.app.core.data.media.remote.ArtworkDto
 import com.xymusic.app.core.model.media.Artwork
-import com.xymusic.app.core.network.DomainError
 import com.xymusic.app.core.network.MediaHttpClient
 import com.xymusic.app.core.network.ServerGeneration
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
-import com.xymusic.app.core.network.model.ProblemCode
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.session.SessionInvalidator
 import com.xymusic.app.core.session.SessionMutationCoordinator
 import com.xymusic.app.data.network.ProblemResponseParser
 import com.xymusic.app.data.network.auth.IdempotencyKeyGenerator
+import com.xymusic.app.domain.error.DomainError
+import com.xymusic.app.domain.error.DomainErrorReason
 import com.xymusic.app.feature.settings.data.remote.CreateAvatarUploadRequestDto
 import com.xymusic.app.feature.settings.data.remote.CurrentUserDto
 import com.xymusic.app.feature.settings.data.remote.ProfileApi
@@ -322,7 +322,7 @@ constructor(
     private fun authenticationFailure() = DomainError.Authentication(
         "Authentication is required",
         null,
-        ProblemCode.AuthenticationRequired,
+        DomainErrorReason.AuthenticationRequired,
     )
 
     private fun protocolFailure(detail: String) = SettingsResult.Failure(

@@ -1,10 +1,11 @@
 package com.xymusic.app.data.network
 
 import com.google.common.truth.Truth.assertThat
-import com.xymusic.app.core.network.DomainError
 import com.xymusic.app.core.network.ProblemMapper
 import com.xymusic.app.core.network.model.ProblemCode
 import com.xymusic.app.core.network.model.ProblemDetailsDto
+import com.xymusic.app.domain.error.DomainError
+import com.xymusic.app.domain.error.DomainErrorReason
 import kotlinx.serialization.json.Json
 import org.junit.Test
 
@@ -54,7 +55,7 @@ class ProblemResponseParserTest {
         val result = parser.parse(401, body, "header-trace", null)
 
         assertThat(result).isEqualTo(
-            DomainError.Authentication("Expired", "body-trace", ProblemCode.AccessTokenExpired),
+            DomainError.Authentication("Expired", "body-trace", DomainErrorReason.AccessTokenExpired),
         )
     }
 

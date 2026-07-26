@@ -1,9 +1,10 @@
 package com.xymusic.app.data.network
 
-import com.xymusic.app.core.network.DomainError
 import com.xymusic.app.core.network.ProblemMapper
 import com.xymusic.app.core.network.isServiceUnavailableStatus
 import com.xymusic.app.core.network.model.ProblemDetailsDto
+import com.xymusic.app.domain.error.DomainError
+import com.xymusic.app.domain.error.DomainErrorReason
 import javax.inject.Inject
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
@@ -33,13 +34,13 @@ constructor(private val json: Json, private val problemMapper: ProblemMapper) {
             DomainError.Authentication(
                 detail = "Authentication failed",
                 traceId = traceId,
-                reason = com.xymusic.app.core.network.model.ProblemCode.Unknown,
+                reason = DomainErrorReason.Unknown,
             )
         status == 403 ->
             DomainError.PermissionDenied(
                 detail = "Permission denied",
                 traceId = traceId,
-                reason = com.xymusic.app.core.network.model.ProblemCode.Unknown,
+                reason = DomainErrorReason.Unknown,
             )
         status == 404 -> DomainError.NotFound("Resource not found", traceId)
         status == 429 -> DomainError.RateLimited("Rate limit exceeded", traceId, retryAfterSeconds)

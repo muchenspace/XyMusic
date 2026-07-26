@@ -9,10 +9,10 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
-import com.xymusic.app.core.preferences.AppSettings
-import com.xymusic.app.core.preferences.MobileDataPolicy
-import com.xymusic.app.core.preferences.StreamingQuality
-import com.xymusic.app.core.preferences.ThemePreference
+import com.xymusic.app.domain.settings.AppSettings
+import com.xymusic.app.domain.settings.MobileDataPolicy
+import com.xymusic.app.domain.settings.StreamingQuality
+import com.xymusic.app.domain.settings.ThemePreference
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.first

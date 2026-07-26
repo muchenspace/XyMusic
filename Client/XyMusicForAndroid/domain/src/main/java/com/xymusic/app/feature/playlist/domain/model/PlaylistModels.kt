@@ -39,11 +39,7 @@ data class PlaylistEntry(
 
 data class PlaylistDetail(val playlist: PlaylistSummary, val entries: List<PlaylistEntry>)
 
-data class PlaylistDetailPage(
-    val playlist: PlaylistSummary,
-    val entries: List<PlaylistEntry>,
-    val nextCursor: String?,
-)
+data class PlaylistDetailPage(val playlist: PlaylistSummary, val entries: List<PlaylistEntry>, val nextCursor: String?)
 
 sealed interface ValueChange<out T> {
     data object Unchanged : ValueChange<Nothing>

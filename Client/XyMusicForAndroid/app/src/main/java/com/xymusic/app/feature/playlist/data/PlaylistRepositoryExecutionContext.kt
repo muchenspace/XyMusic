@@ -1,12 +1,12 @@
 package com.xymusic.app.feature.playlist.data
 
-import com.xymusic.app.core.network.DomainError
 import com.xymusic.app.core.network.ServerGeneration
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
-import com.xymusic.app.core.network.model.ProblemCode
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.session.SessionMutationCoordinator
+import com.xymusic.app.domain.error.DomainError
+import com.xymusic.app.domain.error.DomainErrorReason
 import com.xymusic.app.feature.playlist.data.remote.PlaylistRemoteException
 import com.xymusic.app.feature.playlist.domain.PlaylistResult
 import java.io.IOException
@@ -71,7 +71,7 @@ internal class PlaylistRepositoryExecutionContext(
 internal fun authenticationFailure() = DomainError.Authentication(
     "Authentication is required",
     null,
-    ProblemCode.AuthenticationRequired,
+    DomainErrorReason.AuthenticationRequired,
 )
 
 internal fun protocolFailure(detail: String) = PlaylistResult.Failure(

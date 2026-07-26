@@ -11,9 +11,9 @@ import com.xymusic.app.core.database.entity.PendingSyncOperationEntity
 import com.xymusic.app.core.database.model.SyncOperationStatus
 import com.xymusic.app.core.database.model.SyncOperationType
 import com.xymusic.app.core.database.model.SyncTargetType
-import com.xymusic.app.core.network.DomainError
 import com.xymusic.app.core.network.ServerGeneration
 import com.xymusic.app.core.sync.PendingSyncScheduler
+import com.xymusic.app.domain.error.DomainError
 import com.xymusic.app.feature.library.data.remote.FavoriteItemDto
 import com.xymusic.app.feature.library.data.remote.LibraryProtocolException
 import com.xymusic.app.feature.library.data.remote.LibraryRemoteDataSource

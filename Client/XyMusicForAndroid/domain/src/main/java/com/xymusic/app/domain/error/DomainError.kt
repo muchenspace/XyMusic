@@ -1,6 +1,4 @@
-package com.xymusic.app.core.network
-
-import com.xymusic.app.core.network.model.ProblemCode
+package com.xymusic.app.domain.error
 
 sealed interface DomainError {
     val detail: String
@@ -10,18 +8,24 @@ sealed interface DomainError {
         override val detail: String,
         override val traceId: String?,
         val fieldErrors: Map<String, List<String>>,
-        val reason: ProblemCode = ProblemCode.ValidationError,
+        val reason: DomainErrorReason = DomainErrorReason.ValidationError,
     ) : DomainError
 
-    data class Authentication(override val detail: String, override val traceId: String?, val reason: ProblemCode) :
-        DomainError
+    data class Authentication(
+        override val detail: String,
+        override val traceId: String?,
+        val reason: DomainErrorReason,
+    ) : DomainError
 
-    data class PermissionDenied(override val detail: String, override val traceId: String?, val reason: ProblemCode) :
-        DomainError
+    data class PermissionDenied(
+        override val detail: String,
+        override val traceId: String?,
+        val reason: DomainErrorReason,
+    ) : DomainError
 
     data class NotFound(override val detail: String, override val traceId: String?) : DomainError
 
-    data class Conflict(override val detail: String, override val traceId: String?, val reason: ProblemCode) :
+    data class Conflict(override val detail: String, override val traceId: String?, val reason: DomainErrorReason) :
         DomainError
 
     data class RateLimited(override val detail: String, override val traceId: String?, val retryAfterSeconds: Long?) :
@@ -40,6 +44,31 @@ sealed interface DomainError {
     data class Protocol(override val detail: String, override val traceId: String?, val status: Int?) : DomainError
 
     data class Local(override val detail: String, override val traceId: String? = null) : DomainError
+}
+
+enum class DomainErrorReason {
+    ValidationError,
+    InvalidCursor,
+    AuthenticationRequired,
+    AccessTokenExpired,
+    SessionRevoked,
+    InvalidCredentials,
+    AccountSuspended,
+    Forbidden,
+    ResourceNotFound,
+    DuplicateUsername,
+    IdempotencyKeyReused,
+    VersionConflict,
+    ResourceConflict,
+    InvalidStateTransition,
+    TrackNotPlayable,
+    TrackAlreadyInPlaylist,
+    MediaUploadMismatch,
+    PayloadTooLarge,
+    RateLimited,
+    DependencyUnavailable,
+    InternalError,
+    Unknown,
 }
 
 enum class NetworkFailureReason {

@@ -1,6 +1,6 @@
 package com.xymusic.app.feature.playlist.domain
 
-import com.xymusic.app.core.network.DomainError
+import com.xymusic.app.domain.error.DomainError
 import com.xymusic.app.feature.playlist.domain.model.AddPlaylistTrackCommand
 import com.xymusic.app.feature.playlist.domain.model.CreatePlaylistCommand
 import com.xymusic.app.feature.playlist.domain.model.PlaylistDetail

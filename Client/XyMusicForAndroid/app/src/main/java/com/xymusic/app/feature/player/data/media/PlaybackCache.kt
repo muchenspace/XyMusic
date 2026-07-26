@@ -13,10 +13,10 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import com.xymusic.app.core.common.IoDispatcher
 import com.xymusic.app.core.database.dao.OfflineTrackDao
 import com.xymusic.app.core.network.MediaHttpClient
-import com.xymusic.app.core.preferences.AppSettingsRepository
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.SessionIdentityProvider
 import com.xymusic.app.core.session.SessionMutationCoordinator
+import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.TreeSet

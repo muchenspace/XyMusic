@@ -1,8 +1,6 @@
 package com.xymusic.app.core.network.auth
 
 import com.google.common.truth.Truth.assertThat
-import com.xymusic.app.core.network.DomainError
-import com.xymusic.app.core.network.model.ProblemCode
 import com.xymusic.app.core.security.AccessToken
 import com.xymusic.app.core.security.RefreshToken
 import com.xymusic.app.core.security.SessionTokens
@@ -15,6 +13,8 @@ import com.xymusic.app.data.network.SessionRequestContextBinder
 import com.xymusic.app.data.network.SessionRequestContextCallFactory
 import com.xymusic.app.data.network.SessionRequestContextValidationInterceptor
 import com.xymusic.app.data.network.auth.RefreshingAuthenticator
+import com.xymusic.app.domain.error.DomainError
+import com.xymusic.app.domain.error.DomainErrorReason
 import com.xymusic.app.support.InMemoryRefreshAttemptStore
 import com.xymusic.app.support.InMemoryServerConfigRepository
 import com.xymusic.app.support.InMemoryTokenVault
@@ -282,7 +282,7 @@ class SingleFlightRefreshCoordinatorTest {
                         DomainError.Authentication(
                             detail = "Session revoked",
                             traceId = "trace",
-                            reason = ProblemCode.SessionRevoked,
+                            reason = DomainErrorReason.SessionRevoked,
                         ),
                     )
                 },
@@ -318,7 +318,7 @@ class SingleFlightRefreshCoordinatorTest {
                         DomainError.Authentication(
                             detail = "Session revoked",
                             traceId = "trace",
-                            reason = ProblemCode.SessionRevoked,
+                            reason = DomainErrorReason.SessionRevoked,
                         ),
                     )
                 },

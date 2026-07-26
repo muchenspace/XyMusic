@@ -10,8 +10,8 @@ import com.xymusic.app.core.data.media.remote.RandomCatalogRequestDto
 import com.xymusic.app.core.data.media.remote.RemotePage
 import com.xymusic.app.core.data.media.remote.TrackDetailDto
 import com.xymusic.app.core.data.media.remote.TrackSummaryDto
-import com.xymusic.app.core.network.DomainError
 import com.xymusic.app.data.network.ProblemResponseParser
+import com.xymusic.app.domain.error.DomainError
 import com.xymusic.app.feature.catalog.domain.model.AlbumQuery
 import com.xymusic.app.feature.catalog.domain.model.ArtistQuery
 import com.xymusic.app.feature.catalog.domain.model.TrackQuery

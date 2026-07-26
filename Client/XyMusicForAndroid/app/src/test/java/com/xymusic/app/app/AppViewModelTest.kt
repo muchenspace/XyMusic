@@ -4,11 +4,11 @@ import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import com.xymusic.app.R
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
-import com.xymusic.app.core.preferences.AppSettings
-import com.xymusic.app.core.preferences.AppSettingsRepository
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.session.SessionMutationCoordinator
+import com.xymusic.app.domain.settings.AppSettings
+import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.feature.settings.domain.AppSettingsUseCases
 import com.xymusic.app.support.InMemoryServerConfigRepository
 import dagger.Lazy

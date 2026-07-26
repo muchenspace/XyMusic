@@ -5,7 +5,7 @@ import androidx.annotation.StringRes
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import com.xymusic.app.R
-import com.xymusic.app.core.network.NetworkFailureReason
+import com.xymusic.app.domain.error.NetworkFailureReason
 
 @Composable
 internal fun authFieldErrorText(error: AuthFieldError): String = when (error) {

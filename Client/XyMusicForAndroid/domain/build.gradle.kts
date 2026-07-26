@@ -29,8 +29,6 @@ kotlin {
 
 dependencies {
     api(project(":core:model"))
-    api(project(":core:network"))
-    api(project(":core:preferences"))
 
     implementation(libs.androidx.paging.runtime)
     implementation(libs.kotlinx.coroutines.android)

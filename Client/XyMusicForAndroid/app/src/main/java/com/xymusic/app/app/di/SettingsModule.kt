@@ -1,6 +1,6 @@
 package com.xymusic.app.app.di
 
-import com.xymusic.app.core.preferences.AppSettingsRepository
+import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.feature.settings.data.DataStoreAppSettingsRepository
 import com.xymusic.app.feature.settings.data.DefaultProfileRepository
 import com.xymusic.app.feature.settings.domain.ProfileRepository

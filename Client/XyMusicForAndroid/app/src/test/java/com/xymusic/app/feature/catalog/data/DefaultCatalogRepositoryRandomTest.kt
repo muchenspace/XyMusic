@@ -15,8 +15,8 @@ import com.xymusic.app.core.data.media.remote.RemotePage
 import com.xymusic.app.core.data.media.remote.TrackDetailDto
 import com.xymusic.app.core.data.media.remote.TrackSummaryDto
 import com.xymusic.app.core.database.XyMusicDatabase
-import com.xymusic.app.core.network.DomainError
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
+import com.xymusic.app.domain.error.DomainError
 import com.xymusic.app.feature.catalog.data.remote.CatalogRemoteDataSource
 import com.xymusic.app.feature.catalog.domain.CatalogResult
 import com.xymusic.app.feature.catalog.domain.model.AlbumQuery

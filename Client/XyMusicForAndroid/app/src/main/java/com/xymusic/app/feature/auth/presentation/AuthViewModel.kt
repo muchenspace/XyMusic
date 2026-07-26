@@ -2,8 +2,8 @@ package com.xymusic.app.feature.auth.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.xymusic.app.core.network.DomainError
-import com.xymusic.app.core.network.model.ProblemCode
+import com.xymusic.app.domain.error.DomainError
+import com.xymusic.app.domain.error.DomainErrorReason
 import com.xymusic.app.feature.auth.domain.AuthResult
 import com.xymusic.app.feature.auth.domain.AuthUseCases
 import com.xymusic.app.feature.auth.domain.model.LoginCommand
@@ -127,7 +127,7 @@ constructor(private val useCases: AuthUseCases) : ViewModel() {
         }
         is DomainError.Conflict ->
             when (reason) {
-                ProblemCode.DuplicateUsername -> mapOf(AuthField.Username to AuthFieldError.UsernameTaken)
+                DomainErrorReason.DuplicateUsername -> mapOf(AuthField.Username to AuthFieldError.UsernameTaken)
                 else -> emptyMap()
             }
         else -> emptyMap()
@@ -136,12 +136,12 @@ constructor(private val useCases: AuthUseCases) : ViewModel() {
     private fun DomainError.toMessage(): AuthMessage = when (this) {
         is DomainError.Authentication ->
             when (reason) {
-                ProblemCode.InvalidCredentials -> AuthMessage.InvalidCredentials
+                DomainErrorReason.InvalidCredentials -> AuthMessage.InvalidCredentials
                 else -> AuthMessage.GenericError
             }
         is DomainError.PermissionDenied ->
             when (reason) {
-                ProblemCode.AccountSuspended -> AuthMessage.AccountSuspended
+                DomainErrorReason.AccountSuspended -> AuthMessage.AccountSuspended
                 else -> detailedServerMessage()
             }
         is DomainError.Network -> AuthMessage.NetworkFailure(reason)

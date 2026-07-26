@@ -1,7 +1,7 @@
 package com.xymusic.app.feature.auth.presentation
 
 import androidx.compose.runtime.Immutable
-import com.xymusic.app.core.network.NetworkFailureReason
+import com.xymusic.app.domain.error.NetworkFailureReason
 
 @Immutable
 data class AuthUiState(val isSubmitting: Boolean = false, val fieldErrors: Map<AuthField, AuthFieldError> = emptyMap())

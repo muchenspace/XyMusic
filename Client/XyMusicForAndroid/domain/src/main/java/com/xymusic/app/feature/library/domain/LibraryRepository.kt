@@ -2,7 +2,7 @@ package com.xymusic.app.feature.library.domain
 
 import androidx.paging.PagingData
 import com.xymusic.app.core.model.media.Track
-import com.xymusic.app.core.network.DomainError
+import com.xymusic.app.domain.error.DomainError
 import com.xymusic.app.feature.library.domain.model.FavoriteSort
 import com.xymusic.app.feature.library.domain.model.PlaybackHistoryItem
 import com.xymusic.app.feature.library.domain.model.PlaybackProgressCommand

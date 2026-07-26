@@ -2,9 +2,9 @@ package com.xymusic.app.feature.auth.presentation
 
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
-import com.xymusic.app.core.network.DomainError
-import com.xymusic.app.core.network.NetworkFailureReason
-import com.xymusic.app.core.network.model.ProblemCode
+import com.xymusic.app.domain.error.DomainError
+import com.xymusic.app.domain.error.DomainErrorReason
+import com.xymusic.app.domain.error.NetworkFailureReason
 import com.xymusic.app.feature.auth.domain.AuthRepository
 import com.xymusic.app.feature.auth.domain.AuthResult
 import com.xymusic.app.feature.auth.domain.AuthUseCases
@@ -72,7 +72,7 @@ class AuthViewModelTest {
                     DomainError.PermissionDenied(
                         detail = "当前服务器未开放用户注册，请联系管理员开启注册功能。",
                         traceId = "trace-registration-disabled",
-                        reason = ProblemCode.Forbidden,
+                        reason = DomainErrorReason.Forbidden,
                     ),
                 )
             }
@@ -168,7 +168,7 @@ class AuthViewModelTest {
                 DomainError.Authentication(
                     "Invalid credentials",
                     null,
-                    ProblemCode.InvalidCredentials,
+                    DomainErrorReason.InvalidCredentials,
                 ) to AuthMessage.InvalidCredentials,
             )
 

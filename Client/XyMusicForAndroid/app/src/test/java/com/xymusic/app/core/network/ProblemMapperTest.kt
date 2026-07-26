@@ -3,6 +3,7 @@ package com.xymusic.app.core.network
 import com.google.common.truth.Truth.assertThat
 import com.xymusic.app.core.network.model.ProblemCode
 import com.xymusic.app.core.network.model.ProblemDetailsDto
+import com.xymusic.app.domain.error.DomainError
 import org.junit.Test
 
 class ProblemMapperTest {

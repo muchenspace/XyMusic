@@ -1,8 +1,8 @@
 package com.xymusic.app.feature.playlist.data.remote
 
-import com.xymusic.app.core.network.DomainError
-import com.xymusic.app.core.network.model.ProblemCode
 import com.xymusic.app.data.network.ProblemResponseParser
+import com.xymusic.app.domain.error.DomainError
+import com.xymusic.app.domain.error.DomainErrorReason
 import com.xymusic.app.feature.playlist.domain.model.PlaylistVersionConflict
 import java.io.IOException
 import javax.inject.Inject
@@ -217,7 +217,7 @@ constructor(
         val conflict =
             if (
                 error is DomainError.Conflict &&
-                error.reason == ProblemCode.VersionConflict &&
+                error.reason == DomainErrorReason.VersionConflict &&
                 playlistId != null &&
                 expectedVersion != null
             ) {

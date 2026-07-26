@@ -4,11 +4,11 @@ import com.google.common.truth.Truth.assertThat
 import com.xymusic.app.core.network.ProblemMapper
 import com.xymusic.app.core.network.ServerGeneration
 import com.xymusic.app.core.network.ServerSynchronizedClock
-import com.xymusic.app.core.preferences.AppSettings
-import com.xymusic.app.core.preferences.AppSettingsRepository
 import com.xymusic.app.core.session.ActiveSessionIdentity
 import com.xymusic.app.core.session.SessionIdentityProvider
 import com.xymusic.app.data.network.ProblemResponseParser
+import com.xymusic.app.domain.settings.AppSettings
+import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.feature.player.data.media.InMemoryPlaybackGrantStore
 import com.xymusic.app.feature.player.data.media.PlaybackGrantKey
 import com.xymusic.app.feature.player.domain.PlayerResult
@@ -37,7 +37,9 @@ class HttpPlaybackGrantRepositoryTest {
     fun configuredStreamingQualityOverridesCallerPreferenceInGrantRequest() = runTest {
         val api = RecordingPlaybackApi()
         val settings = FakeAppSettingsRepository().apply {
-            update(AppSettings(streamingQuality = com.xymusic.app.core.preferences.StreamingQuality.LOSSLESS))
+            update(
+                AppSettings(streamingQuality = com.xymusic.app.domain.settings.StreamingQuality.LOSSLESS),
+            )
         }
         val result = repository(api, settingsRepository = settings).get(
             "00000000-0000-0000-0000-000000000001",
