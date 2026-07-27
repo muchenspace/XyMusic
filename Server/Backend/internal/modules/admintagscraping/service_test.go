@@ -50,6 +50,58 @@ func TestSmartSearchToleratesFailedSourcesAndRanksCandidates(t *testing.T) {
 	}
 }
 
+func TestSearchUsesQueryForProviderAndTitleForMatching(t *testing.T) {
+	music := &musicStub{
+		searchResults: map[Source][]Candidate{
+			SourceQMusic: {{ID: "manual", Name: "Manual Result", Artist: "Artist", Album: "Album", Source: SourceQMusic}},
+		},
+	}
+	service, err := NewService(ServiceDependencies{
+		Store: &storeStub{}, Music: music, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	query, title, artist, album := "manual search", "Track Title", "Artist", "Album"
+	result, err := service.Search(context.Background(), SearchInput{
+		Source: SourceQMusic, Query: &query, Title: &title, Artist: &artist, Album: &album,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 1 || result[0].ID != "manual" {
+		t.Fatalf("search result = %#v", result)
+	}
+	queries := music.searchCallQueries()
+	if !reflect.DeepEqual(queries, []string{query}) {
+		t.Fatalf("provider queries = %#v", queries)
+	}
+	if valueOrZero(result[0].TitleScore) != 0 || valueOrZero(result[0].ArtistScore) != 2 || valueOrZero(result[0].AlbumScore) != 2 {
+		t.Fatalf("matching scores = %#v", result[0])
+	}
+}
+
+func TestSearchFallsBackToTitleWhenQueryIsAbsent(t *testing.T) {
+	music := &musicStub{
+		searchResults: map[Source][]Candidate{
+			SourceQMusic: {{ID: "title", Name: "Track Title", Source: SourceQMusic}},
+		},
+	}
+	service, err := NewService(ServiceDependencies{
+		Store: &storeStub{}, Music: music, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	title := "Track Title"
+	if _, err := service.Search(context.Background(), SearchInput{Source: SourceQMusic, Title: &title}); err != nil {
+		t.Fatal(err)
+	}
+	if queries := music.searchCallQueries(); !reflect.DeepEqual(queries, []string{title}) {
+		t.Fatalf("provider queries = %#v", queries)
+	}
+}
+
 func TestCandidateDetailsReturnsCandidateAndClassifiesLyrics(t *testing.T) {
 	lyricFailure := errors.New("lyrics unavailable")
 	candidate := Candidate{
@@ -314,6 +366,7 @@ type musicStub struct {
 	searchResults       map[Source][]Candidate
 	searchErrors        map[Source]error
 	searchCalls         []Source
+	searchQueries       []string
 	artistSearchResults map[Source][]ArtistCandidate
 	artistSearchErrors  map[Source]error
 	artistSearchCalls   []Source
@@ -324,9 +377,10 @@ type musicStub struct {
 	artworkURL          string
 }
 
-func (stub *musicStub) Search(_ context.Context, source Source, _ string) ([]Candidate, error) {
+func (stub *musicStub) Search(_ context.Context, source Source, query string) ([]Candidate, error) {
 	stub.mu.Lock()
 	stub.searchCalls = append(stub.searchCalls, source)
+	stub.searchQueries = append(stub.searchQueries, query)
 	items := append([]Candidate(nil), stub.searchResults[source]...)
 	err := stub.searchErrors[source]
 	stub.mu.Unlock()
@@ -357,6 +411,12 @@ func (stub *musicStub) searchCallSources() []Source {
 	stub.mu.Lock()
 	defer stub.mu.Unlock()
 	return append([]Source(nil), stub.searchCalls...)
+}
+
+func (stub *musicStub) searchCallQueries() []string {
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	return append([]string(nil), stub.searchQueries...)
 }
 
 type fingerprinterStub struct{ calls int }
