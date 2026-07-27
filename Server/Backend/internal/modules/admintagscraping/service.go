@@ -61,14 +61,14 @@ func NewService(dependencies ServiceDependencies) (*Service, error) {
 }
 
 func (service *Service) Search(ctx context.Context, input SearchInput) ([]Candidate, error) {
-	title := ""
-	if input.Title != nil {
-		title = cleanScrapedText(*input.Title)
+	searchText := ""
+	if input.Query != nil {
+		searchText = cleanScrapedText(*input.Query)
 	}
-	if title == "" && input.Query != nil {
-		title = cleanScrapedText(*input.Query)
+	if searchText == "" && input.Title != nil {
+		searchText = cleanScrapedText(*input.Title)
 	}
-	if title == "" {
+	if searchText == "" {
 		return nil, apperror.Validation("Search text must not be empty")
 	}
 	sources := []Source{input.Source}
@@ -77,7 +77,7 @@ func (service *Service) Search(ctx context.Context, input SearchInput) ([]Candid
 	}
 	var candidates []Candidate
 	if input.Source != SourceSmart {
-		result, err := service.music.Search(ctx, sources[0], title)
+		result, err := service.music.Search(ctx, sources[0], searchText)
 		if err != nil {
 			return nil, err
 		}
@@ -93,7 +93,7 @@ func (service *Service) Search(ctx context.Context, input SearchInput) ([]Candid
 			wait.Add(1)
 			go func() {
 				defer wait.Done()
-				items, err := service.music.Search(ctx, source, title)
+				items, err := service.music.Search(ctx, source, searchText)
 				if err == nil {
 					results <- searchResult{items: items}
 				}
