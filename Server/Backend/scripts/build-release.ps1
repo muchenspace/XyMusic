@@ -11,8 +11,6 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 $AdminRoot = Join-Path $ServerRoot 'AdminWeb'
-& (Join-Path $PSScriptRoot 'build-admin-web.ps1') -AdminRoot $AdminRoot
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $ToolsOutput = Join-Path $OutputDirectory 'tools'
 if (Test-Path -LiteralPath $ToolsOutput) {
     Remove-Item -LiteralPath $ToolsOutput -Recurse -Force
@@ -29,6 +27,10 @@ finally {
     Pop-Location
 }
 
+$AdminBuildScript = Join-Path $PSScriptRoot 'build-admin-web.ps1'
+& $AdminBuildScript -AdminRoot $AdminRoot
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 $MigrationsOutput = Join-Path $OutputDirectory 'migrations'
 New-Item -ItemType Directory -Path $MigrationsOutput -Force | Out-Null
 Copy-Item -Path (Join-Path $ProjectRoot 'migrations\*') -Destination $MigrationsOutput -Recurse -Force
@@ -39,4 +41,4 @@ if (Test-Path -LiteralPath $AdminOutput) {
 }
 New-Item -ItemType Directory -Path $AdminOutput -Force | Out-Null
 Copy-Item -Path (Join-Path $AdminDist '*') -Destination $AdminOutput -Recurse -Force
-Write-Host "Go release created at $OutputDirectory"
+Write-Host "Windows release directory created at $OutputDirectory"
