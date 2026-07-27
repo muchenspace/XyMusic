@@ -182,6 +182,8 @@ func runServer(
 			logger.Error("close application runtime", "error", err)
 		}
 	}()
+	runtimeContext, cancelRuntime := context.WithCancel(ctx)
+	defer cancelRuntime()
 	setupService, err := setup.NewService(setup.Options{
 		RootDirectory:     root,
 		ConfigurationPath: configurationPath,
@@ -211,11 +213,14 @@ func runServer(
 		return 1
 	}
 	if configured {
-		bootstrapContext, cancelBootstrap := context.WithTimeout(ctx, 45*time.Second)
+		bootstrapContext, cancelBootstrap := context.WithTimeout(runtimeContext, managedRuntimeInitializationTimeout)
 		err := manager.Initialize(bootstrapContext, raw, setup.RuntimeSourceManaged)
 		cancelBootstrap()
 		if err != nil {
 			logger.Error("runtime initialization failed; control listener remains available", "error", err)
+			if runtimeContext.Err() == nil {
+				go retryManagedRuntime(runtimeContext, manager, raw, logger)
+			}
 		}
 	}
 
