@@ -100,7 +100,8 @@ setup_systemd() {
     cat <<EOF > "$SERVICE_FILE"
 [Unit]
 Description=${APP_NAME} Service
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
