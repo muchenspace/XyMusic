@@ -9,13 +9,7 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $ProjectRoot 'release-linux-amd64'
 }
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
-$projectPrefix = $ProjectRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
-if (-not $OutputDirectory.StartsWith($projectPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw 'Linux release output directory must be inside BackendGo'
-}
 $AdminRoot = Join-Path $ServerRoot 'AdminWeb'
-& (Join-Path $PSScriptRoot 'build-admin-web.ps1') -AdminRoot $AdminRoot
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if (Test-Path -LiteralPath $OutputDirectory) {
     Remove-Item -LiteralPath $OutputDirectory -Recurse -Force
@@ -34,33 +28,19 @@ try {
         Pop-Location
     }
 
-    Copy-Item -Path (Join-Path $ProjectRoot 'migrations') -Destination (Join-Path $OutputDirectory 'migrations') -Recurse -Force
+    $AdminBuildScript = Join-Path $PSScriptRoot 'build-admin-web.ps1'
+    & $AdminBuildScript -AdminRoot $AdminRoot
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    $MigrationsOutput = Join-Path $OutputDirectory 'migrations'
+    New-Item -ItemType Directory -Path $MigrationsOutput -Force | Out-Null
+    Copy-Item -Path (Join-Path $ProjectRoot 'migrations\*') -Destination $MigrationsOutput -Recurse -Force
     $AdminDist = Join-Path $AdminRoot 'dist'
-    Copy-Item -Path $AdminDist -Destination (Join-Path $OutputDirectory 'admin') -Recurse -Force
+    $AdminOutput = Join-Path $OutputDirectory 'admin'
+    New-Item -ItemType Directory -Path $AdminOutput -Force | Out-Null
+    Copy-Item -Path (Join-Path $AdminDist '*') -Destination $AdminOutput -Recurse -Force
 
-    @'
-# XyMusic reads only .env beside the xymusic executable.
-# Do not place secrets in this example file. Start ./xymusic without .env to use the setup wizard.
-# Relative paths are resolved from this directory.
-'@ | Set-Content -LiteralPath (Join-Path $OutputDirectory '.env.example') -Encoding ascii
-    @'
-#!/usr/bin/env sh
-set -eu
-chmod +x ./xymusic
-exec ./xymusic "$@"
-'@ | Set-Content -LiteralPath (Join-Path $OutputDirectory 'run.sh') -Encoding ascii
-
-    $archive = Join-Path $ProjectRoot 'xymusic-linux-amd64.tar.gz'
-    if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
-    Push-Location (Split-Path -Parent $OutputDirectory)
-    try {
-        tar -czf $archive (Split-Path -Leaf $OutputDirectory)
-    }
-    finally {
-        Pop-Location
-    }
-    Write-Host "Linux amd64 release created at $OutputDirectory"
-    Write-Host "Archive created at $archive"
+    Write-Host "Linux amd64 release directory created at $OutputDirectory"
 }
 finally {
     Remove-Item Env:GOOS -ErrorAction SilentlyContinue
