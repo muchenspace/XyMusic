@@ -1,0 +1,30 @@
+# Keep repository text deterministic across Windows, macOS, and Linux.
+* text=auto eol=lf
+
+# Windows command scripts require CRLF for consistent cmd.exe behavior.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Migration hashes are calculated from file bytes and must be reproducible.
+/Server/Backend/migrations/*.sql text eol=lf
+/Server/Backend/migrations/meta/*.json text eol=lf
+
+# Explicit binary assets avoid content conversion and noisy diffs.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.icns binary
+*.bmp binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.jar binary
+*.syso binary
+*.zip binary
+*.gz binary
+*.7z binary
