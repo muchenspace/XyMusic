@@ -37,7 +37,7 @@ function completedBatch(): ArtistArtworkBatch {
   return {
     id: "artist-batch-1",
     requestedBy: "admin-1",
-    options: { sources: ["qmusic", "netease"], overwrite: false, reason: "批量在线刮削艺术家头像" },
+    options: { sources: ["qmusic"], overwrite: false, reason: "批量在线刮削艺术家头像" },
     status: "COMPLETED",
     total: 1,
     processed: 1,
@@ -93,7 +93,7 @@ describe("BatchArtistArtworkScrapeDialog", () => {
     const wrapper = mountDialog(artists);
 
     expect(wrapper.text()).toContain("QQ 音乐");
-    expect(wrapper.text()).toContain("网易云");
+    expect(wrapper.text()).not.toContain("网易云");
     expect(wrapper.text()).not.toContain("咪咕");
     await startButton(wrapper).trigger("click");
     await flushPromises();
@@ -103,7 +103,7 @@ describe("BatchArtistArtworkScrapeDialog", () => {
         { artistId: "missing-1", expectedVersion: 2 },
         { artistId: "missing-2", expectedVersion: 4 },
       ],
-      options: { sources: ["qmusic", "netease"], overwrite: false, reason: "批量在线刮削艺术家头像" },
+      options: { sources: ["qmusic"], overwrite: false, reason: "批量在线刮削艺术家头像" },
     });
     expect(wrapper.text()).toContain("条件排除 2");
     expect(wrapper.text()).toContain("成功 0 · 已跳过 1 · 失败 0");

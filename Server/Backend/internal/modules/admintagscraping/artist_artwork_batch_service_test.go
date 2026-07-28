@@ -104,15 +104,15 @@ func TestArtistArtworkBatchExecuteRetriesWhenAnySourceIsTransient(t *testing.T) 
 	service := newArtistArtworkBatchTestService(t, &artistArtworkBatchStoreStub{}, artistArtworkBatchProcessorStub{
 		search: func(_ context.Context, input ArtistSearchInput) ([]ArtistCandidate, error) {
 			if input.Source == SourceQMusic {
-				return []ArtistCandidate{}, nil
+				return nil, apperror.DependencyUnavailable("artist provider unavailable")
 			}
-			return nil, apperror.DependencyUnavailable("artist provider unavailable")
+			return []ArtistCandidate{}, nil
 		},
 	})
 	claim := artistArtworkBatchClaim(ArtistArtworkBatchTarget{
 		ID: "artist-1", Name: "Artist", NormalizedName: "artist", Version: 1, PerformerRole: true,
 	}, 1, 1, 3)
-	claim.Job.Options.Sources = []Source{SourceQMusic, SourceNetease}
+	claim.Job.Options.Sources = []Source{SourceQMusic}
 	var lost atomic.Bool
 	execution := service.executeItem(context.Background(), claim, &lost)
 	if !execution.retry || execution.status != ItemFailed {
@@ -214,8 +214,8 @@ func TestArtistArtworkBatchApplyConflictIsSkipped(t *testing.T) {
 	service := newArtistArtworkBatchTestService(t, &artistArtworkBatchStoreStub{}, artistArtworkBatchProcessorStub{
 		search: func(context.Context, ArtistSearchInput) ([]ArtistCandidate, error) {
 			return []ArtistCandidate{{
-				Source: SourceNetease, ID: "artist-1", Name: "Artist",
-				ImageURL: "https://music.126.net/avatar.jpg", Score: 2,
+				Source: SourceQMusic, ID: "artist-1", Name: "Artist",
+				ImageURL: "https://y.qq.com/avatar.jpg", Score: 2,
 			}}, nil
 		},
 		apply: func(context.Context, string, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error) {
@@ -227,7 +227,7 @@ func TestArtistArtworkBatchApplyConflictIsSkipped(t *testing.T) {
 	claim := artistArtworkBatchClaim(ArtistArtworkBatchTarget{
 		ID: "artist-1", Name: "Artist", NormalizedName: "artist", Version: 1, PerformerRole: true,
 	}, 1, 1, 3)
-	claim.Job.Options.Sources = []Source{SourceNetease}
+	claim.Job.Options.Sources = []Source{SourceQMusic}
 	var lost atomic.Bool
 	execution := service.executeItem(context.Background(), claim, &lost)
 	if execution.status != ItemSkipped || execution.retry || execution.candidate == nil {
@@ -239,7 +239,7 @@ func TestValidateCreateArtistArtworkBatch(t *testing.T) {
 	valid := CreateArtistArtworkBatchInput{
 		Items: []ArtistArtworkBatchItemInput{{ArtistID: uuid.NewString(), ExpectedVersion: 1}},
 		Options: ArtistArtworkBatchOptions{
-			Sources: []Source{SourceQMusic, SourceNetease}, Reason: "artist artwork scrape",
+			Sources: []Source{SourceQMusic}, Reason: "artist artwork scrape",
 		},
 	}
 	if err := validateCreateArtistArtworkBatch(valid); err != nil {
@@ -251,7 +251,7 @@ func TestValidateCreateArtistArtworkBatch(t *testing.T) {
 		t.Fatal("duplicate artists were accepted")
 	}
 	unsupported := valid
-	unsupported.Options.Sources = []Source{SourceMigu}
+	unsupported.Options.Sources = []Source{Source("netease")}
 	if err := validateCreateArtistArtworkBatch(unsupported); err == nil {
 		t.Fatal("unsupported artist source was accepted")
 	}

@@ -10,14 +10,12 @@ type Source string
 const (
 	SourceSmart    Source = "smart"
 	SourceNetease  Source = "netease"
-	SourceMigu     Source = "migu"
 	SourceQMusic   Source = "qmusic"
 	SourceKugou    Source = "kugou"
-	SourceKuwo     Source = "kuwo"
 	SourceAcoustID Source = "acoustid"
 )
 
-var searchableSources = []Source{SourceNetease, SourceMigu, SourceQMusic, SourceKugou, SourceKuwo}
+var searchableSources = []Source{SourceNetease, SourceQMusic, SourceKugou}
 
 type MatchMode string
 
@@ -50,6 +48,8 @@ type Candidate struct {
 	Disc        string   `json:"disc"`
 	Genre       string   `json:"genre"`
 	Source      Source   `json:"source"`
+	LyricID     string   `json:"lyricId,omitempty"`
+	DurationMS  int      `json:"durationMs,omitempty"`
 	TitleScore  *float64 `json:"titleScore,omitempty"`
 	ArtistScore *float64 `json:"artistScore,omitempty"`
 	AlbumScore  *float64 `json:"albumScore,omitempty"`
@@ -69,6 +69,7 @@ type ApplyFields struct {
 
 type BatchOptions struct {
 	Sources       []Source       `json:"sources"`
+	Verbatim      bool           `json:"verbatim"`
 	MatchMode     MatchMode      `json:"matchMode"`
 	MissingFields []MissingField `json:"missingFields"`
 	Fields        ApplyFields    `json:"fields"`

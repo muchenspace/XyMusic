@@ -28,7 +28,7 @@ func TestProductionMusicPlatformSearchesLiveSources(t *testing.T) {
 		results[source] = items
 	}
 	qq := results[SourceQMusic][0]
-	if _, err := platform.Lyric(ctx, SourceQMusic, qq.ID); err != nil {
+	if _, err := platform.Lyric(ctx, SourceQMusic, qq, false); err != nil {
 		t.Fatalf("qmusic lyric: %v", err)
 	}
 	if qq.AlbumImg != "" {

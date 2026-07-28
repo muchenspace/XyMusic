@@ -246,14 +246,14 @@ func TestBatchItemAppliesFirstReliableCandidate(t *testing.T) {
 	status, candidate, message := service.executeItem(context.Background(), ClaimedBatchItem{
 		Job: BatchJobRecord{ID: "job", RequestedBy: &actor, Options: BatchOptions{
 			Sources: []Source{SourceQMusic}, MatchMode: MatchStrict,
-			Fields: ApplyFields{Title: true}, Reason: "batch apply",
+			Fields: ApplyFields{Title: true}, Verbatim: true, Reason: "batch apply",
 		}},
 		Item: BatchItemRecord{ID: "item", TrackID: "track", ExpectedVersion: 1},
 	}, nilAtomicBool())
 	if status != ItemSucceeded || candidate == nil || candidate.ID != "candidate" || message != "cover skipped" {
 		t.Fatalf("item result = %s/%#v/%q", status, candidate, message)
 	}
-	if processor.applyCalls != 1 || processor.applyInput.ExpectedVersion != 1 || processor.applyInput.Reason != "batch apply" {
+	if processor.applyCalls != 1 || processor.applyInput.ExpectedVersion != 1 || !processor.applyInput.Verbatim || processor.applyInput.Reason != "batch apply" {
 		t.Fatalf("apply = %d/%#v", processor.applyCalls, processor.applyInput)
 	}
 }

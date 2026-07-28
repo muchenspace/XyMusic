@@ -8,7 +8,7 @@ import (
 type MusicPlatform interface {
 	Search(context.Context, Source, string) ([]Candidate, error)
 	SearchArtists(context.Context, Source, string) ([]ArtistCandidate, error)
-	Lyric(context.Context, Source, string) (string, error)
+	Lyric(context.Context, Source, Candidate, bool) (string, error)
 	AcoustID(context.Context, float64, string) ([]Candidate, error)
 	DownloadArtwork(context.Context, string) (DownloadedArtwork, error)
 }

@@ -416,7 +416,7 @@ func (service *BatchService) executeItem(
 	if !matchesMissingFields(metadata.Effective, claim.Job.Options.MissingFields) {
 		return ItemSkipped, nil, "The track does not match the configured missing-field conditions"
 	}
-	query := SearchInput{Title: &metadata.Effective.Title}
+	query := SearchInput{Title: &metadata.Effective.Title, Verbatim: claim.Job.Options.Verbatim}
 	artistNames := make([]string, 0, len(metadata.Effective.Credits))
 	for _, credit := range metadata.Effective.Credits {
 		artistNames = append(artistNames, credit.Name)
@@ -476,6 +476,7 @@ func (service *BatchService) executeItem(
 	result, err := service.processor.Apply(ctx, *claim.Job.RequestedBy, uuid.NewString(), claim.Item.TrackID, ApplyInput{
 		ExpectedVersion: claim.Item.ExpectedVersion,
 		Candidate:       *selected,
+		Verbatim:        claim.Job.Options.Verbatim,
 		Fields:          claim.Job.Options.Fields,
 		WriteBack:       claim.Job.Options.WriteBack,
 		Reason:          claim.Job.Options.Reason,

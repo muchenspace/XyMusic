@@ -83,7 +83,7 @@ describe("TagCandidateDetailDialog", () => {
 
     await flushPromises();
 
-    expect(scraping.candidateDetail).toHaveBeenCalledWith({ candidate: item }, expect.any(AbortSignal));
+    expect(scraping.candidateDetail).toHaveBeenCalledWith({ candidate: item, verbatim: false }, expect.any(AbortSignal));
     expect(scraping.artworkUrl).toHaveBeenCalledWith(item.albumImg);
     expect(wrapper.text()).toContain("候选歌曲");
     expect(wrapper.text()).toContain("候选歌手");

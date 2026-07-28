@@ -4,6 +4,7 @@ import "context"
 
 type SearchInput struct {
 	Source  Source   `json:"source"`
+	Verbatim bool     `json:"verbatim"`
 	Query   *string  `json:"query,omitempty"`
 	Title   *string  `json:"title,omitempty"`
 	Artist  *string  `json:"artist,omitempty"`
@@ -13,6 +14,7 @@ type SearchInput struct {
 
 type CandidateDetailsInput struct {
 	Candidate Candidate `json:"candidate"`
+	Verbatim  bool      `json:"verbatim"`
 }
 
 type CandidateDetailsDTO struct {
@@ -23,6 +25,7 @@ type CandidateDetailsDTO struct {
 type ApplyInput struct {
 	ExpectedVersion   int         `json:"expectedVersion"`
 	Candidate         Candidate   `json:"candidate"`
+	Verbatim          bool        `json:"verbatim"`
 	Fields            ApplyFields `json:"fields"`
 	WriteBack         bool        `json:"writeBack"`
 	Reason            string      `json:"reason"`

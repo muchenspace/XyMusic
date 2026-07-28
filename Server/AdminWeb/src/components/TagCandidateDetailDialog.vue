@@ -11,7 +11,8 @@ const open = defineModel<boolean>({ required: true });
 const props = withDefaults(defineProps<{
   candidate?: TagCandidate;
   selected?: boolean;
-}>(), { selected: false });
+  verbatim?: boolean;
+}>(), { selected: false, verbatim: false });
 const emit = defineEmits<{ select: [candidate: TagCandidate] }>();
 const scraping = useTagScraping();
 
@@ -80,10 +81,8 @@ function scoreLabel(value: number | undefined): string {
 function sourceLabel(source: TagCandidate["source"]): string {
   return ({
     netease: "网易云",
-    migu: "咪咕",
     qmusic: "QQ 音乐",
     kugou: "酷狗",
-    kuwo: "酷我",
     acoustid: "AcoustID",
   } satisfies Record<TagCandidate["source"], string>)[source];
 }
@@ -109,7 +108,7 @@ function loadDetail(): void {
   const controller = new AbortController();
   detailController = controller;
   loading.value = true;
-  void scraping.candidateDetail({ candidate }, controller.signal).then((result) => {
+  void scraping.candidateDetail({ candidate, verbatim: props.verbatim }, controller.signal).then((result) => {
     if (generation !== detailGeneration || !open.value || candidateKey.value !== key) return;
     detail.value = result;
   }).catch((cause: unknown) => {
@@ -127,7 +126,7 @@ function selectCandidate(): void {
   open.value = false;
 }
 
-watch([open, candidateKey], loadDetail, { immediate: true });
+watch([open, candidateKey, () => props.verbatim], loadDetail, { immediate: true });
 onUnmounted(cancelDetailRequest);
 </script>
 

@@ -22,7 +22,7 @@ import (
 
 type ScrapingAPI interface {
 	Search(context.Context, SearchInput) ([]Candidate, error)
-	CandidateDetails(context.Context, Candidate) (CandidateDetailsDTO, error)
+	CandidateDetails(context.Context, Candidate, bool) (CandidateDetailsDTO, error)
 	SearchArtists(context.Context, ArtistSearchInput) ([]ArtistCandidate, error)
 	Fingerprint(context.Context, string) ([]Candidate, error)
 	Apply(context.Context, string, string, string, ApplyInput) (ApplyResult, error)
@@ -131,7 +131,7 @@ func (routes *Routes) candidateDetails(c *gin.Context) error {
 	if _, err := adminauth.RequireAdmin(c, routes.identity, true); err != nil {
 		return err
 	}
-	result, err := routes.scraping.CandidateDetails(c.Request.Context(), input.Candidate)
+	result, err := routes.scraping.CandidateDetails(c.Request.Context(), input.Candidate, input.Verbatim)
 	if err != nil {
 		return err
 	}
@@ -344,7 +344,7 @@ func validateSearchInput(input SearchInput, shape map[string]json.RawMessage) er
 	if input.Source != SourceSmart && !isSearchableSource(input.Source) {
 		return contractError()
 	}
-	if hasExplicitNull(shape, "query", "title", "artist", "album", "sources") {
+	if hasExplicitNull(shape, "query", "title", "artist", "album", "sources", "verbatim") {
 		return contractError()
 	}
 	for _, value := range []*string{input.Query, input.Title, input.Artist, input.Album} {
@@ -371,7 +371,9 @@ func validateCandidateDetailsInput(input CandidateDetailsInput, shape map[string
 		return err
 	}
 	var candidateShape map[string]json.RawMessage
-	if json.Unmarshal(shape["candidate"], &candidateShape) != nil || hasExplicitNull(candidateShape, "titleScore", "artistScore", "albumScore", "score") {
+	if json.Unmarshal(shape["candidate"], &candidateShape) != nil ||
+		hasExplicitNull(candidateShape, "titleScore", "artistScore", "albumScore", "score", "lyricId", "durationMs") ||
+		hasExplicitNull(shape, "verbatim") {
 		return contractError()
 	}
 	return validateCandidateContract(input.Candidate)
@@ -381,7 +383,7 @@ func validateApplyInput(input ApplyInput, shape map[string]json.RawMessage) erro
 	if input.ExpectedVersion < 1 || !contractStringLength(input.Reason, 2, 500) {
 		return contractError()
 	}
-	if hasExplicitNull(shape, "writeBack") {
+	if hasExplicitNull(shape, "writeBack", "verbatim") {
 		return contractError()
 	}
 	if err := requireNestedKeys(shape["candidate"],
@@ -392,7 +394,8 @@ func validateApplyInput(input ApplyInput, shape map[string]json.RawMessage) erro
 		return err
 	}
 	var candidateShape map[string]json.RawMessage
-	if json.Unmarshal(shape["candidate"], &candidateShape) != nil || hasExplicitNull(candidateShape, "titleScore", "artistScore", "albumScore", "score") {
+	if json.Unmarshal(shape["candidate"], &candidateShape) != nil ||
+		hasExplicitNull(candidateShape, "titleScore", "artistScore", "albumScore", "score", "lyricId", "durationMs") {
 		return contractError()
 	}
 	return validateCandidateContract(input.Candidate)
@@ -419,7 +422,7 @@ func validateBatchInput(input CreateBatchInput, shape map[string]json.RawMessage
 	if err := json.Unmarshal(shape["options"], &optionShape); err != nil {
 		return contractError()
 	}
-	if hasExplicitNull(optionShape, "writeBack") {
+	if hasExplicitNull(optionShape, "writeBack", "verbatim") {
 		return contractError()
 	}
 	if err := requireNestedKeys(optionShape["fields"], "title", "artist", "album", "year", "genre", "lyrics", "cover", "overwrite"); err != nil {
@@ -455,6 +458,7 @@ func validateCandidateContract(candidate Candidate) error {
 		{candidate.ArtistID, 0, 2_000}, {candidate.Album, 0, 500}, {candidate.AlbumID, 0, 2_000},
 		{candidate.AlbumImg, 0, 2_000}, {candidate.Year, 0, 30}, {candidate.Track, 0, 30},
 		{candidate.Disc, 0, 30}, {candidate.Genre, 0, 200},
+		{candidate.LyricID, 0, 2_000},
 	}
 	for _, limit := range limits {
 		if !contractStringLength(limit.value, limit.min, limit.max) {
@@ -462,6 +466,9 @@ func validateCandidateContract(candidate Candidate) error {
 		}
 	}
 	if !isSearchableSource(candidate.Source) && candidate.Source != SourceAcoustID {
+		return contractError()
+	}
+	if candidate.DurationMS < 0 || candidate.DurationMS > 24*60*60*1_000 {
 		return contractError()
 	}
 	for _, score := range []*float64{candidate.TitleScore, candidate.ArtistScore, candidate.AlbumScore, candidate.Score} {
