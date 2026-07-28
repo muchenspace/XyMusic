@@ -113,11 +113,15 @@ describe("TagScrapeDialog candidate details", () => {
     const second = candidate("remote-2", "第二候选");
     scraping.search.mockResolvedValue([first, second]);
     scraping.candidateDetail.mockResolvedValue(detail(second));
+    scraping.apply.mockResolvedValue({ appliedFields: ["lyrics"], coverApplied: false, warnings: [] });
     const wrapper = mountDialog();
 
+    await wrapper.get("select[data-testid='tag-verbatim']").setValue("true");
     await wrapper.get("input[placeholder='歌曲、艺术家或专辑']").setValue("候选歌曲");
     await button(wrapper, "搜索").trigger("click");
     await flushPromises();
+
+    expect(scraping.search).toHaveBeenCalledWith(expect.objectContaining({ verbatim: true }), expect.any(AbortSignal));
 
     let cards = wrapper.findAll("[data-testid='tag-candidate']");
     expect(cards).toHaveLength(2);
@@ -127,7 +131,7 @@ describe("TagScrapeDialog candidate details", () => {
     await candidateCard(wrapper, 1).findAll("button").find((item) => item.text() === "查看详情")!.trigger("click");
     await flushPromises();
 
-    expect(scraping.candidateDetail).toHaveBeenCalledWith({ candidate: second }, expect.any(AbortSignal));
+    expect(scraping.candidateDetail).toHaveBeenCalledWith({ candidate: second, verbatim: true }, expect.any(AbortSignal));
     cards = wrapper.findAll("[data-testid='tag-candidate']");
     expect(cards).toHaveLength(2);
     expect(candidateCard(wrapper, 0).text()).toContain("已选用");
@@ -142,6 +146,11 @@ describe("TagScrapeDialog candidate details", () => {
     expect(candidateCard(wrapper, 0).text()).not.toContain("已选用");
     expect(candidateCard(wrapper, 1).text()).toContain("已选用");
     expect(wrapper.find("[data-dialog-title='第二候选']").exists()).toBe(false);
+
+    await button(wrapper, "应用候选").trigger("click");
+    await flushPromises();
+
+    expect(scraping.apply).toHaveBeenCalledWith("track-1", expect.objectContaining({ verbatim: true }));
   });
 
   it("closes the detail view and aborts its request when a new search starts", async () => {

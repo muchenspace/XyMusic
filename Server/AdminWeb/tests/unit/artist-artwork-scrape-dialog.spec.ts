@@ -70,13 +70,13 @@ describe("ArtistArtworkScrapeDialog", () => {
 
     expect(wrapper.text()).toContain("智能多源");
     expect(wrapper.text()).toContain("QQ 音乐");
-    expect(wrapper.text()).toContain("网易云");
+    expect(wrapper.text()).not.toContain("网易云");
     expect(wrapper.text()).not.toContain("咪咕");
 
     await button(wrapper, "搜索头像").trigger("click");
     await flushPromises();
 
-    expect(scraping.searchArtists).toHaveBeenCalledWith({ source: "smart", query: "测试歌手", sources: ["qmusic", "netease"] }, expect.any(AbortSignal));
+    expect(scraping.searchArtists).toHaveBeenCalledWith({ source: "smart", query: "测试歌手", sources: ["qmusic"] }, expect.any(AbortSignal));
     expect(wrapper.text()).toContain("歌手别名");
     expect(wrapper.text()).toContain("匹配分 1.50");
 

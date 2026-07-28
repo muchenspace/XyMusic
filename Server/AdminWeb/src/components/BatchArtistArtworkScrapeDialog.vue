@@ -4,7 +4,7 @@ import AppButton from "@/components/AppButton.vue";
 import BaseDialog from "@/components/BaseDialog.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
 import type { ArtistSummary } from "@/features/music/domain/models";
-import type { ArtistArtworkBatch, TagSource } from "@/features/scraping/domain/models";
+import type { ArtistArtworkBatch, ArtistSource } from "@/features/scraping/domain/models";
 import {
   batchItemMessage,
   batchItemStatusPresentation,
@@ -17,7 +17,7 @@ const props = defineProps<{ artists: ArtistSummary[] }>();
 const emit = defineEmits<{ completed: [] }>();
 const scraping = useTagScraping();
 
-const sources = ref<TagSource[]>(["qmusic", "netease"]);
+const sources = ref<ArtistSource[]>(["qmusic"]);
 const reason = ref("批量在线刮削艺术家头像");
 const job = ref<ArtistArtworkBatch>();
 const loading = ref(false);
@@ -33,9 +33,8 @@ let pollFailures = 0;
 let completedEmitted = false;
 let actionGeneration = 0;
 
-const sourceOptions: Array<{ value: TagSource; label: string }> = [
+const sourceOptions: Array<{ value: ArtistSource; label: string }> = [
   { value: "qmusic", label: "QQ 音乐" },
-  { value: "netease", label: "网易云" },
 ];
 
 watch(open, (value) => {
@@ -49,7 +48,7 @@ watch(open, (value) => {
     beginPolling(job.value.id);
     return;
   }
-  sources.value = ["qmusic", "netease"];
+  sources.value = ["qmusic"];
   reason.value = "批量在线刮削艺术家头像";
   job.value = undefined;
   loading.value = false;

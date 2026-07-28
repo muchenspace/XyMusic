@@ -114,8 +114,13 @@ describe("BatchTagScrapeDialog", () => {
     scraping.createBatch.mockResolvedValue(completedBatch());
     const wrapper = mountDialog([track("track-1"), track("2"), track("3")]);
 
+    await wrapper.get("select[data-testid='batch-verbatim']").setValue("true");
     await startButton(wrapper).trigger("click");
     await flushPromises();
+
+    expect(scraping.createBatch).toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({ sources: ["qmusic", "netease", "kugou"], verbatim: true }),
+    }));
 
     expect(wrapper.text()).toContain("已完成");
     expect(wrapper.text()).toContain("条件排除 2");

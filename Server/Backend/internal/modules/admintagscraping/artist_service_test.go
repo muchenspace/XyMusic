@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+
+	"xymusic/server/internal/shared/apperror"
 )
 
 func TestSearchArtistsSmartRanksMatchesAndToleratesOneFailedSource(t *testing.T) {
@@ -17,7 +19,6 @@ func TestSearchArtistsSmartRanksMatchesAndToleratesOneFailedSource(t *testing.T)
 				Aliases:  []string{"Alias"},
 			}},
 		},
-		artistSearchErrors: map[Source]error{SourceNetease: errors.New("netease unavailable")},
 	}
 	service, err := NewService(ServiceDependencies{
 		Store: &storeStub{}, Music: music, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
@@ -38,7 +39,7 @@ func TestSearchArtistsSmartRanksMatchesAndToleratesOneFailedSource(t *testing.T)
 	calls := append([]Source(nil), music.artistSearchCalls...)
 	music.mu.Unlock()
 	sort.Slice(calls, func(left, right int) bool { return calls[left] < calls[right] })
-	expected := []Source{SourceNetease, SourceQMusic}
+	expected := []Source{SourceQMusic}
 	sort.Slice(expected, func(left, right int) bool { return expected[left] < expected[right] })
 	if !reflect.DeepEqual(calls, expected) {
 		t.Fatalf("artist search calls = %#v", calls)
@@ -47,7 +48,7 @@ func TestSearchArtistsSmartRanksMatchesAndToleratesOneFailedSource(t *testing.T)
 
 func TestSearchArtistsSmartReturnsErrorWhenEveryProviderFails(t *testing.T) {
 	music := &musicStub{artistSearchErrors: map[Source]error{
-		SourceQMusic: errors.New("qq unavailable"), SourceNetease: errors.New("netease unavailable"),
+		SourceQMusic: errors.New("qq unavailable"),
 	}}
 	service, _ := NewService(ServiceDependencies{
 		Store: &storeStub{}, Music: music, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
@@ -114,7 +115,7 @@ func TestApplyArtistArtworkDownloadsAndCarriesAtomicFenceDetails(t *testing.T) {
 	}
 }
 
-func TestApplyArtistArtworkStopsBeforeUploadWhenDownloadFails(t *testing.T) {
+func TestApplyArtistArtworkRejectsRemovedNeteaseCandidate(t *testing.T) {
 	music := &musicStub{artworkErr: errors.New("download failed")}
 	artwork := &artworkStub{}
 	service, _ := NewService(ServiceDependencies{
@@ -125,13 +126,13 @@ func TestApplyArtistArtworkStopsBeforeUploadWhenDownloadFails(t *testing.T) {
 		ArtistArtworkApplyInput{
 			ExpectedVersion: 1,
 			Candidate: ArtistCandidate{
-				Source: SourceNetease, ID: "netease-artist", Name: "Artist",
+				Source: Source("netease"), ID: "netease-artist", Name: "Artist",
 				ImageURL: "https://p1.music.126.net/artist.jpg", Aliases: []string{}, Score: 2,
 			},
 			Reason: "operator scrape",
 		},
 	)
-	if err == nil || artwork.artistCalls != 0 {
+	if !apperror.IsCode(err, apperror.CodeValidationError) || artwork.artistCalls != 0 {
 		t.Fatalf("error/calls = %v / %d", err, artwork.artistCalls)
 	}
 }

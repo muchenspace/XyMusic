@@ -183,8 +183,6 @@ func validateArtistCandidate(candidate ArtistCandidate) error {
 	switch candidate.Source {
 	case SourceQMusic:
 		allowed = []string{"y.qq.com"}
-	case SourceNetease:
-		allowed = []string{"music.126.net"}
 	}
 	if !allowedHost(parsed.Hostname(), allowed) {
 		return apperror.Validation("The artist artwork URL does not match its source")

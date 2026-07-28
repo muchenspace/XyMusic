@@ -4,7 +4,7 @@ import { computed, onUnmounted, ref, watch } from "vue";
 import AppButton from "@/components/AppButton.vue";
 import BaseDialog from "@/components/BaseDialog.vue";
 import type { ArtistSummary } from "@/features/music/domain/models";
-import type { ArtistCandidate, SearchSource } from "@/features/scraping/domain/models";
+import type { ArtistCandidate, ArtistSearchSource } from "@/features/scraping/domain/models";
 import { useTagScraping } from "@/app/services/scraping";
 import { useUiStore } from "@/stores/ui";
 
@@ -14,7 +14,7 @@ const emit = defineEmits<{ applied: [version: number] }>();
 const scraping = useTagScraping();
 const ui = useUiStore();
 
-const source = ref<SearchSource>("smart");
+const source = ref<ArtistSearchSource>("smart");
 const query = ref("");
 const reason = ref("在线刮削艺术家头像");
 const candidates = ref<ArtistCandidate[]>([]);
@@ -28,12 +28,11 @@ let searchController: AbortController | undefined;
 let searchGeneration = 0;
 let applyGeneration = 0;
 
-const sourceOptions: Array<{ value: SearchSource; label: string }> = [
+const sourceOptions: Array<{ value: ArtistSearchSource; label: string }> = [
   { value: "smart", label: "智能多源" },
   { value: "qmusic", label: "QQ 音乐" },
-  { value: "netease", label: "网易云" },
 ];
-const supportedArtistSources = ["qmusic", "netease"] as const;
+const supportedArtistSources = ["qmusic"] as const;
 
 const selectedImageUrl = computed(() => selected.value?.imageUrl
   ? scraping.artworkUrl(selected.value.imageUrl)

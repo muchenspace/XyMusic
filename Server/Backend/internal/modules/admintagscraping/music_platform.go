@@ -14,6 +14,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,18 +24,20 @@ import (
 )
 
 const (
-	platformUserAgent      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36"
-	defaultUpstreamTimeout = 12 * time.Second
-	maximumArtworkBytes    = int64(20 * 1024 * 1024)
-	maximumJSONBytes       = int64(2 * 1024 * 1024)
-	maximumTextBytes       = int64(2 * 1024 * 1024)
-	maximumRequestAttempts = 3
-	maximumRedirects       = 5
-	neteaseLinuxForwardKey = "rFgB&h#%2?^eDg:Q"
-	kugouSignatureSalt     = "NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt"
+	platformUserAgent       = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36"
+	defaultUpstreamTimeout  = 12 * time.Second
+	maximumArtworkBytes     = int64(20 * 1024 * 1024)
+	maximumJSONBytes        = int64(2 * 1024 * 1024)
+	maximumTextBytes        = int64(2 * 1024 * 1024)
+	maximumRequestAttempts  = 3
+	maximumRedirects        = 5
+	neteaseLinuxForwardKey  = "rFgB&h#%2?^eDg:Q"
+	neteaseEAPIKey          = "e82ckenh8dichen8"
+	kugouSignatureSalt      = "NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt"
+	kugouLyricSignatureSalt = "LnT6xpN3khm36zseQzvmgTZ3waWdRSA"
 )
 
-var allowedArtworkHosts = []string{"music.126.net", "y.qq.com", "kugou.com", "migu.cn", "kuwo.cn"}
+var allowedArtworkHosts = []string{"music.126.net", "y.qq.com", "kugou.com"}
 
 type ProductionMusicPlatform struct {
 	client         *http.Client
@@ -72,14 +75,10 @@ func (platform *ProductionMusicPlatform) Search(ctx context.Context, source Sour
 	switch source {
 	case SourceNetease:
 		result, err = platform.searchNetease(ctx, query)
-	case SourceMigu:
-		result, err = platform.searchMigu(ctx, query)
 	case SourceQMusic:
 		result, err = platform.searchQQ(ctx, query)
 	case SourceKugou:
 		result, err = platform.searchKugou(ctx, query)
-	case SourceKuwo:
-		result, err = platform.searchKuwo(ctx, query)
 	default:
 		return nil, apperror.Validation("The music platform source is invalid")
 	}
@@ -89,20 +88,16 @@ func (platform *ProductionMusicPlatform) Search(ctx context.Context, source Sour
 	return result, nil
 }
 
-func (platform *ProductionMusicPlatform) Lyric(ctx context.Context, source Source, id string) (string, error) {
+func (platform *ProductionMusicPlatform) Lyric(ctx context.Context, source Source, candidate Candidate, verbatim bool) (string, error) {
 	var result string
 	var err error
 	switch source {
 	case SourceNetease:
-		result, err = platform.lyricNetease(ctx, id)
-	case SourceMigu:
-		result, err = platform.lyricMigu(ctx, id)
+		result, err = platform.lyricNetease(ctx, candidate.ID, verbatim)
 	case SourceQMusic:
-		result, err = platform.lyricQQ(ctx, id)
+		result, err = platform.lyricQQ(ctx, candidate, verbatim)
 	case SourceKugou:
-		result, err = platform.lyricKugou(ctx, id)
-	case SourceKuwo:
-		result, err = platform.lyricKuwo(ctx, id)
+		result, err = platform.lyricKugou(ctx, candidate, verbatim)
 	default:
 		return "", apperror.Validation("The music platform source is invalid")
 	}
@@ -267,15 +262,52 @@ func (platform *ProductionMusicPlatform) searchNetease(ctx context.Context, quer
 		result = append(result, normalizeCandidate(map[string]any{
 			"id": song["id"], "name": song["name"], "artist": strings.Join(artists, ","), "artistId": artistID,
 			"album": album["name"], "albumId": album["id"], "albumImg": album["picUrl"], "year": year,
+			"durationMs": numberValue(song["dt"]),
 		}, SourceNetease))
 	}
 	return result, nil
 }
 
-func (platform *ProductionMusicPlatform) lyricNetease(ctx context.Context, id string) (string, error) {
+func (platform *ProductionMusicPlatform) lyricNetease(ctx context.Context, id string, verbatim bool) (string, error) {
+	if verbatim {
+		return platform.lyricNeteaseVerbatim(ctx, id)
+	}
 	data, err := platform.neteaseForward(ctx, "https://music.163.com/api/song/lyric?lv=-1&kv=-1&tv=-1", map[string]any{"id": id})
 	if err != nil {
 		return "", err
+	}
+	return cleanScrapedText(mapValue(data["lrc"])["lyric"]), nil
+}
+
+func (platform *ProductionMusicPlatform) lyricNeteaseVerbatim(ctx context.Context, id string) (string, error) {
+	params := map[string]any{"id": numberOrString(id), "lv": "-1", "tv": "-1", "rv": "-1", "yv": "-1"}
+	payload, err := encryptNeteaseEAPIParams("/api/song/lyric/v1", params, []byte(neteaseEAPIKey))
+	if err != nil {
+		return "", err
+	}
+	body := []byte(url.Values{"params": {strings.ToUpper(hex.EncodeToString(payload))}}.Encode())
+	response, err := platform.requestBytes(ctx, "https://interface.music.163.com/eapi/song/lyric/v1", requestOptions{
+		Method:  http.MethodPost,
+		Headers: map[string]string{"Content-Type": "application/x-www-form-urlencoded", "Referer": "https://music.163.com/"},
+		Body:    body,
+	}, maximumJSONBytes)
+	if err != nil {
+		return "", err
+	}
+	decrypted, err := decryptNeteaseEAPIResponse(response.Bytes, []byte(neteaseEAPIKey))
+	if err != nil {
+		return "", err
+	}
+	var data map[string]any
+	if err := json.Unmarshal(decrypted, &data); err != nil {
+		return "", fmt.Errorf("decode Netease lyric response: %w", err)
+	}
+	if lyric := cleanScrapedText(mapValue(data["yrc"])["lyric"]); lyric != "" {
+		document, parseErr := parseYRC(lyric)
+		if parseErr != nil {
+			return "", parseErr
+		}
+		return renderEnhancedLRC(document), nil
 	}
 	return cleanScrapedText(mapValue(data["lrc"])["lyric"]), nil
 }
@@ -299,71 +331,6 @@ func (platform *ProductionMusicPlatform) neteaseForward(ctx context.Context, end
 		Headers: map[string]string{"Content-Type": "application/x-www-form-urlencoded", "Referer": "https://music.163.com/"},
 		Body:    body,
 	})
-}
-
-func (platform *ProductionMusicPlatform) searchMigu(ctx context.Context, query string) ([]Candidate, error) {
-	searchSwitch := url.QueryEscape(`{"song":1}`)
-	endpoint := "https://pd.musicapp.migu.cn/MIGUM3.0/v1.0/content/search_all.do?text=" + url.QueryEscape(query) + "&pageNo=1&pageSize=10&searchSwitch=" + searchSwitch
-	data, err := platform.requestJSON(ctx, endpoint, requestOptions{Headers: map[string]string{"Referer": "https://m.music.migu.cn/"}})
-	if err != nil {
-		return nil, err
-	}
-	result := make([]Candidate, 0)
-	for _, songValue := range sliceValue(mapValue(data["songResultData"])["result"]) {
-		song := mapValue(songValue)
-		artists := make([]string, 0)
-		artistID := ""
-		for index, artistValue := range sliceValue(song["singers"]) {
-			artist := mapValue(artistValue)
-			artists = append(artists, stringValue(artist["name"]))
-			if index == 0 {
-				artistID = stringValue(artist["id"])
-			}
-		}
-		album := map[string]any{}
-		if albums := sliceValue(song["albums"]); len(albums) > 0 {
-			album = mapValue(albums[0])
-		}
-		image := ""
-		images := sliceValue(song["imgItems"])
-		for _, imageValue := range images {
-			candidate := mapValue(imageValue)
-			if image == "" {
-				image = stringValue(candidate["img"])
-			}
-			if stringValue(candidate["imgSizeType"]) == "03" {
-				image = stringValue(candidate["img"])
-				break
-			}
-		}
-		genre := ""
-		if tags := sliceValue(song["tags"]); len(tags) > 0 {
-			genre = stringValue(tags[0])
-		}
-		id := stringValue(song["lyricUrl"])
-		if id == "" {
-			id = stringValue(song["copyrightId"])
-		}
-		result = append(result, normalizeCandidate(map[string]any{
-			"id": id, "name": song["name"], "artist": strings.Join(artists, ","), "artistId": artistID,
-			"album": album["name"], "albumId": album["id"], "albumImg": image, "genre": genre,
-		}, SourceMigu))
-	}
-	return result, nil
-}
-
-func (platform *ProductionMusicPlatform) lyricMigu(ctx context.Context, id string) (string, error) {
-	if strings.HasPrefix(id, "http://") || strings.HasPrefix(id, "https://") {
-		response, err := platform.requestBytes(ctx, id, requestOptions{
-			Headers: map[string]string{"Referer": "https://m.music.migu.cn/"}, ValidateURL: validateMiguLyricURL,
-		}, maximumTextBytes)
-		return string(response.Bytes), err
-	}
-	data, err := platform.requestJSON(ctx, "https://music.migu.cn/v3/api/music/audioPlayer/getLyric?copyrightId="+url.QueryEscape(id), requestOptions{Headers: map[string]string{"Referer": "https://m.music.migu.cn/"}})
-	if err != nil {
-		return "", err
-	}
-	return cleanScrapedText(data["lyric"]), nil
 }
 
 func (platform *ProductionMusicPlatform) searchQQ(ctx context.Context, query string) ([]Candidate, error) {
@@ -397,12 +364,17 @@ func (platform *ProductionMusicPlatform) searchQQ(ctx context.Context, query str
 		result = append(result, normalizeCandidate(map[string]any{
 			"id": song["songmid"], "name": song["songname"], "artist": strings.Join(artists, ","), "artistId": artistID,
 			"album": song["albumname"], "albumId": albumID, "albumImg": image, "year": year,
+			"lyricId": song["songid"], "durationMs": numberValue(song["interval"]) * 1_000,
 		}, SourceQMusic))
 	}
 	return result, nil
 }
 
-func (platform *ProductionMusicPlatform) lyricQQ(ctx context.Context, id string) (string, error) {
+func (platform *ProductionMusicPlatform) lyricQQ(ctx context.Context, candidate Candidate, verbatim bool) (string, error) {
+	if verbatim {
+		return platform.lyricQQVerbatim(ctx, candidate)
+	}
+	id := candidate.ID
 	endpoint := "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?g_tk=5381&format=json&inCharset=utf-8&outCharset=utf-8&notice=0&platform=h5&needNewCode=1&ct=121&cv=0&songmid=" + url.QueryEscape(id)
 	data, err := platform.requestJSON(ctx, endpoint, requestOptions{Headers: map[string]string{"Referer": "https://y.qq.com/"}})
 	if err != nil {
@@ -417,6 +389,61 @@ func (platform *ProductionMusicPlatform) lyricQQ(ctx context.Context, id string)
 		return "", err
 	}
 	return string(decoded), nil
+}
+
+func (platform *ProductionMusicPlatform) lyricQQVerbatim(ctx context.Context, candidate Candidate) (string, error) {
+	seconds := max(0, int(math.Round(float64(candidate.DurationMS)/1_000)))
+	songID := candidate.LyricID
+	if songID == "" {
+		songID = candidate.ID
+	}
+	parameters := map[string]any{
+		"albumName": base64.StdEncoding.EncodeToString([]byte(candidate.Album)),
+		"crypt":     1, "ct": 19, "cv": 2111, "interval": seconds,
+		"lrc_t": 0, "qrc": 1, "qrc_t": 0, "roma": 1, "roma_t": 0,
+		"singerName": base64.StdEncoding.EncodeToString([]byte(candidate.Artist)),
+		"songID":     numberOrString(songID),
+		"songName":   base64.StdEncoding.EncodeToString([]byte(candidate.Name)),
+		"trans":      1, "trans_t": 0, "type": 0,
+	}
+	body, err := json.Marshal(map[string]any{
+		"comm": map[string]any{
+			"ct": 11, "cv": "1003006", "v": "1003006", "os_ver": "15",
+			"phonetype": "24122RKC7C", "tmeAppID": "qqmusiclight", "nettype": "NETWORK_WIFI", "udid": "0",
+		},
+		"request": map[string]any{
+			"method": "GetPlayLyricInfo", "module": "music.musichallSong.PlayLyricInfo", "param": parameters,
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	data, err := platform.requestJSON(ctx, "https://u.y.qq.com/cgi-bin/musicu.fcg", requestOptions{
+		Method:  http.MethodPost,
+		Headers: map[string]string{"Content-Type": "application/json", "Referer": "https://y.qq.com/"},
+		Body:    body,
+	})
+	if err != nil {
+		return "", err
+	}
+	requestData := mapValue(data["request"])
+	if numberValue(requestData["code"]) != 0 {
+		return "", fmt.Errorf("QQ lyric request failed with code %s", stringValue(requestData["code"]))
+	}
+	lyricData := mapValue(requestData["data"])
+	encoded := stringValue(lyricData["lyric"])
+	if encoded == "" {
+		return "", nil
+	}
+	decrypted, err := decryptQRC(encoded)
+	if err != nil {
+		return "", err
+	}
+	document, err := parseQRC(string(decrypted))
+	if err != nil {
+		return "", err
+	}
+	return renderEnhancedLRC(document), nil
 }
 
 func (platform *ProductionMusicPlatform) searchKugou(ctx context.Context, query string) ([]Candidate, error) {
@@ -440,61 +467,111 @@ func (platform *ProductionMusicPlatform) searchKugou(ctx context.Context, query 
 			"id": song["FileHash"], "name": song["SongName"], "artist": strings.Join(splitArtists(cleanScrapedText(song["SingerName"])), ","),
 			"artistId": song["SingerId"], "album": song["AlbumName"], "albumId": song["AlbumID"],
 			"albumImg": strings.ReplaceAll(stringValue(song["Image"]), "{size}", "400"), "year": song["PublishTime"],
+			"lyricId":    firstNonEmpty(song["ID"], song["Audioid"], song["AudioID"], song["MixSongID"]),
+			"durationMs": numberValue(song["Duration"]) * 1_000,
 		}, SourceKugou))
 	}
 	return result, nil
 }
 
-func (platform *ProductionMusicPlatform) lyricKugou(ctx context.Context, id string) (string, error) {
-	response, err := platform.requestBytes(ctx, "https://m.kugou.com/app/i/krc.php?cmd=100&timelength=999999&hash="+url.QueryEscape(id), requestOptions{}, maximumTextBytes)
-	return string(response.Bytes), err
-}
-
-func (platform *ProductionMusicPlatform) searchKuwo(ctx context.Context, query string) ([]Candidate, error) {
+func (platform *ProductionMusicPlatform) lyricKugou(ctx context.Context, candidate Candidate, verbatim bool) (string, error) {
+	if !verbatim {
+		response, err := platform.requestBytes(ctx, "https://m.kugou.com/app/i/krc.php?cmd=100&timelength=999999&hash="+url.QueryEscape(candidate.ID), requestOptions{}, maximumTextBytes)
+		return string(response.Bytes), err
+	}
+	if candidate.LyricID == "" || candidate.DurationMS <= 0 {
+		return "", errors.New("Kugou candidate is missing lyric lookup metadata")
+	}
+	keyword := strings.TrimSpace(strings.Join([]string{strings.ReplaceAll(candidate.Artist, ",", "、"), candidate.Name}, " - "))
 	parameters := url.Values{
-		"client": {"kt"}, "all": {query}, "pn": {"0"}, "rn": {"10"}, "uid": {"0"}, "ver": {"kwplayer_ar_9.2.2.1"},
-		"vipver": {"1"}, "show_copyright_off": {"1"}, "newver": {"1"}, "ft": {"music"}, "cluster": {"0"},
-		"strategy": {"2012"}, "encoding": {"utf8"}, "rformat": {"json"}, "mobi": {"1"}, "issubtitle": {"1"},
+		"album_audio_id": {candidate.LyricID}, "duration": {strconv.Itoa(candidate.DurationMS)}, "hash": {candidate.ID},
+		"keyword": {keyword}, "lrctxt": {"1"}, "man": {"no"},
 	}
-	data, err := platform.requestJSON(ctx, "https://search.kuwo.cn/r.s?"+parameters.Encode(), requestOptions{})
-	if err != nil {
-		return nil, err
-	}
-	result := make([]Candidate, 0)
-	for _, songValue := range sliceValue(data["abslist"]) {
-		song := mapValue(songValue)
-		name := stringValue(song["SONGNAME"])
-		if name == "" {
-			name = stringValue(song["NAME"])
-		}
-		image := ""
-		if short := stringValue(song["web_albumpic_short"]); short != "" {
-			image = "https://img1.kuwo.cn/star/albumcover/" + short
-		}
-		result = append(result, normalizeCandidate(map[string]any{
-			"id": strings.Replace(stringValue(song["MUSICRID"]), "MUSIC_", "", 1), "name": name,
-			"artist": song["ARTIST"], "artistId": song["ARTISTID"], "album": song["ALBUM"],
-			"albumId": song["ALBUMID"], "albumImg": image, "year": song["web_timingonline"],
-		}, SourceKuwo))
-	}
-	return result, nil
-}
-
-func (platform *ProductionMusicPlatform) lyricKuwo(ctx context.Context, id string) (string, error) {
-	endpoint := "https://kuwo.cn/newh5/singles/songinfoandlrc?musicId=" + url.QueryEscape(id) + "&mid=" + url.QueryEscape(id) + "&type=music&httpsStatus=1&plat=web_www"
-	data, err := platform.requestJSON(ctx, endpoint, requestOptions{Headers: map[string]string{"Referer": "https://www.kuwo.cn/"}})
+	parameters = signKugouLyricParameters(parameters, "")
+	data, err := platform.requestJSON(ctx, "https://lyrics.kugou.com/v1/search?"+parameters.Encode(), requestOptions{Headers: kugouLyricHeaders()})
 	if err != nil {
 		return "", err
 	}
-	lines := make([]string, 0)
-	for _, lineValue := range sliceValue(mapValue(data["data"])["lrclist"]) {
-		line := mapValue(lineValue)
-		seconds := math.Max(0, numberValue(line["time"]))
-		minutes := int(seconds) / 60
-		rest := seconds - float64(minutes*60)
-		lines = append(lines, fmt.Sprintf("[%02d:%05.2f]%s", minutes, rest, stringValue(line["lineLyric"])))
+	candidates := sliceValue(data["candidates"])
+	if len(candidates) == 0 {
+		return "", nil
 	}
-	return strings.Join(lines, "\n"), nil
+	lyric := mapValue(candidates[0])
+	lyricID := stringValue(lyric["id"])
+	accessKey := stringValue(lyric["accesskey"])
+	if lyricID == "" || accessKey == "" {
+		return "", errors.New("Kugou lyric candidate is incomplete")
+	}
+	downloadParameters := url.Values{
+		"accesskey": {accessKey}, "charset": {"utf8"}, "client": {"mobi"}, "fmt": {"krc"},
+		"id": {lyricID}, "ver": {"1"},
+	}
+	downloadParameters = signKugouLyricParameters(downloadParameters, "")
+	download, err := platform.requestJSON(ctx, "https://lyrics.kugou.com/download?"+downloadParameters.Encode(), requestOptions{Headers: kugouLyricHeaders()})
+	if err != nil {
+		return "", err
+	}
+	encoded := stringValue(download["content"])
+	if encoded == "" {
+		return "", nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", fmt.Errorf("decode Kugou lyric content: %w", err)
+	}
+	if numberValue(download["contenttype"]) == 2 {
+		return string(decoded), nil
+	}
+	decrypted, err := decryptKRCBytes(decoded)
+	if err != nil {
+		return "", err
+	}
+	document, err := parseKRC(string(decrypted))
+	if err != nil {
+		return "", err
+	}
+	return renderEnhancedLRC(document), nil
+}
+
+func signKugouLyricParameters(parameters url.Values, body string) url.Values {
+	result := make(url.Values, len(parameters)+3)
+	for key, values := range parameters {
+		result[key] = append([]string(nil), values...)
+	}
+	result.Set("appid", "3116")
+	result.Set("clientver", "11070")
+	keys := make([]string, 0, len(result))
+	for key := range result {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var signed strings.Builder
+	signed.WriteString(kugouLyricSignatureSalt)
+	for _, key := range keys {
+		signed.WriteString(key)
+		signed.WriteByte('=')
+		signed.WriteString(result.Get(key))
+	}
+	signed.WriteString(body)
+	signed.WriteString(kugouLyricSignatureSalt)
+	digest := md5.Sum([]byte(signed.String()))
+	result.Set("signature", hex.EncodeToString(digest[:]))
+	return result
+}
+
+func kugouLyricHeaders() map[string]string {
+	clientTime := strconv.FormatInt(time.Now().UnixMilli(), 10)
+	mid := md5.Sum([]byte(clientTime))
+	return map[string]string{
+		"Accept-Encoding": "gzip, deflate",
+		"Connection":      "Keep-Alive",
+		"KG-CLIENTTIMEMS": clientTime,
+		"KG-RC":           "1",
+		"KG-Rec":          "1",
+		"Referer":         "https://www.kugou.com/",
+		"User-Agent":      "Android14-1070-11070-201-0-Lyric-wifi",
+		"mid":             hex.EncodeToString(mid[:]),
+	}
 }
 
 type requestOptions struct {
@@ -811,13 +888,6 @@ func validateArtworkURL(parsed *url.URL) error {
 	return nil
 }
 
-func validateMiguLyricURL(parsed *url.URL) error {
-	if parsed == nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || !allowedHost(parsed.Hostname(), []string{"migu.cn"}) {
-		return &upstreamPolicyError{message: "Migu lyric URL is untrusted"}
-	}
-	return nil
-}
-
 func allowedHost(hostname string, allowed []string) bool {
 	hostname = strings.ToLower(strings.TrimSuffix(hostname, "."))
 	for _, domain := range allowed {
@@ -861,7 +931,26 @@ func normalizeCandidate(value map[string]any, source Source) Candidate {
 		ArtistID: stringValue(value["artistId"]), Album: cleanScrapedText(value["album"]), AlbumID: stringValue(value["albumId"]),
 		AlbumImg: stringValue(value["albumImg"]), Year: cleanScrapedText(value["year"]), Track: cleanScrapedText(value["track"]),
 		Disc: cleanScrapedText(value["disc"]), Genre: cleanScrapedText(value["genre"]), Source: source,
+		LyricID:    stringValue(value["lyricId"]),
+		DurationMS: int(math.Max(0, math.Round(numberValue(value["durationMs"])))),
 	}
+}
+
+func firstNonEmpty(values ...any) string {
+	for _, value := range values {
+		if result := stringValue(value); result != "" {
+			return result
+		}
+	}
+	return ""
+}
+
+func numberOrString(value string) any {
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err == nil {
+		return parsed
+	}
+	return value
 }
 
 func mapValue(value any) map[string]any {

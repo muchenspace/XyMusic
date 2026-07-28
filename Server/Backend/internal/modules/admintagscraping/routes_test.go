@@ -41,8 +41,8 @@ func TestRoutesExposeAllFifteenTagScrapingAPIs(t *testing.T) {
 		status             int
 		idempotent         bool
 	}{
-		{http.MethodPost, "/api/v1/admin/tag-scraping/search", `{"source":"smart","title":"Song","artist":"Artist"}`, http.StatusOK, false},
-		{http.MethodPost, "/api/v1/admin/tag-scraping/candidates/details", `{"candidate":` + candidate + `}`, http.StatusOK, false},
+		{http.MethodPost, "/api/v1/admin/tag-scraping/search", `{"source":"smart","title":"Song","artist":"Artist","verbatim":true}`, http.StatusOK, false},
+		{http.MethodPost, "/api/v1/admin/tag-scraping/candidates/details", `{"candidate":` + candidate + `,"verbatim":true}`, http.StatusOK, false},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/artists/search", `{"source":"smart","query":"Artist"}`, http.StatusOK, false},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/artists/" + id + "/apply", `{"expectedVersion":1,"candidate":` + artistCandidate + `,"overwrite":false,"reason":"operator apply"}`, http.StatusOK, true},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/artists/batches", `{"items":[{"artistId":"` + id + `","expectedVersion":1}],"options":{"sources":["qmusic"],"overwrite":false,"reason":"batch avatar"}}`, http.StatusAccepted, true},
@@ -50,9 +50,9 @@ func TestRoutesExposeAllFifteenTagScrapingAPIs(t *testing.T) {
 		{http.MethodPost, "/api/v1/admin/tag-scraping/artists/batches/" + id + "/cancel", "", http.StatusAccepted, true},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/artists/batches/" + id + "/retry", "", http.StatusAccepted, true},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/tracks/" + id + "/fingerprint", "", http.StatusOK, false},
-		{http.MethodPost, "/api/v1/admin/tag-scraping/tracks/" + id + "/apply", `{"expectedVersion":1,"candidate":` + candidate + `,"fields":` + fields + `,"writeBack":false,"reason":"operator apply"}`, http.StatusOK, true},
+		{http.MethodPost, "/api/v1/admin/tag-scraping/tracks/" + id + "/apply", `{"expectedVersion":1,"candidate":` + candidate + `,"verbatim":true,"fields":` + fields + `,"writeBack":false,"reason":"operator apply"}`, http.StatusOK, true},
 		{http.MethodGet, "/api/v1/admin/tag-scraping/artwork?url=https%3A%2F%2Fy.qq.com%2Fcover.jpg", "", http.StatusOK, false},
-		{http.MethodPost, "/api/v1/admin/tag-scraping/batches", `{"items":[{"trackId":"` + id + `","expectedVersion":1}],"options":{"sources":["qmusic"],"matchMode":"strict","missingFields":["lyrics"],"fields":` + fields + `,"writeBack":false,"reason":"batch apply"}}`, http.StatusAccepted, true},
+		{http.MethodPost, "/api/v1/admin/tag-scraping/batches", `{"items":[{"trackId":"` + id + `","expectedVersion":1}],"options":{"sources":["qmusic"],"verbatim":true,"matchMode":"strict","missingFields":["lyrics"],"fields":` + fields + `,"writeBack":false,"reason":"batch apply"}}`, http.StatusAccepted, true},
 		{http.MethodGet, "/api/v1/admin/tag-scraping/batches/" + id + "?updatedAfter=2026-07-16T01%3A02%3A03Z", "", http.StatusOK, false},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/batches/" + id + "/cancel", "", http.StatusAccepted, true},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/batches/" + id + "/retry", "", http.StatusAccepted, true},
@@ -89,6 +89,9 @@ func TestRoutesExposeAllFifteenTagScrapingAPIs(t *testing.T) {
 		scraping.applyCalls != 1 || scraping.artistApplyCalls != 1 || scraping.artworkCalls != 1 {
 		t.Fatalf("scraping calls=%d/%d/%d/%d/%d/%d/%d", scraping.searchCalls, scraping.candidateDetailsCalls,
 			scraping.artistSearchCalls, scraping.fingerprintCalls, scraping.applyCalls, scraping.artistApplyCalls, scraping.artworkCalls)
+	}
+	if !scraping.candidateDetailsVerbatim || !scraping.applyVerbatim || !batches.createVerbatim {
+		t.Fatalf("verbatim parameters were not forwarded: details=%t apply=%t batch=%t", scraping.candidateDetailsVerbatim, scraping.applyVerbatim, batches.createVerbatim)
 	}
 	if batches.createCalls != 1 || batches.jobCalls != 1 || batches.cancelCalls != 1 || batches.retryCalls != 1 {
 		t.Fatalf("batch calls=%d/%d/%d/%d", batches.createCalls, batches.jobCalls, batches.cancelCalls, batches.retryCalls)
@@ -333,6 +336,7 @@ func TestUnknownJSONFieldsAreStrippedFromIdempotentPayloads(t *testing.T) {
 type scrapingAPIStub struct {
 	searchCalls, candidateDetailsCalls, artistSearchCalls, fingerprintCalls int
 	applyCalls, artistApplyCalls, artworkCalls                              int
+	candidateDetailsVerbatim, applyVerbatim                                 bool
 	artworkResponse                                                         DownloadedArtwork
 	artworkURL                                                              string
 }
@@ -341,8 +345,9 @@ func (stub *scrapingAPIStub) Search(context.Context, SearchInput) ([]Candidate, 
 	stub.searchCalls++
 	return []Candidate{}, nil
 }
-func (stub *scrapingAPIStub) CandidateDetails(_ context.Context, candidate Candidate) (CandidateDetailsDTO, error) {
+func (stub *scrapingAPIStub) CandidateDetails(_ context.Context, candidate Candidate, verbatim bool) (CandidateDetailsDTO, error) {
 	stub.candidateDetailsCalls++
+	stub.candidateDetailsVerbatim = verbatim
 	return CandidateDetailsDTO{
 		Candidate: candidate,
 		Lyrics:    &MetadataLyrics{Content: "[00:01.00]line", Format: "LRC", Language: "und"},
@@ -356,8 +361,9 @@ func (stub *scrapingAPIStub) Fingerprint(context.Context, string) ([]Candidate, 
 	stub.fingerprintCalls++
 	return []Candidate{}, nil
 }
-func (stub *scrapingAPIStub) Apply(context.Context, string, string, string, ApplyInput) (ApplyResult, error) {
+func (stub *scrapingAPIStub) Apply(_ context.Context, _ string, _ string, _ string, input ApplyInput) (ApplyResult, error) {
 	stub.applyCalls++
+	stub.applyVerbatim = input.Verbatim
 	return ApplyResult{Warnings: []string{}}, nil
 }
 func (stub *scrapingAPIStub) ApplyArtistArtwork(
@@ -379,11 +385,13 @@ func (stub *scrapingAPIStub) Artwork(_ context.Context, rawURL string) (Download
 
 type batchAPIStub struct {
 	createCalls, jobCalls, cancelCalls, retryCalls int
+	createVerbatim                                 bool
 	updatedAfter                                   *time.Time
 }
 
-func (stub *batchAPIStub) Create(context.Context, string, CreateBatchInput) (BatchJobDTO, error) {
+func (stub *batchAPIStub) Create(_ context.Context, _ string, input CreateBatchInput) (BatchJobDTO, error) {
 	stub.createCalls++
+	stub.createVerbatim = input.Options.Verbatim
 	return BatchJobDTO{Items: []BatchItemDTO{}}, nil
 }
 func (stub *batchAPIStub) Job(_ context.Context, _ string, updatedAfter *time.Time) (BatchJobDTO, error) {

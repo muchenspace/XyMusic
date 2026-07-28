@@ -18,7 +18,7 @@ import (
 	"xymusic/server/internal/shared/apperror"
 )
 
-var defaultSmartSources = []Source{SourceQMusic, SourceNetease, SourceMigu, SourceKugou}
+var defaultSmartSources = []Source{SourceQMusic, SourceNetease, SourceKugou}
 
 type ServiceDependencies struct {
 	Store                   Store
@@ -70,6 +70,9 @@ func (service *Service) Search(ctx context.Context, input SearchInput) ([]Candid
 	}
 	if searchText == "" {
 		return nil, apperror.Validation("Search text must not be empty")
+	}
+	if input.Source != SourceSmart && !isSearchableSource(input.Source) {
+		return nil, apperror.Validation("The music platform source is invalid")
 	}
 	sources := []Source{input.Source}
 	if input.Source == SourceSmart {
@@ -130,11 +133,11 @@ func (service *Service) Search(ctx context.Context, input SearchInput) ([]Candid
 	return scored, nil
 }
 
-func (service *Service) CandidateDetails(ctx context.Context, candidate Candidate) (CandidateDetailsDTO, error) {
+func (service *Service) CandidateDetails(ctx context.Context, candidate Candidate, verbatim bool) (CandidateDetailsDTO, error) {
 	if err := validateCandidate(candidate); err != nil {
 		return CandidateDetailsDTO{}, err
 	}
-	content, err := service.lyrics(ctx, candidate)
+	content, err := service.lyrics(ctx, candidate, verbatim)
 	if err != nil {
 		return CandidateDetailsDTO{}, err
 	}
@@ -276,7 +279,7 @@ func (service *Service) Apply(
 		set("genres", genres, current.Effective.Genres, len(current.Effective.Genres) == 0)
 	}
 	if input.Fields.Lyrics && (input.Fields.Overwrite || current.Effective.Lyrics == nil) {
-		content, lyricErr := service.lyrics(ctx, candidate)
+		content, lyricErr := service.lyrics(ctx, candidate, input.Verbatim)
 		lyrics := metadataLyrics(content)
 		switch {
 		case lyricErr != nil:
@@ -363,11 +366,11 @@ func checkApplyCancellation(ctx context.Context, input ApplyInput) error {
 	return nil
 }
 
-func (service *Service) lyrics(ctx context.Context, candidate Candidate) (string, error) {
+func (service *Service) lyrics(ctx context.Context, candidate Candidate, verbatim bool) (string, error) {
 	if candidate.Source == SourceAcoustID {
 		return "", nil
 	}
-	text, err := service.music.Lyric(ctx, candidate.Source, candidate.ID)
+	text, err := service.music.Lyric(ctx, candidate.Source, candidate, verbatim)
 	if err == nil && strings.TrimSpace(text) != "" {
 		return text, nil
 	}
@@ -393,7 +396,7 @@ func (service *Service) lyrics(ctx context.Context, candidate Candidate) (string
 		}
 		sort.SliceStable(fallbacks, func(left, right int) bool { return fallbacks[left].score > fallbacks[right].score })
 		if len(fallbacks) > 0 && fallbacks[0].score >= 2 {
-			return service.music.Lyric(ctx, SourceQMusic, fallbacks[0].candidate.ID)
+			return service.music.Lyric(ctx, SourceQMusic, fallbacks[0].candidate, verbatim)
 		}
 	}
 	return "", nil
@@ -433,7 +436,9 @@ func validSmartSources(input []Source) []Source {
 }
 
 func validateCandidate(candidate Candidate) error {
-	if candidate.ID == "" || javascriptLength(candidate.ID) > 2_000 || candidate.Name == "" || javascriptLength(candidate.Name) > 300 {
+	if candidate.ID == "" || javascriptLength(candidate.ID) > 2_000 || candidate.Name == "" || javascriptLength(candidate.Name) > 300 ||
+		javascriptLength(candidate.LyricID) > 2_000 ||
+		candidate.DurationMS < 0 || candidate.DurationMS > 24*60*60*1_000 {
 		return apperror.Validation("The scraping candidate is missing required fields")
 	}
 	if !isSearchableSource(candidate.Source) && candidate.Source != SourceAcoustID {

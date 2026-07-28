@@ -130,7 +130,7 @@ func (*fpcalcOnlyMusic) Search(context.Context, Source, string) ([]Candidate, er
 func (*fpcalcOnlyMusic) SearchArtists(context.Context, Source, string) ([]ArtistCandidate, error) {
 	return nil, errors.New("unexpected artist search call")
 }
-func (*fpcalcOnlyMusic) Lyric(context.Context, Source, string) (string, error) {
+func (*fpcalcOnlyMusic) Lyric(context.Context, Source, Candidate, bool) (string, error) {
 	return "", errors.New("unexpected lyric call")
 }
 func (*fpcalcOnlyMusic) AcoustID(context.Context, float64, string) ([]Candidate, error) {

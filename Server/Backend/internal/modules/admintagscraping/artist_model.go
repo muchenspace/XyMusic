@@ -1,8 +1,8 @@
 package admintagscraping
 
-var searchableArtistSources = []Source{SourceQMusic, SourceNetease}
+var searchableArtistSources = []Source{SourceQMusic}
 
-var defaultSmartArtistSources = []Source{SourceQMusic, SourceNetease}
+var defaultSmartArtistSources = []Source{SourceQMusic}
 
 type ArtistSearchInput struct {
 	Source  Source   `json:"source"`

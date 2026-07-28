@@ -21,6 +21,7 @@ const emit = defineEmits<{ applied: [] }>();
 const scraping = useTagScraping();
 const ui = useUiStore();
 const source = ref<SearchSource>("smart");
+const verbatim = ref(false);
 const query = ref("");
 const candidates = ref<TagCandidate[]>([]);
 const selected = ref<TagCandidate>();
@@ -63,6 +64,7 @@ watch(open, (value) => {
   resetCandidateDetail();
   if (!value || !props.track) return;
   query.value = [props.track.title, props.track.artists.join(" ")].filter(Boolean).join(" ");
+  verbatim.value = false;
   candidates.value = []; selected.value = undefined; writeBack.value = false;
   error.value = archived.value ? "已归档曲目需先恢复后才能在线刮削" : "";
 });
@@ -87,7 +89,7 @@ async function search(): Promise<void> {
   loading.value = true; error.value = "";
   try {
     const result = await scraping.search({
-      source: source.value, query: query.value.trim(), title: track.title,
+      source: source.value, verbatim: verbatim.value, query: query.value.trim(), title: track.title,
       artist: track.artists.join(","), album: track.album?.title ?? "",
     }, controller.signal);
     if (generation !== lookupGeneration || !open.value) return;
@@ -139,7 +141,7 @@ async function apply(): Promise<void> {
   const trackId = track.id;
   loading.value = true; error.value = "";
   try {
-    const result = await scraping.apply(trackId, { expectedVersion: props.expectedVersion, candidate: selected.value, fields: { ...fields }, writeBack: writeBack.value, reason: reason.value.trim() || "在线 Tag 刮削" });
+    const result = await scraping.apply(trackId, { expectedVersion: props.expectedVersion, candidate: selected.value, verbatim: verbatim.value, fields: { ...fields }, writeBack: writeBack.value, reason: reason.value.trim() || "在线 Tag 刮削" });
     if (result.warnings.length) ui.notify("warning", "Tag 已应用，但存在警告", result.warnings.join("；"));
     emit("applied");
     if (generation === applyGeneration && open.value && props.track?.id === trackId) open.value = false;
@@ -153,9 +155,10 @@ async function apply(): Promise<void> {
 
 <template>
   <BaseDialog v-model="open" title="在线 Tag 刮削" :description="track?.title" width="2xl">
-    <div class="grid gap-4 lg:grid-cols-[180px_minmax(0,1fr)_auto] lg:items-end">
-      <div><label class="ui-label">搜索来源</label><select v-model="source" class="ui-select" :disabled="archived"><option value="smart">智能多源</option><option value="netease">网易云</option><option value="migu">咪咕</option><option value="qmusic">QQ 音乐</option><option value="kugou">酷狗</option><option value="kuwo">酷我</option></select></div>
+    <div class="grid gap-4 lg:grid-cols-[180px_minmax(0,1fr)_160px_auto] lg:items-end">
+      <div><label class="ui-label">搜索来源</label><select v-model="source" class="ui-select" :disabled="archived"><option value="smart">智能多源</option><option value="netease">网易云</option><option value="qmusic">QQ 音乐</option><option value="kugou">酷狗</option></select></div>
       <div><label class="ui-label">搜索关键词</label><input v-model="query" class="ui-input" :disabled="archived" placeholder="歌曲、艺术家或专辑" @keyup.enter="search" /></div>
+      <div><label class="ui-label">歌词类型</label><select v-model="verbatim" data-testid="tag-verbatim" class="ui-select" :disabled="archived"><option :value="false">普通歌词</option><option :value="true">逐字歌词</option></select></div>
       <div class="grid grid-cols-2 gap-2 lg:flex"><AppButton :loading="loading" :disabled="archived" @click="search"><template #icon><Search :size="15" /></template>搜索</AppButton><AppButton :loading="loading" :disabled="archived" @click="fingerprint"><template #icon><Fingerprint :size="15" /></template>音频指纹</AppButton></div>
     </div>
     <div class="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.65fr)_minmax(300px,0.75fr)]">
@@ -201,5 +204,5 @@ async function apply(): Promise<void> {
     <p v-if="error" class="mt-4 rounded-xl bg-rose-500/10 p-3 text-sm text-[var(--danger)]">{{ error }}</p>
     <template #footer><AppButton @click="open = false">取消</AppButton><AppButton variant="primary" :loading="loading" :disabled="archived || !selected || !expectedVersion" @click="apply"><template #icon><Sparkles :size="15" /></template>应用候选</AppButton></template>
   </BaseDialog>
-  <TagCandidateDetailDialog v-model="detailOpen" :candidate="detailCandidate" :selected="selected === detailCandidate" @select="selectCandidate" />
+  <TagCandidateDetailDialog v-model="detailOpen" :candidate="detailCandidate" :selected="selected === detailCandidate" :verbatim="verbatim" @select="selectCandidate" />
 </template>

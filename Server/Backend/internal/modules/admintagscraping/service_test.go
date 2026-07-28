@@ -16,7 +16,6 @@ func TestSmartSearchToleratesFailedSourcesAndRanksCandidates(t *testing.T) {
 	music := &musicStub{
 		searchResults: map[Source][]Candidate{
 			SourceQMusic: {{ID: "best", Name: "Song", Artist: "Artist", Album: "Album", Source: SourceQMusic}},
-			SourceMigu:   {{ID: "weak", Name: "Different", Artist: "Artist", Album: "Other", Source: SourceMigu}},
 			SourceKugou:  {{ID: "partial", Name: "Song live", Artist: "Artist", Album: "Album", Source: SourceKugou}},
 		},
 		searchErrors: map[Source]error{SourceNetease: errors.New("upstream down")},
@@ -43,10 +42,26 @@ func TestSmartSearchToleratesFailedSourcesAndRanksCandidates(t *testing.T) {
 	}
 	calls := music.searchCallSources()
 	sort.Slice(calls, func(left, right int) bool { return calls[left] < calls[right] })
-	expected := []Source{SourceKugou, SourceMigu, SourceNetease, SourceQMusic}
+	expected := []Source{SourceKugou, SourceNetease, SourceQMusic}
 	sort.Slice(expected, func(left, right int) bool { return expected[left] < expected[right] })
 	if !reflect.DeepEqual(calls, expected) {
 		t.Fatalf("smart sources = %#v", calls)
+	}
+}
+
+func TestSearchRejectsRemovedMusicSources(t *testing.T) {
+	service, err := NewService(ServiceDependencies{
+		Store: &storeStub{}, Music: &musicStub{}, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	title := "Song"
+	for _, source := range []Source{Source("migu"), Source("kuwo")} {
+		_, err := service.Search(context.Background(), SearchInput{Source: source, Title: &title})
+		if !apperror.IsCode(err, apperror.CodeValidationError) {
+			t.Fatalf("source %q error = %v", source, err)
+		}
 	}
 }
 
@@ -133,7 +148,7 @@ func TestCandidateDetailsReturnsCandidateAndClassifiesLyrics(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := service.CandidateDetails(context.Background(), candidate)
+			result, err := service.CandidateDetails(context.Background(), candidate, item.name == "LRC")
 			if item.lyricErr != nil {
 				if !errors.Is(err, item.lyricErr) {
 					t.Fatalf("error = %v, want %v", err, item.lyricErr)
@@ -147,6 +162,32 @@ func TestCandidateDetailsReturnsCandidateAndClassifiesLyrics(t *testing.T) {
 				t.Fatalf("details = %#v, want candidate=%#v lyrics=%#v", result, candidate, item.want)
 			}
 		})
+	}
+}
+
+func TestApplyPassesVerbatimToLyricProvider(t *testing.T) {
+	metadata := metadataFixture(1)
+	updated := metadataFixture(2)
+	music := &musicStub{lyrics: "[00:01.00]line"}
+	service, err := NewService(ServiceDependencies{
+		Store: &storeStub{metadata: metadata, updatedMetadata: updated}, Music: music,
+		Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.Apply(context.Background(), "admin", "trace", "track", ApplyInput{
+		ExpectedVersion: 1,
+		Candidate:       Candidate{ID: "candidate", Name: "Song", Source: SourceQMusic},
+		Fields:          ApplyFields{Lyrics: true, Overwrite: true},
+		Verbatim:        true,
+		Reason:          "verbatim lyrics",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(music.lyricCalls) != 1 || !music.lyricCalls[0].verbatim {
+		t.Fatalf("lyric calls = %#v", music.lyricCalls)
 	}
 }
 
@@ -372,9 +413,16 @@ type musicStub struct {
 	artistSearchCalls   []Source
 	lyrics              string
 	lyricErr            error
+	lyricCalls          []lyricCall
 	artwork             DownloadedArtwork
 	artworkErr          error
 	artworkURL          string
+}
+
+type lyricCall struct {
+	source   Source
+	candidate Candidate
+	verbatim bool
 }
 
 func (stub *musicStub) Search(_ context.Context, source Source, query string) ([]Candidate, error) {
@@ -394,7 +442,10 @@ func (stub *musicStub) SearchArtists(_ context.Context, source Source, _ string)
 	return append([]ArtistCandidate(nil), stub.artistSearchResults[source]...), stub.artistSearchErrors[source]
 }
 
-func (stub *musicStub) Lyric(context.Context, Source, string) (string, error) {
+func (stub *musicStub) Lyric(_ context.Context, source Source, candidate Candidate, verbatim bool) (string, error) {
+	stub.mu.Lock()
+	stub.lyricCalls = append(stub.lyricCalls, lyricCall{source: source, candidate: candidate, verbatim: verbatim})
+	stub.mu.Unlock()
 	return stub.lyrics, stub.lyricErr
 }
 

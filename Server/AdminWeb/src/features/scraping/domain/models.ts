@@ -1,11 +1,14 @@
-export type TagSource = "netease" | "migu" | "qmusic" | "kugou" | "kuwo";
+export type TagSource = "netease" | "qmusic" | "kugou";
 export type SearchSource = "smart" | TagSource;
+export type ArtistSource = "qmusic";
+export type ArtistSearchSource = "smart" | ArtistSource;
 export type MatchMode = "strict" | "simple";
 export type TagScrapingMissingField = "artist" | "album" | "year" | "genre" | "lyrics" | "cover";
 
 export interface TagCandidate {
   id: string; name: string; artist: string; artistId: string; album: string; albumId: string;
   albumImg: string; year: string; track: string; disc: string; genre: string;
+  lyricId?: string; durationMs?: number;
   source: TagSource | "acoustid"; titleScore?: number; artistScore?: number; albumScore?: number; score?: number;
 }
 
@@ -17,6 +20,7 @@ export interface TagCandidateLyrics {
 
 export interface TagCandidateDetailInput {
   candidate: TagCandidate;
+  verbatim: boolean;
 }
 
 export interface TagCandidateDetail {
@@ -29,8 +33,8 @@ export interface ScrapingFields {
   lyrics: boolean; cover: boolean; overwrite: boolean;
 }
 
-export interface TagSearchInput { source: SearchSource; query?: string; title?: string; artist?: string; album?: string; sources?: TagSource[] }
-export interface ApplyTagInput { expectedVersion: number; candidate: TagCandidate; fields: ScrapingFields; writeBack: boolean; reason: string }
+export interface TagSearchInput { source: SearchSource; verbatim: boolean; query?: string; title?: string; artist?: string; album?: string; sources?: TagSource[] }
+export interface ApplyTagInput { expectedVersion: number; candidate: TagCandidate; verbatim: boolean; fields: ScrapingFields; writeBack: boolean; reason: string }
 export interface ApplyTagResult { appliedFields: string[]; coverApplied: boolean; warnings: string[] }
 
 export interface ArtistCandidate {
@@ -38,14 +42,14 @@ export interface ArtistCandidate {
   name: string;
   imageUrl: string;
   aliases: string[];
-  source: TagSource;
+  source: ArtistSource;
   score: number;
 }
 
 export interface ArtistSearchInput {
-  source: SearchSource;
+  source: ArtistSearchSource;
   query: string;
-  sources?: TagSource[];
+  sources?: ArtistSource[];
 }
 
 export interface ApplyArtistArtworkInput {
@@ -72,6 +76,7 @@ export interface CreateBatchInput {
   items: Array<{ trackId: string; expectedVersion: number }>;
   options: {
     sources: TagSource[];
+    verbatim: boolean;
     matchMode: MatchMode;
     missingFields: TagScrapingMissingField[];
     fields: ScrapingFields;
@@ -88,7 +93,7 @@ export interface ArtistArtworkBatchItem {
   position: number;
   status: BatchItemStatus;
   candidate: ArtistCandidate | null;
-  source: TagSource | null;
+  source: ArtistSource | null;
   message: string | null;
   attempts: number;
   nextAttemptAt: string | null;
@@ -102,7 +107,7 @@ export interface ArtistArtworkBatch {
   id: string;
   requestedBy: string | null;
   options: {
-    sources: TagSource[];
+    sources: ArtistSource[];
     overwrite: boolean;
     reason: string;
   };
@@ -124,7 +129,7 @@ export interface ArtistArtworkBatch {
 export interface CreateArtistArtworkBatchInput {
   items: Array<{ artistId: string; expectedVersion: number }>;
   options: {
-    sources: TagSource[];
+    sources: ArtistSource[];
     overwrite: false;
     reason: string;
   };
