@@ -105,8 +105,12 @@ private fun calculateWordTimedHighlightProgressByTimes(
 			return WordTimedHighlightProgress(completedCount, 0f)
 		}
 		val endTimeMs = word.endTimeMs
-		if (endTimeMs == null || endTimeMs <= word.timeMs) {
+		if (endTimeMs == null) {
 			return WordTimedHighlightProgress(completedCount, 0f)
+		}
+		if (endTimeMs <= word.timeMs) {
+			completedCount += 1
+			continue
 		}
 		if (playbackPositionMs >= endTimeMs) {
 			completedCount += 1
