@@ -1,7 +1,7 @@
 import type { Lyrics } from "../../domain/music";
 import type { DesktopLyricsFullscreenBehavior } from "./UserInterfacePreferences";
 
-export const DESKTOP_LYRICS_PROTOCOL_VERSION = 2 as const;
+export const DESKTOP_LYRICS_PROTOCOL_VERSION = 3 as const;
 
 export interface DesktopLyricsTrack {
   id: string;
@@ -19,7 +19,6 @@ export interface DesktopLyricsSnapshot {
   anchoredAtMs: number;
   offsetSeconds: number;
   showTranslation: boolean;
-  wordLyricsEnabled: boolean;
   locked: boolean;
   fontScale: number;
   textColor?: string;

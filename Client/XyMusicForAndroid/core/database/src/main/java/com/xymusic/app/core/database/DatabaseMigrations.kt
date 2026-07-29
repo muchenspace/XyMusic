@@ -178,6 +178,40 @@ object DatabaseMigrations {
             }
         }
 
+    val MIGRATION_6_7 =
+        object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Version 6 cached no authoritative timing marker, so these rows must be resynced.
+                db.execSQL("DROP TABLE lyrics")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS lyrics (
+                        id TEXT NOT NULL,
+                        track_id TEXT NOT NULL,
+                        language TEXT NOT NULL,
+                        format TEXT NOT NULL,
+                        timing TEXT NOT NULL,
+                        content TEXT NOT NULL,
+                        is_default INTEGER NOT NULL,
+                        track_version INTEGER NOT NULL,
+                        updated_at_epoch_ms INTEGER NOT NULL,
+                        PRIMARY KEY(id),
+                        FOREIGN KEY(track_id) REFERENCES tracks(id)
+                            ON UPDATE CASCADE ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_lyrics_track_language_format " +
+                        "ON lyrics(track_id, language, format)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_lyrics_track_default " +
+                        "ON lyrics(track_id, is_default)",
+                )
+            }
+        }
+
     val ALL =
         arrayOf(
             MIGRATION_1_2,
@@ -185,5 +219,6 @@ object DatabaseMigrations {
             MIGRATION_3_4,
             MIGRATION_4_5,
             MIGRATION_5_6,
+            MIGRATION_6_7,
         )
 }

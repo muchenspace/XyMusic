@@ -220,8 +220,6 @@
     <string name="settings_wifi_only_summary">开启后，移动网络不会开始新的在线播放</string>
     <string name="settings_cache_limit">播放缓存上限</string>
     <string name="settings_cache_limit_value">%1$d MiB</string>
-    <string name="settings_word_by_word_lyrics">逐字歌词</string>
-    <string name="settings_word_by_word_lyrics_summary">根据每行歌词的时间差估算逐字高亮</string>
     <string name="settings_account">账户与数据</string>
     <string name="settings_account_summary">恢复默认设置或退出账号</string>
     <string name="settings_reset">恢复默认设置</string>

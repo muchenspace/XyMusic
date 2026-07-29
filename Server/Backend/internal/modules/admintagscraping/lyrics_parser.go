@@ -28,17 +28,9 @@ type lyricWord struct {
 
 var (
 	lyricLinePattern  = regexp.MustCompile(`^\[(\d+),(\d+)\](.*)$`)
-	yrcWordPattern    = regexp.MustCompile(`\((\d+),(\d+),\d+\)`)
 	qrcWordPattern    = regexp.MustCompile(`\((\d+),(\d+)\)`)
-	krcWordPattern    = regexp.MustCompile(`<([0-9]+),([0-9]+),\d+>`)
 	qrcContentPattern = regexp.MustCompile(`(?s)<Lyric_1\s+LyricType="1"\s+LyricContent="(.*?)"\s*/>`)
 )
-
-func parseYRC(content string) (lyricDocument, error) {
-	return parseTimedLines(content, func(line lyricLine, raw string) (lyricLine, bool, error) {
-		return parseYRCWords(line, raw)
-	})
-}
 
 func parseQRC(content string) (lyricDocument, error) {
 	match := qrcContentPattern.FindStringSubmatch(content)
@@ -47,12 +39,6 @@ func parseQRC(content string) (lyricDocument, error) {
 	}
 	return parseTimedLines(html.UnescapeString(match[1]), func(line lyricLine, raw string) (lyricLine, bool, error) {
 		return parseQRCWords(line, raw)
-	})
-}
-
-func parseKRC(content string) (lyricDocument, error) {
-	return parseTimedLines(content, func(line lyricLine, raw string) (lyricLine, bool, error) {
-		return parseKRCWords(line, raw)
 	})
 }
 
@@ -85,22 +71,6 @@ func parseTimedLines(content string, parseWords func(lyricLine, string) (lyricLi
 		return lyricDocument{}, fmt.Errorf("lyric content has no timed lines")
 	}
 	return document, nil
-}
-
-func parseYRCWords(line lyricLine, raw string) (lyricLine, bool, error) {
-	if strings.HasPrefix(raw, "[") {
-		if closing := strings.Index(raw, "]"); closing >= 0 {
-			raw = raw[closing+1:]
-		}
-	}
-	return parseWordsByMarkers(line, raw, yrcWordPattern, func(match []int) (int, int, error) {
-		start, err := parseInt(raw[match[2]:match[3]])
-		if err != nil {
-			return 0, 0, err
-		}
-		duration, err := parseInt(raw[match[4]:match[5]])
-		return start, start + duration, err
-	})
 }
 
 func parseQRCWords(line lyricLine, raw string) (lyricLine, bool, error) {
@@ -145,67 +115,20 @@ func parseQRCWords(line lyricLine, raw string) (lyricLine, bool, error) {
 	return line, true, nil
 }
 
-func parseKRCWords(line lyricLine, raw string) (lyricLine, bool, error) {
-	return parseWordsByMarkers(line, raw, krcWordPattern, func(match []int) (int, int, error) {
-		start, err := parseInt(raw[match[2]:match[3]])
-		if err != nil {
-			return 0, 0, err
-		}
-		duration, err := parseInt(raw[match[4]:match[5]])
-		return line.StartMS + start, line.StartMS + start + duration, err
-	})
-}
-
-func parseWordsByMarkers(
-	line lyricLine,
-	raw string,
-	pattern *regexp.Regexp,
-	timing func([]int) (int, int, error),
-) (lyricLine, bool, error) {
-	markers := pattern.FindAllStringSubmatchIndex(raw, -1)
-	if len(markers) == 0 {
-		text := strings.TrimSpace(raw)
-		if text == "" {
-			return line, false, nil
-		}
-		line.Words = []lyricWord{{StartMS: line.StartMS, EndMS: line.EndMS, Text: text}}
-		return line, false, nil
-	}
-
-	words := make([]lyricWord, 0, len(markers))
-	for index, marker := range markers {
-		textStart := marker[1]
-		textEnd := len(raw)
-		if index+1 < len(markers) {
-			textEnd = markers[index+1][0]
-		}
-		text := raw[textStart:textEnd]
-		start, end, err := timing(marker)
-		if err != nil {
-			return lyricLine{}, false, fmt.Errorf("parse lyric word timing: %w", err)
-		}
-		if text == "" {
-			continue
-		}
-		words = append(words, lyricWord{StartMS: start, EndMS: end, Text: text, Timed: true})
-	}
-	if len(words) == 0 {
-		return line, false, nil
-	}
-	line.Words = words
-	return line, true, nil
-}
-
 func renderEnhancedLRC(document lyricDocument) string {
 	lines := make([]string, 0, len(document.Lines))
 	for _, line := range document.Lines {
 		text := strings.Builder{}
 		text.WriteString(formatLyricTimestamp(line.StartMS, '[', ']'))
 		for _, word := range line.Words {
-			if word.Timed {
+			if word.Timed || document.HasWordTiming {
 				text.WriteString(formatLyricTimestamp(word.StartMS, '<', '>'))
 			}
 			text.WriteString(word.Text)
+		}
+		if document.HasWordTiming && len(line.Words) > 0 {
+			// Enhanced LRC has no standard end marker; preserve QRC's real final end time.
+			text.WriteString(formatLyricTimestamp(line.Words[len(line.Words)-1].EndMS, '<', '>'))
 		}
 		if text.Len() > len(formatLyricTimestamp(line.StartMS, '[', ']')) {
 			lines = append(lines, text.String())
@@ -219,8 +142,9 @@ func formatLyricTimestamp(milliseconds int, opening, closing byte) string {
 		milliseconds = 0
 	}
 	minutes := milliseconds / 60_000
-	seconds := float64(milliseconds%60_000) / 1_000
-	return fmt.Sprintf("%c%02d:%05.2f%c", opening, minutes, seconds, closing)
+	seconds := milliseconds % 60_000 / 1_000
+	fraction := milliseconds % 1_000
+	return fmt.Sprintf("%c%02d:%02d.%03d%c", opening, minutes, seconds, fraction, closing)
 }
 
 func parseInt(value string) (int, error) {

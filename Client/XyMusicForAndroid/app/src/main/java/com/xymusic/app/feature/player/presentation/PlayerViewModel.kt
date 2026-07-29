@@ -7,7 +7,7 @@ import com.xymusic.app.core.common.DefaultDispatcher
 import com.xymusic.app.core.common.runCatchingPreservingCancellation
 import com.xymusic.app.core.model.media.Lyrics
 import com.xymusic.app.core.model.media.LyricsFormat
-import com.xymusic.app.domain.settings.AppSettingsUseCases
+import com.xymusic.app.core.model.media.LyricsTiming
 import com.xymusic.app.feature.player.domain.LyricsSource
 import com.xymusic.app.feature.player.domain.PlaybackQueueUseCases
 import com.xymusic.app.feature.player.domain.PlayerEvent
@@ -46,7 +46,6 @@ constructor(
     private val playerUseCases: PlayerUseCases,
     private val lyricsSource: LyricsSource,
     private val playbackQueueUseCases: PlaybackQueueUseCases,
-    private val appSettingsUseCases: AppSettingsUseCases,
     @DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
     private val mutableEffects = MutableSharedFlow<PlayerUiEffect>(extraBufferCapacity = 1)
@@ -68,10 +67,7 @@ constructor(
                                 }
                             }
                             this@flow.emitAll(
-                                lyricsSource.observe(trackId).map { lyrics ->
-                                    lyrics.firstOrNull(Lyrics::isDefault)
-                                        ?: lyrics.firstOrNull()
-                                },
+                                lyricsSource.observe(trackId),
                             )
                         }
                     }
@@ -82,7 +78,7 @@ constructor(
         selectedLyrics
             .map { lyrics ->
                 lyrics?.let {
-                    SelectedLyricsContent(it.language, it.format, it.content)
+                    SelectedLyricsContent(it.language, it.format, it.timing, it.content)
                 }
             }.distinctUntilChanged()
             .mapLatest { lyrics ->
@@ -91,6 +87,7 @@ constructor(
                         parsePlayerLyrics(
                             content = it.content,
                             format = it.format,
+                            timing = it.timing,
                             language = it.language,
                         )
                     } ?: ParsedPlayerLyrics.Empty
@@ -101,14 +98,13 @@ constructor(
         combine(
             playerUseCases.state,
             parsedLyrics,
-            appSettingsUseCases.settings,
-        ) { player, lyrics, settings ->
+        ) { player, lyrics ->
             PlayerUiState(
                 player = player,
                 lyrics = lyrics.lines,
                 lyricsLanguage = lyrics.language,
                 synchronizedLyrics = lyrics.synchronized,
-                wordByWordLyricsEnabled = settings.wordByWordLyricsEnabled,
+                lyricsTiming = lyrics.timing,
                 sleepTimerRemainingMs = player.sleepTimerRemainingMs,
             )
         }.stateIn(
@@ -202,6 +198,15 @@ constructor(
         execute { playerUseCases.clearQueue() }
     }
 
+    fun refreshLyrics() {
+        val trackId = uiState.value.player.currentItem?.trackId ?: return
+        viewModelScope.launch {
+            runCatchingPreservingCancellation {
+                lyricsSource.refresh(trackId)
+            }
+        }
+    }
+
     private suspend fun setPlaybackMode(mode: PlayerPlaybackMode): PlayerResult<Unit> {
         val repeatResult =
             playerUseCases.setRepeatMode(
@@ -238,4 +243,9 @@ private fun PlayerFailure.messageRes(): Int = when (this) {
 
 internal const val PLAYER_FAILURE_MESSAGE_DELAY_MS = 300L
 
-private data class SelectedLyricsContent(val language: String, val format: LyricsFormat, val content: String)
+private data class SelectedLyricsContent(
+    val language: String,
+    val format: LyricsFormat,
+    val timing: LyricsTiming,
+    val content: String,
+)

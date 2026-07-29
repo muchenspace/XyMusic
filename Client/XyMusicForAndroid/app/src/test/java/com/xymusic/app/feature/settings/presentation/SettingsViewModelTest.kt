@@ -160,27 +160,6 @@ class SettingsViewModelTest {
         }
     }
 
-    @Test
-    fun wordByWordLyricsSettingIsUpdatedWithoutLosingOtherSettings() = runTest {
-        val appSettingsRepository =
-            FakeAppSettingsRepository(
-                AppSettings(theme = ThemePreference.DARK),
-            )
-        val viewModel =
-            viewModel(
-                repository = FakeProfileRepository(),
-                normalizer = normalizer(png()),
-                appSettingsRepository = appSettingsRepository,
-            )
-
-        viewModel.setWordByWordLyricsEnabled(false)
-        advanceUntilIdle()
-
-        val settings = appSettingsRepository.settings.first()
-        assertThat(settings.wordByWordLyricsEnabled).isFalse()
-        assertThat(settings.theme).isEqualTo(ThemePreference.DARK)
-    }
-
     private fun viewModel(
         repository: FakeProfileRepository,
         normalizer: AvatarImageNormalizer,

@@ -20,6 +20,7 @@ import com.xymusic.app.core.database.entity.TrackEntity
 import com.xymusic.app.core.database.model.ArtistCreditRole
 import com.xymusic.app.core.database.model.CatalogItemType
 import com.xymusic.app.core.database.model.LyricsFormat
+import com.xymusic.app.core.database.model.LyricsTiming
 import com.xymusic.app.core.database.model.PlaylistVisibility
 import com.xymusic.app.core.database.model.SearchScope
 import kotlinx.coroutines.flow.first
@@ -95,6 +96,19 @@ class XyMusicDatabaseTest {
                 .first()
                 .map { it.id },
         ).containsExactly("lyrics-2")
+    }
+
+    @Test
+    fun lyricTimingSurvivesDatabaseRoundTrip() = runTest {
+        val track = track("track-word")
+        database.catalogDao().replaceTrackMetadata(track, emptyList())
+        database.catalogDao().replaceLyrics(
+            trackId = track.id,
+            lyrics = listOf(lyrics("lyrics-word", track.id, "word lyrics").copy(timing = LyricsTiming.WORD)),
+        )
+
+        assertThat(database.catalogDao().observeLyrics(track.id).first().single().timing)
+            .isEqualTo(LyricsTiming.WORD)
     }
 
     @Test
@@ -296,6 +310,7 @@ class XyMusicDatabaseTest {
         trackId = trackId,
         language = "zh-CN",
         format = LyricsFormat.LRC,
+        timing = LyricsTiming.LINE,
         content = content,
         isDefault = true,
         trackVersion = 1,

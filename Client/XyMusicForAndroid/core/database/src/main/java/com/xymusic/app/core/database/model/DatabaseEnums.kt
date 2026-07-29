@@ -13,6 +13,11 @@ enum class LyricsFormat {
     PLAIN,
 }
 
+enum class LyricsTiming {
+    LINE,
+    WORD,
+}
+
 enum class PlaylistVisibility {
     PRIVATE,
     UNLISTED,

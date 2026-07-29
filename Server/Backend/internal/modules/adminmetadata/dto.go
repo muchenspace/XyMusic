@@ -28,6 +28,7 @@ type MetadataDTO struct {
 type RevisionLyricsDTO struct {
 	Format     string `json:"format"`
 	Language   string `json:"language"`
+	Timing     string `json:"timing"`
 	HasContent bool   `json:"hasContent"`
 }
 

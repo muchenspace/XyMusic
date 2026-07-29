@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"xymusic/server/internal/shared/apperror"
+	sharedlyrics "xymusic/server/internal/shared/lyrics"
 	"xymusic/server/internal/shared/tagwriteback"
 )
 
@@ -954,8 +955,8 @@ func (repository *Repository) ensureMetadataWith(ctx context.Context, database m
 				'discNumber', track.disc_number, 'discTotal', NULL,
 				'genres', '[]'::jsonb, 'bpm', NULL, 'isrc', NULL,
 				'comment', NULL, 'copyright', NULL,
-				'lyrics', (
-					SELECT jsonb_build_object('content', lyric.content, 'format', lyric.format, 'language', lyric.language)
+					'lyrics', (
+						SELECT jsonb_build_object('content', lyric.content, 'format', lyric.format, 'language', lyric.language, 'timing', lyric.timing)
 					FROM lyrics lyric WHERE lyric.track_id = track.id AND lyric.content IS NOT NULL
 					ORDER BY lyric.is_default DESC, lyric.created_at, lyric.id LIMIT 1
 				),
@@ -1259,8 +1260,8 @@ func (repository *Repository) projectMetadata(
 	if previous.Lyrics != nil && (metadata.Lyrics == nil || metadata.Lyrics.Language != previous.Lyrics.Language) {
 		if _, err := tx.Exec(ctx, `
 			DELETE FROM lyrics WHERE track_id = $1 AND language = $2 AND format = $3
-			  AND content = $4 AND asset_id IS NULL`,
-			trackID, previous.Lyrics.Language, previous.Lyrics.Format, previous.Lyrics.Content); err != nil {
+			  AND timing = $4 AND content = $5 AND asset_id IS NULL`,
+			trackID, previous.Lyrics.Language, previous.Lyrics.Format, previous.Lyrics.Timing, previous.Lyrics.Content); err != nil {
 			return fmt.Errorf("remove previous projected lyrics: %w", err)
 		}
 	}
@@ -1269,12 +1270,12 @@ func (repository *Repository) projectMetadata(
 			return fmt.Errorf("clear projected default lyrics: %w", err)
 		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO lyrics (id, track_id, format, language, origin, content, is_default)
-			VALUES ($1, $2, $3, $4, 'SCRAPED', $5, true)
+			INSERT INTO lyrics (id, track_id, format, timing, language, origin, content, is_default)
+			VALUES ($1, $2, $3, $4, $5, 'SCRAPED', $6, true)
 			ON CONFLICT (track_id, language) DO UPDATE SET
-				format = EXCLUDED.format, content = EXCLUDED.content, origin = 'SCRAPED',
+				format = EXCLUDED.format, timing = EXCLUDED.timing, content = EXCLUDED.content, origin = 'SCRAPED',
 				asset_id = NULL, is_default = true, version = lyrics.version + 1, updated_at = now()`,
-			uuid.NewString(), trackID, metadata.Lyrics.Format, metadata.Lyrics.Language, metadata.Lyrics.Content); err != nil {
+			uuid.NewString(), trackID, metadata.Lyrics.Format, metadata.Lyrics.Timing, metadata.Lyrics.Language, metadata.Lyrics.Content); err != nil {
 			return fmt.Errorf("upsert projected lyrics: %w", err)
 		}
 	}
@@ -1405,6 +1406,9 @@ func decodeMetadataDocuments(rawJSON, overridesJSON []byte) (MetadataSnapshot, m
 		return MetadataSnapshot{}, nil, fmt.Errorf("decode raw track metadata: %w", err)
 	}
 	normalizeSnapshot(&raw)
+	if err := validateStoredMetadataLyrics(raw); err != nil {
+		return MetadataSnapshot{}, nil, err
+	}
 	overrides := make(map[string]any)
 	if len(overridesJSON) > 0 {
 		if err := json.Unmarshal(overridesJSON, &overrides); err != nil {
@@ -1430,7 +1434,24 @@ func applyOverrides(raw MetadataSnapshot, overrides map[string]any) (MetadataSna
 		return MetadataSnapshot{}, apperror.Validation("Stored metadata overrides are invalid")
 	}
 	normalizeSnapshot(&result)
+	if err := validateStoredMetadataLyrics(result); err != nil {
+		return MetadataSnapshot{}, err
+	}
 	return result, nil
+}
+
+func validateStoredMetadataLyrics(snapshot MetadataSnapshot) error {
+	if snapshot.Lyrics == nil {
+		return nil
+	}
+	if err := sharedlyrics.ValidateDocument(
+		snapshot.Lyrics.Format,
+		snapshot.Lyrics.Timing,
+		snapshot.Lyrics.Content,
+	); err != nil {
+		return apperror.Internal("Stored metadata lyrics violate the timing contract", err)
+	}
+	return nil
 }
 
 func normalizeSnapshot(snapshot *MetadataSnapshot) {

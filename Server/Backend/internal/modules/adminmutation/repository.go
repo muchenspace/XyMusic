@@ -473,7 +473,7 @@ func (repository *Repository) UpsertLyrics(ctx context.Context, trackID string, 
 		}
 	}
 	var stored StoredLyric
-	err = tx.QueryRow(ctx, `INSERT INTO lyrics(track_id,language,origin,format,content,is_default) VALUES($1,$2,'MANUAL',$3,$4,$5) ON CONFLICT(track_id,language) DO UPDATE SET format=excluded.format,content=excluded.content,origin='MANUAL',is_default=excluded.is_default,version=lyrics.version+1,updated_at=now() RETURNING id,language,format::text,coalesce(content,''),is_default,updated_at`, trackID, input.Language, input.Format, input.Content.Value, input.IsDefault.Value).Scan(&stored.ID, &stored.Language, &stored.Format, &stored.Content, &stored.IsDefault, &stored.UpdatedAt)
+	err = tx.QueryRow(ctx, `INSERT INTO lyrics(track_id,language,origin,format,timing,content,is_default) VALUES($1,$2,'MANUAL',$3,$4,$5,$6) ON CONFLICT(track_id,language) DO UPDATE SET format=excluded.format,timing=excluded.timing,content=excluded.content,origin='MANUAL',is_default=excluded.is_default,version=lyrics.version+1,updated_at=now() RETURNING id,language,format::text,timing::text,coalesce(content,''),is_default,updated_at`, trackID, input.Language, input.Format, input.Timing, input.Content.Value, input.IsDefault.Value).Scan(&stored.ID, &stored.Language, &stored.Format, &stored.Timing, &stored.Content, &stored.IsDefault, &stored.UpdatedAt)
 	if err != nil {
 		return StoredLyric{}, fmt.Errorf("store admin lyrics: %w", err)
 	}

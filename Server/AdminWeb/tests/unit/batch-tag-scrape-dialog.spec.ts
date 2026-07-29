@@ -119,8 +119,10 @@ describe("BatchTagScrapeDialog", () => {
     await flushPromises();
 
     expect(scraping.createBatch).toHaveBeenCalledWith(expect.objectContaining({
-      options: expect.objectContaining({ sources: ["qmusic", "netease", "kugou"], verbatim: true }),
+      options: expect.objectContaining({ sources: ["qmusic"], verbatim: true }),
     }));
+    expect(wrapper.find("input[type='checkbox'][value='netease']").exists()).toBe(false);
+    expect(wrapper.find("input[type='checkbox'][value='kugou']").exists()).toBe(false);
 
     expect(wrapper.text()).toContain("已完成");
     expect(wrapper.text()).toContain("条件排除 2");

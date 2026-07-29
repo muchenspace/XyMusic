@@ -17,6 +17,7 @@ import (
 	"xymusic/server/internal/modules/adminauth"
 	"xymusic/server/internal/platform/httpserver"
 	"xymusic/server/internal/shared/apperror"
+	sharedlyrics "xymusic/server/internal/shared/lyrics"
 	"xymusic/server/internal/shared/pagination"
 )
 
@@ -602,7 +603,21 @@ func routeLyrics(value any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"content": content, "format": format, "language": language}, nil
+	rawTiming, exists := item["timing"]
+	if !exists {
+		return nil, routeContractError()
+	}
+	timing, ok := rawTiming.(string)
+	if !ok {
+		return nil, routeContractError()
+	}
+	if !sharedlyrics.ValidTiming(timing) {
+		return nil, routeContractError()
+	}
+	if err := sharedlyrics.ValidateDocument(format, sharedlyrics.Timing(timing), content); err != nil {
+		return nil, routeContractError()
+	}
+	return map[string]any{"content": content, "format": format, "language": language, "timing": timing}, nil
 }
 
 func optionalResetFields(value any, present bool) ([]string, error) {

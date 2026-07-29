@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
-import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -168,22 +167,6 @@ class SettingsScreenComposeTest {
     }
 
     @Test
-    fun wordByWordLyricsRowPersistsTheSelectedValue() {
-        val settingsRepository = InMemoryAppSettingsRepository()
-        composeRule.setSettingsContent(settingsRepository = settingsRepository)
-
-        composeRule.waitForIdle()
-        composeRule.onNodeWithText(context.getString(R.string.settings_playback)).performClick()
-        composeRule.onNode(hasScrollToIndexAction()).performScrollToIndex(3)
-        composeRule
-            .onNodeWithText(context.getString(R.string.settings_word_by_word_lyrics))
-            .performClick()
-        composeRule.waitForIdle()
-
-        assertThat(settingsRepository.current.wordByWordLyricsEnabled).isFalse()
-    }
-
-    @Test
     fun profileAndServerDetailsKeepTheirExistingActions() {
         composeRule.setSettingsContent()
 
@@ -224,10 +207,7 @@ class SettingsScreenComposeTest {
         composeRule.onNodeWithText("Lin Chen").assertIsDisplayed()
         composeRule.onNodeWithText(context.getString(R.string.settings_playback)).assertIsDisplayed()
         composeRule.onNodeWithTag(SettingsTestTags.page(SettingsPage.Playback)).performClick()
-        composeRule.onNodeWithTag(SettingsTestTags.LandscapeRight).performScrollToIndex(4)
-        composeRule
-            .onNodeWithText(context.getString(R.string.settings_word_by_word_lyrics))
-            .assertIsDisplayed()
+        composeRule.onNodeWithTag(SettingsTestTags.LandscapeRight).performScrollToIndex(3)
     }
 
     @Test

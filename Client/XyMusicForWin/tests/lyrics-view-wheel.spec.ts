@@ -4,7 +4,7 @@ import { nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApplicationServices } from "../src/application/services";
 import type { AudioPlayer, AudioSnapshot } from "../src/application/ports/AudioPlayer";
-import type { Track } from "../src/domain/music";
+import type { Lyrics, Track } from "../src/domain/music";
 import LyricsView from "../src/presentation/components/LyricsView.vue";
 import { applicationServicesKey } from "../src/presentation/services";
 import { useLyricsStore } from "../src/presentation/stores/lyricsStore";
@@ -29,7 +29,7 @@ describe("playback lyrics wheel controls", () => {
   });
 
   it("prevents Ctrl+wheel defaults and persists font-size changes", async () => {
-    const mounted = await mountLyricsView();
+    const mounted = await mountLyricsView({ timing: "LINE" });
     try {
       const scroll = mounted.wrapper.get(".lyrics-scroll").element;
       const increase = new WheelEvent("wheel", { cancelable: true, ctrlKey: true, deltaY: -100 });
@@ -53,7 +53,7 @@ describe("playback lyrics wheel controls", () => {
   });
 
   it("binds both theme palettes to playback lyric CSS variables", async () => {
-    const mounted = await mountLyricsView();
+    const mounted = await mountLyricsView({ timing: "LINE" });
     try {
       const style = mounted.wrapper.get(".lyrics-scroll").attributes("style");
       expect(style).toContain("--playback-lyric-text-dark: #8e98a3");
@@ -66,7 +66,7 @@ describe("playback lyrics wheel controls", () => {
   });
 
   it("keeps ordinary wheel scrolling and pauses automatic lyric following", async () => {
-    const mounted = await mountLyricsView();
+    const mounted = await mountLyricsView({ timing: "LINE" });
     try {
       scrollIntoView.mockClear();
       const scroll = mounted.wrapper.get(".lyrics-scroll").element;
@@ -85,9 +85,32 @@ describe("playback lyrics wheel controls", () => {
       mounted.wrapper.unmount();
     }
   });
+
+  it("renders explicit word timing without the removed line-progress layer", async () => {
+    const mounted = await mountLyricsView({
+      timing: "WORD",
+      lines: [{
+        time: 0,
+        text: "first second",
+        words: [{ time: 0, endTime: 1, text: "first" }, { time: 1, endTime: 2, text: " second" }],
+      }],
+    });
+    try {
+      expect(mounted.wrapper.findAll(".lyric-line-fill")).toHaveLength(0);
+      expect(mounted.wrapper.findAll(".lyric-word")).toHaveLength(2);
+      expect(mounted.wrapper.findAll(".lyric-word.is-sung")).toHaveLength(0);
+
+      mounted.player.currentTime = 1.2;
+      await nextTick();
+      expect(mounted.wrapper.findAll(".lyric-word.is-sung")).toHaveLength(2);
+      expect(mounted.wrapper.findAll(".lyric-word")[1]?.attributes("style")).toContain("--lyric-word-progress: 20%;");
+    } finally {
+      mounted.wrapper.unmount();
+    }
+  });
 });
 
-async function mountLyricsView(): Promise<{
+async function mountLyricsView(options: { timing: Lyrics["timing"]; lines?: Lyrics["lines"] }): Promise<{
   wrapper: VueWrapper;
   player: ReturnType<typeof usePlayerStore>;
   lyrics: ReturnType<typeof useLyricsStore>;
@@ -116,7 +139,8 @@ async function mountLyricsView(): Promise<{
     trackId: "track-1",
     source: "lrc",
     synchronized: true,
-    lines: [
+    timing: options.timing,
+    lines: options.lines ?? [
       { time: 0, text: "first line" },
       { time: 1, text: "second line" },
     ],
@@ -138,7 +162,6 @@ function createServices(writeLyricsFontScale: (value: number) => void): Applicat
       readLyrics: () => ({
         fontScale: 1,
         showTranslation: true,
-        wordLyricsEnabled: true,
         colors: {
           dark: { textColor: "#8e98a3", highlightColor: "#d7e6f3" },
           light: { textColor: "#626a74", highlightColor: "#1b4269" },
@@ -146,7 +169,6 @@ function createServices(writeLyricsFontScale: (value: number) => void): Applicat
       }),
       writeLyricsFontScale,
       writeLyricsTranslation() {},
-      writeLyricsWordLyricsEnabled() {},
       writeLyricsTextColor() {},
       writeLyricsHighlightColor() {},
       readLyricsOffset: () => 0,

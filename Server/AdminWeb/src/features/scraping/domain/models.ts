@@ -16,6 +16,7 @@ export interface TagCandidateLyrics {
   content: string;
   format: "PLAIN" | "LRC";
   language: string;
+  timing: "LINE" | "WORD";
 }
 
 export interface TagCandidateDetailInput {

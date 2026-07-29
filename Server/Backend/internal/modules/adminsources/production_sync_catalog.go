@@ -14,6 +14,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"xymusic/server/internal/modules/adminmetadata"
+	sharedlyrics "xymusic/server/internal/shared/lyrics"
 )
 
 func (synchronizer *ProductionSynchronizer) storeStandardFile(
@@ -531,6 +532,11 @@ func recordScanMetadata(
 	checksum string,
 	scannedAt time.Time,
 ) error {
+	if raw.Lyrics != nil {
+		if err := sharedlyrics.ValidateDocument(raw.Lyrics.Format, raw.Lyrics.Timing, raw.Lyrics.Content); err != nil {
+			return fmt.Errorf("validate scanned local library metadata lyrics: %w", err)
+		}
+	}
 	rawJSON, err := json.Marshal(raw)
 	if err != nil {
 		return fmt.Errorf("encode scanned local library metadata: %w", err)
@@ -596,6 +602,11 @@ func recordScanMetadata(
 }
 
 func syncScannedLyrics(ctx context.Context, transaction pgx.Tx, trackID string, incoming []scannedLyric) error {
+	for index, lyric := range incoming {
+		if err := sharedlyrics.ValidateDocument(lyric.Format, lyric.Timing, lyric.Content); err != nil {
+			return fmt.Errorf("validate scanned lyric %d: %w", index, err)
+		}
+	}
 	languages := make([]string, 0, len(incoming))
 	for _, lyric := range incoming {
 		languages = append(languages, lyric.Language)
@@ -611,12 +622,12 @@ func syncScannedLyrics(ctx context.Context, transaction pgx.Tx, trackID string, 
 	}
 	for _, lyric := range incoming {
 		if _, err := transaction.Exec(ctx, `INSERT INTO lyrics(
-			track_id,language,format,content,origin,is_default
-		) VALUES($1,$2,$3,$4,$5,false)
-		ON CONFLICT(track_id,language) DO UPDATE SET format=EXCLUDED.format,content=EXCLUDED.content,
+			track_id,language,format,timing,content,origin,is_default
+		) VALUES($1,$2,$3,$4,$5,$6,false)
+		ON CONFLICT(track_id,language) DO UPDATE SET format=EXCLUDED.format,timing=EXCLUDED.timing,content=EXCLUDED.content,
 			origin=EXCLUDED.origin,asset_id=NULL,version=lyrics.version+1,updated_at=now()
 		WHERE lyrics.origin IN('SCAN','EXTERNAL')`,
-			trackID, lyric.Language, lyric.Format, lyric.Content, lyric.Origin); err != nil {
+			trackID, lyric.Language, lyric.Format, lyric.Timing, lyric.Content, lyric.Origin); err != nil {
 			return fmt.Errorf("store scanned local library lyric: %w", err)
 		}
 	}
@@ -687,7 +698,7 @@ func (synchronizer *ProductionSynchronizer) syncUnchangedSidecars(
 				break
 			}
 		}
-		raw.Lyrics = &adminmetadata.MetadataLyrics{Content: selected.Content, Format: selected.Format, Language: selected.Language}
+		raw.Lyrics = &adminmetadata.MetadataLyrics{Content: selected.Content, Format: selected.Format, Language: selected.Language, Timing: selected.Timing}
 	} else {
 		raw.Lyrics = nil
 	}

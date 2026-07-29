@@ -194,7 +194,7 @@ class RetrofitApiContractTest {
 
         val track = request { api.track("track-1") }
         assertProtectedRequest(track, method = "GET", path = "/api/v1/tracks/track-1")
-        assertQuery(track, "lyricPage" to "1", "lyricPageSize" to "20")
+        assertQuery(track)
 
         val artists = request { api.artists(cursor = "artist-cursor", limit = 20, sort = "name") }
         assertProtectedRequest(artists, method = "GET", path = "/api/v1/artists")

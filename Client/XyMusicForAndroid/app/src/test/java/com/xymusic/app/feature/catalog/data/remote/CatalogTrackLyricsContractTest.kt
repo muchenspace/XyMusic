@@ -19,73 +19,45 @@ import kotlinx.serialization.json.Json
 import org.junit.Test
 import retrofit2.Response
 
-class CatalogTrackLyricsPaginationTest {
+class CatalogTrackLyricsContractTest {
     @Test
-    fun trackLoadsEveryLyricPageBeforeReturning() = runTest {
-        val requestedPages = mutableListOf<Int>()
-        val api =
-            FakeCatalogApi { _, page, pageSize ->
-                requestedPages += page
-                assertThat(pageSize).isEqualTo(100)
-                Response.success(
-                    detail(
-                        page = page,
-                        lyrics =
-                        if (page == 1) {
-                            (0 until 100).map(::lyric)
-                        } else {
-                            listOf(lyric(100))
-                        },
-                    ),
-                )
-            }
+    fun trackRequestsOneDetailAndReturnsTheServerResource() = runTest {
+        var calls = 0
+        val api = FakeCatalogApi {
+            calls += 1
+            Response.success(detail(lyric = lyric()))
+        }
 
         val result = dataSource(api).track(TRACK_ID)
 
-        assertThat(requestedPages).containsExactly(1, 2).inOrder()
-        assertThat(result.lyrics).hasSize(101)
+        assertThat(calls).isEqualTo(1)
+        assertThat(result.lyric?.id).isEqualTo("lyric-1")
+        assertThat(result.lyric?.timing).isEqualTo("LINE")
     }
 
     @Test
-    fun duplicateLyricAcrossPagesIsRejected() = runTest {
-        val api =
-            FakeCatalogApi { _, page, _ ->
-                Response.success(
-                    detail(
-                        page = page,
-                        lyrics =
-                        if (page == 1) {
-                            (0 until 100).map(::lyric)
-                        } else {
-                            listOf(lyric(0))
-                        },
-                    ),
-                )
-            }
+    fun trackAllowsAnExplicitNullLyric() = runTest {
+        val result = dataSource(FakeCatalogApi { Response.success(detail(lyric = null)) }).track(TRACK_ID)
 
-        val failure = runCatching { dataSource(api).track(TRACK_ID) }.exceptionOrNull()
+        assertThat(result.lyric).isNull()
+    }
+
+    @Test
+    fun trackRejectsAResourceForAnotherTrack() = runTest {
+        val failure = runCatching {
+            dataSource(FakeCatalogApi { Response.success(detail(lyric = lyric(trackId = "other-track"))) })
+                .track(TRACK_ID)
+        }.exceptionOrNull()
 
         assertThat(failure).isInstanceOf(CatalogProtocolException::class.java)
     }
 
     @Test
-    fun changedTrackVersionAcrossLyricPagesIsRejected() = runTest {
-        val api =
-            FakeCatalogApi { _, page, _ ->
-                Response.success(
-                    detail(
-                        page = page,
-                        lyrics =
-                        if (page == 1) {
-                            (0 until 100).map(::lyric)
-                        } else {
-                            listOf(lyric(100, trackVersion = 2))
-                        },
-                    ),
-                )
-            }
-
-        val failure = runCatching { dataSource(api).track(TRACK_ID) }.exceptionOrNull()
+    fun trackRejectsAnUnknownTimingMarker() = runTest {
+        val failure = runCatching {
+            dataSource(FakeCatalogApi { Response.success(detail(lyric = lyric(timing = "UNKNOWN"))) })
+                .track(TRACK_ID)
+        }.exceptionOrNull()
 
         assertThat(failure).isInstanceOf(CatalogProtocolException::class.java)
     }
@@ -95,7 +67,7 @@ class CatalogTrackLyricsPaginationTest {
         problemResponseParser = ProblemResponseParser(Json { ignoreUnknownKeys = true }, ProblemMapper()),
     )
 
-    private fun detail(page: Int, lyrics: List<LyricsResourceDto>) = TrackDetailDto(
+    private fun detail(lyric: LyricsResourceDto?) = TrackDetailDto(
         id = TRACK_ID,
         title = "Track",
         artists = emptyList(),
@@ -106,29 +78,26 @@ class CatalogTrackLyricsPaginationTest {
         discNumber = 1,
         isFavorite = false,
         publishedAt = TIMESTAMP,
-        lyrics = lyrics,
-        lyricPage = page,
-        lyricPageSize = 100,
-        lyricTotal = 101,
-        lyricTotalPages = 2,
+        lyric = lyric,
     )
 
-    private fun lyric(index: Int, trackVersion: Long = 1) = LyricsResourceDto(
-        id = "lyric-$index",
-        trackId = TRACK_ID,
+    private fun lyric(
+        trackId: String = TRACK_ID,
+        timing: String = "LINE",
+    ) = LyricsResourceDto(
+        id = "lyric-1",
+        trackId = trackId,
         language = "zh-CN",
         format = "PLAIN",
-        content = "Line $index",
-        isDefault = index == 0,
-        trackVersion = trackVersion,
+        timing = timing,
+        content = "Line",
+        trackVersion = 1,
         updatedAt = TIMESTAMP,
     )
 
-    private fun interface TrackHandler {
-        suspend fun invoke(trackId: String, page: Int, pageSize: Int): Response<TrackDetailDto>
-    }
-
-    private class FakeCatalogApi(private val trackHandler: TrackHandler) : CatalogApi {
+    private class FakeCatalogApi(
+        private val trackHandler: suspend (String) -> Response<TrackDetailDto>,
+    ) : CatalogApi {
         override suspend fun tracks(
             cursor: String?,
             limit: Int,
@@ -140,8 +109,7 @@ class CatalogTrackLyricsPaginationTest {
         override suspend fun randomTracks(request: RandomCatalogRequestDto): Response<RandomTracksResponseDto> =
             error("unused")
 
-        override suspend fun track(trackId: String, lyricPage: Int, lyricPageSize: Int): Response<TrackDetailDto> =
-            trackHandler.invoke(trackId, lyricPage, lyricPageSize)
+        override suspend fun track(trackId: String): Response<TrackDetailDto> = trackHandler(trackId)
 
         override suspend fun artists(cursor: String?, limit: Int, sort: String): Response<ArtistPageDto> =
             error("unused")

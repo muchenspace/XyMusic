@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -115,7 +116,7 @@ func TestRoutesStripUnknownJSONFieldsBeforeIdempotency(t *testing.T) {
 		"expectedVersion":1,
 		"patch":{
 			"credits":[{"name":"Artist","role":"PRIMARY","nestedUnknown":true}],
-			"lyrics":{"content":"text","format":"PLAIN","language":"en","lyricUnknown":true},
+			"lyrics":{"content":"text","format":"PLAIN","language":"en","timing":"LINE","lyricUnknown":true},
 			"patchUnknown":"discard"
 		},
 		"reason":"edit",
@@ -147,6 +148,67 @@ func TestRoutesStripUnknownJSONFieldsBeforeIdempotency(t *testing.T) {
 	if _, found := api.updateInput.Patch["patchUnknown"]; found {
 		t.Fatalf("unknown patch reached service: %#v", api.updateInput.Patch)
 	}
+	lyrics, ok := api.updateInput.Patch["lyrics"].(map[string]any)
+	if !ok || lyrics["timing"] != "LINE" {
+		t.Fatalf("lyrics timing=%#v", api.updateInput.Patch["lyrics"])
+	}
+}
+
+func TestRoutesPreserveWordLyricTimingInMetadataPatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	api := &metadataAPIStub{calls: make(map[string]int)}
+	identityService := &metadataIdentityStub{actor: identity.AuthenticatedActor{
+		UserID: "admin-1", Role: identity.RoleAdmin,
+	}}
+	routes, _ := NewRoutes(api, identityService, &metadataIdempotencyStub{})
+	engine := gin.New()
+	routes.Register(engine)
+	trackID := "00000000-0000-0000-0000-000000000001"
+	body := `{"expectedVersion":1,"patch":{"lyrics":{"content":"[00:01.00]<00:01.00>word","format":"LRC","language":"und","timing":"WORD"}},"reason":"edit lyrics"}`
+	request := httptest.NewRequest(
+		http.MethodPatch, "/api/v1/admin/tracks/"+trackID+"/metadata", bytes.NewBufferString(body),
+	)
+	request.Header.Set("Authorization", "Bearer admin")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "metadata-lyrics-timing-1")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	lyrics, ok := api.updateInput.Patch["lyrics"].(map[string]any)
+	if !ok || lyrics["timing"] != "WORD" {
+		t.Fatalf("lyrics patch=%#v", api.updateInput.Patch["lyrics"])
+	}
+}
+
+func TestRoutesRejectNonCanonicalLyricTimingBeforeAPI(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	api := &metadataAPIStub{calls: make(map[string]int)}
+	identityService := &metadataIdentityStub{actor: identity.AuthenticatedActor{
+		UserID: "admin-1", Role: identity.RoleAdmin,
+	}}
+	routes, _ := NewRoutes(api, identityService, &metadataIdempotencyStub{})
+	engine := gin.New()
+	routes.Register(engine)
+	trackID := "00000000-0000-0000-0000-000000000001"
+	for _, timing := range []string{"word", " WORD "} {
+		body := fmt.Sprintf(`{"expectedVersion":1,"patch":{"lyrics":{"content":"[00:01.00]<00:01.00>word","format":"LRC","language":"und","timing":%q}},"reason":"edit lyrics"}`, timing)
+		request := httptest.NewRequest(
+			http.MethodPatch, "/api/v1/admin/tracks/"+trackID+"/metadata", bytes.NewBufferString(body),
+		)
+		request.Header.Set("Authorization", "Bearer admin")
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Idempotency-Key", "metadata-lyrics-timing-invalid")
+		response := httptest.NewRecorder()
+		engine.ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("timing %q status=%d body=%s", timing, response.Code, response.Body.String())
+		}
+	}
+	if api.calls["update"] != 0 {
+		t.Fatalf("non-canonical timing reached API %d times", api.calls["update"])
+	}
 }
 
 func TestRoutesRejectInvalidContractsBeforeAuthentication(t *testing.T) {
@@ -163,6 +225,7 @@ func TestRoutesRejectInvalidContractsBeforeAuthentication(t *testing.T) {
 		{http.MethodPatch, "/api/v1/admin/tracks/not-a-uuid/metadata", `{"expectedVersion":1,"patch":{"title":"x"},"reason":"x"}`},
 		{http.MethodPatch, "/api/v1/admin/tracks/" + trackID + "/metadata", `{"expectedVersion":0,"patch":{"title":"x"},"reason":"x"}`},
 		{http.MethodPatch, "/api/v1/admin/tracks/" + trackID + "/metadata", `{"expectedVersion":1,"patch":{"title":1},"reason":"x"}`},
+		{http.MethodPatch, "/api/v1/admin/tracks/" + trackID + "/metadata", `{"expectedVersion":1,"patch":{"lyrics":{"content":"text","format":"PLAIN","language":"und"}},"reason":"x"}`},
 		{http.MethodPatch, "/api/v1/admin/tracks/" + trackID + "/metadata", `{"expectedVersion":1,"patch":{"title":"x"},"resetFields":null,"reason":"x"}`},
 		{http.MethodPost, "/api/v1/admin/metadata/batch", `{"items":[],"patch":{"title":"x"},"reason":"x"}`},
 	}

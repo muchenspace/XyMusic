@@ -40,7 +40,7 @@ function candidate(id = "remote-1", name = "候选歌曲"): TagCandidate {
 function detail(item: TagCandidate, content = "[00:01.00]第一行\n[00:04.00]第二行"): TagCandidateDetail {
   return {
     candidate: item,
-    lyrics: { content, format: "LRC", language: "und" },
+    lyrics: { content, format: "LRC", language: "und", timing: "LINE" },
   };
 }
 

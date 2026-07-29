@@ -444,7 +444,7 @@ func (repository *Repository) FindTrack(ctx context.Context, id string, lyricLim
 
 func (repository *Repository) listLyrics(ctx context.Context, trackID string, limit, offset int) ([]LyricRecord, int, error) {
 	rows, err := repository.pool.Query(ctx, `
-		SELECT id, language, format::text, content, is_default, version, updated_at
+		SELECT id, language, format::text, timing::text, content, is_default, version, updated_at
 		FROM lyrics
 		WHERE track_id = $1
 		ORDER BY is_default DESC, language ASC, id ASC
@@ -457,7 +457,7 @@ func (repository *Repository) listLyrics(ctx context.Context, trackID string, li
 	for rows.Next() {
 		var lyric LyricRecord
 		if err := rows.Scan(
-			&lyric.ID, &lyric.Language, &lyric.Format, &lyric.Content,
+			&lyric.ID, &lyric.Language, &lyric.Format, &lyric.Timing, &lyric.Content,
 			&lyric.IsDefault, &lyric.Version, &lyric.UpdatedAt,
 		); err != nil {
 			rows.Close()

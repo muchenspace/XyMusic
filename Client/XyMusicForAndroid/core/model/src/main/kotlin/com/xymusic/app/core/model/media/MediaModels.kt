@@ -43,8 +43,8 @@ data class Lyrics(
     val trackId: String,
     val language: String,
     val format: LyricsFormat,
+    val timing: LyricsTiming,
     val content: String,
-    val isDefault: Boolean,
     val trackVersion: Long,
     val updatedAtEpochMillis: Long,
 )
@@ -54,4 +54,9 @@ data class TrackDetail(val track: Track, val lyrics: List<Lyrics>)
 enum class LyricsFormat {
     LRC,
     PLAIN,
+}
+
+enum class LyricsTiming {
+    LINE,
+    WORD,
 }

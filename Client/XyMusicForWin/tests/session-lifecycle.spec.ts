@@ -131,7 +131,6 @@ function createServices(restorePlayback: () => unknown): ApplicationServices {
       readLyrics: () => ({
         fontScale: 1,
         showTranslation: true,
-        wordLyricsEnabled: true,
         colors: {
           dark: { textColor: "#8e98a3", highlightColor: "#d7e6f3" },
           light: { textColor: "#626a74", highlightColor: "#1b4269" },
@@ -139,7 +138,6 @@ function createServices(restorePlayback: () => unknown): ApplicationServices {
       }),
       writeLyricsFontScale() {},
       writeLyricsTranslation() {},
-      writeLyricsWordLyricsEnabled() {},
       writeLyricsTextColor() {},
       writeLyricsHighlightColor() {},
       readLyricsOffset: () => 0,

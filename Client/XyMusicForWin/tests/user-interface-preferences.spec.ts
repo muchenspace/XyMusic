@@ -7,7 +7,6 @@ describe("local user interface preferences", () => {
       "xy-music-theme": "sepia",
       "xymusic.desktop.lyrics.font-scale": "8",
       "xymusic.desktop.lyrics.translation": "sometimes",
-      "xymusic.desktop.lyrics.word-lyrics-enabled": "sometimes",
       "xymusic.playback-lyrics.dark.text-color": "white",
       "xymusic.playback-lyrics.dark.highlight-color": "#xyzxyz",
       "xymusic.playback-lyrics.light.text-color": "#12345",
@@ -19,7 +18,6 @@ describe("local user interface preferences", () => {
       "xymusic.desktop-lyrics.font-scale": "9",
       "xymusic.desktop-lyrics.text-color": "white",
       "xymusic.desktop-lyrics.highlight-color": "#xyzxyz",
-      "xymusic.desktop-lyrics.word-lyrics-enabled": "sometimes",
     });
     const preferences = new LocalUserInterfacePreferences(storage);
 
@@ -27,7 +25,6 @@ describe("local user interface preferences", () => {
     expect(preferences.readLyrics()).toEqual({
       fontScale: 1,
       showTranslation: true,
-      wordLyricsEnabled: true,
       colors: {
         dark: { textColor: "#8e98a3", highlightColor: "#d7e6f3" },
         light: { textColor: "#626a74", highlightColor: "#1b4269" },
@@ -40,7 +37,6 @@ describe("local user interface preferences", () => {
       fontScale: 1,
       textColor: "#f4f5f7",
       highlightColor: "#cf9437",
-      wordLyricsEnabled: true,
     });
     expect(preferences.readLyricsOffset("valid")).toBe(2.3);
     expect(preferences.readLyricsOffset("high")).toBe(5);
@@ -53,7 +49,6 @@ describe("local user interface preferences", () => {
     preferences.writeTheme("light");
     preferences.writeLyricsFontScale(1.2);
     preferences.writeLyricsTranslation(false);
-    preferences.writeLyricsWordLyricsEnabled(false);
     preferences.writeLyricsTextColor("dark", "#ABCDEF");
     preferences.writeLyricsHighlightColor("dark", "#FEDCBA");
     preferences.writeLyricsTextColor("light", "#123ABC");
@@ -64,7 +59,6 @@ describe("local user interface preferences", () => {
     preferences.writeDesktopLyricsFontScale(1.35);
     preferences.writeDesktopLyricsTextColor("#ABCDEF");
     preferences.writeDesktopLyricsHighlightColor("#123456");
-    preferences.writeDesktopLyricsWordLyricsEnabled(false);
     for (let index = 0; index < 105; index += 1) preferences.writeLyricsOffset(`track-${index}`, index / 10);
     preferences.writeLyricsOffset("track-104", 0);
 
@@ -72,7 +66,6 @@ describe("local user interface preferences", () => {
       "xy-music-theme": "light",
       "xymusic.desktop.lyrics.font-scale": "1.2",
       "xymusic.desktop.lyrics.translation": "false",
-      "xymusic.desktop.lyrics.word-lyrics-enabled": "false",
       "xymusic.playback-lyrics.dark.text-color": "#abcdef",
       "xymusic.playback-lyrics.dark.highlight-color": "#fedcba",
       "xymusic.playback-lyrics.light.text-color": "#123abc",
@@ -83,7 +76,6 @@ describe("local user interface preferences", () => {
       "xymusic.desktop-lyrics.font-scale": "1.35",
       "xymusic.desktop-lyrics.text-color": "#abcdef",
       "xymusic.desktop-lyrics.highlight-color": "#123456",
-      "xymusic.desktop-lyrics.word-lyrics-enabled": "false",
     });
     const offsets = JSON.parse(storage.values["xymusic.desktop.lyrics.offsets.v1"] ?? "{}") as Record<string, number>;
     expect(Object.keys(offsets)).toHaveLength(99);
@@ -103,7 +95,6 @@ describe("local user interface preferences", () => {
     expect(preferences.readLyrics()).toEqual({
       fontScale: 1,
       showTranslation: true,
-      wordLyricsEnabled: true,
       colors: {
         dark: { textColor: "#8e98a3", highlightColor: "#d7e6f3" },
         light: { textColor: "#626a74", highlightColor: "#1b4269" },
@@ -116,14 +107,12 @@ describe("local user interface preferences", () => {
       fontScale: 1,
       textColor: "#f4f5f7",
       highlightColor: "#cf9437",
-      wordLyricsEnabled: true,
     });
     expect(preferences.readLyricsOffset("track")).toBe(0);
     expect(() => {
       preferences.writeTheme("dark");
       preferences.writeLyricsFontScale(1);
       preferences.writeLyricsTranslation(true);
-      preferences.writeLyricsWordLyricsEnabled(true);
       preferences.writeLyricsTextColor("dark", "#8e98a3");
       preferences.writeLyricsHighlightColor("dark", "#d7e6f3");
       preferences.writeLyricsTextColor("light", "#626a74");
@@ -134,7 +123,6 @@ describe("local user interface preferences", () => {
       preferences.writeDesktopLyricsFontScale(1.1);
       preferences.writeDesktopLyricsTextColor("#ffffff");
       preferences.writeDesktopLyricsHighlightColor("#cf9437");
-      preferences.writeDesktopLyricsWordLyricsEnabled(true);
       preferences.writeLyricsOffset("track", 1);
       preferences.clearLyricsOffsets();
     }).not.toThrow();

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	sharedlyrics "xymusic/server/internal/shared/lyrics"
 )
 
 func TestMetadataSnapshotFromProbeNormalizesTagsAndStreams(t *testing.T) {
@@ -163,13 +165,31 @@ func TestRemuxArtworkInputIndexAccountsForFFMetadataInput(t *testing.T) {
 	}
 }
 
+func TestRemuxRejectsInconsistentLyricsBeforeRunningFFmpeg(t *testing.T) {
+	metadata, err := NormalizeMetadataSnapshot(validSnapshotValue())
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata.Lyrics = &MetadataLyrics{
+		Content: "[00:01.00]<00:01.00>word\n[00:02.00]ordinary line",
+		Format:  "LRC", Language: "und", Timing: sharedlyrics.TimingWord,
+	}
+	runner := &metadataRunnerStub{}
+	err = RemuxMetadataToFile(
+		context.Background(), "song.flac", filepath.Join(t.TempDir(), "output.tmp"), "", "ffmpeg", metadata, runner,
+	)
+	if err == nil || len(runner.calls) != 0 {
+		t.Fatalf("RemuxMetadataToFile() error/calls = %v/%d", err, len(runner.calls))
+	}
+}
+
 func TestRemuxWritesLongAndMultilineMetadataThroughAFile(t *testing.T) {
 	metadata, err := NormalizeMetadataSnapshot(validSnapshotValue())
 	if err != nil {
 		t.Fatal(err)
 	}
 	lyrics := strings.Repeat("line = value; # comment \\\r\n", 2_000)
-	metadata.Lyrics = &MetadataLyrics{Content: lyrics, Format: "PLAIN", Language: "zh-cn"}
+	metadata.Lyrics = &MetadataLyrics{Content: lyrics, Format: "PLAIN", Language: "zh-cn", Timing: sharedlyrics.TimingLine}
 	runner := &metadataRunnerStub{}
 	if err := RemuxMetadataToFile(
 		context.Background(), "song.flac", filepath.Join(t.TempDir(), "output.tmp"), "", "ffmpeg", metadata, runner,
@@ -198,6 +218,7 @@ func TestMetadataSnapshotFromProbePrefersExplicitLyricsFormat(t *testing.T) {
 		{name: "explicit lrc", tags: map[string]any{"lyrics": "no timestamp", "lyrics-format": "lrc"}, want: "LRC"},
 		{name: "synced key", tags: map[string]any{"syncedlyrics": "no timestamp"}, want: "LRC"},
 		{name: "unsynced key", tags: map[string]any{"unsyncedlyrics": "[00:01.00] literal"}, want: "PLAIN"},
+		{name: "colon fraction timestamp", tags: map[string]any{"lyrics": "[00:01:25]line"}, want: "LRC"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -213,6 +234,87 @@ func TestMetadataSnapshotFromProbePrefersExplicitLyricsFormat(t *testing.T) {
 			if metadata.Lyrics == nil || metadata.Lyrics.Format != test.want {
 				t.Fatalf("lyrics=%+v, want format %s", metadata.Lyrics, test.want)
 			}
+		})
+	}
+}
+
+func TestMetadataSnapshotFromProbeResolvesLyricsTiming(t *testing.T) {
+	tests := []struct {
+		name      string
+		tags      map[string]any
+		want      string
+		wantError bool
+	}{
+		{
+			name: "explicit word timing",
+			tags: map[string]any{
+				"lyrics": "[00:01.00]<00:01.00>word", "lyrics_format": "LRC", "lyrics_timing": "WORD",
+			},
+			want: "WORD",
+		},
+		{
+			name: "enhanced LRC without timing tag",
+			tags: map[string]any{"lyrics": "[00:01.00]<00:01.00>word", "lyrics_format": "LRC"},
+			want: "WORD",
+		},
+		{
+			name:      "word tag without word markers",
+			tags:      map[string]any{"lyrics": "[00:01.00]ordinary line", "lyrics_format": "LRC", "lyrics_timing": "WORD"},
+			wantError: true,
+		},
+		{
+			name: "plain lyrics reject word timing",
+			tags: map[string]any{
+				"lyrics": "[00:01.00]<00:01.00>literal", "lyrics_format": "PLAIN", "lyrics_timing": "WORD",
+			},
+			wantError: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.tags["title"] = "Song"
+			test.tags["artist"] = "Artist"
+			metadata, err := MetadataSnapshotFromProbe(ProbeOutput{Format: &struct {
+				Duration string         `json:"duration"`
+				Tags     map[string]any `json:"tags"`
+			}{Tags: test.tags}}, "fallback")
+			if test.wantError {
+				if err == nil {
+					t.Fatal("MetadataSnapshotFromProbe() succeeded")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if metadata.Lyrics == nil || string(metadata.Lyrics.Timing) != test.want {
+				t.Fatalf("lyrics=%+v, want timing %s", metadata.Lyrics, test.want)
+			}
+		})
+	}
+}
+
+func TestFFMetadataValuesWriteLyricsTiming(t *testing.T) {
+	tests := []struct {
+		name   string
+		format string
+		timing string
+		want   string
+	}{
+		{name: "word LRC", format: "LRC", timing: "WORD", want: "WORD"},
+		{name: "plain line", format: "PLAIN", timing: "LINE", want: "LINE"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			metadata := MetadataSnapshot{Lyrics: &MetadataLyrics{
+				Content: "[00:01.00]<00:01.00>word", Format: test.format, Language: "und", Timing: sharedlyrics.Timing(test.timing),
+			}}
+			for _, pair := range ffmetadataValues(metadata) {
+				if pair[0] == "lyrics_timing" && pair[1] == test.want {
+					return
+				}
+			}
+			t.Fatalf("lyrics_timing tag missing or wrong, want %s", test.want)
 		})
 	}
 }

@@ -252,7 +252,7 @@ func (routes *Routes) upsertLyrics(c *gin.Context) error {
 	if err := httpserver.DecodeJSON(c, &input); err != nil {
 		return err
 	}
-	if input.ExpectedVersion < 1 || !routeText(input.Language, 2, 35) || (input.Format != "LRC" && input.Format != "PLAIN") || !input.Content.Set || routeLength(input.Content.Value) > 1000000 || !input.IsDefault.Set {
+	if input.ExpectedVersion < 1 || !routeText(input.Language, 2, 35) || (input.Format != "LRC" && input.Format != "PLAIN") || (input.Timing != "LINE" && input.Timing != "WORD") || !input.Content.Set || routeLength(input.Content.Value) > 1000000 || !input.IsDefault.Set {
 		return mutationContractError()
 	}
 	return routes.execute(c, "admin.track.lyrics:"+id+":"+input.Language, lyricsPayload(input), http.StatusOK, func(actor, trace string) (any, error) {
@@ -465,7 +465,7 @@ func trackUpdatePayload(i UpdateTrackInput) map[string]any {
 	return p
 }
 func lyricsPayload(i LyricsInput) map[string]any {
-	return map[string]any{"expectedVersion": i.ExpectedVersion, "language": i.Language, "format": i.Format, "content": i.Content.Value, "isDefault": i.IsDefault.Value}
+	return map[string]any{"expectedVersion": i.ExpectedVersion, "language": i.Language, "format": i.Format, "timing": i.Timing, "content": i.Content.Value, "isDefault": i.IsDefault.Value}
 }
 
 var mutationUUIDPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)

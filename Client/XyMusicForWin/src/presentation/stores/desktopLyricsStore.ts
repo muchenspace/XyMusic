@@ -22,7 +22,6 @@ export const useDesktopLyricsStore = defineStore("desktop-lyrics", () => {
   const fontScale = ref(stored.fontScale);
   const textColor = ref(stored.textColor);
   const highlightColor = ref(stored.highlightColor);
-  const wordLyricsEnabled = ref(stored.wordLyricsEnabled ?? true);
   const transitions = new SerialTaskQueue();
   let initialized = false;
   let initializePromise: Promise<void> | null = null;
@@ -141,11 +140,6 @@ export const useDesktopLyricsStore = defineStore("desktop-lyrics", () => {
     preferences.writeDesktopLyricsHighlightColor?.(highlightColor.value);
   }
 
-  function setWordLyricsEnabled(enabled: boolean): void {
-    wordLyricsEnabled.value = enabled;
-    preferences.writeDesktopLyricsWordLyricsEnabled?.(enabled);
-  }
-
   function applyWindowState(state: DesktopLyricsWindowState): void {
     visible.value = state.requestedVisible;
     actuallyVisible.value = state.visible;
@@ -205,7 +199,6 @@ export const useDesktopLyricsStore = defineStore("desktop-lyrics", () => {
     fontScale,
     textColor,
     highlightColor,
-    wordLyricsEnabled,
     initialize,
     setVisible,
     toggleVisible,
@@ -214,7 +207,6 @@ export const useDesktopLyricsStore = defineStore("desktop-lyrics", () => {
     setFontScale,
     setTextColor,
     setHighlightColor,
-    setWordLyricsEnabled,
   };
 });
 
@@ -225,7 +217,6 @@ const DEFAULT_PREFERENCES = {
   fontScale: 1,
   textColor: DEFAULT_DESKTOP_LYRICS_TEXT_COLOR,
   highlightColor: DEFAULT_DESKTOP_LYRICS_HIGHLIGHT_COLOR,
-  wordLyricsEnabled: true,
 };
 
 const MAX_INITIALIZE_ATTEMPTS = 3;

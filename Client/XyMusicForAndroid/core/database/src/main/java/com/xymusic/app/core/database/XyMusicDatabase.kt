@@ -71,6 +71,6 @@ abstract class XyMusicDatabase : RoomDatabase() {
 
     companion object {
         const val NAME = "xymusic.db"
-        const val VERSION = 6
+        const val VERSION = 7
     }
 }

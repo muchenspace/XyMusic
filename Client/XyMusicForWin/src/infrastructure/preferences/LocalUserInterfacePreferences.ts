@@ -30,7 +30,6 @@ export class LocalUserInterfacePreferences implements UserInterfacePreferences {
     return {
       fontScale: normalizeFontScale(Number(this.get(FONT_SCALE_KEY))),
       showTranslation: normalizeBoolean(this.get(TRANSLATION_KEY), true),
-      wordLyricsEnabled: normalizeBoolean(this.get(LYRICS_WORD_LYRICS_ENABLED_KEY), true),
       colors: {
         dark: {
           textColor: normalizeColor(this.get(LYRICS_DARK_TEXT_COLOR_KEY), DEFAULT_PLAYBACK_LYRICS_COLORS.dark.textColor),
@@ -52,10 +51,6 @@ export class LocalUserInterfacePreferences implements UserInterfacePreferences {
     this.set(TRANSLATION_KEY, String(visible));
   }
 
-  writeLyricsWordLyricsEnabled(enabled: boolean): void {
-    this.set(LYRICS_WORD_LYRICS_ENABLED_KEY, String(enabled));
-  }
-
   writeLyricsTextColor(scheme: LyricsColorScheme, value: string): void {
     const fallback = DEFAULT_PLAYBACK_LYRICS_COLORS[scheme].textColor;
     this.set(scheme === "dark" ? LYRICS_DARK_TEXT_COLOR_KEY : LYRICS_LIGHT_TEXT_COLOR_KEY, normalizeColor(value, fallback));
@@ -75,7 +70,6 @@ export class LocalUserInterfacePreferences implements UserInterfacePreferences {
       fontScale: normalizeDesktopLyricsFontScale(Number(this.get(DESKTOP_LYRICS_FONT_SCALE_KEY))),
       textColor: colors.textColor,
       highlightColor: colors.highlightColor,
-      wordLyricsEnabled: normalizeBoolean(this.get(DESKTOP_LYRICS_WORD_LYRICS_ENABLED_KEY), true),
     };
   }
 
@@ -101,10 +95,6 @@ export class LocalUserInterfacePreferences implements UserInterfacePreferences {
 
   writeDesktopLyricsHighlightColor(value: string): void {
     this.set(DESKTOP_LYRICS_HIGHLIGHT_COLOR_KEY, normalizeColor(value, DEFAULT_DESKTOP_LYRICS_HIGHLIGHT_COLOR));
-  }
-
-  writeDesktopLyricsWordLyricsEnabled(enabled: boolean): void {
-    this.set(DESKTOP_LYRICS_WORD_LYRICS_ENABLED_KEY, String(enabled));
   }
 
   readLyricsOffset(trackId: string): number {
@@ -227,7 +217,6 @@ function normalizeOffset(value: number): number {
 const THEME_KEY = "xy-music-theme";
 const FONT_SCALE_KEY = "xymusic.desktop.lyrics.font-scale";
 const TRANSLATION_KEY = "xymusic.desktop.lyrics.translation";
-const LYRICS_WORD_LYRICS_ENABLED_KEY = "xymusic.desktop.lyrics.word-lyrics-enabled";
 const LYRICS_DARK_TEXT_COLOR_KEY = "xymusic.playback-lyrics.dark.text-color";
 const LYRICS_DARK_HIGHLIGHT_COLOR_KEY = "xymusic.playback-lyrics.dark.highlight-color";
 const LYRICS_LIGHT_TEXT_COLOR_KEY = "xymusic.playback-lyrics.light.text-color";
@@ -238,7 +227,6 @@ const DESKTOP_LYRICS_FULLSCREEN_BEHAVIOR_KEY = "xymusic.desktop-lyrics.fullscree
 const DESKTOP_LYRICS_FONT_SCALE_KEY = "xymusic.desktop-lyrics.font-scale";
 const DESKTOP_LYRICS_TEXT_COLOR_KEY = "xymusic.desktop-lyrics.text-color";
 const DESKTOP_LYRICS_HIGHLIGHT_COLOR_KEY = "xymusic.desktop-lyrics.highlight-color";
-const DESKTOP_LYRICS_WORD_LYRICS_ENABLED_KEY = "xymusic.desktop-lyrics.word-lyrics-enabled";
 const DESKTOP_LYRICS_PALETTE_VERSION_KEY = "xymusic.desktop-lyrics.palette-version";
 const OFFSETS_KEY = "xymusic.desktop.lyrics.offsets.v1";
 const DEFAULT_FONT_SCALE = 1;

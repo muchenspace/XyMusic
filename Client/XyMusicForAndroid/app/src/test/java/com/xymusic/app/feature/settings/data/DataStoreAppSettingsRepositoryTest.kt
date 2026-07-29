@@ -3,7 +3,6 @@ package com.xymusic.app.feature.settings.data
 import android.app.Application
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -38,7 +37,6 @@ class DataStoreAppSettingsRepositoryTest {
         val settings = repository.settings.first()
 
         assertThat(settings.theme).isEqualTo(ThemePreference.SYSTEM)
-        assertThat(settings.wordByWordLyricsEnabled).isTrue()
     }
 
     @Test
@@ -71,7 +69,6 @@ class DataStoreAppSettingsRepositoryTest {
             AppSettings(
                 theme = ThemePreference.TWILIGHT_PURPLE,
                 dynamicColorEnabled = true,
-                wordByWordLyricsEnabled = false,
                 streamingQuality = StreamingQuality.LOSSLESS,
                 mobileDataPolicy = MobileDataPolicy.WIFI_ONLY,
                 cacheLimitMiB = 4_096,
@@ -89,7 +86,6 @@ class DataStoreAppSettingsRepositoryTest {
             AppSettings(
                 theme = ThemePreference.OCEAN_BLUE,
                 dynamicColorEnabled = true,
-                wordByWordLyricsEnabled = false,
                 streamingQuality = StreamingQuality.HIGH,
                 mobileDataPolicy = MobileDataPolicy.WIFI_ONLY,
                 cacheLimitMiB = 2_048,
@@ -122,29 +118,17 @@ class DataStoreAppSettingsRepositoryTest {
     }
 
     @Test
-    fun persistedWordByWordLyricsPreferenceRemainsReadable() = runTest {
-        val repository = repository().also { it.reset() }
-        repository.rawDataStore().edit { values ->
-            values[booleanPreferencesKey("word_by_word_lyrics_enabled")] = false
-        }
-
-        assertThat(repository().settings.first().wordByWordLyricsEnabled).isFalse()
-    }
-
-    @Test
     fun concurrentFieldMutationsPreserveBothUpdates() = runTest {
         val repository = repository().also { it.reset() }
 
         listOf(
             async { repository.mutate { it.copy(theme = ThemePreference.DARK) } },
             async { repository.mutate { it.copy(dynamicColorEnabled = true) } },
-            async { repository.mutate { it.copy(wordByWordLyricsEnabled = false) } },
         ).awaitAll()
 
         val settings = repository.settings.first()
         assertThat(settings.theme).isEqualTo(ThemePreference.DARK)
         assertThat(settings.dynamicColorEnabled).isTrue()
-        assertThat(settings.wordByWordLyricsEnabled).isFalse()
     }
 
     private fun repository(): DataStoreAppSettingsRepository = DataStoreAppSettingsRepository(

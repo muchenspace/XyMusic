@@ -39,19 +39,15 @@ type LyricDTO struct {
 	TrackID      string `json:"trackId"`
 	Language     string `json:"language"`
 	Format       string `json:"format"`
+	Timing       string `json:"timing"`
 	Content      string `json:"content"`
-	IsDefault    bool   `json:"isDefault"`
 	TrackVersion int    `json:"trackVersion"`
 	UpdatedAt    string `json:"updatedAt"`
 }
 
 type TrackDetailDTO struct {
 	TrackSummaryDTO
-	Lyrics          []LyricDTO `json:"lyrics"`
-	LyricPage       int        `json:"lyricPage"`
-	LyricPageSize   int        `json:"lyricPageSize"`
-	LyricTotal      int        `json:"lyricTotal"`
-	LyricTotalPages int        `json:"lyricTotalPages"`
+	Lyric *LyricDTO `json:"lyric"`
 }
 
 type ArtistSummaryDTO struct {
@@ -120,10 +116,7 @@ type ListTracksInput struct {
 	Sort     TrackSort
 }
 
-type GetTrackInput struct {
-	LyricPage     int
-	LyricPageSize int
-}
+type GetTrackInput struct{}
 
 type ListArtistsInput struct {
 	Cursor string

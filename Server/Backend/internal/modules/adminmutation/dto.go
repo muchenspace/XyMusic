@@ -70,6 +70,7 @@ type LyricDTO struct {
 	TrackID      string `json:"trackId"`
 	Language     string `json:"language"`
 	Format       string `json:"format"`
+	Timing       string `json:"timing"`
 	Content      string `json:"content"`
 	IsDefault    bool   `json:"isDefault"`
 	TrackVersion int    `json:"trackVersion"`

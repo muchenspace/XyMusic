@@ -18,6 +18,7 @@ import type {
   BatchRestoreTracksResult,
   MusicListQuery,
   MusicPage,
+  MetadataLyrics,
   PermanentDeleteTracksJob,
   TrackListQuery,
   TrackMetadataRecord,
@@ -31,16 +32,16 @@ export class HttpMusicAdminGateway implements MusicAdminGateway {
     return adminApi.tracks(query, signal);
   }
 
-  getTrackMetadata(trackId: string, signal?: AbortSignal): Promise<TrackMetadataRecord> {
-    return adminApi.trackMetadata(trackId, signal);
+  async getTrackMetadata(trackId: string, signal?: AbortSignal): Promise<TrackMetadataRecord> {
+    return validateTrackMetadataRecord(await adminApi.trackMetadata(trackId, signal));
   }
 
   listTagHistory(trackId: string, page: number, pageSize: number, signal?: AbortSignal): Promise<MusicPage<TrackTagRevision>> {
     return adminApi.tagHistory(trackId, { page, pageSize }, signal);
   }
 
-  updateTrackMetadata(trackId: string, command: UpdateTrackMetadataCommand): Promise<TrackMetadataRecord> {
-    return adminApi.updateTrackMetadata(trackId, command);
+  async updateTrackMetadata(trackId: string, command: UpdateTrackMetadataCommand): Promise<TrackMetadataRecord> {
+    return validateTrackMetadataRecord(await adminApi.updateTrackMetadata(trackId, command));
   }
 
   async setTrackState(trackId: string, expectedVersion: number, action: "publish" | "archive" | "restore"): Promise<void> {
@@ -73,8 +74,8 @@ export class HttpMusicAdminGateway implements MusicAdminGateway {
     return adminApi.bulkUpdateTracks(command.items, command.patch, command.reason);
   }
 
-  restoreTagRevision(trackId: string, revisionId: string, expectedVersion: number, reason: string): Promise<TrackMetadataRecord> {
-    return adminApi.restoreTagRevision(trackId, revisionId, expectedVersion, reason);
+  async restoreTagRevision(trackId: string, revisionId: string, expectedVersion: number, reason: string): Promise<TrackMetadataRecord> {
+    return validateTrackMetadataRecord(await adminApi.restoreTagRevision(trackId, revisionId, expectedVersion, reason));
   }
 
   listAlbums(query: MusicListQuery, signal?: AbortSignal): Promise<MusicPage<AlbumSummary>> {
@@ -103,5 +104,18 @@ export class HttpMusicAdminGateway implements MusicAdminGateway {
 
   async updateArtist(artistId: string, command: UpdateArtistCommand): Promise<void> {
     await adminApi.updateArtist(artistId, command);
+  }
+}
+
+function validateTrackMetadataRecord(record: TrackMetadataRecord): TrackMetadataRecord {
+  validateLyricsTiming(record.raw.lyrics);
+  validateLyricsTiming(record.effective.lyrics);
+  if (Object.prototype.hasOwnProperty.call(record.overrides, "lyrics")) validateLyricsTiming(record.overrides.lyrics);
+  return record;
+}
+
+function validateLyricsTiming(lyrics: MetadataLyrics | null | undefined): void {
+  if (lyrics && lyrics.timing !== "LINE" && lyrics.timing !== "WORD") {
+    throw new Error("Track metadata lyrics timing is invalid");
   }
 }

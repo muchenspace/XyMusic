@@ -16,6 +16,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/lyrics"
 )
 
 var defaultSmartSources = []Source{SourceQMusic, SourceNetease, SourceKugou}
@@ -75,7 +76,12 @@ func (service *Service) Search(ctx context.Context, input SearchInput) ([]Candid
 		return nil, apperror.Validation("The music platform source is invalid")
 	}
 	sources := []Source{input.Source}
-	if input.Source == SourceSmart {
+	if input.Verbatim {
+		if input.Source != SourceSmart && input.Source != SourceQMusic {
+			return nil, unsupportedVerbatimSourceError()
+		}
+		sources = []Source{SourceQMusic}
+	} else if input.Source == SourceSmart {
 		sources = validSmartSources(input.Sources)
 	}
 	var candidates []Candidate
@@ -137,11 +143,18 @@ func (service *Service) CandidateDetails(ctx context.Context, candidate Candidat
 	if err := validateCandidate(candidate); err != nil {
 		return CandidateDetailsDTO{}, err
 	}
-	content, err := service.lyrics(ctx, candidate, verbatim)
+	if err := validateVerbatimCandidate(candidate, verbatim); err != nil {
+		return CandidateDetailsDTO{}, err
+	}
+	result, err := service.lyrics(ctx, candidate, verbatim)
 	if err != nil {
 		return CandidateDetailsDTO{}, err
 	}
-	return CandidateDetailsDTO{Candidate: candidate, Lyrics: metadataLyrics(content)}, nil
+	metadata, err := metadataLyrics(result)
+	if err != nil {
+		return CandidateDetailsDTO{}, err
+	}
+	return CandidateDetailsDTO{Candidate: candidate, Lyrics: metadata}, nil
 }
 
 func (service *Service) Fingerprint(ctx context.Context, trackID string) ([]Candidate, error) {
@@ -195,6 +208,9 @@ func (service *Service) Apply(
 	input ApplyInput,
 ) (ApplyResult, error) {
 	if err := validateCandidate(input.Candidate); err != nil {
+		return ApplyResult{}, err
+	}
+	if err := validateVerbatimCandidate(input.Candidate, input.Verbatim); err != nil {
 		return ApplyResult{}, err
 	}
 	reason := normalizeText(input.Reason)
@@ -279,16 +295,19 @@ func (service *Service) Apply(
 		set("genres", genres, current.Effective.Genres, len(current.Effective.Genres) == 0)
 	}
 	if input.Fields.Lyrics && (input.Fields.Overwrite || current.Effective.Lyrics == nil) {
-		content, lyricErr := service.lyrics(ctx, candidate, input.Verbatim)
-		lyrics := metadataLyrics(content)
+		lyricResult, lyricErr := service.lyrics(ctx, candidate, input.Verbatim)
+		var metadata *MetadataLyrics
+		if lyricErr == nil {
+			metadata, lyricErr = metadataLyrics(lyricResult)
+		}
 		switch {
 		case lyricErr != nil:
 			warnings = append(warnings, "Lyrics retrieval failed: "+messageOf(lyricErr))
-		case lyrics == nil:
+		case metadata == nil:
 			warnings = append(warnings, "No lyrics were returned")
 		default:
-			if !sameMetadataValue(*lyrics, current.Effective.Lyrics) {
-				patch["lyrics"] = *lyrics
+			if !sameMetadataValue(*metadata, current.Effective.Lyrics) {
+				patch["lyrics"] = *metadata
 				appliedFields = append(appliedFields, "lyrics")
 			}
 		}
@@ -366,21 +385,21 @@ func checkApplyCancellation(ctx context.Context, input ApplyInput) error {
 	return nil
 }
 
-func (service *Service) lyrics(ctx context.Context, candidate Candidate, verbatim bool) (string, error) {
+func (service *Service) lyrics(ctx context.Context, candidate Candidate, verbatim bool) (LyricResult, error) {
 	if candidate.Source == SourceAcoustID {
-		return "", nil
+		return LyricResult{}, nil
 	}
-	text, err := service.music.Lyric(ctx, candidate.Source, candidate, verbatim)
-	if err == nil && strings.TrimSpace(text) != "" {
-		return text, nil
+	result, err := service.music.Lyric(ctx, candidate.Source, candidate, verbatim)
+	if err == nil && strings.TrimSpace(result.Content) != "" {
+		return result, nil
 	}
 	if candidate.Source == SourceQMusic && err != nil {
-		return "", err
+		return LyricResult{}, err
 	}
 	if candidate.Source != SourceQMusic && candidate.Name != "" {
 		matches, searchErr := service.music.Search(ctx, SourceQMusic, candidate.Name)
 		if searchErr != nil {
-			return "", searchErr
+			return LyricResult{}, searchErr
 		}
 		type fallback struct {
 			candidate Candidate
@@ -399,18 +418,24 @@ func (service *Service) lyrics(ctx context.Context, candidate Candidate, verbati
 			return service.music.Lyric(ctx, SourceQMusic, fallbacks[0].candidate, verbatim)
 		}
 	}
-	return "", nil
+	return LyricResult{}, nil
 }
 
-func metadataLyrics(content string) *MetadataLyrics {
-	if strings.TrimSpace(content) == "" {
-		return nil
+func metadataLyrics(result LyricResult) (*MetadataLyrics, error) {
+	if strings.TrimSpace(result.Content) == "" {
+		return nil, nil
 	}
 	format := "PLAIN"
-	if lrcPattern.MatchString(content) {
+	if lrcPattern.MatchString(result.Content) {
 		format = "LRC"
 	}
-	return &MetadataLyrics{Content: content, Format: format, Language: "und"}
+	if !lyrics.ValidTiming(string(result.Timing)) {
+		return nil, apperror.Validation("Lyrics timing is missing or invalid")
+	}
+	if err := lyrics.ValidateDocument(format, result.Timing, result.Content); err != nil {
+		return nil, apperror.Validation("Lyrics timing does not match lyrics content")
+	}
+	return &MetadataLyrics{Content: result.Content, Format: format, Language: "und", Timing: result.Timing}, nil
 }
 
 func validSmartSources(input []Source) []Source {
@@ -445,6 +470,17 @@ func validateCandidate(candidate Candidate) error {
 		return apperror.Validation("The scraping candidate source is invalid")
 	}
 	return nil
+}
+
+func validateVerbatimCandidate(candidate Candidate, verbatim bool) error {
+	if verbatim && candidate.Source != SourceQMusic && candidate.Source != SourceAcoustID {
+		return unsupportedVerbatimSourceError()
+	}
+	return nil
+}
+
+func unsupportedVerbatimSourceError() error {
+	return apperror.Validation("Verbatim lyrics are only supported by QQ Music")
 }
 
 func cleanScrapedText(value any) string {

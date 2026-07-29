@@ -1,8 +1,46 @@
-import type { Lyrics } from "./music";
+import type { LyricWord, Lyrics } from "./music";
 
 export interface LyricPlaybackPosition {
   lineIndex: number;
-  lineProgress: number;
+  wordIndex: number;
+}
+
+export interface LyricPlaybackClock {
+  positionSeconds: number;
+  anchoredAtMs: number;
+  isPlaying: boolean;
+}
+
+export function shouldReanchorLyricPlaybackClock(
+  current: LyricPlaybackClock,
+  next: LyricPlaybackClock,
+  nowMs = Date.now(),
+): boolean {
+  const expectedPosition = interpolateLyricPlaybackSeconds(current, nowMs);
+  return (
+    !next.isPlaying ||
+    current.isPlaying !== next.isPlaying ||
+    Math.abs(next.positionSeconds - expectedPosition) > PLAYBACK_JUMP_THRESHOLD_SECONDS
+  );
+}
+
+export function interpolateLyricPlaybackSeconds(
+  clock: LyricPlaybackClock,
+  nowMs = Date.now(),
+): number {
+  const position = Math.max(0, finiteNumber(clock.positionSeconds));
+  if (!clock.isPlaying) return position;
+  const elapsed = Math.max(0, finiteNumber(nowMs) - finiteNumber(clock.anchoredAtMs)) / 1_000;
+  return position + elapsed;
+}
+
+export function resolveLyricWordProgress(word: LyricWord, playbackSeconds: number): number {
+  const playback = finiteNumber(playbackSeconds);
+  const start = finiteNumber(word.time);
+  const end = word.endTime;
+  if (playback <= start || end === undefined || !Number.isFinite(end) || end <= start) return 0;
+  const progress = Math.min(1, Math.max(0, (playback - start) / (end - start)));
+  return Math.round(progress * 1_000_000) / 1_000_000;
 }
 
 export function resolveLyricPlaybackPosition(
@@ -14,26 +52,20 @@ export function resolveLyricPlaybackPosition(
   const lineIndex = findActiveLineIndex(lyrics, playback);
   if (lineIndex < 0) return EMPTY_POSITION;
   const line = lyrics.lines[lineIndex]!;
-  const lineStart = line.time;
-  if (lineStart === null) return EMPTY_POSITION;
-  const nextLineTime = findNextTimedLine(lyrics, lineIndex + 1);
-  const fallbackLineEnd = lineStart + DEFAULT_LINE_DURATION_SECONDS;
-  const lineEnd = validEndTime(nextLineTime, lineStart) ?? fallbackLineEnd;
-  if (playback >= lineEnd) return EMPTY_POSITION;
   return {
     lineIndex,
-    lineProgress: progressBetween(playback, lineStart, lineEnd),
+    wordIndex: lyrics.timing === "WORD" ? findActiveWordIndex(line.words, playback) : -1,
   };
 }
 
-function findActiveLineIndex(lyrics: Lyrics, playbackSeconds: number): number {
+function findActiveLineIndex(lyrics: Lyrics, playback: number): number {
   let low = 0;
   let high = lyrics.lines.length - 1;
   let result = -1;
   while (low <= high) {
     const middle = (low + high) >>> 1;
     const time = lyrics.lines[middle]?.time;
-    if (time !== null && time !== undefined && time <= playbackSeconds) {
+    if (time !== null && time !== undefined && time <= playback) {
       result = middle;
       low = middle + 1;
     } else {
@@ -43,26 +75,19 @@ function findActiveLineIndex(lyrics: Lyrics, playbackSeconds: number): number {
   return result;
 }
 
-function findNextTimedLine(lyrics: Lyrics, fromIndex: number): number | undefined {
-  for (let index = fromIndex; index < lyrics.lines.length; index += 1) {
-    const time = lyrics.lines[index]?.time;
-    if (time !== null && time !== undefined && Number.isFinite(time)) return time;
-  }
-  return undefined;
-}
-
-function validEndTime(value: number | undefined, start: number): number | undefined {
-  return value !== undefined && Number.isFinite(value) && value > start ? value : undefined;
-}
-
-function progressBetween(value: number, start: number, end: number): number {
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return value >= end ? 1 : 0;
-  return Math.max(0, Math.min(1, (value - start) / (end - start)));
+function findActiveWordIndex(words: LyricWord[] | undefined, playback: number): number {
+	if (!words?.length) return -1;
+	for (let index = 0; index < words.length; index += 1) {
+		const word = words[index];
+		if (!word || !Number.isFinite(word.time) || playback < word.time) return -1;
+		if (word.endTime === undefined || !Number.isFinite(word.endTime) || playback < word.endTime) return index;
+	}
+	return -1;
 }
 
 function finiteNumber(value: number): number {
   return Number.isFinite(value) ? value : 0;
 }
 
-const EMPTY_POSITION: LyricPlaybackPosition = { lineIndex: -1, lineProgress: 0 };
-const DEFAULT_LINE_DURATION_SECONDS = 4;
+const EMPTY_POSITION: LyricPlaybackPosition = { lineIndex: -1, wordIndex: -1 };
+const PLAYBACK_JUMP_THRESHOLD_SECONDS = 0.08;

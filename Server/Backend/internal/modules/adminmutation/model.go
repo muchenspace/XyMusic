@@ -187,6 +187,7 @@ type LyricsInput struct {
 	ExpectedVersion int            `json:"expectedVersion"`
 	Language        string         `json:"language"`
 	Format          string         `json:"format"`
+	Timing          string         `json:"timing"`
 	Content         OptionalString `json:"content"`
 	IsDefault       OptionalBool   `json:"isDefault"`
 }
@@ -284,6 +285,7 @@ type UpdateTrackParams struct {
 type DeleteResult struct{ DeletedFiles, QuarantinedFiles, ScheduledObjects int }
 type StoredLyric struct {
 	ID, Language, Format, Content string
+	Timing                        string
 	IsDefault                     bool
 	TrackVersion                  int
 	UpdatedAt                     time.Time

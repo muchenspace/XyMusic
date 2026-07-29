@@ -330,7 +330,7 @@ var adminForbiddenJSONBodies = map[string]string{
 		"expectedVersion":2
 	}`,
 	"PUT /api/v1/admin/tracks/:id/lyrics": `{
-		"expectedVersion":2,"language":"zh-CN","format":"LRC","content":"[00:00]Line","isDefault":true
+		"expectedVersion":2,"language":"zh-CN","format":"LRC","timing":"LINE","content":"[00:00]Line","isDefault":true
 	}`,
 	"PATCH /api/v1/admin/users/:id/status": `{
 		"expectedVersion":2,"status":"SUSPENDED","reason":"maintenance"

@@ -79,8 +79,8 @@ data class LyricsResourceDto(
     val trackId: String,
     val language: String,
     val format: String,
+    val timing: String,
     val content: String,
-    val isDefault: Boolean,
     val trackVersion: Long,
     val updatedAt: String,
 )
@@ -97,11 +97,7 @@ data class TrackDetailDto(
     val discNumber: Int,
     val isFavorite: Boolean,
     val publishedAt: String,
-    val lyrics: List<LyricsResourceDto>,
-    val lyricPage: Int = 1,
-    val lyricPageSize: Int = 100,
-    val lyricTotal: Int = lyrics.size,
-    val lyricTotalPages: Int = if (lyrics.isEmpty()) 0 else 1,
+    val lyric: LyricsResourceDto?,
 )
 
 @Serializable

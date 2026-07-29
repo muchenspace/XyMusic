@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"xymusic/server/internal/shared/apperror"
+	sharedlyrics "xymusic/server/internal/shared/lyrics"
 )
 
 func TestSmartSearchToleratesFailedSourcesAndRanksCandidates(t *testing.T) {
@@ -46,6 +47,52 @@ func TestSmartSearchToleratesFailedSourcesAndRanksCandidates(t *testing.T) {
 	sort.Slice(expected, func(left, right int) bool { return expected[left] < expected[right] })
 	if !reflect.DeepEqual(calls, expected) {
 		t.Fatalf("smart sources = %#v", calls)
+	}
+}
+
+func TestVerbatimSmartSearchUsesQQMusicOnly(t *testing.T) {
+	music := &musicStub{
+		searchResults: map[Source][]Candidate{
+			SourceQMusic:  {{ID: "qmusic", Name: "Song", Source: SourceQMusic}},
+			SourceNetease: {{ID: "netease", Name: "Song", Source: SourceNetease}},
+			SourceKugou:   {{ID: "kugou", Name: "Song", Source: SourceKugou}},
+		},
+	}
+	service, err := NewService(ServiceDependencies{
+		Store: &storeStub{}, Music: music, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	title := "Song"
+	result, err := service.Search(context.Background(), SearchInput{
+		Source: SourceSmart, Verbatim: true, Title: &title,
+		Sources: []Source{SourceNetease, SourceKugou},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 1 || result[0].ID != "qmusic" {
+		t.Fatalf("verbatim results = %#v", result)
+	}
+	if calls := music.searchCallSources(); !reflect.DeepEqual(calls, []Source{SourceQMusic}) {
+		t.Fatalf("verbatim search sources = %#v", calls)
+	}
+}
+
+func TestVerbatimSearchRejectsUnsupportedSource(t *testing.T) {
+	service, err := NewService(ServiceDependencies{
+		Store: &storeStub{}, Music: &musicStub{}, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	title := "Song"
+	for _, source := range []Source{SourceNetease, SourceKugou} {
+		_, err := service.Search(context.Background(), SearchInput{Source: source, Verbatim: true, Title: &title})
+		if !apperror.IsCode(err, apperror.CodeValidationError) {
+			t.Fatalf("source %q error = %v", source, err)
+		}
 	}
 }
 
@@ -123,26 +170,40 @@ func TestCandidateDetailsReturnsCandidateAndClassifiesLyrics(t *testing.T) {
 		ID: "song", Name: "Song", Artist: "Artist", Album: "Album", Source: SourceQMusic,
 	}
 	tests := []struct {
-		name     string
-		content  string
-		lyricErr error
-		want     *MetadataLyrics
+		name           string
+		content        string
+		timing         sharedlyrics.Timing
+		lyricErr       error
+		wantValidation bool
+		want           *MetadataLyrics
 	}{
 		{
-			name: "LRC", content: "[00:01.00]line",
-			want: &MetadataLyrics{Content: "[00:01.00]line", Format: "LRC", Language: "und"},
+			name: "LRC", content: "[00:01.00]line", timing: sharedlyrics.TimingLine,
+			want: &MetadataLyrics{Content: "[00:01.00]line", Format: "LRC", Language: "und", Timing: "LINE"},
 		},
 		{
-			name: "plain text", content: "first line\nsecond line",
-			want: &MetadataLyrics{Content: "first line\nsecond line", Format: "PLAIN", Language: "und"},
+			name: "word LRC", content: "[00:01.00]<00:01.00>word", timing: sharedlyrics.TimingWord,
+			want: &MetadataLyrics{Content: "[00:01.00]<00:01.00>word", Format: "LRC", Language: "und", Timing: "WORD"},
 		},
-		{name: "empty", content: "  \n\t", want: nil},
+		{
+			name: "plain text", content: "first line\nsecond line", timing: sharedlyrics.TimingLine,
+			want: &MetadataLyrics{Content: "first line\nsecond line", Format: "PLAIN", Language: "und", Timing: "LINE"},
+		},
+		{name: "empty", content: "  \n\t", timing: sharedlyrics.TimingLine, want: nil},
+		{
+			name: "missing timing", content: "[00:01.00]line",
+			wantValidation: true,
+		},
+		{
+			name: "incomplete word timing", content: "[00:01.00]<00:01.00>word\n[00:02.00]line",
+			timing: sharedlyrics.TimingWord, wantValidation: true,
+		},
 		{name: "upstream error", lyricErr: lyricFailure},
 	}
 	for _, item := range tests {
 		t.Run(item.name, func(t *testing.T) {
 			service, err := NewService(ServiceDependencies{
-				Store: &storeStub{}, Music: &musicStub{lyrics: item.content, lyricErr: item.lyricErr},
+				Store: &storeStub{}, Music: &musicStub{lyrics: item.content, lyricTiming: item.timing, lyricErr: item.lyricErr},
 				Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
 			})
 			if err != nil {
@@ -152,6 +213,12 @@ func TestCandidateDetailsReturnsCandidateAndClassifiesLyrics(t *testing.T) {
 			if item.lyricErr != nil {
 				if !errors.Is(err, item.lyricErr) {
 					t.Fatalf("error = %v, want %v", err, item.lyricErr)
+				}
+				return
+			}
+			if item.wantValidation {
+				if !apperror.IsCode(err, apperror.CodeValidationError) {
+					t.Fatalf("error = %v, want validation error", err)
 				}
 				return
 			}
@@ -168,7 +235,7 @@ func TestCandidateDetailsReturnsCandidateAndClassifiesLyrics(t *testing.T) {
 func TestApplyPassesVerbatimToLyricProvider(t *testing.T) {
 	metadata := metadataFixture(1)
 	updated := metadataFixture(2)
-	music := &musicStub{lyrics: "[00:01.00]line"}
+	music := &musicStub{lyrics: "[00:01.00]line", lyricTiming: sharedlyrics.TimingLine}
 	service, err := NewService(ServiceDependencies{
 		Store: &storeStub{metadata: metadata, updatedMetadata: updated}, Music: music,
 		Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
@@ -225,8 +292,9 @@ func TestApplyPreservesExistingFieldsAndCoordinatesLyricsCoverAndWriteback(t *te
 	updated.Version = version + 1
 	store := &storeStub{metadata: metadata, updatedMetadata: updated, albumID: &albumID, writeback: WritebackJob{ID: "writeback"}}
 	music := &musicStub{
-		lyrics:  "[00:01.00]line",
-		artwork: DownloadedArtwork{Bytes: []byte{0xff, 0xd8, 0xff, 0x00}, ContentType: "image/jpeg", Extension: "jpg"},
+		lyrics:      "[00:01.00]line",
+		lyricTiming: sharedlyrics.TimingLine,
+		artwork:     DownloadedArtwork{Bytes: []byte{0xff, 0xd8, 0xff, 0x00}, ContentType: "image/jpeg", Extension: "jpg"},
 	}
 	artwork := &artworkStub{}
 	service, _ := NewService(ServiceDependencies{
@@ -412,6 +480,7 @@ type musicStub struct {
 	artistSearchErrors  map[Source]error
 	artistSearchCalls   []Source
 	lyrics              string
+	lyricTiming         sharedlyrics.Timing
 	lyricErr            error
 	lyricCalls          []lyricCall
 	artwork             DownloadedArtwork
@@ -420,9 +489,9 @@ type musicStub struct {
 }
 
 type lyricCall struct {
-	source   Source
+	source    Source
 	candidate Candidate
-	verbatim bool
+	verbatim  bool
 }
 
 func (stub *musicStub) Search(_ context.Context, source Source, query string) ([]Candidate, error) {
@@ -442,11 +511,11 @@ func (stub *musicStub) SearchArtists(_ context.Context, source Source, _ string)
 	return append([]ArtistCandidate(nil), stub.artistSearchResults[source]...), stub.artistSearchErrors[source]
 }
 
-func (stub *musicStub) Lyric(_ context.Context, source Source, candidate Candidate, verbatim bool) (string, error) {
+func (stub *musicStub) Lyric(_ context.Context, source Source, candidate Candidate, verbatim bool) (LyricResult, error) {
 	stub.mu.Lock()
 	stub.lyricCalls = append(stub.lyricCalls, lyricCall{source: source, candidate: candidate, verbatim: verbatim})
 	stub.mu.Unlock()
-	return stub.lyrics, stub.lyricErr
+	return LyricResult{Content: stub.lyrics, Timing: stub.lyricTiming}, stub.lyricErr
 }
 
 func (stub *musicStub) AcoustID(context.Context, float64, string) ([]Candidate, error) {

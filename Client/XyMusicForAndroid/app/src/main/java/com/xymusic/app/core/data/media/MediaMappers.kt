@@ -20,6 +20,7 @@ import com.xymusic.app.core.database.entity.TrackEntity
 import com.xymusic.app.core.database.model.AlbumReadModel
 import com.xymusic.app.core.database.model.ArtistCreditRole
 import com.xymusic.app.core.database.model.LyricsFormat as DatabaseLyricsFormat
+import com.xymusic.app.core.database.model.LyricsTiming as DatabaseLyricsTiming
 import com.xymusic.app.core.database.model.TrackDetailReadModel
 import com.xymusic.app.core.database.model.TrackSummaryReadModel
 import com.xymusic.app.core.model.media.Album
@@ -29,8 +30,10 @@ import com.xymusic.app.core.model.media.ArtistReference
 import com.xymusic.app.core.model.media.Artwork
 import com.xymusic.app.core.model.media.Lyrics
 import com.xymusic.app.core.model.media.LyricsFormat
+import com.xymusic.app.core.model.media.LyricsTiming
 import com.xymusic.app.core.model.media.Track
 import com.xymusic.app.core.model.media.TrackDetail
+import com.xymusic.app.core.model.media.requireValidLyricsDocument
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -154,7 +157,7 @@ internal fun TrackDetailDto.toWriteModel(cachedAtEpochMs: Long): TrackWriteModel
     trackNumber = trackNumber,
     discNumber = discNumber,
     publishedAt = publishedAt,
-    lyrics = lyrics,
+    lyrics = lyric?.let(::listOf),
     cachedAtEpochMs = cachedAtEpochMs,
 )
 
@@ -211,13 +214,17 @@ private fun LyricsResourceDto.toEntity(): LyricsEntity {
     requireUuid(id, "lyrics ID")
     requireUuid(trackId, "lyrics track ID")
     require(trackVersion >= 1) { "Lyrics track version must be positive" }
+    val documentFormat = LyricsFormat.valueOf(format)
+    val documentTiming = LyricsTiming.valueOf(timing)
+    requireValidLyricsDocument(documentFormat, documentTiming, content)
     return LyricsEntity(
         id = id,
         trackId = trackId,
         language = language,
-        format = DatabaseLyricsFormat.valueOf(format),
+        format = DatabaseLyricsFormat.valueOf(documentFormat.name),
+        timing = DatabaseLyricsTiming.valueOf(documentTiming.name),
         content = content,
-        isDefault = isDefault,
+        isDefault = true,
         trackVersion = trackVersion,
         updatedAtEpochMs = Instant.parse(updatedAt).toEpochMilli(),
     )
@@ -228,19 +235,14 @@ internal fun TrackSummaryReadModel.toDomain(): Track = track.toDomain(album, cre
 internal fun TrackDetailReadModel.toDomain(): TrackDetail = TrackDetail(
     track = track.toDomain(album, credits, artists),
     lyrics =
-    lyrics
-        .sortedWith(
-            compareByDescending<LyricsEntity> { it.isDefault }
-                .thenBy(LyricsEntity::language)
-                .thenBy { it.format.name },
-        ).map { lyric ->
+    lyrics.map { lyric ->
             Lyrics(
                 id = lyric.id,
                 trackId = lyric.trackId,
                 language = lyric.language,
                 format = LyricsFormat.valueOf(lyric.format.name),
+                timing = LyricsTiming.valueOf(lyric.timing.name),
                 content = lyric.content,
-                isDefault = lyric.isDefault,
                 trackVersion = lyric.trackVersion,
                 updatedAtEpochMillis = lyric.updatedAtEpochMs,
             )

@@ -9,7 +9,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.Cached
 import androidx.compose.material.icons.outlined.HighQuality
-import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.MaterialTheme
@@ -192,16 +191,6 @@ private fun PlaybackSettingsPage(
                 valueMiB = uiState.settings.cacheLimitMiB,
                 onValueChanged = viewModel::setCacheLimitMiB,
                 position = SettingsRowPosition.Middle,
-            )
-        }
-        item(key = "word-by-word-lyrics") {
-            SettingsToggleItem(
-                icon = Icons.Outlined.MusicNote,
-                title = stringResource(R.string.settings_word_by_word_lyrics),
-                summary = stringResource(R.string.settings_word_by_word_lyrics_summary),
-                checked = uiState.settings.wordByWordLyricsEnabled,
-                onCheckedChange = viewModel::setWordByWordLyricsEnabled,
-                position = SettingsRowPosition.Last,
             )
         }
     }

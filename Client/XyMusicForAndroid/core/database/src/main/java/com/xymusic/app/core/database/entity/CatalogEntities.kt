@@ -8,6 +8,7 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.xymusic.app.core.database.model.ArtistCreditRole
 import com.xymusic.app.core.database.model.LyricsFormat
+import com.xymusic.app.core.database.model.LyricsTiming
 
 data class ArtworkColumns(
     @ColumnInfo(name = "asset_id") val assetId: String?,
@@ -179,6 +180,7 @@ data class LyricsEntity(
     @ColumnInfo(name = "track_id") val trackId: String,
     @ColumnInfo(name = "language") val language: String,
     @ColumnInfo(name = "format") val format: LyricsFormat,
+    @ColumnInfo(name = "timing") val timing: LyricsTiming,
     @ColumnInfo(name = "content") val content: String,
     @ColumnInfo(name = "is_default") val isDefault: Boolean,
     @ColumnInfo(name = "track_version") val trackVersion: Long,

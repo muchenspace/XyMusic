@@ -15,7 +15,6 @@ const props = defineProps<{
   theme: "dark" | "light";
   themePreference: ThemePreference;
   lyricsFontScale: number;
-  lyricsWordLyricsEnabled: boolean;
   lyricsTextColor: string;
   lyricsHighlightColor: string;
   desktopLyricsVisible: boolean;
@@ -24,7 +23,6 @@ const props = defineProps<{
   desktopLyricsFontScale: number;
   desktopLyricsTextColor: string;
   desktopLyricsHighlightColor: string;
-  desktopLyricsWordLyricsEnabled: boolean;
   desktopLyricsShowTranslation: boolean;
   savingProfile: boolean;
   uploadingAvatar: boolean;
@@ -37,7 +35,6 @@ const emit = defineEmits<{
   "update:notificationsEnabled": [value: boolean];
   "update:themePreference": [value: ThemePreference];
   "update:lyricsFontScale": [value: number];
-  "update:lyricsWordLyricsEnabled": [value: boolean];
   "update:lyricsTextColor": [value: string];
   "update:lyricsHighlightColor": [value: string];
   "update:desktopLyricsVisible": [value: boolean];
@@ -46,7 +43,6 @@ const emit = defineEmits<{
   "update:desktopLyricsFontScale": [value: number];
   "update:desktopLyricsTextColor": [value: string];
   "update:desktopLyricsHighlightColor": [value: string];
-  "update:desktopLyricsWordLyricsEnabled": [value: boolean];
   "update:desktopLyricsShowTranslation": [value: boolean];
   updateProfile: [value: { displayName: string; bio: string | null }];
   uploadAvatar: [file: File];
@@ -213,13 +209,6 @@ function normalizedPort(value: string): string { return validPort(value) ? Strin
           <template v-else-if="activeCategory === 'lyrics'">
             <section class="settings-card">
               <div class="settings-card-heading"><span class="settings-icon"><Languages :size="19" /></span><div><h3>播放页歌词</h3><p>支持 Ctrl + 鼠标滚轮调节字号，深浅主题分别保存颜色</p></div></div>
-              <label class="field-group">
-                <span>逐字歌词</span>
-                <select id="playback-word-lyrics" :value="String(lyricsWordLyricsEnabled)" @change="emit('update:lyricsWordLyricsEnabled', ($event.target as HTMLSelectElement).value === 'true')">
-                  <option value="true">开启</option>
-                  <option value="false">关闭</option>
-                </select>
-              </label>
               <label class="field-group lyrics-font-setting">
                 <span>字号 <output for="playback-lyrics-font-scale">{{ Math.round(lyricsFontScale * 100) }}%</output></span>
                 <input
@@ -268,13 +257,6 @@ function normalizedPort(value: string): string { return validPort(value) ? Strin
 
             <section class="settings-card">
               <div class="settings-card-heading"><span class="settings-icon"><MonitorCog :size="19" /></span><div><h3>桌面歌词</h3><p>控制独立悬浮歌词窗口、交互方式和显示效果</p></div></div>
-              <label class="field-group">
-                <span>逐字歌词</span>
-                <select id="desktop-word-lyrics" :value="String(desktopLyricsWordLyricsEnabled)" @change="emit('update:desktopLyricsWordLyricsEnabled', ($event.target as HTMLSelectElement).value === 'true')">
-                  <option value="true">开启</option>
-                  <option value="false">关闭</option>
-                </select>
-              </label>
               <label class="field-group">
                 <span>显示桌面歌词</span>
                 <select :value="String(desktopLyricsVisible)" @change="emit('update:desktopLyricsVisible', ($event.target as HTMLSelectElement).value === 'true')">

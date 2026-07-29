@@ -16,6 +16,16 @@ import type {
 } from "../src/infrastructure/http/musicDtos";
 
 describe("desktop catalog API contract", () => {
+  it("requests one lyric resource without lyric pagination", async () => {
+    const detail = { ...trackDetailDto() } as unknown as Record<string, unknown>;
+    const api = new RecordingApi([detail]);
+
+    const lyrics = await new HttpCatalogRepository(api.client).getLyrics("track/1");
+
+    expect(api.paths()).toEqual(["api/v1/tracks/track%2F1"]);
+    expect(lyrics).toMatchObject({ trackId: "track/1", timing: "LINE" });
+  });
+
   it("uses the catalog list, search, detail, and album routes", async () => {
     const api = new RecordingApi([
       { items: [trackDto()], nextCursor: "track-next" },
@@ -24,13 +34,7 @@ describe("desktop catalog API contract", () => {
         artists: { items: [artistDto()], nextCursor: "artist-next" },
         albums: { items: [albumDto()], nextCursor: null },
       },
-      trackDetailDto({ lyricTotal: 2, lyricTotalPages: 2 }),
-      trackDetailDto({
-        lyricPage: 2,
-        lyricTotal: 2,
-        lyricTotalPages: 2,
-        lyrics: [lyricDto({ id: "lyric-2", language: "en", content: "[00:01.00]Translation", isDefault: false })],
-      }),
+      trackDetailDto(),
       { items: [albumDto()], nextCursor: null },
     ]);
     const repository = new HttpCatalogRepository(api.client);
@@ -43,8 +47,7 @@ describe("desktop catalog API contract", () => {
     expect(api.paths()).toEqual([
       "api/v1/tracks?sort=TITLE_ASC&limit=25&cursor=next%2Fvalue",
       "api/v1/search?q=rock+%26+roll&scope=ALL&limit=20",
-      "api/v1/tracks/track%2F1?lyricPage=1&lyricPageSize=100",
-      "api/v1/tracks/track%2F1?lyricPage=2&lyricPageSize=100",
+      "api/v1/tracks/track%2F1",
       "api/v1/albums?sort=TITLE_DESC&limit=30&cursor=album%2Fpage",
     ]);
     expect(tracks).toMatchObject({ nextCursor: "track-next", items: [{ id: "track-1", duration: 181 }] });
@@ -54,41 +57,33 @@ describe("desktop catalog API contract", () => {
       albums: [{ id: "album-1" }],
       nextCursors: { tracks: null, artists: "artist-next", albums: null },
     });
-    expect(lyrics).toMatchObject({ trackId: "track/1", synchronized: true, lines: [{ time: 1, text: "Line" }] });
+    expect(lyrics).toMatchObject({ trackId: "track/1", synchronized: true, timing: "LINE", lines: [{ time: 1, text: "Line" }] });
     expect(albums.items[0]).toMatchObject({ id: "album-1", year: 2025 });
   });
 
-  it("rejects lyric pages that do not advance, change versions, or repeat lyric IDs", async () => {
-    const stalled = new RecordingApi([
-      trackDetailDto({ lyricTotal: 2, lyricTotalPages: 2 }),
-      trackDetailDto({ lyricPage: 1, lyricTotal: 2, lyricTotalPages: 2 }),
-    ]);
-    await expect(new HttpCatalogRepository(stalled.client).getLyrics("track/1"))
-      .rejects.toMatchObject<ApiError>({ code: "INVALID_PAGINATION" });
+  it("accepts a track detail without lyrics when the server returns lyric null", async () => {
+    const api = new RecordingApi([trackDetailDto({ lyric: null })]);
 
-    const changedVersion = new RecordingApi([
-      trackDetailDto({ lyricTotal: 2, lyricTotalPages: 2 }),
-      trackDetailDto({
-        lyricPage: 2,
-        lyricTotal: 2,
-        lyricTotalPages: 2,
-        lyrics: [lyricDto({ id: "lyric-2", trackVersion: 8 })],
-      }),
-    ]);
-    await expect(new HttpCatalogRepository(changedVersion.client).getLyrics("track/1"))
-      .rejects.toMatchObject<ApiError>({ code: "INVALID_PAGINATION" });
+    await expect(new HttpCatalogRepository(api.client).getLyrics("track/1")).resolves.toBeNull();
+    expect(api.paths()).toEqual(["api/v1/tracks/track%2F1"]);
+  });
 
-    const repeated = new RecordingApi([
-      trackDetailDto({ lyricTotal: 2, lyricTotalPages: 2 }),
-      trackDetailDto({ lyricPage: 2, lyricTotal: 2, lyricTotalPages: 2 }),
-    ]);
-    await expect(new HttpCatalogRepository(repeated.client).getLyrics("track/1"))
-      .rejects.toMatchObject<ApiError>({ code: "INVALID_PAGINATION" });
+  it("rejects invalid timing on the returned lyric resource", async () => {
+    const api = new RecordingApi([trackDetailDto({
+      lyric: lyricDto({ timing: unsafeWireTiming("UNKNOWN") }),
+    })]);
 
-    expect(stalled.paths()).toEqual([
-      "api/v1/tracks/track%2F1?lyricPage=1&lyricPageSize=100",
-      "api/v1/tracks/track%2F1?lyricPage=2&lyricPageSize=100",
-    ]);
+    await expect(new HttpCatalogRepository(api.client).getLyrics("track/1"))
+      .rejects.toMatchObject<ApiError>({ code: "INVALID_PAGINATION" });
+  });
+
+  it("rejects a missing timing field on the returned lyric resource", async () => {
+    const lyric = lyricDto();
+    Reflect.deleteProperty(lyric, "timing");
+    const api = new RecordingApi([trackDetailDto({ lyric })]);
+
+    await expect(new HttpCatalogRepository(api.client).getLyrics("track/1"))
+      .rejects.toMatchObject<ApiError>({ code: "INVALID_PAGINATION" });
   });
 
   it("uses every scoped search route and validates scoped responses", async () => {
@@ -319,27 +314,29 @@ function trackDto(id = "track-1"): TrackDto {
 function trackDetailDto(overrides: Partial<TrackDetailDto> = {}): TrackDetailDto {
   return {
     ...trackDto("track/1"),
-    lyrics: [lyricDto()],
-    lyricPage: 1,
-    lyricPageSize: 1,
-    lyricTotal: 1,
-    lyricTotalPages: 1,
+    lyric: lyricDto(),
     ...overrides,
   };
 }
 
-function lyricDto(overrides: Partial<TrackDetailDto["lyrics"][number]> = {}): TrackDetailDto["lyrics"][number] {
+type LyricDto = NonNullable<TrackDetailDto["lyric"]>;
+
+function lyricDto(overrides: Partial<LyricDto> = {}): LyricDto {
   return {
     id: "lyric-1",
     trackId: "track/1",
     language: "zh",
     format: "LRC",
+    timing: "LINE",
     content: "[00:01.00]Line",
-    isDefault: true,
     trackVersion: 7,
     updatedAt: "2026-07-17T00:00:00Z",
     ...overrides,
   };
+}
+
+function unsafeWireTiming(value: unknown): LyricDto["timing"] {
+  return value as LyricDto["timing"];
 }
 
 function albumDto(): AlbumDto {

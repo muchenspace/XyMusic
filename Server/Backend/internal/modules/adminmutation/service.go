@@ -12,6 +12,7 @@ import (
 
 	"xymusic/server/internal/modules/catalog"
 	"xymusic/server/internal/shared/apperror"
+	sharedlyrics "xymusic/server/internal/shared/lyrics"
 )
 
 type Service struct {
@@ -413,8 +414,14 @@ func optionalBatchTimestamp(value *time.Time) *string {
 }
 
 func (service *Service) UpsertLyrics(ctx context.Context, actorID, traceID, trackID string, input LyricsInput) (LyricDTO, error) {
-	if input.ExpectedVersion < 1 || (input.Format != "LRC" && input.Format != "PLAIN") {
+	if input.ExpectedVersion < 1 || (input.Format != "LRC" && input.Format != "PLAIN") || !input.Content.Set || !input.IsDefault.Set {
 		return LyricDTO{}, apperror.Validation("Lyrics request is invalid")
+	}
+	if !sharedlyrics.ValidTiming(input.Timing) {
+		return LyricDTO{}, apperror.Validation("Lyrics timing is invalid")
+	}
+	if err := sharedlyrics.ValidateDocument(input.Format, sharedlyrics.Timing(input.Timing), input.Content.Value); err != nil {
+		return LyricDTO{}, apperror.Validation("Lyrics timing does not match lyrics content")
 	}
 	if javascriptLength(input.Content.Value) > 1_000_000 {
 		return LyricDTO{}, apperror.Validation("content is too long")
@@ -431,7 +438,7 @@ func (service *Service) UpsertLyrics(ctx context.Context, actorID, traceID, trac
 	if err := service.audit(ctx, actorID, "admin.track.lyrics.upsert", "track", trackID, traceID, nil); err != nil {
 		return LyricDTO{}, err
 	}
-	return LyricDTO{ID: stored.ID, TrackID: trackID, Language: stored.Language, Format: stored.Format, Content: stored.Content,
+	return LyricDTO{ID: stored.ID, TrackID: trackID, Language: stored.Language, Format: stored.Format, Timing: stored.Timing, Content: stored.Content,
 		IsDefault: stored.IsDefault, TrackVersion: stored.TrackVersion, UpdatedAt: formatTimestamp(stored.UpdatedAt)}, nil
 }
 

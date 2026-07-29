@@ -140,10 +140,6 @@ constructor(
 
     fun setTheme(theme: ThemePreference) = updateSettings { copy(theme = theme) }
 
-    fun setWordByWordLyricsEnabled(enabled: Boolean) = updateSettings {
-        copy(wordByWordLyricsEnabled = enabled)
-    }
-
     fun setStreamingQuality(quality: StreamingQuality) = updateSettings { copy(streamingQuality = quality) }
 
     fun setWifiOnly(wifiOnly: Boolean) = updateSettings {

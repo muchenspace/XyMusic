@@ -344,6 +344,9 @@ func validateSearchInput(input SearchInput, shape map[string]json.RawMessage) er
 	if input.Source != SourceSmart && !isSearchableSource(input.Source) {
 		return contractError()
 	}
+	if input.Verbatim && input.Source != SourceSmart && input.Source != SourceQMusic {
+		return contractError()
+	}
 	if hasExplicitNull(shape, "query", "title", "artist", "album", "sources", "verbatim") {
 		return contractError()
 	}
@@ -360,6 +363,9 @@ func validateSearchInput(input SearchInput, shape map[string]json.RawMessage) er
 			if !isSearchableSource(source) {
 				return contractError()
 			}
+			if input.Verbatim && source != SourceQMusic {
+				return contractError()
+			}
 		}
 	}
 	return nil
@@ -374,6 +380,9 @@ func validateCandidateDetailsInput(input CandidateDetailsInput, shape map[string
 	if json.Unmarshal(shape["candidate"], &candidateShape) != nil ||
 		hasExplicitNull(candidateShape, "titleScore", "artistScore", "albumScore", "score", "lyricId", "durationMs") ||
 		hasExplicitNull(shape, "verbatim") {
+		return contractError()
+	}
+	if input.Verbatim && input.Candidate.Source != SourceQMusic && input.Candidate.Source != SourceAcoustID {
 		return contractError()
 	}
 	return validateCandidateContract(input.Candidate)
@@ -396,6 +405,9 @@ func validateApplyInput(input ApplyInput, shape map[string]json.RawMessage) erro
 	var candidateShape map[string]json.RawMessage
 	if json.Unmarshal(shape["candidate"], &candidateShape) != nil ||
 		hasExplicitNull(candidateShape, "titleScore", "artistScore", "albumScore", "score", "lyricId", "durationMs") {
+		return contractError()
+	}
+	if input.Verbatim && input.Candidate.Source != SourceQMusic && input.Candidate.Source != SourceAcoustID {
 		return contractError()
 	}
 	return validateCandidateContract(input.Candidate)
@@ -437,6 +449,9 @@ func validateBatchInput(input CreateBatchInput, shape map[string]json.RawMessage
 	}
 	for _, source := range options.Sources {
 		if !isSearchableSource(source) {
+			return contractError()
+		}
+		if options.Verbatim && source != SourceQMusic {
 			return contractError()
 		}
 	}

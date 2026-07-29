@@ -18,6 +18,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"xymusic/server/internal/platform/processio"
+	sharedlyrics "xymusic/server/internal/shared/lyrics"
 )
 
 const (
@@ -151,6 +152,11 @@ func RemuxMetadataToFile(
 	metadata MetadataSnapshot,
 	runner ProcessRunner,
 ) error {
+	if metadata.Lyrics != nil {
+		if err := sharedlyrics.ValidateDocument(metadata.Lyrics.Format, metadata.Lyrics.Timing, metadata.Lyrics.Content); err != nil {
+			return fmt.Errorf("validate lyrics before metadata writeback: %w", err)
+		}
+	}
 	containerArguments, format, err := ffmpegContainerArguments(sourcePath)
 	if err != nil {
 		return err
@@ -286,7 +292,15 @@ func metadataFileFromProbe(probe ProbeOutput, fallbackTitle string) (ProbedMetad
 			}
 		}
 		language := normalizeLanguage(firstNonEmpty(lyricsLanguage, firstTag(tags, "language", "lyrics-language")))
-		lyrics = &MetadataLyrics{Content: lyricsContent, Format: lyricsFormat, Language: language}
+		timingTag := strings.ToUpper(strings.TrimSpace(firstTag(tags, "lyrics_timing", "lyrics-timing")))
+		timing := sharedlyrics.DetectTiming(lyricsFormat, lyricsContent)
+		if timingTag != "" {
+			if !sharedlyrics.ValidTiming(timingTag) {
+				return ProbedMetadataFile{}, fmt.Errorf("embedded lyrics timing %q is invalid", timingTag)
+			}
+			timing = sharedlyrics.Timing(timingTag)
+		}
+		lyrics = &MetadataLyrics{Content: lyricsContent, Format: lyricsFormat, Language: language, Timing: timing}
 	}
 	releaseDate := parseReleaseDateTag(firstTag(tags, "date", "year"))
 	bpm := parseBPM(firstTag(tags, "bpm", "tbpm"))
@@ -382,6 +396,7 @@ func ffmetadataValues(metadata MetadataSnapshot) [][2]string {
 	}
 	lyrics := lyricsValue(metadata.Lyrics)
 	lyricsFormat := lyricsFormatValue(metadata.Lyrics)
+	lyricsTiming := lyricsTimingValue(metadata.Lyrics)
 	syncedLyrics := ""
 	unsyncedLyrics := ""
 	if lyricsFormat == "LRC" {
@@ -405,6 +420,7 @@ func ffmetadataValues(metadata MetadataSnapshot) [][2]string {
 		{"copyright", pointerValue(metadata.Copyright)},
 		{"lyrics", lyrics}, {"syncedlyrics", syncedLyrics}, {"unsyncedlyrics", unsyncedLyrics},
 		{"lyrics_format", lyricsFormat}, {"lyrics-format", lyricsFormat},
+		{"lyrics_timing", lyricsTiming}, {"lyrics-timing", lyricsTiming},
 		{"language", lyricsLanguageValue(metadata.Lyrics)},
 		{"lyrics-language", lyricsLanguageValue(metadata.Lyrics)},
 	}
@@ -743,7 +759,14 @@ func lyricsFormatValue(value *MetadataLyrics) string {
 	return value.Format
 }
 
+func lyricsTimingValue(value *MetadataLyrics) string {
+	if value == nil {
+		return ""
+	}
+	return string(value.Timing)
+}
+
 var (
 	numberPairPattern   = regexp.MustCompile(`^([0-9]+)(?:\s*/\s*([0-9]+))?$`)
-	lrcTimestampPattern = regexp.MustCompile(`\[[0-9]{1,3}:[0-9]{2}(?:\.[0-9]{1,3})?\]`)
+	lrcTimestampPattern = regexp.MustCompile(`\[[0-9]{1,3}:[0-5][0-9](?:[.:][0-9]{1,3})?\]`)
 )

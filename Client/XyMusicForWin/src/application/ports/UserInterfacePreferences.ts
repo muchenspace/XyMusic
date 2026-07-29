@@ -17,7 +17,6 @@ export interface LyricsColors {
 export interface LyricsPreferencesSnapshot {
   fontScale: number;
   showTranslation: boolean;
-  wordLyricsEnabled: boolean;
   colors: Record<LyricsColorScheme, LyricsColors>;
 }
 
@@ -28,7 +27,6 @@ export interface DesktopLyricsPreferencesSnapshot {
   fontScale: number;
   textColor: string;
   highlightColor: string;
-  wordLyricsEnabled: boolean;
 }
 
 export interface UserInterfacePreferences {
@@ -37,7 +35,6 @@ export interface UserInterfacePreferences {
   readLyrics(): LyricsPreferencesSnapshot;
   writeLyricsFontScale(value: number): void;
   writeLyricsTranslation(visible: boolean): void;
-  writeLyricsWordLyricsEnabled(enabled: boolean): void;
   writeLyricsTextColor(scheme: LyricsColorScheme, value: string): void;
   writeLyricsHighlightColor(scheme: LyricsColorScheme, value: string): void;
   readDesktopLyrics(): DesktopLyricsPreferencesSnapshot;
@@ -47,7 +44,6 @@ export interface UserInterfacePreferences {
   writeDesktopLyricsFontScale(value: number): void;
   writeDesktopLyricsTextColor(value: string): void;
   writeDesktopLyricsHighlightColor(value: string): void;
-  writeDesktopLyricsWordLyricsEnabled(enabled: boolean): void;
   readLyricsOffset(trackId: string): number;
   writeLyricsOffset(trackId: string, offset: number): void;
   clearLyricsOffsets(): void;
