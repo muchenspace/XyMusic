@@ -21,7 +21,10 @@ type AdminMediaAPI interface {
 	AbandonUpload(context.Context, string, string) error
 }
 
-const artworkCompletionTimeout = 2 * time.Minute
+const (
+	artworkOperationTimeout  = 2 * time.Minute
+	artworkCompletionTimeout = 2 * time.Minute
+)
 
 type AdminMediaArtworkApplier struct {
 	media AdminMediaAPI
@@ -44,8 +47,10 @@ func (adapter *AdminMediaArtworkApplier) ApplyAlbumArtwork(
 	albumID string,
 	artwork DownloadedArtwork,
 ) error {
+	operationContext, cancelOperation := context.WithTimeout(ctx, artworkOperationTimeout)
+	defer cancelOperation()
 	digest := sha256.Sum256(artwork.Bytes)
-	upload, err := adapter.media.CreateUpload(ctx, actorID, traceID, adminmedia.CreateUploadInput{
+	upload, err := adapter.media.CreateUpload(operationContext, actorID, traceID, adminmedia.CreateUploadInput{
 		Purpose:        adminmedia.PurposeAlbumArtwork,
 		TargetID:       albumID,
 		FileName:       "scraped-cover." + artwork.Extension,
@@ -57,7 +62,7 @@ func (adapter *AdminMediaArtworkApplier) ApplyAlbumArtwork(
 		return err
 	}
 	if err := adapter.media.UploadContent(
-		ctx, actorID, upload.ID, artwork.ContentType, int64(len(artwork.Bytes)), bytes.NewReader(artwork.Bytes),
+		operationContext, actorID, upload.ID, artwork.ContentType, int64(len(artwork.Bytes)), bytes.NewReader(artwork.Bytes),
 	); err != nil {
 		return adapter.abandonAfterFailure(ctx, actorID, upload.ID, err)
 	}
