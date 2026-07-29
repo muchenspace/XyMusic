@@ -61,7 +61,8 @@ private suspend fun extractArtworkAmbientColor(
                 ImageRequest
                     .Builder(context)
                     .data(artworkUrl)
-                    .applyStableArtworkCacheKey(cacheKey)
+                    // Keep the small palette request separate from the full-size artwork entry.
+                    .applyAmbientArtworkCacheKey(cacheKey)
                     .size(128)
                     .build()
             val result = loader.execute(request)
@@ -87,3 +88,11 @@ private suspend fun extractArtworkAmbientColor(
 }.getOrNull()
 
 private val artworkAmbientColorCache = LruCache<String, Int>(64)
+
+private fun ImageRequest.Builder.applyAmbientArtworkCacheKey(cacheKey: String?): ImageRequest.Builder = apply {
+    stableArtworkCacheKey(cacheKey)?.let { stableKey ->
+        memoryCacheKey("$stableKey:ambient-128")
+        // Reuse the encoded disk entry; only the decoded memory entry needs a distinct size key.
+        diskCacheKey(stableKey)
+    }
+}
