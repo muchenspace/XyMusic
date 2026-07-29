@@ -3,13 +3,13 @@ package admintagscraping
 import "context"
 
 type SearchInput struct {
-	Source  Source   `json:"source"`
+	Source   Source   `json:"source"`
 	Verbatim bool     `json:"verbatim"`
-	Query   *string  `json:"query,omitempty"`
-	Title   *string  `json:"title,omitempty"`
-	Artist  *string  `json:"artist,omitempty"`
-	Album   *string  `json:"album,omitempty"`
-	Sources []Source `json:"sources,omitempty"`
+	Query    *string  `json:"query,omitempty"`
+	Title    *string  `json:"title,omitempty"`
+	Artist   *string  `json:"artist,omitempty"`
+	Album    *string  `json:"album,omitempty"`
+	Sources  []Source `json:"sources,omitempty"`
 }
 
 type CandidateDetailsInput struct {
@@ -67,21 +67,31 @@ type BatchItemDTO struct {
 }
 
 type BatchJobDTO struct {
-	ID              string         `json:"id"`
-	RequestedBy     *string        `json:"requestedBy"`
-	Options         BatchOptions   `json:"options"`
-	Status          JobStatus      `json:"status"`
-	Total           int            `json:"total"`
-	Processed       int            `json:"processed"`
-	Succeeded       int            `json:"succeeded"`
-	Failed          int            `json:"failed"`
-	Skipped         int            `json:"skipped"`
-	CancelRequested bool           `json:"cancelRequested"`
-	StartedAt       *string        `json:"startedAt"`
-	CompletedAt     *string        `json:"completedAt"`
-	CreatedAt       string         `json:"createdAt"`
-	UpdatedAt       string         `json:"updatedAt"`
-	Unsuccessful    int            `json:"unsuccessful"`
-	PartialItems    bool           `json:"partialItems"`
-	Items           []BatchItemDTO `json:"items"`
+	ID              string                        `json:"id"`
+	RequestedBy     *string                       `json:"requestedBy"`
+	Options         BatchOptions                  `json:"options"`
+	Status          JobStatus                     `json:"status"`
+	Total           int                           `json:"total"`
+	Processed       int                           `json:"processed"`
+	Succeeded       int                           `json:"succeeded"`
+	Failed          int                           `json:"failed"`
+	Skipped         int                           `json:"skipped"`
+	CancelRequested bool                          `json:"cancelRequested"`
+	StartedAt       *string                       `json:"startedAt"`
+	CompletedAt     *string                       `json:"completedAt"`
+	CreatedAt       string                        `json:"createdAt"`
+	UpdatedAt       string                        `json:"updatedAt"`
+	Unsuccessful    int                           `json:"unsuccessful"`
+	ChannelStatus   map[Source]BatchChannelStatus `json:"channelStatus"`
+	PartialItems    bool                          `json:"partialItems"`
+	Items           []BatchItemDTO                `json:"items"`
+}
+
+type BatchChannelStatus struct {
+	Target              int     `json:"target"`
+	Actual              int     `json:"actual"`
+	State               string  `json:"state"`
+	RetryAfterSeconds   int     `json:"retryAfterSeconds,omitempty"`
+	ConsecutiveFailures int     `json:"consecutiveFailures,omitempty"`
+	ErrorRate           float64 `json:"errorRate,omitempty"`
 }

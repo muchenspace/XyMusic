@@ -70,6 +70,7 @@ export type BatchItemStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "
 export interface BatchItem { id: string; trackId: string; position: number; status: BatchItemStatus; source: string | null; message: string | null; candidate: TagCandidate | null }
 export interface TagScrapingBatch {
   id: string; status: BatchJobStatus; total: number; processed: number; succeeded: number; skipped: number; failed: number; unsuccessful: number;
+  channelStatus?: Partial<Record<TagSource, { target: number; actual: number; state: string }>>;
   cancelRequested: boolean; items: BatchItem[]; createdAt: string; updatedAt: string; completedAt: string | null;
   partialItems?: boolean;
 }
@@ -77,6 +78,7 @@ export interface CreateBatchInput {
   items: Array<{ trackId: string; expectedVersion: number }>;
   options: {
     sources: TagSource[];
+    channelConcurrency?: Partial<Record<TagSource, number>>;
     verbatim: boolean;
     matchMode: MatchMode;
     missingFields: TagScrapingMissingField[];

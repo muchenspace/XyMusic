@@ -77,10 +77,13 @@ type AudioVariantProfile struct {
 }
 
 type GeneratedVariant struct {
-	Profile        AudioVariantProfile
-	ObjectKey      string
-	ChecksumSHA256 string
-	SizeBytes      int64
+	Profile              AudioVariantProfile
+	ObjectKey            string
+	ChecksumSHA256       string
+	SizeBytes            int64
+	SourceChecksumSHA256 string
+	ProfileVersion       string
+	Reused               bool
 }
 
 type CommitMediaJob struct {
@@ -110,6 +113,10 @@ type Store interface {
 	ReadyAssetReferencesObject(context.Context, string) (bool, error)
 	CompleteObjectCleanup(context.Context, CleanupJob, string, bool, time.Time) (bool, error)
 	FailObjectCleanup(context.Context, CleanupJob, string, error, time.Time) error
+}
+
+type VariantReuseStore interface {
+	FindReusableVariants(context.Context, string, string, string, []AudioVariantProfile) ([]GeneratedVariant, error)
 }
 
 type DownloadedObject struct {

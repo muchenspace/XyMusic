@@ -28,6 +28,12 @@ type Logger interface {
 	Error(string, map[string]any)
 }
 
+type PerformanceMetrics interface {
+	ObservePipeline(string, time.Duration, bool)
+	ObserveCache(string, bool)
+	ObservePlatform(string, bool)
+}
+
 type Store interface {
 	FingerprintSource(context.Context, string) (FingerprintSource, error)
 	Metadata(context.Context, string) (TrackMetadata, error)

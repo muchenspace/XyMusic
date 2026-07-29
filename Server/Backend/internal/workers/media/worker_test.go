@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,6 +65,48 @@ func TestWorkerProcessesLosslessSegmentAndCommitsFencedVariants(t *testing.T) {
 	}
 }
 
+func TestWorkerReusesReadyVariantsBySourceChecksumAndProfileVersion(t *testing.T) {
+	attemptID := "attempt"
+	source := []byte("source")
+	digest := sha256.Sum256(source)
+	checksum := hex.EncodeToString(digest[:])
+	profiles := AudioVariantProfiles("aac")
+	store := &workerStoreStub{
+		job: &MediaJob{
+			ID: "job", SourceAssetID: "asset", TrackID: "track", Generation: 1,
+			AttemptID: &attemptID,
+		},
+		source: &SourceAsset{ID: "asset", ObjectKey: "source", SizeBytes: int64(len(source)), ChecksumSHA256: &checksum},
+		reusable: []GeneratedVariant{{
+			Profile: profiles[0], ObjectKey: "media/variants/track/old/data_saver.m4a",
+			ChecksumSHA256: "variant-checksum", SizeBytes: 42,
+			SourceChecksumSHA256: checksum, ProfileVersion: "v7",
+		}},
+	}
+	runner := &workerRunnerStub{
+		probe: `{"streams":[{"codec_type":"audio","codec_name":"aac"}],"format":{"duration":"1"}}`,
+	}
+	storage := &workerStorageStub{source: source}
+	worker := newTestWorker(t, store, storage, runner, Options{ProfileVersion: "v7", FFmpegThreads: 3})
+	worked, err := worker.RunNext(context.Background())
+	if err != nil || !worked {
+		t.Fatalf("worked=%v error=%v", worked, err)
+	}
+	if store.reuseCalls != 1 || store.commit == nil || len(store.commit.Generated) != len(profiles) {
+		t.Fatalf("reuse calls/commit = %d/%#v", store.reuseCalls, store.commit)
+	}
+	if !store.commit.Generated[0].Reused || store.commit.Generated[0].ObjectKey != "media/variants/track/old/data_saver.m4a" {
+		t.Fatalf("reused variant = %#v", store.commit.Generated[0])
+	}
+	if len(storage.uploaded) != len(profiles)-1 {
+		t.Fatalf("uploaded variants = %#v", storage.uploaded)
+	}
+	joined := strings.Join(runner.ffmpegArguments, " ")
+	if !strings.Contains(joined, "-threads 3") || strings.Count(joined, "-map 0:a:0 -vn") != len(profiles)-1 {
+		t.Fatalf("ffmpeg arguments = %s", joined)
+	}
+}
+
 func TestWorkerQueuesEveryUploadedObjectWhenCommitIsSuperseded(t *testing.T) {
 	attemptID := "attempt"
 	source := []byte("source")
@@ -111,9 +154,65 @@ func TestWorkerQueuesCurrentObjectWhenUploadFailsAfterObjectCreation(t *testing.
 	if err != nil || !worked {
 		t.Fatalf("worked=%v error=%v", worked, err)
 	}
-	if len(store.enqueued) != 1 || !strings.HasSuffix(store.enqueued[0].key, "/data_saver.m4a") ||
-		store.enqueued[0].reason != "ABANDONED_MEDIA_ATTEMPT" {
+	if len(store.enqueued) == 0 {
 		t.Fatalf("abandoned objects = %#v", store.enqueued)
+	}
+	for _, cleanup := range store.enqueued {
+		if !strings.HasPrefix(cleanup.key, "media/variants/track/job/attempt/") ||
+			cleanup.reason != "ABANDONED_MEDIA_ATTEMPT" {
+			t.Fatalf("abandoned object cleanup = %#v", cleanup)
+		}
+	}
+}
+
+func TestUploadVariantsUsesBoundedParallelUploads(t *testing.T) {
+	storage := &parallelUploadStorage{
+		started: make(chan struct{}, 4),
+		release: make(chan struct{}),
+	}
+	worker := &Worker{storage: storage, uploadSemaphore: make(chan struct{}, 2)}
+	directory := t.TempDir()
+	planned := make([]plannedVariant, 0, 4)
+	for index := 0; index < 4; index++ {
+		path := filepath.Join(directory, fmt.Sprintf("variant-%d.m4a", index))
+		if err := os.WriteFile(path, []byte(fmt.Sprintf("variant-%d", index)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		planned = append(planned, plannedVariant{
+			Profile: AudioVariantProfile{Quality: fmt.Sprintf("Q%d", index), Extension: "m4a", MIMEType: "audio/mp4"},
+			Path:    path, ObjectKey: fmt.Sprintf("variant/%d", index),
+		})
+	}
+	type uploadResult struct {
+		variants []GeneratedVariant
+		err      error
+	}
+	resultChannel := make(chan uploadResult, 1)
+	go func() {
+		variants, _, err := worker.uploadVariants(context.Background(), planned, "source-checksum")
+		resultChannel <- uploadResult{variants: variants, err: err}
+	}()
+	for index := 0; index < 2; index++ {
+		select {
+		case <-storage.started:
+		case <-time.After(time.Second):
+			t.Fatal("upload worker did not start in parallel")
+		}
+	}
+	storage.mu.Lock()
+	maximum := storage.maximumInFlight
+	storage.mu.Unlock()
+	if maximum != 2 {
+		t.Fatalf("maximum upload concurrency = %d, want 2", maximum)
+	}
+	close(storage.release)
+	select {
+	case result := <-resultChannel:
+		if result.err != nil || len(result.variants) != len(planned) {
+			t.Fatalf("upload result = %#v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("parallel uploads did not finish")
 	}
 }
 
@@ -274,6 +373,9 @@ type workerStoreStub struct {
 	failed            error
 	scheduled         []string
 	enqueued          []cleanupEnqueue
+	reusable          []GeneratedVariant
+	reuseCalls        int
+	reuseErr          error
 	cleanupReferenced bool
 	cleanupCompleted  bool
 	cleanupFailed     error
@@ -305,6 +407,20 @@ func (store *workerStoreStub) MediaJobControl(context.Context, string, string, s
 
 func (store *workerStoreStub) FindReadySourceAsset(context.Context, string) (*SourceAsset, error) {
 	return store.source, nil
+}
+
+func (store *workerStoreStub) FindReusableVariants(
+	_ context.Context,
+	_, _, _ string,
+	_ []AudioVariantProfile,
+) ([]GeneratedVariant, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.reuseCalls++
+	if store.reuseErr != nil {
+		return nil, store.reuseErr
+	}
+	return append([]GeneratedVariant(nil), store.reusable...), nil
 }
 
 func (store *workerStoreStub) CommitMediaJob(_ context.Context, input CommitMediaJob) ([]string, error) {
@@ -369,6 +485,37 @@ type workerStorageStub struct {
 	uploadErrAt int
 	uploadCalls int
 }
+
+type parallelUploadStorage struct {
+	mu              sync.Mutex
+	started         chan struct{}
+	release         chan struct{}
+	inFlight        int
+	maximumInFlight int
+}
+
+func (storage *parallelUploadStorage) DownloadToFile(context.Context, string, string, int64) (DownloadedObject, error) {
+	return DownloadedObject{}, errors.New("not implemented")
+}
+
+func (storage *parallelUploadStorage) UploadFile(_ context.Context, _ string, path, _, _ string) (int64, error) {
+	value, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	storage.mu.Lock()
+	storage.inFlight++
+	storage.maximumInFlight = max(storage.maximumInFlight, storage.inFlight)
+	storage.mu.Unlock()
+	storage.started <- struct{}{}
+	<-storage.release
+	storage.mu.Lock()
+	storage.inFlight--
+	storage.mu.Unlock()
+	return int64(len(value)), nil
+}
+
+func (storage *parallelUploadStorage) Delete(context.Context, string) error { return nil }
 
 func (storage *workerStorageStub) DownloadToFile(_ context.Context, _ string, path string, _ int64) (DownloadedObject, error) {
 	if err := os.WriteFile(path, storage.source, 0o600); err != nil {

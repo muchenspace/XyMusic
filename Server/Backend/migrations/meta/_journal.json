@@ -204,6 +204,13 @@
       "when": 1785208432426,
       "tag": "0028_lyrics_timing",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1785340800000,
+      "tag": "0029_media_variant_reuse",
+      "breakpoints": true
     }
   ]
 }
