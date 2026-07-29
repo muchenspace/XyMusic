@@ -700,9 +700,14 @@ func (repository *Repository) ClaimBatchItem(
 	finishedJobIDs := finishedJobIDs(recoveredFinished)
 	job, err := scanBatchJob(tx.QueryRow(ctx, batchJobSelect+`
 		WHERE status IN ('PENDING','RUNNING','CANCELLING')
-		  AND EXISTS (
-			SELECT 1 FROM tag_scraping_job_items claimable
-			WHERE claimable.job_id = tag_scraping_jobs.id AND claimable.status = 'PENDING'
+		  AND (
+			EXISTS (
+				SELECT 1 FROM tag_scraping_job_items claimable
+				WHERE claimable.job_id = tag_scraping_jobs.id AND claimable.status = 'PENDING'
+			) OR NOT EXISTS (
+				SELECT 1 FROM tag_scraping_job_items active
+				WHERE active.job_id = tag_scraping_jobs.id AND active.status IN ('PENDING', 'RUNNING')
+			)
 		  )
 		ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1`))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -738,10 +743,17 @@ func (repository *Repository) ClaimBatchItem(
 		WHERE job_id = $1 AND status = 'PENDING'
 		ORDER BY position FOR UPDATE SKIP LOCKED LIMIT 1`, job.ID))
 	if errors.Is(err, pgx.ErrNoRows) {
+		jobFinished, reconcileErr := repository.reconcileBatchTx(ctx, tx, job.ID)
+		if reconcileErr != nil {
+			return ClaimResult{}, fmt.Errorf("reconcile empty tag scraping batch: %w", reconcileErr)
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return ClaimResult{}, fmt.Errorf("commit empty tag scraping claim: %w", err)
 		}
-		return ClaimResult{FinishJobID: job.ID, FinishedJobIDs: finishedJobIDs}, nil
+		if jobFinished {
+			finishedJobIDs = append(finishedJobIDs, job.ID)
+		}
+		return ClaimResult{FinishedJobIDs: finishedJobIDs}, nil
 	}
 	if err != nil {
 		return ClaimResult{}, fmt.Errorf("claim tag scraping item: %w", err)
