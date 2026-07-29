@@ -275,6 +275,42 @@ func TestBatchItemAppliesFirstReliableCandidate(t *testing.T) {
 	}
 }
 
+func TestBatchItemDependencyWarningFailsTheItem(t *testing.T) {
+	processor := &batchProcessorStub{
+		metadata: metadataFixture(1),
+		matches: []Candidate{{
+			ID: "candidate", Name: "Song", Source: SourceQMusic,
+			TitleScore: floatPointer(2), Score: floatPointer(4),
+		}},
+		applyResult: ApplyResult{Warnings: []string{"Cover application failed: artwork host unavailable"}},
+	}
+	service, err := NewBatchService(BatchServiceDependencies{Store: &storeStub{}, Processor: processor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := "admin"
+	status, candidate, message := service.executeItem(context.Background(), ClaimedBatchItem{
+		Job: BatchJobRecord{ID: "job", RequestedBy: &actor, Options: BatchOptions{
+			Sources: []Source{SourceQMusic}, MatchMode: MatchStrict,
+			Fields: ApplyFields{Title: true}, Verbatim: true, Reason: "dependency failure",
+		}},
+		Item: BatchItemRecord{ID: "item", TrackID: "track", ExpectedVersion: 1},
+	}, nilAtomicBool())
+	if status != ItemFailed || candidate != nil || message == "" {
+		t.Fatalf("item result = %s/%#v/%q", status, candidate, message)
+	}
+}
+
+func TestBatchCancellationReturnsCancelledItemStatus(t *testing.T) {
+	service, _ := NewBatchService(BatchServiceDependencies{Store: &storeStub{}, Processor: &batchProcessorStub{}})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	status, candidate, message := service.itemErrorStatus(ctx, context.Canceled, nilAtomicBool())
+	if status != ItemCancelled || candidate != nil || message != "The batch was cancelled" {
+		t.Fatalf("item result = %s/%#v/%q", status, candidate, message)
+	}
+}
+
 func TestBatchItemSkipsWhenMissingFieldConditionDoesNotMatch(t *testing.T) {
 	metadata := metadataFixture(1)
 	metadata.Effective.Lyrics = &MetadataLyrics{Content: "present", Format: "PLAIN", Language: "und", Timing: "LINE"}
@@ -550,7 +586,7 @@ func TestSeparateBatchInstancesObservePersistentCancellationAfterSearch(t *testi
 		t.Fatal(err)
 	}
 	close(processor.release)
-	if status := waitForStatus(t, store.completed); status != ItemSkipped {
+	if status := waitForStatus(t, store.completed); status != ItemCancelled {
 		t.Fatalf("completed status = %s", status)
 	}
 	if processor.applyCalls.Load() != 0 {
@@ -578,7 +614,7 @@ func TestSeparateBatchInstancesCancelActiveSearchDuringLeaseRenewal(t *testing.T
 	if _, err := api.Cancel(context.Background(), claim.Job.ID); err != nil {
 		t.Fatal(err)
 	}
-	if status := waitForStatus(t, store.completed); status != ItemSkipped {
+	if status := waitForStatus(t, store.completed); status != ItemCancelled {
 		t.Fatalf("completed status = %s", status)
 	}
 	if processor.applyCalls.Load() != 0 || store.renewCalls.Load() == 0 {

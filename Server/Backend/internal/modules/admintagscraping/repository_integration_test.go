@@ -353,7 +353,7 @@ func TestProductionBatchCancellationAcrossServiceInstances(t *testing.T) {
 	close(processor.release)
 	waitForSignal(t, processed, "production batch item did not stop after cancellation")
 	job, items, err := repository.Batch(ctx, jobID, nil)
-	if err != nil || len(items) != 1 || items[0].Status != ItemSkipped || processor.applyCalls.Load() != 0 {
+	if err != nil || len(items) != 1 || items[0].Status != ItemCancelled || processor.applyCalls.Load() != 0 {
 		t.Fatalf("job/items/apply=%+v/%+v/%d error=%v", job, items, processor.applyCalls.Load(), err)
 	}
 	finished, err := repository.FinishBatch(ctx, jobID, time.Now().UTC())
@@ -550,7 +550,7 @@ func TestProductionBatchAttemptFenceAndCancelledCompletion(t *testing.T) {
 	}
 	cancelledJob, cancelledItems, err := repository.Batch(ctx, cancelledJobID, nil)
 	if err != nil || cancelledJob.Processed != 1 || cancelledJob.Succeeded != 0 || cancelledJob.Failed != 0 ||
-		len(cancelledItems) != 1 || cancelledItems[0].Status != ItemSkipped || cancelledItems[0].Candidate != nil ||
+		len(cancelledItems) != 1 || cancelledItems[0].Status != ItemCancelled || cancelledItems[0].Candidate != nil ||
 		cancelledItems[0].Source != nil || pointerValue(cancelledItems[0].Message) != "The batch was cancelled" {
 		t.Fatalf("cancelled completion job=%+v items=%+v error=%v", cancelledJob, cancelledItems, err)
 	}

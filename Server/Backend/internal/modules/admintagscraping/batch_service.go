@@ -15,11 +15,12 @@ import (
 )
 
 const (
-	defaultBatchLease     = 120 * time.Second
-	defaultBatchHeartbeat = 30 * time.Second
-	defaultBatchIdlePoll  = 5 * time.Second
-	defaultBatchWorkPoll  = 250 * time.Millisecond
-	defaultBatchWorkers   = 64
+	defaultBatchLease            = 120 * time.Second
+	defaultBatchHeartbeat        = 30 * time.Second
+	defaultBatchIdlePoll         = 5 * time.Second
+	defaultBatchWorkPoll         = 250 * time.Millisecond
+	defaultBatchWorkers          = 64
+	maximumBatchRecoveryAttempts = 3
 )
 
 var defaultBatchChannelConcurrency = map[Source]int{
@@ -84,7 +85,43 @@ type BatchService struct {
 }
 
 type activeBatchItem struct {
-	cancel context.CancelFunc
+	cancel     context.CancelFunc
+	cancelling func()
+}
+
+type batchProgress struct {
+	mu           sync.Mutex
+	stage        ItemStage
+	message      string
+	retryCount   int
+	retryAfterAt *time.Time
+}
+
+func newBatchProgress() *batchProgress {
+	return &batchProgress{stage: StageSearchCandidates}
+}
+
+func (progress *batchProgress) set(stage ItemStage, message string, retryCount int, retryAfterAt *time.Time) {
+	progress.mu.Lock()
+	defer progress.mu.Unlock()
+	if retryCount == 0 && progress.retryCount > 0 {
+		retryCount = progress.retryCount
+	}
+	progress.stage = stage
+	progress.message = message
+	progress.retryCount = max(0, retryCount)
+	progress.retryAfterAt = retryAfterAt
+}
+
+func (progress *batchProgress) snapshot() (ItemStage, string, int, *time.Time) {
+	progress.mu.Lock()
+	defer progress.mu.Unlock()
+	var retryAfterAt *time.Time
+	if progress.retryAfterAt != nil {
+		value := *progress.retryAfterAt
+		retryAfterAt = &value
+	}
+	return progress.stage, progress.message, progress.retryCount, retryAfterAt
 }
 
 var _ BatchAPI = (*BatchService)(nil)
@@ -336,10 +373,45 @@ func (service *BatchService) processNext(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
+func (service *BatchService) updateBatchProgress(
+	ctx context.Context,
+	claim ClaimedBatchItem,
+	progress *batchProgress,
+	stage ItemStage,
+	message string,
+	retryCount int,
+	retryAfterAt *time.Time,
+) {
+	progress.set(stage, message, retryCount, retryAfterAt)
+	updater, ok := service.store.(interface {
+		UpdateBatchItemProgress(context.Context, string, string, string, ItemStage, string, int, *time.Time, time.Time) error
+	})
+	if !ok {
+		return
+	}
+	if err := updater.UpdateBatchItemProgress(
+		ctx, claim.Item.ID, claim.AttemptID, service.workerID,
+		stage, message, retryCount, retryAfterAt, service.now().UTC(),
+	); err != nil && !errors.Is(err, ErrBatchLeaseLost) {
+		service.logger.Warn("tag_scraping.batch.progress_update_failed", map[string]any{
+			"jobId": claim.Job.ID, "itemId": claim.Item.ID, "stage": stage,
+			"message": messageOf(err),
+		})
+	}
+}
+
 func (service *BatchService) processItem(workerContext context.Context, claim ClaimedBatchItem) {
 	startedAt := time.Now()
 	itemContext, cancel := context.WithCancel(workerContext)
-	activeItem := service.setActive(claim.Job.ID, cancel)
+	progress := newBatchProgress()
+	itemContext = withBatchProgressReporter(itemContext, func(stage ItemStage, message string, retryCount int, retryAfterAt *time.Time) {
+		service.updateBatchProgress(itemContext, claim, progress, stage, message, retryCount, retryAfterAt)
+	})
+	activeItem := service.setActiveWithCancellation(claim.Job.ID, cancel, func() {
+		_, _, retryCount, _ := progress.snapshot()
+		service.updateBatchProgress(itemContext, claim, progress, StageCancelling,
+			"正在取消，等待当前操作和封面上传清理完成", retryCount, nil)
+	})
 	defer func() {
 		cancel()
 		service.clearActive(claim.Job.ID, activeItem)
@@ -383,10 +455,13 @@ func (service *BatchService) processItem(workerContext context.Context, claim Cl
 					return
 				}
 				if control.CancelRequested {
+					service.updateBatchProgress(itemContext, claim, progress, StageCancelling, "The batch is cancelling; waiting for the current operation to stop", 0, nil)
 					cancelRequested.Store(true)
 					cancel()
 					return
 				}
+				stage, message, retryCount, retryAfterAt := progress.snapshot()
+				service.updateBatchProgress(itemContext, claim, progress, stage, message, retryCount, retryAfterAt)
 			}
 		}
 	}()
@@ -414,7 +489,11 @@ func (service *BatchService) processItem(workerContext context.Context, claim Cl
 		return
 	}
 	if cancelRequested.Load() {
-		status, candidate, message = ItemSkipped, nil, "The batch was cancelled"
+		status, candidate, message = ItemCancelled, nil, "The batch was cancelled"
+	}
+	if requested, err := service.store.BatchCancelRequested(context.WithoutCancel(itemContext), claim.Job.ID); err == nil && requested {
+		status, candidate, message = ItemCancelled, nil, "The batch was cancelled"
+		cancelRequested.Store(true)
 	}
 	completed, err := service.store.CompleteBatchItem(
 		context.WithoutCancel(itemContext), claim.Job.ID, claim.Item.ID, claim.AttemptID,
@@ -457,6 +536,7 @@ func (service *BatchService) executeItem(
 	if err := service.ensureBatchActive(ctx, claim.Job.ID); err != nil {
 		return service.itemErrorStatus(ctx, err, ownershipLost)
 	}
+	reportBatchProgress(ctx, StageSearchCandidates, "正在读取曲目并准备联合搜索", claim.Item.RetryCount, nil)
 	metadata, err := service.processor.TrackMetadata(ctx, claim.Item.TrackID)
 	if err != nil {
 		return service.itemErrorStatus(ctx, err, ownershipLost)
@@ -473,9 +553,19 @@ func (service *BatchService) executeItem(
 	query := SearchInput{Title: &metadata.Effective.Title, Verbatim: claim.Job.Options.Verbatim}
 	artistNames := make([]string, 0, len(metadata.Effective.Credits))
 	for _, credit := range metadata.Effective.Credits {
-		artistNames = append(artistNames, credit.Name)
+		if credit.Role == "PRIMARY" {
+			artistNames = append(artistNames, credit.Name)
+		}
 	}
-	artist := strings.Join(artistNames, ",")
+	if len(artistNames) == 0 {
+		for _, credit := range metadata.Effective.Credits {
+			artistNames = append(artistNames, credit.Name)
+		}
+	}
+	artist := ""
+	if len(artistNames) > 0 {
+		artist = artistNames[0]
+	}
 	query.Artist = &artist
 	if metadata.Effective.Album != nil {
 		query.Album = metadata.Effective.Album
@@ -486,30 +576,44 @@ func (service *BatchService) executeItem(
 	var selected *Candidate
 	sourceErrors := make([]string, 0)
 	successfulSources := 0
+	retryCount := claim.Item.RetryCount
 	for _, source := range claim.Job.Options.Sources {
 		if ctx.Err() != nil || ownershipLost.Load() {
-			return ItemSkipped, nil, "The batch was cancelled"
+			return ItemCancelled, nil, "The batch was cancelled"
 		}
 		if err := service.ensureBatchActive(ctx, claim.Job.ID); err != nil {
 			return service.itemErrorStatus(ctx, err, ownershipLost)
 		}
 		query.Source = source
+		reportBatchProgress(ctx, StageWaitingRateLimit, fmt.Sprintf("%s 音乐限流，等待平台许可", source), retryCount, nil)
 		releaseChannel, acquireErr := service.acquireChannel(ctx, claim.Job.ID, source, claim.Job.Options.ChannelConcurrency[source])
 		if acquireErr != nil {
 			return service.itemErrorStatus(ctx, acquireErr, ownershipLost)
 		}
+		reportBatchProgress(ctx, StageSearchCandidates, fmt.Sprintf("正在搜索 %s 候选", source), retryCount, nil)
 		matches, searchErr := service.processor.Search(ctx, query)
 		releaseChannel()
 		if err := service.ensureBatchActive(ctx, claim.Job.ID); err != nil {
 			return service.itemErrorStatus(ctx, err, ownershipLost)
 		}
 		if searchErr != nil {
+			if retryable, retryAfter := transientArtistArtworkBatchError(searchErr); retryable {
+				if retryAfter <= 0 {
+					retryAfter = time.Second
+				}
+				retryCount++
+				recoveryAt := service.now().UTC().Add(retryAfter)
+				reportBatchProgress(ctx, StageRetryWaiting, fmt.Sprintf("%s 请求失败，%s 后重试或切换来源", source, retryAfter.Round(time.Second)), retryCount, &recoveryAt)
+				if sleepErr := sleepContext(ctx, retryAfter); sleepErr != nil {
+					return service.itemErrorStatus(ctx, sleepErr, ownershipLost)
+				}
+			}
 			sourceErrors = append(sourceErrors, string(source)+": "+messageOf(searchErr))
 			continue
 		}
 		successfulSources++
 		for index := range matches {
-			if reliableTagMatch(matches[index], claim.Job.Options.MatchMode) {
+			if reliableTagMatch(query, matches[index], claim.Job.Options.MatchMode) {
 				match := matches[index]
 				selected = &match
 				break
@@ -532,12 +636,14 @@ func (service *BatchService) executeItem(
 	if err := service.ensureBatchActive(ctx, claim.Job.ID); err != nil {
 		return service.itemErrorStatus(ctx, err, ownershipLost)
 	}
+	reportBatchProgress(ctx, StageWaitingRateLimit, fmt.Sprintf("%s 音乐限流，等待平台许可", selected.Source), retryCount, nil)
 	releaseChannel, acquireErr := service.acquireChannel(
 		ctx, claim.Job.ID, selected.Source, claim.Job.Options.ChannelConcurrency[selected.Source],
 	)
 	if acquireErr != nil {
 		return service.itemErrorStatus(ctx, acquireErr, ownershipLost)
 	}
+	reportBatchProgress(ctx, StageUpdateMetadata, "正在更新元数据", retryCount, nil)
 	applyContext := withBatchChannelLease(ctx, selected.Source, func(channelContext context.Context, source Source) (func(), error) {
 		return service.acquireChannel(channelContext, claim.Job.ID, source, claim.Job.Options.ChannelConcurrency[source])
 	})
@@ -560,7 +666,19 @@ func (service *BatchService) executeItem(
 	if message == "" {
 		message = "Scraping completed"
 	}
+	if applyResultHasDependencyFailure(result) {
+		return ItemFailed, nil, message
+	}
 	return ItemSucceeded, selected, message
+}
+
+func applyResultHasDependencyFailure(result ApplyResult) bool {
+	for _, warning := range result.Warnings {
+		if strings.HasPrefix(warning, "Lyrics retrieval failed:") || strings.HasPrefix(warning, "Cover application failed:") {
+			return true
+		}
+	}
+	return false
 }
 
 func (service *BatchService) itemErrorStatus(
@@ -575,7 +693,7 @@ func (service *BatchService) itemErrorStatus(
 		return ItemSkipped, nil, "The batch item lease was lost"
 	}
 	if ctx.Err() != nil || errors.Is(err, errBatchCancellationRequested) {
-		return ItemSkipped, nil, "The batch was cancelled"
+		return ItemCancelled, nil, "The batch was cancelled"
 	}
 	if isArchivedTrackError(err) {
 		return ItemSkipped, nil, archivedBatchItemMessage
@@ -605,7 +723,11 @@ func (service *BatchService) signal() {
 }
 
 func (service *BatchService) setActive(jobID string, cancel context.CancelFunc) *activeBatchItem {
-	item := &activeBatchItem{cancel: cancel}
+	return service.setActiveWithCancellation(jobID, cancel, nil)
+}
+
+func (service *BatchService) setActiveWithCancellation(jobID string, cancel context.CancelFunc, cancelling func()) *activeBatchItem {
+	item := &activeBatchItem{cancel: cancel, cancelling: cancelling}
 	service.activeMu.Lock()
 	service.active[jobID] = append(service.active[jobID], item)
 	service.activeMu.Unlock()
@@ -635,6 +757,9 @@ func (service *BatchService) cancelJob(jobID string) {
 	active := append([]*activeBatchItem(nil), service.active[jobID]...)
 	service.activeMu.Unlock()
 	for _, item := range active {
+		if item.cancelling != nil {
+			item.cancelling()
+		}
 		item.cancel()
 	}
 }
@@ -893,11 +1018,24 @@ func onlyQQMusicSource(sources []Source) bool {
 }
 
 func presentBatch(job BatchJobRecord, items []BatchItemRecord, partial bool) BatchJobDTO {
-	skipped := max(0, job.Processed-job.Succeeded-job.Failed)
+	skipped := 0
+	cancelled := 0
+	if partial {
+		skipped = max(0, job.Processed-job.Succeeded-job.Failed)
+	} else {
+		for _, item := range items {
+			switch item.Status {
+			case ItemSkipped:
+				skipped++
+			case ItemCancelled:
+				cancelled++
+			}
+		}
+	}
 	result := BatchJobDTO{
 		ID: job.ID, RequestedBy: job.RequestedBy, Options: job.Options, Status: job.Status,
 		Total: job.Total, Processed: job.Processed, Succeeded: job.Succeeded, Failed: job.Failed,
-		Skipped:         skipped,
+		Skipped: skipped, Cancelled: cancelled,
 		CancelRequested: job.CancelRequested, StartedAt: optionalTimestamp(job.StartedAt),
 		CompletedAt: optionalTimestamp(job.CompletedAt), CreatedAt: formatTimestamp(job.CreatedAt),
 		UpdatedAt: formatTimestamp(job.UpdatedAt), Unsuccessful: max(0, job.Processed-job.Succeeded),
@@ -906,7 +1044,10 @@ func presentBatch(job BatchJobRecord, items []BatchItemRecord, partial bool) Bat
 	for _, item := range items {
 		result.Items = append(result.Items, BatchItemDTO{
 			ID: item.ID, JobID: item.JobID, TrackID: item.TrackID, ExpectedVersion: item.ExpectedVersion,
-			Position: item.Position, Status: item.Status, Candidate: item.Candidate, Source: item.Source,
+			Position: item.Position, Status: item.Status, Stage: item.Stage,
+			HeartbeatAt: optionalTimestamp(item.HeartbeatAt), RetryCount: item.RetryCount,
+			RetryAfterAt: optionalTimestamp(item.RetryAfterAt), RecoveryCount: item.RecoveryCount,
+			Candidate: item.Candidate, Source: item.Source,
 			Message: item.Message, CreatedAt: formatTimestamp(item.CreatedAt), UpdatedAt: formatTimestamp(item.UpdatedAt),
 			StartedAt: optionalTimestamp(item.StartedAt), CompletedAt: optionalTimestamp(item.CompletedAt),
 		})

@@ -164,6 +164,51 @@ func TestSearchFallsBackToTitleWhenQueryIsAbsent(t *testing.T) {
 	}
 }
 
+func TestSearchCombinesTitleAndPrimaryArtistForProviderQuery(t *testing.T) {
+	music := &musicStub{searchResults: map[Source][]Candidate{
+		SourceQMusic: {{ID: "combined", Name: "Track Title", Artist: "Artist", Source: SourceQMusic}},
+	}}
+	service, err := NewService(ServiceDependencies{
+		Store: &storeStub{}, Music: music, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	title, artist := "Track Title", "Artist, Featured"
+	if _, err := service.Search(context.Background(), SearchInput{
+		Source: SourceQMusic, Title: &title, Artist: &artist,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if queries := music.searchCallQueries(); !reflect.DeepEqual(queries, []string{"Track Title Artist"}) {
+		t.Fatalf("provider query = %#v", queries)
+	}
+}
+
+func TestReliableTagMatchRejectsAlbumAndVersionMixing(t *testing.T) {
+	title, artist, album := "Song", "Artist", "Album"
+	query := SearchInput{Title: &title, Artist: &artist, Album: &album}
+	tests := []struct {
+		name      string
+		candidate Candidate
+		want      bool
+	}{
+		{name: "exact", candidate: Candidate{Name: "Song", Artist: "Artist", Album: "Album"}, want: true},
+		{name: "live", candidate: Candidate{Name: "Song (Live)", Artist: "Artist", Album: "Album"}},
+		{name: "remix", candidate: Candidate{Name: "Song Remix", Artist: "Artist", Album: "Album"}},
+		{name: "cover", candidate: Candidate{Name: "Song Cover", Artist: "Artist", Album: "Album"}},
+		{name: "album mismatch", candidate: Candidate{Name: "Song", Artist: "Artist", Album: "Other"}},
+		{name: "artist mismatch", candidate: Candidate{Name: "Song", Artist: "Other", Album: "Album"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := reliableTagMatch(query, test.candidate, MatchStrict); got != test.want {
+				t.Fatalf("match = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestCandidateDetailsReturnsCandidateAndClassifiesLyrics(t *testing.T) {
 	lyricFailure := errors.New("lyrics unavailable")
 	candidate := Candidate{
