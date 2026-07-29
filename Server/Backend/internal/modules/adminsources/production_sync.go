@@ -303,26 +303,32 @@ func (synchronizer *ProductionSynchronizer) syncStandardFile(
 		return assetReusable, checkErr
 	}
 	if unchanged && existing.Status == SourceFileReady && existing.SourceAssetID != nil {
-		externalLyrics, err := synchronizer.sourceHasExternalLyrics(ctx, existing.ID)
+		reusable, err := checkReadyAsset()
 		if err != nil {
 			return localSourceRecord{}, err
 		}
-		sidecars, err := sidecarLyricsForFile(file)
-		if err != nil {
-			return localSourceRecord{}, err
-		}
-		if len(sidecars) > 0 || externalLyrics {
-			if err := synchronizer.syncUnchangedSidecars(ctx, existing, sidecars, seenAt); err != nil {
+		if reusable {
+			externalLyrics, err := synchronizer.sourceHasExternalLyrics(ctx, existing.ID)
+			if err != nil {
 				return localSourceRecord{}, err
 			}
+			sidecars, err := sidecarLyricsForFile(file)
+			if err != nil {
+				return localSourceRecord{}, err
+			}
+			if len(sidecars) > 0 || externalLyrics {
+				if err := synchronizer.syncUnchangedSidecars(ctx, existing, sidecars, seenAt); err != nil {
+					return localSourceRecord{}, err
+				}
+			}
+			if _, err := synchronizer.database.Exec(ctx,
+				`UPDATE local_music_sources SET last_seen_at=$2,updated_at=$3 WHERE id=$1`,
+				existing.ID, seenAt, synchronizer.now()); err != nil {
+				return localSourceRecord{}, fmt.Errorf("touch unchanged local library file: %w", err)
+			}
+			existing.LastSeenAt = seenAt
+			return existing, nil
 		}
-		if _, err := synchronizer.database.Exec(ctx,
-			`UPDATE local_music_sources SET last_seen_at=$2,updated_at=$3 WHERE id=$1`,
-			existing.ID, seenAt, synchronizer.now()); err != nil {
-			return localSourceRecord{}, fmt.Errorf("touch unchanged local library file: %w", err)
-		}
-		existing.LastSeenAt = seenAt
-		return existing, nil
 	}
 	if unchanged && existing.Status == SourceFileProcessing && existing.MediaJobID != nil {
 		var status string

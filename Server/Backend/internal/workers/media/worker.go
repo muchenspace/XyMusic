@@ -122,8 +122,9 @@ func New(options Options) (*Worker, error) {
 	if options.UploadWorkers == 0 {
 		options.UploadWorkers = 2
 	}
-	if options.FFmpegThreads == 0 {
-		options.FFmpegThreads = max(1, runtime.GOMAXPROCS(0)/options.Workers)
+	ffmpegThreadLimit := max(1, runtime.GOMAXPROCS(0)/max(1, options.Workers))
+	if options.FFmpegThreads == 0 || options.FFmpegThreads > ffmpegThreadLimit {
+		options.FFmpegThreads = ffmpegThreadLimit
 	}
 	if options.ProfileVersion == "" {
 		options.ProfileVersion = "v1"
@@ -417,6 +418,10 @@ func (worker *Worker) process(ctx context.Context, job MediaJob) (processErr err
 		if reuseErr != nil {
 			return contextError(ctx, reuseErr)
 		}
+		variants, reuseErr = verifyReusableVariants(ctx, worker.storage, variants)
+		if reuseErr != nil {
+			return contextError(ctx, reuseErr)
+		}
 		for _, variant := range variants {
 			variant.Reused = true
 			reused[variant.Profile.Quality] = variant
@@ -484,6 +489,29 @@ func (worker *Worker) process(ctx context.Context, job MediaJob) (processErr err
 		})
 	}
 	return nil
+}
+
+func verifyReusableVariants(
+	ctx context.Context,
+	verifier ObjectStorage,
+	variants []GeneratedVariant,
+) ([]GeneratedVariant, error) {
+	verified := make([]GeneratedVariant, 0, len(variants))
+	for _, variant := range variants {
+		sizeBytes, checksum, exists, err := verifier.StatObject(ctx, variant.ObjectKey)
+		if err != nil {
+			return nil, fmt.Errorf("verify reusable media variant object: %w", err)
+		}
+		if !exists || sizeBytes != variant.SizeBytes {
+			continue
+		}
+		if variant.ChecksumSHA256 != "" &&
+			(checksum == "" || !strings.EqualFold(checksum, variant.ChecksumSHA256)) {
+			continue
+		}
+		verified = append(verified, variant)
+	}
+	return verified, nil
 }
 
 type plannedVariant struct {

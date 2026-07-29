@@ -171,7 +171,7 @@ func (scanner *FilesystemScanner) Scan(ctx context.Context, input ScanInput) (Sc
 func discoverLibraryFiles(root string, include, exclude []*regexp.Regexp) ([]DiscoveredFile, error) {
 	files := make([]DiscoveredFile, 0)
 	audioPaths := make([]string, 0)
-	sidecarsByDirectory := make(map[string][]string)
+	sidecarsByDirectory := make(map[string]map[string][]string)
 	cueOwned := make(map[string]string)
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
@@ -225,7 +225,16 @@ func discoverLibraryFiles(root string, include, exclude []*regexp.Regexp) ([]Dis
 		}
 		if extension == ".lrc" || extension == ".txt" {
 			directoryKey := normalizePlatformPath(filepath.Dir(path))
-			sidecarsByDirectory[directoryKey] = append(sidecarsByDirectory[directoryKey], path)
+			stem := normalizePlatformPath(strings.TrimSuffix(entry.Name(), extension))
+			byStem := sidecarsByDirectory[directoryKey]
+			if byStem == nil {
+				byStem = make(map[string][]string)
+				sidecarsByDirectory[directoryKey] = byStem
+			}
+			byStem[stem] = append(byStem[stem], path)
+			if separator := strings.LastIndex(stem, "."); separator > 0 {
+				byStem[stem[:separator]] = append(byStem[stem[:separator]], path)
+			}
 		}
 		return nil
 	})
@@ -238,17 +247,27 @@ func discoverLibraryFiles(root string, include, exclude []*regexp.Regexp) ([]Dis
 		}
 		relative := normalizedRelativeLibraryPath(root, path)
 		if matchesPatterns(relative, include, exclude) {
-			files = append(files, DiscoveredFile{AudioPath: path, RelativePath: relativeLibraryPath(root, path), SidecarPaths: append([]string{}, sidecarsByDirectory[normalizePlatformPath(filepath.Dir(path))]...)})
+			files = append(files, DiscoveredFile{AudioPath: path, RelativePath: relativeLibraryPath(root, path), SidecarPaths: sidecarPathsForAudio(sidecarsByDirectory, path)})
 		}
 	}
 	for index := range files {
 		if files[index].AudioPath == "" || files[index].ScanError != nil {
 			continue
 		}
-		files[index].SidecarPaths = append([]string{}, sidecarsByDirectory[normalizePlatformPath(filepath.Dir(files[index].AudioPath))]...)
+		files[index].SidecarPaths = sidecarPathsForAudio(sidecarsByDirectory, files[index].AudioPath)
 	}
 	sort.SliceStable(files, func(i, j int) bool { return files[i].RelativePath < files[j].RelativePath })
 	return files, nil
+}
+
+func sidecarPathsForAudio(index map[string]map[string][]string, audioPath string) []string {
+	directory := index[normalizePlatformPath(filepath.Dir(audioPath))]
+	if directory == nil {
+		return []string{}
+	}
+	stem := normalizePlatformPath(strings.TrimSuffix(filepath.Base(audioPath), filepath.Ext(audioPath)))
+	paths := directory[stem]
+	return append([]string{}, paths...)
 }
 
 func cueReferences(path string) ([]string, error) {

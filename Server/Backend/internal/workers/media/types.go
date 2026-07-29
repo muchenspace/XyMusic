@@ -127,6 +127,7 @@ type DownloadedObject struct {
 type ObjectStorage interface {
 	DownloadToFile(context.Context, string, string, int64) (DownloadedObject, error)
 	UploadFile(context.Context, string, string, string, string) (int64, error)
+	StatObject(context.Context, string) (sizeBytes int64, checksumSHA256 string, exists bool, err error)
 	Delete(context.Context, string) error
 }
 

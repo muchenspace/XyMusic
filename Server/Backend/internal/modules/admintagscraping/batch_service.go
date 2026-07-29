@@ -248,7 +248,7 @@ func (service *BatchService) Job(ctx context.Context, jobID string, updatedAfter
 		return BatchJobDTO{}, err
 	}
 	result := presentBatch(job, items, updatedAfter != nil)
-	result.ChannelStatus = service.channelStatus(job.Options)
+	result.ChannelStatus = service.channelStatus(job.ID, job.Options)
 	return result, nil
 }
 
@@ -531,7 +531,16 @@ func (service *BatchService) executeItem(
 	if err := service.ensureBatchActive(ctx, claim.Job.ID); err != nil {
 		return service.itemErrorStatus(ctx, err, ownershipLost)
 	}
-	result, err := service.processor.Apply(ctx, *claim.Job.RequestedBy, uuid.NewString(), claim.Item.TrackID, ApplyInput{
+	releaseChannel, acquireErr := service.acquireChannel(
+		ctx, claim.Job.ID, selected.Source, claim.Job.Options.ChannelConcurrency[selected.Source],
+	)
+	if acquireErr != nil {
+		return service.itemErrorStatus(ctx, acquireErr, ownershipLost)
+	}
+	applyContext := withBatchChannelLease(ctx, selected.Source, func(channelContext context.Context, source Source) (func(), error) {
+		return service.acquireChannel(channelContext, claim.Job.ID, source, claim.Job.Options.ChannelConcurrency[source])
+	})
+	result, err := service.processor.Apply(applyContext, *claim.Job.RequestedBy, uuid.NewString(), claim.Item.TrackID, ApplyInput{
 		ExpectedVersion: claim.Item.ExpectedVersion,
 		Candidate:       *selected,
 		Verbatim:        claim.Job.Options.Verbatim,
@@ -542,6 +551,7 @@ func (service *BatchService) executeItem(
 			return service.ensureBatchActive(checkContext, claim.Job.ID)
 		},
 	})
+	releaseChannel()
 	if err != nil {
 		return service.itemErrorStatus(ctx, err, ownershipLost)
 	}
@@ -793,7 +803,7 @@ func (service *BatchService) deleteChannelGates(jobID string) {
 	service.channelMu.Unlock()
 }
 
-func (service *BatchService) channelStatus(options BatchOptions) map[Source]BatchChannelStatus {
+func (service *BatchService) channelStatus(jobID string, options BatchOptions) map[Source]BatchChannelStatus {
 	options = normalizeBatchOptions(options)
 	healthProvider, _ := service.processor.(interface {
 		ChannelHealth(Source) ChannelHealth
@@ -801,9 +811,13 @@ func (service *BatchService) channelStatus(options BatchOptions) map[Source]Batc
 	service.channelMu.Lock()
 	defer service.channelMu.Unlock()
 	result := make(map[Source]BatchChannelStatus, len(options.Sources))
+	perJob := service.channelGates[jobID]
 	for _, source := range options.Sources {
 		target := options.ChannelConcurrency[source]
-		actual := service.channelActive[source]
+		actual := 0
+		if gate := perJob[source]; gate != nil {
+			actual = len(gate.semaphore)
+		}
 		state := "READY"
 		if actual > 0 {
 			state = "ACTIVE"

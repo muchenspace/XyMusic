@@ -229,10 +229,24 @@ func (store *PostgresStore) CommitMediaJob(
 		return output.Profile.Quality == "LOSSLESS"
 	})
 	if !hasLossless {
-		if _, err := transaction.Exec(ctx, `DELETE FROM track_variants
-			WHERE track_id=$1 AND quality='LOSSLESS'`, input.Job.TrackID); err != nil {
+		rows, err := transaction.Query(ctx, `DELETE FROM track_variants
+			WHERE track_id=$1 AND quality='LOSSLESS' RETURNING asset_id`, input.Job.TrackID)
+		if err != nil {
 			return nil, fmt.Errorf("remove obsolete lossless variant: %w", err)
 		}
+		for rows.Next() {
+			var assetID string
+			if err := rows.Scan(&assetID); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan obsolete lossless variant: %w", err)
+			}
+			previousAssetIDs = append(previousAssetIDs, assetID)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("iterate obsolete lossless variants: %w", err)
+		}
+		rows.Close()
 	}
 	for _, output := range input.Generated {
 		if output.Reused {

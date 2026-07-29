@@ -152,6 +152,26 @@ function save(): void {
 const SettingField = defineComponent({ inheritAttrs: false, props: { label: { type: String, required: true }, hint: String, locked: Boolean }, setup: (props, { slots, attrs }) => () => h("label", { ...attrs, class: [attrs.class, "block"] }, [h("span", { class: "mb-1.5 flex items-center gap-2" }, [h("span", { class: "text-[13px] font-semibold" }, props.label), props.locked ? h("span", { class: "inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300" }, [h(LockKeyhole, { size: 10 }), "环境变量锁定"]) : null]), slots.default?.(), props.hint ? h("span", { class: "ui-hint block" }, props.hint) : null]) });
 const ToggleSetting = defineComponent({ props: { modelValue: Boolean, label: { type: String, required: true }, detail: { type: String, required: true }, disabled: Boolean }, emits: ["update:modelValue"], setup: (props, { emit }) => () => h("label", { class: "flex items-center justify-between gap-4 rounded-xl border border-[var(--border)] p-4", "aria-disabled": props.disabled }, [h("span", [h("span", { class: "block font-semibold" }, props.label), h("span", { class: "mt-1 block text-xs text-[var(--muted)]" }, props.detail)]), h("button", { type: "button", class: "switch", disabled: props.disabled, role: "switch", "aria-label": props.label, "aria-checked": String(props.modelValue), onClick: () => emit("update:modelValue", !props.modelValue) })]) });
 const SystemItem = defineComponent({ props: { label: { type: String, required: true }, value: { type: String, required: true } }, setup: (props) => () => h("div", { class: "min-w-0 bg-[var(--surface-solid)] p-4" }, [h("dt", { class: "text-xs font-semibold text-[var(--muted)]" }, props.label), h("dd", { class: "mt-1.5 break-all font-mono text-sm font-semibold" }, props.value)]) });
+const pipelineMetrics = computed(() => {
+  const labels: Record<string, string> = { scan: "扫描", scraping: "刮削", transcode: "转码" };
+  return Object.entries(labels).map(([name, label]) => {
+    const metric = systemQuery.data.value?.metrics?.pipelines?.[name];
+    return {
+      label,
+      value: metric
+        ? `${metric.total} 次 / 平均 ${metric.averageLatencyMs} ms / 最近 ${metric.lastLatencyMs} ms / 错误 ${(metric.errorRate * 100).toFixed(2)}%`
+        : "暂无数据",
+    };
+  });
+});
+const cacheMetrics = computed(() => Object.entries(systemQuery.data.value?.metrics?.caches ?? {}).map(([name, metric]) => ({
+  label: `缓存 · ${name}`,
+  value: `${metric.hits} 命中 / ${metric.misses} 未命中 / ${(metric.hitRate * 100).toFixed(2)}%`,
+})));
+const platformMetrics = computed(() => Object.entries(systemQuery.data.value?.metrics?.platforms ?? {}).map(([name, metric]) => ({
+  label: `渠道 · ${name}`,
+  value: `${metric.requests} 请求 / ${metric.errors} 错误 / ${(metric.errorRate * 100).toFixed(2)}%`,
+})));
 </script>
 
 <template>
@@ -194,6 +214,26 @@ const SystemItem = defineComponent({ props: { label: { type: String, required: t
           <div v-else-if="tab === 'access'" key="access" class="space-y-5"><ToggleSetting v-model="form.registration.enabled" label="开放用户注册" detail="关闭时只能由管理员创建账户" :disabled="locked('registration','enabled')" /><div class="grid gap-5 sm:grid-cols-2"><SettingField label="访问令牌 TTL（秒）" :locked="locked('security','accessTokenTtlSeconds')"><input v-model.number="form.security.accessTokenTtlSeconds" class="ui-input" type="number" min="60" max="86400" :disabled="locked('security','accessTokenTtlSeconds')" /></SettingField><SettingField label="刷新令牌 TTL（秒）" :locked="locked('security','refreshTokenTtlSeconds')"><input v-model.number="form.security.refreshTokenTtlSeconds" class="ui-input" type="number" min="3600" max="31536000" :disabled="locked('security','refreshTokenTtlSeconds')" /></SettingField></div><div class="grid gap-5 sm:grid-cols-2"><SettingField label="IPv4 监听 IP" :locked="locked('http','ipv4Host')" hint="修改后下次重启生效。"><input v-model="form.http.ipv4Host" class="ui-input font-mono" :disabled="locked('http','ipv4Host')" /></SettingField><SettingField label="IPv4 监听端口" :locked="locked('http','ipv4Port')" hint="修改后下次重启生效。"><input v-model.number="form.http.ipv4Port" class="ui-input" type="number" min="1" max="65535" :disabled="locked('http','ipv4Port')" /></SettingField><SettingField label="IPv6 监听 IP" :locked="locked('http','ipv6Host')" hint="修改后下次重启生效。"><input v-model="form.http.ipv6Host" class="ui-input font-mono" :disabled="locked('http','ipv6Host')" /></SettingField><SettingField label="IPv6 监听端口" :locked="locked('http','ipv6Port')" hint="修改后下次重启生效。"><input v-model.number="form.http.ipv6Port" class="ui-input" type="number" min="1" max="65535" :disabled="locked('http','ipv6Port')" /></SettingField></div><SettingField label="反向代理 IP（每行一个）" :locked="locked('http','trustedProxyAddresses')" hint="仅用于识别代理传入的真实客户端 IP，不是访问白名单；直接访问服务端时留空。"><textarea v-model="proxies" class="ui-textarea font-mono" :disabled="locked('http','trustedProxyAddresses')" /></SettingField></div>
           <div v-else key="system"><StatePanel v-if="systemQuery.isPending.value" state="loading" compact /><StatePanel v-else-if="systemQuery.isError.value" state="error" compact @retry="systemQuery.refetch()" /><div v-else-if="systemQuery.data.value" class="space-y-5"><dl class="grid gap-px overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--border)] sm:grid-cols-2"><SystemItem label="XyMusic 版本" :value="systemQuery.data.value.applicationVersion" /><SystemItem label="运行时" :value="systemQuery.data.value.runtimeVersion" /><SystemItem label="操作系统" :value="`${systemQuery.data.value.platform} · ${systemQuery.data.value.architecture}`" /><SystemItem label="运行时长" :value="formatDuration(systemQuery.data.value.uptimeSeconds * 1000)" /><SystemItem label="PostgreSQL" :value="systemQuery.data.value.databaseVersion" /><SystemItem label="迁移版本" :value="systemQuery.data.value.migrationVersion" /><SystemItem label="FFmpeg" :value="systemQuery.data.value.ffmpegVersion ?? '未检测到'" /><SystemItem label="Worker" :value="systemQuery.data.value.worker.synchronized ? '运行中 · 配置已同步' : systemQuery.data.value.worker.responsive ? '运行中 · 正在同步配置' : '不可用或未启动'" /><SystemItem label="数据目录" :value="systemQuery.data.value.dataDirectory" /><SystemItem label="配置文件" :value="systemQuery.data.value.configurationFile" /><SystemItem label="配置来源" :value="systemQuery.data.value.configurationSource" /></dl><div><h3 class="mb-3 text-sm font-bold">实时运行指标</h3><dl class="grid gap-px overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--border)] sm:grid-cols-2 xl:grid-cols-4"><SystemItem label="请求总数 / 错误率" :value="systemQuery.data.value.metrics ? `${systemQuery.data.value.metrics.requests.total} / ${(systemQuery.data.value.metrics.requests.errorRate * 100).toFixed(2)}%` : '暂无数据'" /><SystemItem label="平均 / P95 延迟" :value="systemQuery.data.value.metrics ? `${systemQuery.data.value.metrics.requests.averageLatencyMs} / ${systemQuery.data.value.metrics.requests.p95LatencyMs} ms` : '暂无数据'" /><SystemItem label="事件循环延迟" :value="systemQuery.data.value.metrics ? `${systemQuery.data.value.metrics.eventLoop.lagMs} ms` : '暂无数据'" /><SystemItem label="进程内存 RSS" :value="systemQuery.data.value.metrics ? formatBytes(systemQuery.data.value.metrics.memory.rssBytes) : '暂无数据'" /></dl></div><div><h3 class="mb-3 text-sm font-bold">后台队列积压</h3><dl class="grid gap-px overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--border)] sm:grid-cols-3 xl:grid-cols-6"><SystemItem label="总计" :value="String(systemQuery.data.value.queues.total)" /><SystemItem label="转码" :value="String(systemQuery.data.value.queues.media)" /><SystemItem label="扫描" :value="String(systemQuery.data.value.queues.scans)" /><SystemItem label="Tag 写回" :value="String(systemQuery.data.value.queues.writeback)" /><SystemItem label="Tag 抓取" :value="String(systemQuery.data.value.queues.scraping)" /><SystemItem label="清理" :value="String(systemQuery.data.value.queues.cleanup)" /></dl></div></div></div>
           </Transition>
+          <div v-if="tab === 'system' && systemQuery.data.value" class="mt-5 space-y-5">
+            <div>
+              <h3 class="mb-3 text-sm font-bold">流水线性能</h3>
+              <dl class="grid gap-px overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--border)] sm:grid-cols-2 xl:grid-cols-3">
+                <SystemItem v-for="metric in pipelineMetrics" :key="metric.label" :label="metric.label" :value="metric.value" />
+              </dl>
+            </div>
+            <div v-if="cacheMetrics.length">
+              <h3 class="mb-3 text-sm font-bold">缓存命中率</h3>
+              <dl class="grid gap-px overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--border)] sm:grid-cols-2 xl:grid-cols-3">
+                <SystemItem v-for="metric in cacheMetrics" :key="metric.label" :label="metric.label" :value="metric.value" />
+              </dl>
+            </div>
+            <div v-if="platformMetrics.length">
+              <h3 class="mb-3 text-sm font-bold">渠道错误率</h3>
+              <dl class="grid gap-px overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--border)] sm:grid-cols-2 xl:grid-cols-3">
+                <SystemItem v-for="metric in platformMetrics" :key="metric.label" :label="metric.label" :value="metric.value" />
+              </dl>
+            </div>
+          </div>
           <div v-if="['database','storage','media','library'].includes(tab)" class="mt-6 flex items-center gap-3 border-t border-[var(--border)] pt-5"><AppButton :loading="testing" @click="testCurrent"><template #icon><CheckCircle2 :size="15" /></template>{{ tab === 'media' ? '测试 FFmpeg' : '测试当前配置' }}</AppButton><span v-if="testMessage && !actionError" class="text-sm font-semibold text-emerald-600 dark:text-emerald-400">{{ testMessage }}</span></div><p v-if="actionError" class="mt-5 rounded-xl bg-rose-500/10 p-3 text-sm text-[var(--danger)]">{{ actionError }}</p>
         </div></section>
       </div>

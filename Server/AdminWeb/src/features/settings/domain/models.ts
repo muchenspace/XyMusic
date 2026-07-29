@@ -130,6 +130,16 @@ export interface SystemInformation {
     };
     eventLoop: { lagMs: number; maximumLagMs: number };
     memory: { rssBytes: number; heapUsedBytes: number; heapTotalBytes: number; externalBytes: number };
+    pipelines?: Record<string, {
+      total: number;
+      errors: number;
+      errorRate: number;
+      averageLatencyMs: number;
+      maximumLatencyMs: number;
+      lastLatencyMs: number;
+    }>;
+    caches?: Record<string, { hits: number; misses: number; hitRate: number }>;
+    platforms?: Record<string, { requests: number; errors: number; errorRate: number }>;
   } | null;
   queues: {
     media: number;

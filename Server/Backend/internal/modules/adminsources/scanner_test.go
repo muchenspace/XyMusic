@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"testing"
@@ -87,6 +88,40 @@ func TestFilesystemScannerHonorsCancellation(t *testing.T) {
 	}
 	if len(synchronizer.files) != 0 {
 		t.Fatalf("processed files=%d", len(synchronizer.files))
+	}
+}
+
+func TestDiscoverLibraryFilesIndexesOnlyMatchingSidecars(t *testing.T) {
+	root := t.TempDir()
+	paths := []string{
+		"song.flac", "other.flac", "song.lrc", "song.txt", "song.zh.lrc", "song.zh-Hans.lrc",
+		"song.extra.more.lrc", "other.lrc", "unrelated.txt",
+	}
+	for _, name := range paths {
+		path := filepath.Join(root, name)
+		if err := os.WriteFile(path, []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files, err := discoverLibraryFiles(root, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := make(map[string]DiscoveredFile, len(files))
+	for _, file := range files {
+		byName[filepath.Base(file.AudioPath)] = file
+	}
+	got := make([]string, 0, len(byName["song.flac"].SidecarPaths))
+	for _, path := range byName["song.flac"].SidecarPaths {
+		got = append(got, filepath.Base(path))
+	}
+	sort.Strings(got)
+	want := []string{"song.lrc", "song.txt", "song.zh-Hans.lrc", "song.zh.lrc"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("song sidecars = %#v, want %#v", got, want)
+	}
+	if len(byName["other.flac"].SidecarPaths) != 1 || filepath.Base(byName["other.flac"].SidecarPaths[0]) != "other.lrc" {
+		t.Fatalf("other sidecars = %#v", byName["other.flac"].SidecarPaths)
 	}
 }
 

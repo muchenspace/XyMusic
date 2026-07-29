@@ -425,7 +425,7 @@ func TestBatchChannelGateReportsConfiguredTargetAndActualUsage(t *testing.T) {
 	if _, err := service.acquireChannel(checkContext, "job", SourceQMusic, 2); err == nil {
 		t.Fatal("third request exceeded the batch channel limit")
 	}
-	status := service.channelStatus(BatchOptions{
+	status := service.channelStatus("job", BatchOptions{
 		Sources:            []Source{SourceQMusic},
 		ChannelConcurrency: map[Source]int{SourceQMusic: 2},
 	})
@@ -434,7 +434,7 @@ func TestBatchChannelGateReportsConfiguredTargetAndActualUsage(t *testing.T) {
 	}
 	firstRelease()
 	secondRelease()
-	status = service.channelStatus(BatchOptions{
+	status = service.channelStatus("job", BatchOptions{
 		Sources:            []Source{SourceQMusic},
 		ChannelConcurrency: map[Source]int{SourceQMusic: 2},
 	})

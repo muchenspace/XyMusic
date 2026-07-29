@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -86,7 +87,12 @@ func TestWorkerReusesReadyVariantsBySourceChecksumAndProfileVersion(t *testing.T
 	runner := &workerRunnerStub{
 		probe: `{"streams":[{"codec_type":"audio","codec_name":"aac"}],"format":{"duration":"1"}}`,
 	}
-	storage := &workerStorageStub{source: source}
+	storage := &workerStorageStub{
+		source: source,
+		objectStats: map[string]objectStat{
+			"media/variants/track/old/data_saver.m4a": {sizeBytes: 42, checksum: "variant-checksum", exists: true},
+		},
+	}
 	worker := newTestWorker(t, store, storage, runner, Options{ProfileVersion: "v7", FFmpegThreads: 3})
 	worked, err := worker.RunNext(context.Background())
 	if err != nil || !worked {
@@ -102,8 +108,41 @@ func TestWorkerReusesReadyVariantsBySourceChecksumAndProfileVersion(t *testing.T
 		t.Fatalf("uploaded variants = %#v", storage.uploaded)
 	}
 	joined := strings.Join(runner.ffmpegArguments, " ")
-	if !strings.Contains(joined, "-threads 3") || strings.Count(joined, "-map 0:a:0 -vn") != len(profiles)-1 {
+	wantThreads := min(3, max(1, runtime.GOMAXPROCS(0)/2))
+	if !strings.Contains(joined, "-threads "+fmt.Sprint(wantThreads)) || strings.Count(joined, "-map 0:a:0 -vn") != len(profiles)-1 {
 		t.Fatalf("ffmpeg arguments = %s", joined)
+	}
+}
+
+func TestVerifyReusableVariantsDropsMissingOrChangedObjects(t *testing.T) {
+	checksum := "present-checksum"
+	variants := []GeneratedVariant{
+		{ObjectKey: "present", SizeBytes: 10, ChecksumSHA256: checksum},
+		{ObjectKey: "missing", SizeBytes: 10, ChecksumSHA256: checksum},
+		{ObjectKey: "wrong-size", SizeBytes: 10, ChecksumSHA256: checksum},
+		{ObjectKey: "wrong-checksum", SizeBytes: 10, ChecksumSHA256: checksum},
+	}
+	verifier := &workerStorageStub{objectStats: map[string]objectStat{
+		"present":        {sizeBytes: 10, checksum: checksum, exists: true},
+		"wrong-size":     {sizeBytes: 9, checksum: checksum, exists: true},
+		"wrong-checksum": {sizeBytes: 10, checksum: "other-checksum", exists: true},
+	}}
+	verified, err := verifyReusableVariants(context.Background(), verifier, variants)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(verified) != 1 || verified[0].ObjectKey != "present" {
+		t.Fatalf("verified variants = %#v", verified)
+	}
+}
+
+func TestWorkerClampsConfiguredFFmpegThreadsToCPUShare(t *testing.T) {
+	worker := newTestWorker(t, &workerStoreStub{}, &workerStorageStub{}, &workerRunnerStub{}, Options{
+		Workers: 4, FFmpegThreads: 64,
+	})
+	want := max(1, runtime.GOMAXPROCS(0)/4)
+	if worker.ffmpegThreads != want {
+		t.Fatalf("ffmpeg threads = %d, want %d", worker.ffmpegThreads, want)
 	}
 }
 
@@ -484,6 +523,14 @@ type workerStorageStub struct {
 	deleteErr   error
 	uploadErrAt int
 	uploadCalls int
+	objectStats map[string]objectStat
+}
+
+type objectStat struct {
+	sizeBytes int64
+	checksum  string
+	exists    bool
+	err       error
 }
 
 type parallelUploadStorage struct {
@@ -516,6 +563,10 @@ func (storage *parallelUploadStorage) UploadFile(_ context.Context, _ string, pa
 }
 
 func (storage *parallelUploadStorage) Delete(context.Context, string) error { return nil }
+
+func (storage *parallelUploadStorage) StatObject(context.Context, string) (int64, string, bool, error) {
+	return 0, "", false, nil
+}
 
 func (storage *workerStorageStub) DownloadToFile(_ context.Context, _ string, path string, _ int64) (DownloadedObject, error) {
 	if err := os.WriteFile(path, storage.source, 0o600); err != nil {
@@ -550,6 +601,11 @@ func (storage *workerStorageStub) Delete(_ context.Context, key string) error {
 	defer storage.mu.Unlock()
 	storage.deleted = append(storage.deleted, key)
 	return storage.deleteErr
+}
+
+func (storage *workerStorageStub) StatObject(_ context.Context, key string) (int64, string, bool, error) {
+	stat := storage.objectStats[key]
+	return stat.sizeBytes, stat.checksum, stat.exists, stat.err
 }
 
 type workerRunnerStub struct {
