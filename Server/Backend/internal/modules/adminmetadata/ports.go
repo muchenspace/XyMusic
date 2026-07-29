@@ -37,10 +37,6 @@ type WorkerStore interface {
 	FailWriteback(context.Context, string, string, string, error, time.Time) error
 }
 
-type SourceObjectStorage interface {
-	UploadFile(context.Context, string, string, string, string) (int64, error)
-}
-
 type WritebackCommit struct {
 	JobID          string
 	WorkerID       string
@@ -48,10 +44,8 @@ type WritebackCommit struct {
 	OriginalSHA256 string
 	OutputSHA256   string
 	OutputSize     int64
-	OutputModified  time.Time
-	SourceObjectKey string
-	SourceMIMEType  string
-	Metadata        MetadataSnapshot
+	OutputModified time.Time
+	Metadata       MetadataSnapshot
 }
 
 type ProcessResult struct {

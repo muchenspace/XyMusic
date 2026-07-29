@@ -95,32 +95,3 @@ func TestCollectorValidatesOptions(t *testing.T) {
 		t.Fatal("negative sample interval was accepted")
 	}
 }
-
-func TestCollectorTracksPipelineCacheAndPlatformStatistics(t *testing.T) {
-	collector, err := New(Options{SampleLimit: 32, SampleInterval: time.Hour})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer collector.Close()
-	collector.ObservePipeline("scan", 100*time.Millisecond, false)
-	collector.ObservePipeline("scan", 300*time.Millisecond, true)
-	collector.ObserveCache("search", true)
-	collector.ObserveCache("search", false)
-	collector.ObservePlatform("qmusic", false)
-	collector.ObservePlatform("qmusic", true)
-
-	snapshot := collector.Snapshot()
-	pipeline := snapshot.Pipelines["scan"]
-	if pipeline.Total != 2 || pipeline.Errors != 1 || pipeline.ErrorRate != 0.5 ||
-		pipeline.AverageLatencyMS != 200 || pipeline.MaximumLatencyMS != 300 || pipeline.LastLatencyMS != 300 {
-		t.Fatalf("pipeline = %#v", pipeline)
-	}
-	cache := snapshot.Caches["search"]
-	if cache.Hits != 1 || cache.Misses != 1 || cache.HitRate != 0.5 {
-		t.Fatalf("cache = %#v", cache)
-	}
-	platform := snapshot.Platforms["qmusic"]
-	if platform.Requests != 2 || platform.Errors != 1 || platform.ErrorRate != 0.5 {
-		t.Fatalf("platform = %#v", platform)
-	}
-}

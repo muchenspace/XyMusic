@@ -341,18 +341,6 @@ func mergeScraping(current config.Config, input ScrapingInput) (config.Config, e
 		}
 		environment["ACOUSTID_CLIENT"] = value
 	}
-	if input.GlobalConcurrency != nil {
-		if *input.GlobalConcurrency < 1 || *input.GlobalConcurrency > 64 {
-			return config.Config{}, validation("scraping.globalConcurrency must be between 1 and 64")
-		}
-		environment["TAG_SCRAPING_WORKERS"] = strconv.Itoa(*input.GlobalConcurrency)
-	}
-	if input.CoverConcurrency != nil {
-		if *input.CoverConcurrency < 1 || *input.CoverConcurrency > 64 {
-			return config.Config{}, validation("scraping.coverConcurrency must be between 1 and 64")
-		}
-		environment["TAG_COVER_WORKERS"] = strconv.Itoa(*input.CoverConcurrency)
-	}
 	return parseCandidate(environment)
 }
 
@@ -377,8 +365,6 @@ func changedFields(previous, candidate config.Config) []string {
 		{"media.ffprobePath", previous.Media.FFprobePath, candidate.Media.FFprobePath},
 		{"scraping.fpcalcPath", previous.Scraping.FPcalcPath, candidate.Scraping.FPcalcPath},
 		{"scraping.acoustIdClient", previous.Scraping.AcoustIDClient, candidate.Scraping.AcoustIDClient},
-		{"scraping.globalConcurrency", previous.Scraping.BatchWorkers, candidate.Scraping.BatchWorkers},
-		{"scraping.coverConcurrency", previous.Scraping.CoverWorkers, candidate.Scraping.CoverWorkers},
 		{"localLibrary.name", previous.LocalLibrary.Name, candidate.LocalLibrary.Name},
 		{"localLibrary.directory", previous.LocalLibrary.Directory, candidate.LocalLibrary.Directory},
 		{"localLibrary.mode", previous.LocalLibrary.Mode, candidate.LocalLibrary.Mode},

@@ -64,28 +64,6 @@ func (c *Client) Put(ctx context.Context, objectKey string, reader io.Reader, si
 	return nil
 }
 
-func (c *Client) UploadFile(
-	ctx context.Context, objectKey, path, contentType, checksumSHA256 string,
-) (int64, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return 0, fmt.Errorf("open object upload file: %w", err)
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return 0, fmt.Errorf("inspect object upload file: %w", err)
-	}
-	uploaded, err := c.client.PutObject(ctx, c.bucket, objectKey, file, info.Size(), minio.PutObjectOptions{
-		ContentType: contentType, UserMetadata: map[string]string{"sha256": checksumSHA256},
-		SendContentMd5: true, DisableMultipart: true,
-	})
-	if err != nil {
-		return 0, fmt.Errorf("upload object %q: %w", objectKey, err)
-	}
-	return uploaded.Size, nil
-}
-
 func (c *Client) Stat(ctx context.Context, objectKey string) (minio.ObjectInfo, error) {
 	info, err := c.client.StatObject(ctx, c.bucket, objectKey, minio.StatObjectOptions{})
 	if err != nil {

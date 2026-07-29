@@ -22,38 +22,6 @@ func TestBatchPresentationSeparatesSkippedAndKeepsUnsuccessful(t *testing.T) {
 	}
 }
 
-func TestBatchPresentationKeepsCancelledOutOfSkippedOnPartialUpdates(t *testing.T) {
-	now := time.Date(2026, 7, 16, 1, 2, 3, 0, time.UTC)
-	dto := presentBatch(BatchJobRecord{
-		ID: "job", Status: JobCancelled, Total: 3, Processed: 3, Cancelled: 2,
-		CreatedAt: now, UpdatedAt: now,
-	}, nil, true)
-	if dto.Cancelled != 2 || dto.Skipped != 1 || dto.Unsuccessful != 3 {
-		t.Fatalf("partial cancellation summary = %#v", dto)
-	}
-}
-
-func TestBatchJobDoesNotFinishBatchAsPartOfRead(t *testing.T) {
-	now := time.Date(2026, 7, 30, 1, 2, 3, 0, time.UTC)
-	store := &reconcilingBatchStore{storeStub: &storeStub{
-		batchJob: BatchJobRecord{ID: "job", Status: JobRunning, Total: 1, CreatedAt: now, UpdatedAt: now},
-	}}
-	service, err := NewBatchService(BatchServiceDependencies{
-		Store: store, Processor: &batchProcessorStub{}, Clock: func() time.Time { return now },
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	job, err := service.Job(context.Background(), "job", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if store.finishCalls != 0 || job.Status != JobRunning {
-		t.Fatalf("read changed job = %+v, finish calls = %d", job, store.finishCalls)
-	}
-}
-
 func TestCreateBatchRejectsMixedSelectionBeforeCreatingWritebackJob(t *testing.T) {
 	preflightErr := apperror.New(
 		apperror.CodeForbidden,
@@ -307,42 +275,6 @@ func TestBatchItemAppliesFirstReliableCandidate(t *testing.T) {
 	}
 }
 
-func TestBatchItemDependencyWarningFailsTheItem(t *testing.T) {
-	processor := &batchProcessorStub{
-		metadata: metadataFixture(1),
-		matches: []Candidate{{
-			ID: "candidate", Name: "Song", Source: SourceQMusic,
-			TitleScore: floatPointer(2), Score: floatPointer(4),
-		}},
-		applyResult: ApplyResult{Warnings: []string{"Cover application failed: artwork host unavailable"}},
-	}
-	service, err := NewBatchService(BatchServiceDependencies{Store: &storeStub{}, Processor: processor})
-	if err != nil {
-		t.Fatal(err)
-	}
-	actor := "admin"
-	status, candidate, message := service.executeItem(context.Background(), ClaimedBatchItem{
-		Job: BatchJobRecord{ID: "job", RequestedBy: &actor, Options: BatchOptions{
-			Sources: []Source{SourceQMusic}, MatchMode: MatchStrict,
-			Fields: ApplyFields{Title: true}, Verbatim: true, Reason: "dependency failure",
-		}},
-		Item: BatchItemRecord{ID: "item", TrackID: "track", ExpectedVersion: 1},
-	}, nilAtomicBool())
-	if status != ItemFailed || candidate != nil || message == "" {
-		t.Fatalf("item result = %s/%#v/%q", status, candidate, message)
-	}
-}
-
-func TestBatchCancellationReturnsCancelledItemStatus(t *testing.T) {
-	service, _ := NewBatchService(BatchServiceDependencies{Store: &storeStub{}, Processor: &batchProcessorStub{}})
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	status, candidate, message := service.itemErrorStatus(ctx, context.Canceled, nilAtomicBool())
-	if status != ItemCancelled || candidate != nil || message != "The batch was cancelled" {
-		t.Fatalf("item result = %s/%#v/%q", status, candidate, message)
-	}
-}
-
 func TestBatchItemSkipsWhenMissingFieldConditionDoesNotMatch(t *testing.T) {
 	metadata := metadataFixture(1)
 	metadata.Effective.Lyrics = &MetadataLyrics{Content: "present", Format: "PLAIN", Language: "und", Timing: "LINE"}
@@ -450,67 +382,6 @@ func TestBatchLifecycleRecoversLeasesAndCancelInterruptsActiveItem(t *testing.T)
 	}
 }
 
-func TestBatchCancellationRetainsUnfinishedItemsWhenCompletionOrderInterleaves(t *testing.T) {
-	firstContext, firstCancel := context.WithCancel(context.Background())
-	secondContext, secondCancel := context.WithCancel(context.Background())
-	service := &BatchService{active: make(map[string][]*activeBatchItem)}
-	first := service.setActive("job", firstCancel)
-	second := service.setActive("job", secondCancel)
-
-	service.clearActive("job", second)
-	service.cancelJob("job")
-
-	select {
-	case <-firstContext.Done():
-	default:
-		t.Fatal("unfinished batch item was not cancelled")
-	}
-	select {
-	case <-secondContext.Done():
-		t.Fatal("completed batch item remained active")
-	default:
-	}
-	service.clearActive("job", first)
-}
-
-func TestBatchChannelGateReportsConfiguredTargetAndActualUsage(t *testing.T) {
-	service := &BatchService{
-		channelGates:  make(map[string]map[Source]*batchChannelGate),
-		channelGlobal: make(map[Source]*batchChannelGate),
-		channelActive: make(map[Source]int),
-	}
-	firstRelease, err := service.acquireChannel(context.Background(), "job", SourceQMusic, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	secondRelease, err := service.acquireChannel(context.Background(), "job", SourceQMusic, 2)
-	if err != nil {
-		firstRelease()
-		t.Fatal(err)
-	}
-	checkContext, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	if _, err := service.acquireChannel(checkContext, "job", SourceQMusic, 2); err == nil {
-		t.Fatal("third request exceeded the batch channel limit")
-	}
-	status := service.channelStatus("job", BatchOptions{
-		Sources:            []Source{SourceQMusic},
-		ChannelConcurrency: map[Source]int{SourceQMusic: 2},
-	})
-	if status[SourceQMusic].Target != 2 || status[SourceQMusic].Actual != 2 || status[SourceQMusic].State != "ACTIVE" {
-		t.Fatalf("channel status = %#v", status)
-	}
-	firstRelease()
-	secondRelease()
-	status = service.channelStatus("job", BatchOptions{
-		Sources:            []Source{SourceQMusic},
-		ChannelConcurrency: map[Source]int{SourceQMusic: 2},
-	})
-	if status[SourceQMusic].Actual != 0 || status[SourceQMusic].State != "READY" {
-		t.Fatalf("released channel status = %#v", status)
-	}
-}
-
 func TestBatchWorkerLogsPollFailure(t *testing.T) {
 	pollErr := errors.New("claim database unavailable")
 	logger := newBatchLogRecorder()
@@ -577,31 +448,6 @@ func TestBatchWorkerLogsCompletionFailure(t *testing.T) {
 	assertBatchLog(t, entry, "warn", "tag_scraping.batch.complete_failed", batchItemLogFields(claim, completeErr))
 }
 
-func TestBatchWorkerRecoversProcessorPanicAndReleasesChannels(t *testing.T) {
-	logger := newBatchLogRecorder()
-	store := &batchFaultStore{storeStub: &storeStub{}}
-	processor := &batchProcessorStub{metadata: metadataFixture(1), panicOnSearch: true}
-	service, err := NewBatchService(BatchServiceDependencies{
-		Store: store, Processor: processor, Logger: logger, WorkerID: "worker-panic",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	claim := splitCancellationClaim()
-	claim.Job.Options.Sources = []Source{SourceQMusic}
-	service.processItem(context.Background(), claim)
-
-	entry := waitForBatchLog(t, logger)
-	assertBatchLog(t, entry, "error", "tag_scraping.batch.processor_panic", map[string]any{
-		"jobId": claim.Job.ID, "itemId": claim.Item.ID, "attemptId": claim.AttemptID,
-		"workerId": "worker-panic",
-	})
-	status := service.channelStatus(claim.Job.ID, claim.Job.Options)
-	if status[SourceQMusic].Actual != 0 || status[SourceQMusic].Waiting != 0 {
-		t.Fatalf("channel lease leaked after panic: %#v", status[SourceQMusic])
-	}
-}
-
 func TestBatchWorkerLogsReleaseFailure(t *testing.T) {
 	releaseErr := errors.New("release database unavailable")
 	logger := newBatchLogRecorder()
@@ -643,7 +489,7 @@ func TestSeparateBatchInstancesObservePersistentCancellationAfterSearch(t *testi
 		t.Fatal(err)
 	}
 	close(processor.release)
-	if status := waitForStatus(t, store.completed); status != ItemCancelled {
+	if status := waitForStatus(t, store.completed); status != ItemSkipped {
 		t.Fatalf("completed status = %s", status)
 	}
 	if processor.applyCalls.Load() != 0 {
@@ -671,7 +517,7 @@ func TestSeparateBatchInstancesCancelActiveSearchDuringLeaseRenewal(t *testing.T
 	if _, err := api.Cancel(context.Background(), claim.Job.ID); err != nil {
 		t.Fatal(err)
 	}
-	if status := waitForStatus(t, store.completed); status != ItemCancelled {
+	if status := waitForStatus(t, store.completed); status != ItemSkipped {
 		t.Fatalf("completed status = %s", status)
 	}
 	if processor.applyCalls.Load() != 0 || store.renewCalls.Load() == 0 {
@@ -686,7 +532,6 @@ type batchProcessorStub struct {
 	metadataTrackIDs []string
 	matches          []Candidate
 	searchErr        error
-	panicOnSearch    bool
 	searchCalls      int
 	applyResult      ApplyResult
 	applyErr         error
@@ -708,26 +553,13 @@ type batchFaultStore struct {
 	releaseErr  error
 }
 
-type reconcilingBatchStore struct {
-	*storeStub
-	finishCalls int
-}
-
-func (store *reconcilingBatchStore) FinishBatch(context.Context, string, time.Time) (bool, error) {
-	store.finishCalls++
-	store.batchJob.Status = JobCompleted
-	store.batchJob.Processed = store.batchJob.Total
-	store.batchJob.CompletedAt = &store.batchJob.UpdatedAt
-	return true, nil
-}
-
 func (store *batchFaultStore) RenewBatchItemLease(
 	context.Context,
 	string,
 	string,
 	string,
 	string,
-	time.Duration,
+	time.Time,
 ) (BatchLeaseControl, error) {
 	if store.renewErr != nil {
 		return BatchLeaseControl{}, store.renewErr
@@ -745,11 +577,11 @@ func (store *batchFaultStore) CompleteBatchItem(
 	*Candidate,
 	string,
 	time.Time,
-) (BatchCompletionResult, error) {
+) (bool, error) {
 	if store.completeErr != nil {
-		return BatchCompletionResult{}, store.completeErr
+		return false, store.completeErr
 	}
-	return BatchCompletionResult{ItemCompleted: true}, nil
+	return true, nil
 }
 
 func (store *batchFaultStore) ReleaseBatchItem(context.Context, string, string, string, time.Time) error {
@@ -841,7 +673,7 @@ func (store *splitCancellationStore) BatchCancelRequested(context.Context, strin
 	return store.cancelled.Load(), nil
 }
 
-func (store *splitCancellationStore) RenewBatchItemLease(context.Context, string, string, string, string, time.Duration) (BatchLeaseControl, error) {
+func (store *splitCancellationStore) RenewBatchItemLease(context.Context, string, string, string, string, time.Time) (BatchLeaseControl, error) {
 	store.renewCalls.Add(1)
 	return BatchLeaseControl{Owned: true, CancelRequested: store.cancelled.Load()}, nil
 }
@@ -853,9 +685,9 @@ func (store *splitCancellationStore) CompleteBatchItem(
 	_ *Candidate,
 	_ string,
 	_ time.Time,
-) (BatchCompletionResult, error) {
+) (bool, error) {
 	store.completed <- status
-	return BatchCompletionResult{ItemCompleted: true}, nil
+	return true, nil
 }
 
 type blockingBatchProcessor struct {
@@ -939,9 +771,6 @@ func (stub *batchProcessorStub) TrackMetadata(_ context.Context, trackID string)
 }
 func (stub *batchProcessorStub) Search(context.Context, SearchInput) ([]Candidate, error) {
 	stub.searchCalls++
-	if stub.panicOnSearch {
-		panic("search processor panic")
-	}
 	return stub.matches, stub.searchErr
 }
 func (stub *batchProcessorStub) Apply(_ context.Context, _, _, _ string, input ApplyInput) (ApplyResult, error) {

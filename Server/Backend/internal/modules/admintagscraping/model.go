@@ -19,20 +19,6 @@ const (
 
 var searchableSources = []Source{SourceNetease, SourceQMusic, SourceKugou}
 
-type ChannelHealth struct {
-	State               string  `json:"state"`
-	Actual              int     `json:"actual"`
-	RetryAfterSeconds   int     `json:"retryAfterSeconds"`
-	ConsecutiveFailures int     `json:"consecutiveFailures"`
-	ErrorRate           float64 `json:"errorRate"`
-}
-
-type ArtworkHealth struct {
-	Limit   int
-	Actual  int
-	Waiting int
-}
-
 type MatchMode string
 
 const (
@@ -89,14 +75,13 @@ type ApplyFields struct {
 }
 
 type BatchOptions struct {
-	Sources            []Source       `json:"sources"`
-	ChannelConcurrency map[Source]int `json:"channelConcurrency,omitempty"`
-	Verbatim           bool           `json:"verbatim"`
-	MatchMode          MatchMode      `json:"matchMode"`
-	MissingFields      []MissingField `json:"missingFields"`
-	Fields             ApplyFields    `json:"fields"`
-	WriteBack          bool           `json:"writeBack"`
-	Reason             string         `json:"reason"`
+	Sources       []Source       `json:"sources"`
+	Verbatim      bool           `json:"verbatim"`
+	MatchMode     MatchMode      `json:"matchMode"`
+	MissingFields []MissingField `json:"missingFields"`
+	Fields        ApplyFields    `json:"fields"`
+	WriteBack     bool           `json:"writeBack"`
+	Reason        string         `json:"reason"`
 }
 
 type MetadataCredit struct {
@@ -200,17 +185,12 @@ type DownloadedArtwork struct {
 type JobStatus string
 
 const (
-	JobPending    JobStatus = "PENDING"
-	JobRunning    JobStatus = "RUNNING"
-	JobCancelling JobStatus = "CANCELLING"
-	JobCompleted  JobStatus = "COMPLETED"
-	JobCancelled  JobStatus = "CANCELLED"
-	JobFailed     JobStatus = "FAILED"
+	JobPending   JobStatus = "PENDING"
+	JobRunning   JobStatus = "RUNNING"
+	JobCompleted JobStatus = "COMPLETED"
+	JobCancelled JobStatus = "CANCELLED"
+	JobFailed    JobStatus = "FAILED"
 )
-
-func isTerminalJobStatus(status JobStatus) bool {
-	return status == JobCompleted || status == JobCancelled || status == JobFailed
-}
 
 type ItemStatus string
 
@@ -220,24 +200,6 @@ const (
 	ItemSucceeded ItemStatus = "SUCCEEDED"
 	ItemFailed    ItemStatus = "FAILED"
 	ItemSkipped   ItemStatus = "SKIPPED"
-	ItemCancelled ItemStatus = "CANCELLED"
-)
-
-type ItemStage string
-
-const (
-	StageWaitingExecution ItemStage = "WAITING_EXECUTION"
-	StageSearchCandidates ItemStage = "SEARCH_CANDIDATES"
-	StageWaitingRateLimit ItemStage = "WAITING_RATE_LIMIT"
-	StageGetLyrics        ItemStage = "GET_LYRICS"
-	StageUpdateMetadata   ItemStage = "UPDATE_METADATA"
-	StageWaitingCover     ItemStage = "WAITING_COVER_QUEUE"
-	StageDownloadCover    ItemStage = "DOWNLOAD_COVER"
-	StageApplyCover       ItemStage = "APPLY_COVER"
-	StageRetryWaiting     ItemStage = "RETRY_WAITING"
-	StageRecoveryFailed   ItemStage = "RECOVERY_FAILED"
-	StageCancelling       ItemStage = "CANCELLING"
-	StageCancelled        ItemStage = "CANCELLED"
 )
 
 type BatchJobRecord struct {
@@ -249,7 +211,6 @@ type BatchJobRecord struct {
 	Processed       int
 	Succeeded       int
 	Failed          int
-	Cancelled       int
 	CancelRequested bool
 	StartedAt       *time.Time
 	CompletedAt     *time.Time
@@ -264,11 +225,6 @@ type BatchItemRecord struct {
 	ExpectedVersion int
 	Position        int
 	Status          ItemStatus
-	Stage           ItemStage
-	HeartbeatAt     *time.Time
-	RetryCount      int
-	RetryAfterAt    *time.Time
-	RecoveryCount   int
 	AttemptID       *string
 	LockedBy        *string
 	LockedUntil     *time.Time
@@ -288,21 +244,13 @@ type ClaimedBatchItem struct {
 }
 
 type ClaimResult struct {
-	Item           *ClaimedBatchItem
-	FinishJobID    string
-	FinishedJobIDs []string
-}
-
-type BatchCompletionResult struct {
-	ItemCompleted bool
-	JobFinished   bool
+	Item        *ClaimedBatchItem
+	FinishJobID string
 }
 
 type BatchLeaseControl struct {
 	Owned           bool
 	CancelRequested bool
-	LockedUntil     *time.Time
-	HeartbeatAt     *time.Time
 }
 
 type MetadataPatch map[string]any

@@ -808,19 +808,13 @@ func (s *Service) buildConfig(input SetupInput) (config.Config, error) {
 		},
 		Storage: storageValue,
 		Media: config.Media{
-			Mode:           mediaMode,
-			FFmpegPath:     ffmpegConfigured,
-			FFprobePath:    ffprobeConfigured,
-			Workers:        2,
-			UploadWorkers:  2,
-			FFmpegThreads:  0,
-			ProfileVersion: "v1",
+			Mode:        mediaMode,
+			FFmpegPath:  ffmpegConfigured,
+			FFprobePath: ffprobeConfigured,
 		},
 		Scraping: config.Scraping{
 			FPcalcPath:     optionalTrim(input.Media.FPcalcPath),
 			AcoustIDClient: optionalTrim(input.Media.AcoustIDClient),
-			BatchWorkers:   64,
-			CoverWorkers:   8,
 		},
 		LocalLibrary: config.LocalLibrary{
 			Name:                strings.TrimSpace(input.Source.Name),
@@ -831,7 +825,6 @@ func (s *Service) buildConfig(input SetupInput) (config.Config, error) {
 			ScanIntervalMinutes: cloneInt(input.Source.ScanIntervalMinutes),
 			IncludePatterns:     trimmedStrings(input.Source.IncludePatterns),
 			ExcludePatterns:     trimmedStrings(input.Source.ExcludePatterns),
-			ScanWorkers:         8,
 		},
 		Registration: config.Registration{Enabled: *input.Registration.Enabled},
 	}

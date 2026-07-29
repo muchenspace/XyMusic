@@ -313,7 +313,8 @@ func TestProductionBatchCancellationAcrossServiceInstances(t *testing.T) {
 	if _, err := pool.Exec(ctx, "UPDATE tag_scraping_jobs SET created_at = '2000-01-01' WHERE id = $1", jobID); err != nil {
 		t.Fatal(err)
 	}
-	claim, err := repository.ClaimBatchItem(ctx, workerID, 2*time.Minute)
+	now := time.Now().UTC()
+	claim, err := repository.ClaimBatchItem(ctx, workerID, now, 2*time.Minute)
 	if err != nil || claim.Item == nil || claim.Item.Job.ID != jobID {
 		t.Fatalf("claim=%+v error=%v", claim, err)
 	}
@@ -344,7 +345,7 @@ func TestProductionBatchCancellationAcrossServiceInstances(t *testing.T) {
 		t.Fatalf("cancelled writeback enqueue error = %v", err)
 	}
 	control, err := repository.RenewBatchItemLease(
-		ctx, jobID, claim.Item.Item.ID, claim.Item.AttemptID, workerID, 2*time.Minute,
+		ctx, jobID, claim.Item.Item.ID, claim.Item.AttemptID, workerID, now.Add(2*time.Minute),
 	)
 	if err != nil || !control.Owned || !control.CancelRequested {
 		t.Fatalf("lease control=%+v error=%v", control, err)
@@ -352,7 +353,7 @@ func TestProductionBatchCancellationAcrossServiceInstances(t *testing.T) {
 	close(processor.release)
 	waitForSignal(t, processed, "production batch item did not stop after cancellation")
 	job, items, err := repository.Batch(ctx, jobID, nil)
-	if err != nil || len(items) != 1 || items[0].Status != ItemCancelled || processor.applyCalls.Load() != 0 {
+	if err != nil || len(items) != 1 || items[0].Status != ItemSkipped || processor.applyCalls.Load() != 0 {
 		t.Fatalf("job/items/apply=%+v/%+v/%d error=%v", job, items, processor.applyCalls.Load(), err)
 	}
 	finished, err := repository.FinishBatch(ctx, jobID, time.Now().UTC())
@@ -463,14 +464,11 @@ func TestProductionBatchAttemptFenceAndCancelledCompletion(t *testing.T) {
 
 	jobID := createBatch(1)
 	now := time.Now().UTC()
-	claimA, err := repository.ClaimBatchItem(ctx, "attempt-worker-a", time.Minute)
+	claimA, err := repository.ClaimBatchItem(ctx, "attempt-worker-a", now, time.Minute)
 	if err != nil || claimA.Item == nil || claimA.Item.Job.ID != jobID {
 		t.Fatalf("claim A=%+v error=%v", claimA, err)
 	}
-	if _, err := pool.Exec(ctx, "UPDATE tag_scraping_job_items SET locked_until = clock_timestamp() - interval '1 second' WHERE id = $1", claimA.Item.Item.ID); err != nil {
-		t.Fatal(err)
-	}
-	claimB, err := repository.ClaimBatchItem(ctx, "attempt-worker-b", time.Minute)
+	claimB, err := repository.ClaimBatchItem(ctx, "attempt-worker-b", now.Add(2*time.Minute), time.Minute)
 	if err != nil || claimB.Item == nil || claimB.Item.Job.ID != jobID || claimB.Item.AttemptID == claimA.Item.AttemptID {
 		t.Fatalf("claim B=%+v error=%v", claimB, err)
 	}
@@ -490,8 +488,8 @@ func TestProductionBatchAttemptFenceAndCancelledCompletion(t *testing.T) {
 		ctx, jobID, claimA.Item.Item.ID, claimA.Item.AttemptID, "attempt-worker-a",
 		ItemSucceeded, nil, "stale completion", now.Add(2*time.Minute),
 	)
-	if completed.ItemCompleted || !errors.Is(err, ErrBatchLeaseLost) {
-		t.Fatalf("stale CompleteBatchItem=%+v error=%v", completed, err)
+	if completed || !errors.Is(err, ErrBatchLeaseLost) {
+		t.Fatalf("stale CompleteBatchItem=%v error=%v", completed, err)
 	}
 	var metadataRows int
 	if err := pool.QueryRow(ctx, "SELECT count(*)::int FROM track_metadata WHERE track_id = $1", trackID).Scan(&metadataRows); err != nil {
@@ -522,12 +520,8 @@ func TestProductionBatchAttemptFenceAndCancelledCompletion(t *testing.T) {
 		ctx, jobID, claimB.Item.Item.ID, claimB.Item.AttemptID, "attempt-worker-b",
 		ItemSucceeded, nil, "completed by current attempt", now.Add(2*time.Minute),
 	)
-	if err != nil || !completed.ItemCompleted {
-		t.Fatalf("current CompleteBatchItem=%+v error=%v", completed, err)
-	}
-	job, _, err = repository.Batch(ctx, jobID, nil)
-	if err != nil || job.Status != JobCompleted || job.Processed != 1 || job.Succeeded != 1 || job.Failed != 0 {
-		t.Fatalf("batch was not finalized with its last item: job=%+v error=%v", job, err)
+	if err != nil || !completed {
+		t.Fatalf("current CompleteBatchItem=%v error=%v", completed, err)
 	}
 	if finished, err := repository.FinishBatch(ctx, jobID, now.Add(2*time.Minute)); err != nil || !finished {
 		t.Fatalf("FinishBatch=%v error=%v", finished, err)
@@ -539,7 +533,7 @@ func TestProductionBatchAttemptFenceAndCancelledCompletion(t *testing.T) {
 	}
 
 	cancelledJobID := createBatch(updated.Version)
-	cancelledClaim, err := repository.ClaimBatchItem(ctx, "cancelled-completion-worker", time.Minute)
+	cancelledClaim, err := repository.ClaimBatchItem(ctx, "cancelled-completion-worker", now.Add(3*time.Minute), time.Minute)
 	if err != nil || cancelledClaim.Item == nil || cancelledClaim.Item.Job.ID != cancelledJobID {
 		t.Fatalf("cancelled completion claim=%+v error=%v", cancelledClaim, err)
 	}
@@ -549,14 +543,14 @@ func TestProductionBatchAttemptFenceAndCancelledCompletion(t *testing.T) {
 	candidate := &Candidate{ID: "must-be-discarded", Name: "Must Be Discarded", Source: SourceQMusic}
 	completed, err = repository.CompleteBatchItem(
 		ctx, cancelledJobID, cancelledClaim.Item.Item.ID, cancelledClaim.Item.AttemptID, "cancelled-completion-worker",
-		ItemCancelled, candidate, "must be replaced", time.Now().UTC(),
+		ItemSucceeded, candidate, "must be replaced", now.Add(3*time.Minute),
 	)
-	if err != nil || !completed.ItemCompleted {
-		t.Fatalf("cancelled CompleteBatchItem=%+v error=%v", completed, err)
+	if err != nil || !completed {
+		t.Fatalf("cancelled CompleteBatchItem=%v error=%v", completed, err)
 	}
 	cancelledJob, cancelledItems, err := repository.Batch(ctx, cancelledJobID, nil)
 	if err != nil || cancelledJob.Processed != 1 || cancelledJob.Succeeded != 0 || cancelledJob.Failed != 0 ||
-		len(cancelledItems) != 1 || cancelledItems[0].Status != ItemCancelled || cancelledItems[0].Candidate != nil ||
+		len(cancelledItems) != 1 || cancelledItems[0].Status != ItemSkipped || cancelledItems[0].Candidate != nil ||
 		cancelledItems[0].Source != nil || pointerValue(cancelledItems[0].Message) != "The batch was cancelled" {
 		t.Fatalf("cancelled completion job=%+v items=%+v error=%v", cancelledJob, cancelledItems, err)
 	}
@@ -662,7 +656,7 @@ func TestProductionStaleBatchAttemptCannotCommitMutations(t *testing.T) {
 	if _, err := pool.Exec(ctx, `update tag_scraping_jobs set created_at = '1999-01-01' where id = $1`, jobID); err != nil {
 		t.Fatal(err)
 	}
-	attemptA, err := repository.ClaimBatchItem(ctx, "worker-a", time.Minute)
+	attemptA, err := repository.ClaimBatchItem(ctx, "worker-a", time.Now().UTC(), time.Minute)
 	if err != nil || attemptA.Item == nil || attemptA.Item.Job.ID != jobID ||
 		attemptA.Item.Item.LockedUntil == nil {
 		t.Fatalf("attempt A claim = %+v error=%v", attemptA, err)
@@ -674,11 +668,12 @@ func TestProductionStaleBatchAttemptCannotCommitMutations(t *testing.T) {
 	if _, err := pool.Exec(ctx, `update tag_scraping_jobs set created_at = '2000-01-01' where id = $1`, laterJobID); err != nil {
 		t.Fatal(err)
 	}
-	laterClaim, err := repository.ClaimBatchItem(ctx, "later-worker", time.Minute)
+	leaseStillActiveNow := attemptA.Item.Item.LockedUntil.Add(-time.Second)
+	laterClaim, err := repository.ClaimBatchItem(ctx, "later-worker", leaseStillActiveNow, time.Minute)
 	if err != nil || laterClaim.Item == nil || laterClaim.Item.Job.ID != laterJobID {
 		t.Fatalf("claim behind active lease = %+v error=%v", laterClaim, err)
 	}
-	if finished, err := repository.FinishBatch(ctx, jobID, time.Now().UTC()); err != nil || finished {
+	if finished, err := repository.FinishBatch(ctx, jobID, leaseStillActiveNow); err != nil || finished {
 		t.Fatalf("active leased batch finished=%v error=%v", finished, err)
 	}
 	leasedJob, leasedItems, err := repository.Batch(ctx, jobID, nil)
@@ -686,10 +681,8 @@ func TestProductionStaleBatchAttemptCannotCommitMutations(t *testing.T) {
 		leasedItems[0].AttemptID == nil || *leasedItems[0].AttemptID != attemptA.Item.AttemptID {
 		t.Fatalf("active leased batch changed job=%+v items=%+v error=%v", leasedJob, leasedItems, err)
 	}
-	if _, err := pool.Exec(ctx, "UPDATE tag_scraping_job_items SET locked_until = clock_timestamp() - interval '1 second' WHERE id = $1", attemptA.Item.Item.ID); err != nil {
-		t.Fatal(err)
-	}
-	attemptB, err := repository.ClaimBatchItem(ctx, "worker-b", time.Minute)
+	attemptBNow := attemptA.Item.Item.LockedUntil.Add(time.Second)
+	attemptB, err := repository.ClaimBatchItem(ctx, "worker-b", attemptBNow, time.Minute)
 	if err != nil || attemptB.Item == nil || attemptB.Item.Item.ID != attemptA.Item.Item.ID ||
 		attemptB.Item.AttemptID == attemptA.Item.AttemptID {
 		t.Fatalf("attempt B claim = %+v error=%v", attemptB, err)

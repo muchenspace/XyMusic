@@ -99,31 +99,6 @@ func TestMergeSettingsValidatesBoundsAndNullableFields(t *testing.T) {
 	}
 }
 
-func TestMergeScrapingConcurrencyUsesConfiguredBounds(t *testing.T) {
-	current := settingsTestConfig(t)
-	if current.Scraping.BatchWorkers != 64 || current.Scraping.CoverWorkers != 8 {
-		t.Fatalf("scraping defaults = %#v", current.Scraping)
-	}
-	global := 32
-	cover := 16
-	candidate, err := mergeScraping(current, ScrapingInput{GlobalConcurrency: &global, CoverConcurrency: &cover})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if candidate.Scraping.BatchWorkers != global || candidate.Scraping.CoverWorkers != cover {
-		t.Fatalf("scraping concurrency = %#v", candidate.Scraping)
-	}
-	for _, value := range []int{0, 65} {
-		invalid := value
-		if _, err := mergeScraping(current, ScrapingInput{GlobalConcurrency: &invalid}); !apperror.IsCode(err, apperror.CodeValidationError) {
-			t.Fatalf("global concurrency %d error = %v", value, err)
-		}
-		if _, err := mergeScraping(current, ScrapingInput{CoverConcurrency: &invalid}); !apperror.IsCode(err, apperror.CodeValidationError) {
-			t.Fatalf("cover concurrency %d error = %v", value, err)
-		}
-	}
-}
-
 func TestMergeMediaToolsAllowsBlankPathsForSystemPath(t *testing.T) {
 	current := settingsTestConfig(t)
 	empty := ""

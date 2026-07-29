@@ -5,10 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -45,7 +43,7 @@ func TestWorkerProcessesLosslessSegmentAndCommitsFencedVariants(t *testing.T) {
 		t.Fatalf("commit = %#v", store.commit)
 	}
 	for _, output := range store.commit.Generated {
-		wantPrefix := "media/checkpoints/" + store.job.TrackID + "/"
+		wantPrefix := "media/variants/" + store.job.TrackID + "/" + store.job.ID + "/" + attemptID + "/"
 		if !strings.HasPrefix(output.ObjectKey, wantPrefix) || output.SizeBytes == 0 || output.ChecksumSHA256 == "" {
 			t.Fatalf("generated output = %#v", output)
 		}
@@ -66,173 +64,6 @@ func TestWorkerProcessesLosslessSegmentAndCommitsFencedVariants(t *testing.T) {
 	}
 }
 
-func TestWorkerReusesReadyVariantsBySourceChecksumAndProfileVersion(t *testing.T) {
-	attemptID := "attempt"
-	source := []byte("source")
-	digest := sha256.Sum256(source)
-	checksum := hex.EncodeToString(digest[:])
-	profiles := AudioVariantProfiles("aac")
-	store := &workerStoreStub{
-		job: &MediaJob{
-			ID: "job", SourceAssetID: "asset", TrackID: "track", Generation: 1,
-			AttemptID: &attemptID,
-		},
-		source: &SourceAsset{ID: "asset", ObjectKey: "source", SizeBytes: int64(len(source)), ChecksumSHA256: &checksum},
-		reusable: []GeneratedVariant{{
-			Profile: profiles[0], ObjectKey: "media/variants/track/old/data_saver.m4a",
-			ChecksumSHA256: "variant-checksum", SizeBytes: 42,
-			SourceChecksumSHA256: checksum, ProfileVersion: "v7",
-		}},
-	}
-	runner := &workerRunnerStub{
-		probe: `{"streams":[{"codec_type":"audio","codec_name":"aac"}],"format":{"duration":"1"}}`,
-	}
-	storage := &workerStorageStub{
-		source: source,
-		objectStats: map[string]objectStat{
-			"media/variants/track/old/data_saver.m4a": {sizeBytes: 42, checksum: "variant-checksum", exists: true},
-		},
-	}
-	worker := newTestWorker(t, store, storage, runner, Options{ProfileVersion: "v7", FFmpegThreads: 3})
-	worked, err := worker.RunNext(context.Background())
-	if err != nil || !worked {
-		t.Fatalf("worked=%v error=%v", worked, err)
-	}
-	if store.reuseCalls != 1 || store.commit == nil || len(store.commit.Generated) != len(profiles) {
-		t.Fatalf("reuse calls/commit = %d/%#v", store.reuseCalls, store.commit)
-	}
-	if !store.commit.Generated[0].Reused || store.commit.Generated[0].ObjectKey != "media/variants/track/old/data_saver.m4a" {
-		t.Fatalf("reused variant = %#v", store.commit.Generated[0])
-	}
-	if len(storage.uploaded) != len(profiles)-1 {
-		t.Fatalf("uploaded variants = %#v", storage.uploaded)
-	}
-	joined := strings.Join(runner.ffmpegArguments, " ")
-	wantThreads := min(3, max(1, runtime.GOMAXPROCS(0)/2))
-	if !strings.Contains(joined, "-threads "+fmt.Sprint(wantThreads)) || strings.Count(joined, "-map 0:a:0 -vn") != len(profiles)-1 {
-		t.Fatalf("ffmpeg arguments = %s", joined)
-	}
-}
-
-func TestWorkerReusesUploadedCheckpointBeforeRunningFFmpeg(t *testing.T) {
-	attemptID := "attempt"
-	source := []byte("source")
-	digest := sha256.Sum256(source)
-	checksum := hex.EncodeToString(digest[:])
-	profiles := AudioVariantProfiles("aac")
-	checkpointKey := checkpointVariantObjectKey("track", checksum, "v1", mediaRange{StartMS: 0, EndMS: 1_000}, profiles[0])
-	store := &workerStoreStub{
-		job: &MediaJob{ID: "job", SourceAssetID: "asset", TrackID: "track", Generation: 1, AttemptID: &attemptID},
-		source: &SourceAsset{ID: "asset", ObjectKey: "source", SizeBytes: int64(len(source)), ChecksumSHA256: &checksum},
-	}
-	storage := &workerStorageStub{source: source, objectStats: map[string]objectStat{
-		checkpointKey: {sizeBytes: 42, checksum: "checkpoint-checksum", exists: true},
-	}}
-	runner := &workerRunnerStub{
-		probe: `{"streams":[{"codec_type":"audio","codec_name":"aac"}],"format":{"duration":"1"}}`,
-	}
-	worker := newTestWorker(t, store, storage, runner, Options{})
-	worked, err := worker.RunNext(context.Background())
-	if err != nil || !worked {
-		t.Fatalf("worked=%v error=%v", worked, err)
-	}
-	if store.commit == nil || len(store.commit.Generated) != len(profiles) ||
-		store.commit.Generated[0].ObjectKey != checkpointKey || store.commit.Generated[0].Reused {
-		t.Fatalf("checkpoint commit = %#v", store.commit)
-	}
-	if len(storage.uploaded) != len(profiles)-1 || strings.Count(strings.Join(runner.ffmpegArguments, " "), "-map 0:a:0 -vn") != len(profiles)-1 {
-		t.Fatalf("checkpoint reuse uploads=%#v ffmpeg=%v", storage.uploaded, runner.ffmpegArguments)
-	}
-}
-
-func TestVerifyReusableVariantsDropsMissingOrChangedObjects(t *testing.T) {
-	checksum := "present-checksum"
-	variants := []GeneratedVariant{
-		{ObjectKey: "present", SizeBytes: 10, ChecksumSHA256: checksum},
-		{ObjectKey: "missing", SizeBytes: 10, ChecksumSHA256: checksum},
-		{ObjectKey: "wrong-size", SizeBytes: 10, ChecksumSHA256: checksum},
-		{ObjectKey: "wrong-checksum", SizeBytes: 10, ChecksumSHA256: checksum},
-	}
-	verifier := &workerStorageStub{objectStats: map[string]objectStat{
-		"present":        {sizeBytes: 10, checksum: checksum, exists: true},
-		"wrong-size":     {sizeBytes: 9, checksum: checksum, exists: true},
-		"wrong-checksum": {sizeBytes: 10, checksum: "other-checksum", exists: true},
-	}}
-	verified, err := verifyReusableVariants(context.Background(), verifier, variants)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(verified) != 1 || verified[0].ObjectKey != "present" {
-		t.Fatalf("verified variants = %#v", verified)
-	}
-}
-
-func TestWorkerClampsConfiguredFFmpegThreadsToCPUShare(t *testing.T) {
-	worker := newTestWorker(t, &workerStoreStub{}, &workerStorageStub{}, &workerRunnerStub{}, Options{
-		Workers: 4, FFmpegThreads: 64,
-	})
-	want := max(1, runtime.GOMAXPROCS(0)/4)
-	if worker.ffmpegThreads != want {
-		t.Fatalf("ffmpeg threads = %d, want %d", worker.ffmpegThreads, want)
-	}
-}
-
-func TestWorkerDrainWaitsForClaimedJobAndRejectsNewClaims(t *testing.T) {
-	attemptID := "attempt"
-	source := []byte("source")
-	digest := sha256.Sum256(source)
-	checksum := hex.EncodeToString(digest[:])
-	store := &workerStoreStub{
-		job: &MediaJob{ID: "job", SourceAssetID: "asset", TrackID: "track", Generation: 1, AttemptID: &attemptID},
-		source: &SourceAsset{ID: "asset", ObjectKey: "source", SizeBytes: int64(len(source)), ChecksumSHA256: &checksum},
-	}
-	runner := &workerRunnerStub{
-		probe: `{"streams":[{"codec_type":"audio","codec_name":"aac"}],"format":{"duration":"1"}}`,
-		blockFFmpeg: true, ffmpegStarted: make(chan struct{}), releaseFFmpeg: make(chan struct{}),
-	}
-	worker := newTestWorker(t, store, &workerStorageStub{source: source}, runner, Options{})
-	finished := make(chan error, 1)
-	go func() {
-		_, err := worker.RunNext(context.Background())
-		finished <- err
-	}()
-	select {
-	case <-runner.ffmpegStarted:
-	case <-time.After(time.Second):
-		t.Fatal("ffmpeg did not start")
-	}
-	if _, err := worker.RunNext(context.Background()); err != nil && !errors.Is(err, ErrWorkerClosed) {
-		t.Fatalf("claim while draining before drain = %v", err)
-	}
-	drainDone := make(chan error, 1)
-	go func() { drainDone <- worker.Drain(context.Background()) }()
-	select {
-	case err := <-drainDone:
-		t.Fatalf("drain returned before active job finished: %v", err)
-	case <-time.After(20 * time.Millisecond):
-	}
-	if _, err := worker.RunNext(context.Background()); !errors.Is(err, ErrWorkerClosed) {
-		t.Fatalf("claim while draining error = %v", err)
-	}
-	close(runner.releaseFFmpeg)
-	select {
-	case err := <-finished:
-		if err != nil {
-			t.Fatalf("drained job error = %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("drained job did not finish")
-	}
-	select {
-	case err := <-drainDone:
-		if err != nil {
-			t.Fatalf("drain error = %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("drain did not finish")
-	}
-}
-
 func TestWorkerQueuesEveryUploadedObjectWhenCommitIsSuperseded(t *testing.T) {
 	attemptID := "attempt"
 	source := []byte("source")
@@ -250,7 +81,7 @@ func TestWorkerQueuesEveryUploadedObjectWhenCommitIsSuperseded(t *testing.T) {
 	if err != nil || !worked {
 		t.Fatalf("worked=%v error=%v", worked, err)
 	}
-	if len(store.enqueued) != 0 {
+	if len(store.enqueued) != 3 {
 		t.Fatalf("abandoned objects = %#v", store.enqueued)
 	}
 	for _, cleanup := range store.enqueued {
@@ -280,65 +111,9 @@ func TestWorkerQueuesCurrentObjectWhenUploadFailsAfterObjectCreation(t *testing.
 	if err != nil || !worked {
 		t.Fatalf("worked=%v error=%v", worked, err)
 	}
-	if len(store.enqueued) == 0 {
+	if len(store.enqueued) != 1 || !strings.HasSuffix(store.enqueued[0].key, "/data_saver.m4a") ||
+		store.enqueued[0].reason != "ABANDONED_MEDIA_ATTEMPT" {
 		t.Fatalf("abandoned objects = %#v", store.enqueued)
-	}
-	for _, cleanup := range store.enqueued {
-		if !strings.HasPrefix(cleanup.key, "media/checkpoints/track/") ||
-			cleanup.reason != "ABANDONED_MEDIA_ATTEMPT" {
-			t.Fatalf("abandoned object cleanup = %#v", cleanup)
-		}
-	}
-}
-
-func TestUploadVariantsUsesBoundedParallelUploads(t *testing.T) {
-	storage := &parallelUploadStorage{
-		started: make(chan struct{}, 4),
-		release: make(chan struct{}),
-	}
-	worker := &Worker{storage: storage, uploadSemaphore: make(chan struct{}, 2)}
-	directory := t.TempDir()
-	planned := make([]plannedVariant, 0, 4)
-	for index := 0; index < 4; index++ {
-		path := filepath.Join(directory, fmt.Sprintf("variant-%d.m4a", index))
-		if err := os.WriteFile(path, []byte(fmt.Sprintf("variant-%d", index)), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		planned = append(planned, plannedVariant{
-			Profile: AudioVariantProfile{Quality: fmt.Sprintf("Q%d", index), Extension: "m4a", MIMEType: "audio/mp4"},
-			Path:    path, ObjectKey: fmt.Sprintf("variant/%d", index),
-		})
-	}
-	type uploadResult struct {
-		variants []GeneratedVariant
-		err      error
-	}
-	resultChannel := make(chan uploadResult, 1)
-	go func() {
-		variants, _, err := worker.uploadVariants(context.Background(), planned, "source-checksum")
-		resultChannel <- uploadResult{variants: variants, err: err}
-	}()
-	for index := 0; index < 2; index++ {
-		select {
-		case <-storage.started:
-		case <-time.After(time.Second):
-			t.Fatal("upload worker did not start in parallel")
-		}
-	}
-	storage.mu.Lock()
-	maximum := storage.maximumInFlight
-	storage.mu.Unlock()
-	if maximum != 2 {
-		t.Fatalf("maximum upload concurrency = %d, want 2", maximum)
-	}
-	close(storage.release)
-	select {
-	case result := <-resultChannel:
-		if result.err != nil || len(result.variants) != len(planned) {
-			t.Fatalf("upload result = %#v", result)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("parallel uploads did not finish")
 	}
 }
 
@@ -499,9 +274,6 @@ type workerStoreStub struct {
 	failed            error
 	scheduled         []string
 	enqueued          []cleanupEnqueue
-	reusable          []GeneratedVariant
-	reuseCalls        int
-	reuseErr          error
 	cleanupReferenced bool
 	cleanupCompleted  bool
 	cleanupFailed     error
@@ -533,20 +305,6 @@ func (store *workerStoreStub) MediaJobControl(context.Context, string, string, s
 
 func (store *workerStoreStub) FindReadySourceAsset(context.Context, string) (*SourceAsset, error) {
 	return store.source, nil
-}
-
-func (store *workerStoreStub) FindReusableVariants(
-	_ context.Context,
-	_, _, _ string,
-	_ []AudioVariantProfile,
-) ([]GeneratedVariant, error) {
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	store.reuseCalls++
-	if store.reuseErr != nil {
-		return nil, store.reuseErr
-	}
-	return append([]GeneratedVariant(nil), store.reusable...), nil
 }
 
 func (store *workerStoreStub) CommitMediaJob(_ context.Context, input CommitMediaJob) ([]string, error) {
@@ -610,49 +368,6 @@ type workerStorageStub struct {
 	deleteErr   error
 	uploadErrAt int
 	uploadCalls int
-	objectStats map[string]objectStat
-}
-
-type objectStat struct {
-	sizeBytes int64
-	checksum  string
-	exists    bool
-	err       error
-}
-
-type parallelUploadStorage struct {
-	mu              sync.Mutex
-	started         chan struct{}
-	release         chan struct{}
-	inFlight        int
-	maximumInFlight int
-}
-
-func (storage *parallelUploadStorage) DownloadToFile(context.Context, string, string, int64) (DownloadedObject, error) {
-	return DownloadedObject{}, errors.New("not implemented")
-}
-
-func (storage *parallelUploadStorage) UploadFile(_ context.Context, _ string, path, _, _ string) (int64, error) {
-	value, err := os.ReadFile(path)
-	if err != nil {
-		return 0, err
-	}
-	storage.mu.Lock()
-	storage.inFlight++
-	storage.maximumInFlight = max(storage.maximumInFlight, storage.inFlight)
-	storage.mu.Unlock()
-	storage.started <- struct{}{}
-	<-storage.release
-	storage.mu.Lock()
-	storage.inFlight--
-	storage.mu.Unlock()
-	return int64(len(value)), nil
-}
-
-func (storage *parallelUploadStorage) Delete(context.Context, string) error { return nil }
-
-func (storage *parallelUploadStorage) StatObject(context.Context, string) (int64, string, bool, error) {
-	return 0, "", false, nil
 }
 
 func (storage *workerStorageStub) DownloadToFile(_ context.Context, _ string, path string, _ int64) (DownloadedObject, error) {
@@ -690,11 +405,6 @@ func (storage *workerStorageStub) Delete(_ context.Context, key string) error {
 	return storage.deleteErr
 }
 
-func (storage *workerStorageStub) StatObject(_ context.Context, key string) (int64, string, bool, error) {
-	stat := storage.objectStats[key]
-	return stat.sizeBytes, stat.checksum, stat.exists, stat.err
-}
-
 type workerRunnerStub struct {
 	mu                sync.Mutex
 	probe             string
@@ -702,7 +412,6 @@ type workerRunnerStub struct {
 	blockFFmpeg       bool
 	ffmpegStarted     chan struct{}
 	ffmpegStartedOnce sync.Once
-	releaseFFmpeg     chan struct{}
 }
 
 func (runner *workerRunnerStub) Run(ctx context.Context, executable string, arguments []string, _ time.Duration) (ProcessResult, error) {
@@ -716,15 +425,8 @@ func (runner *workerRunnerStub) Run(ctx context.Context, executable string, argu
 		runner.ffmpegStartedOnce.Do(func() { close(runner.ffmpegStarted) })
 	}
 	if runner.blockFFmpeg {
-		if runner.releaseFFmpeg == nil {
-			<-ctx.Done()
-			return ProcessResult{}, context.Cause(ctx)
-		}
-		select {
-		case <-ctx.Done():
-			return ProcessResult{}, context.Cause(ctx)
-		case <-runner.releaseFFmpeg:
-		}
+		<-ctx.Done()
+		return ProcessResult{}, context.Cause(ctx)
 	}
 	for _, argument := range arguments {
 		if filepath.Ext(argument) != ".m4a" && filepath.Ext(argument) != ".flac" {

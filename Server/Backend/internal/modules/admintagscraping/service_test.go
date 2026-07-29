@@ -164,80 +164,6 @@ func TestSearchFallsBackToTitleWhenQueryIsAbsent(t *testing.T) {
 	}
 }
 
-func TestSearchCombinesTitleAndPrimaryArtistForProviderQuery(t *testing.T) {
-	music := &musicStub{searchResults: map[Source][]Candidate{
-		SourceQMusic: {{ID: "combined", Name: "Track Title", Artist: "Artist", Source: SourceQMusic}},
-	}}
-	service, err := NewService(ServiceDependencies{
-		Store: &storeStub{}, Music: music, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	title, artist := "Track Title", "Artist, Featured"
-	if _, err := service.Search(context.Background(), SearchInput{
-		Source: SourceQMusic, Title: &title, Artist: &artist,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if queries := music.searchCallQueries(); !reflect.DeepEqual(queries, []string{"Track Title Artist"}) {
-		t.Fatalf("provider query = %#v", queries)
-	}
-}
-
-func TestReliableTagMatchRejectsAlbumAndVersionMixing(t *testing.T) {
-	title, artist, album := "Song", "Artist", "Album"
-	query := SearchInput{Title: &title, Artist: &artist, Album: &album}
-	tests := []struct {
-		name      string
-		candidate Candidate
-		want      bool
-	}{
-		{name: "exact", candidate: Candidate{Name: "Song", Artist: "Artist", Album: "Album"}, want: true},
-		{name: "live", candidate: Candidate{Name: "Song (Live)", Artist: "Artist", Album: "Album"}},
-		{name: "remix", candidate: Candidate{Name: "Song Remix", Artist: "Artist", Album: "Album"}},
-		{name: "cover", candidate: Candidate{Name: "Song Cover", Artist: "Artist", Album: "Album"}},
-		{name: "album mismatch", candidate: Candidate{Name: "Song", Artist: "Artist", Album: "Other"}},
-		{name: "artist mismatch", candidate: Candidate{Name: "Song", Artist: "Other", Album: "Album"}},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := reliableTagMatch(query, test.candidate, MatchStrict); got != test.want {
-				t.Fatalf("match = %v, want %v", got, test.want)
-			}
-		})
-	}
-}
-
-func TestLyricsFallbackRejectsAlbumAndVersionMixing(t *testing.T) {
-	music := &musicStub{
-		searchResults: map[Source][]Candidate{
-			SourceQMusic: {
-				{ID: "live", Name: "Song Live", Artist: "Artist", Album: "Album"},
-				{ID: "wrong-album", Name: "Song", Artist: "Artist", Album: "Other"},
-			},
-		},
-		lyrics:      "[00:01.00]line",
-		lyricTiming: sharedlyrics.TimingLine,
-		lyricErr:    errors.New("lyrics unavailable"),
-	}
-	service, err := NewService(ServiceDependencies{
-		Store: &storeStub{}, Music: music, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := service.lyrics(context.Background(), Candidate{
-		ID: "netease-song", Name: "Song", Artist: "Artist", Album: "Album", Source: SourceNetease,
-	}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Content != "" || len(music.lyricCalls) != 1 || music.lyricCalls[0].source != SourceNetease {
-		t.Fatalf("unsafe lyric fallback = %#v calls=%#v", result, music.lyricCalls)
-	}
-}
-
 func TestCandidateDetailsReturnsCandidateAndClassifiesLyrics(t *testing.T) {
 	lyricFailure := errors.New("lyrics unavailable")
 	candidate := Candidate{
@@ -730,21 +656,21 @@ func (stub *storeStub) RetryBatch(context.Context, string) error {
 	stub.retryRequests++
 	return stub.retryErr
 }
-func (stub *storeStub) RecoverExpiredBatchItems(context.Context, time.Time) ([]string, error) {
+func (stub *storeStub) RecoverExpiredBatchItems(context.Context, time.Time) error {
 	stub.recoverCalls++
-	return nil, nil
+	return nil
 }
-func (stub *storeStub) ClaimBatchItem(context.Context, string, time.Duration) (ClaimResult, error) {
+func (stub *storeStub) ClaimBatchItem(context.Context, string, time.Time, time.Duration) (ClaimResult, error) {
 	return stub.claim, stub.claimErr
 }
-func (stub *storeStub) RenewBatchItemLease(context.Context, string, string, string, string, time.Duration) (BatchLeaseControl, error) {
+func (stub *storeStub) RenewBatchItemLease(context.Context, string, string, string, string, time.Time) (BatchLeaseControl, error) {
 	return BatchLeaseControl{Owned: true, CancelRequested: stub.cancelled}, nil
 }
 func (stub *storeStub) BatchCancelRequested(context.Context, string) (bool, error) {
 	return stub.cancelled, nil
 }
-func (stub *storeStub) CompleteBatchItem(context.Context, string, string, string, string, ItemStatus, *Candidate, string, time.Time) (BatchCompletionResult, error) {
-	return BatchCompletionResult{ItemCompleted: true}, nil
+func (stub *storeStub) CompleteBatchItem(context.Context, string, string, string, string, ItemStatus, *Candidate, string, time.Time) (bool, error) {
+	return true, nil
 }
 func (stub *storeStub) ReleaseBatchItem(context.Context, string, string, string, time.Time) error {
 	return nil

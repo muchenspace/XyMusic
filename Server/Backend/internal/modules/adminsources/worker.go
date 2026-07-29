@@ -26,7 +26,6 @@ type WorkerOptions struct {
 	Heartbeat     time.Duration
 	ProgressWrite time.Duration
 	Now           func() time.Time
-	Metrics       PerformanceMetrics
 }
 
 type Worker struct {
@@ -39,7 +38,6 @@ type Worker struct {
 	heartbeat     time.Duration
 	progressWrite time.Duration
 	now           func() time.Time
-	metrics       PerformanceMetrics
 }
 
 var _ ScanExecutor = (*Worker)(nil)
@@ -84,7 +82,6 @@ func NewWorker(options WorkerOptions) (*Worker, error) {
 		store: options.Store, scanner: options.Scanner, rootDirectory: filepath.Clean(absolute),
 		defaultRoot: options.DefaultRoot, workerID: options.WorkerID, lease: options.Lease,
 		heartbeat: options.Heartbeat, progressWrite: options.ProgressWrite, now: options.Now,
-		metrics: options.Metrics,
 	}, nil
 }
 
@@ -175,7 +172,6 @@ func (worker *Worker) RunNextScan(ctx context.Context) (bool, error) {
 	}()
 
 	var lastProgress atomic.Int64
-	scanStartedAt := time.Now()
 	result, scanErr := worker.scanner.Scan(ctx, ScanInput{
 		ScanRunID: claim.Run.ID, RootID: claim.Root.ID, Directory: claim.Root.Path,
 		IncludePatterns: cloneStrings(claim.Root.IncludePatterns),
@@ -214,9 +210,6 @@ func (worker *Worker) RunNextScan(ctx context.Context) (bool, error) {
 			return err
 		},
 	})
-	if worker.metrics != nil {
-		worker.metrics.ObservePipeline("scan", time.Since(scanStartedAt), scanErr != nil)
-	}
 
 	finalContext, cancelFinal := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancelFinal()

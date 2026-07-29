@@ -39,10 +39,6 @@ type Scanner interface {
 	Scan(context.Context, ScanInput) (ScanResult, error)
 }
 
-type PerformanceMetrics interface {
-	ObservePipeline(string, time.Duration, bool)
-}
-
 type ScanInput struct {
 	ScanRunID       string
 	RootID          string

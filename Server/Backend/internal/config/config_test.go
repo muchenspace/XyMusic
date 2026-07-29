@@ -41,10 +41,6 @@ func TestDevelopmentDefaultsAreCompatible(t *testing.T) {
 	if cfg.Media.Mode != "ADVANCED" || cfg.Media.FFmpegPath != "ffmpeg" || cfg.Media.FFprobePath != "ffprobe" {
 		t.Fatalf("expected PATH-based media defaults: %#v", cfg.Media)
 	}
-	if cfg.Media.Workers != 2 || cfg.Media.UploadWorkers != 2 || cfg.Media.FFmpegThreads != 0 ||
-		cfg.Media.ProfileVersion != "v1" || cfg.Scraping.BatchWorkers != 64 || cfg.Scraping.CoverWorkers != 8 || cfg.LocalLibrary.ScanWorkers != 8 {
-		t.Fatalf("unexpected performance defaults: media=%#v scraping=%#v local=%#v", cfg.Media, cfg.Scraping, cfg.LocalLibrary)
-	}
 }
 
 func TestHTTPListenersSupportSeparateAddressFamiliesAndLegacyFallback(t *testing.T) {

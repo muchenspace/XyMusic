@@ -45,7 +45,7 @@ export interface RuntimeSettings {
     lockedFields: string[];
   };
   mediaTools: MediaToolsConfig & { lockedFields: string[] };
-  scraping: { fpcalcPath: string; acoustIdClient: string; globalConcurrency: number; coverConcurrency: number; lockedFields: string[] };
+  scraping: { fpcalcPath: string; acoustIdClient: string; lockedFields: string[] };
   localLibrary: {
     name: string;
     directory: string;
@@ -79,7 +79,7 @@ export interface RuntimeSettingsUpdate {
   database?: DatabaseSettingsInput;
   storage?: StorageSettingsInput;
   mediaTools?: Partial<MediaToolsConfig>;
-  scraping?: { fpcalcPath?: string; acoustIdClient?: string; globalConcurrency?: number; coverConcurrency?: number };
+  scraping?: { fpcalcPath?: string; acoustIdClient?: string };
   localLibrary?: {
     name?: string;
     directory?: string;
@@ -130,16 +130,6 @@ export interface SystemInformation {
     };
     eventLoop: { lagMs: number; maximumLagMs: number };
     memory: { rssBytes: number; heapUsedBytes: number; heapTotalBytes: number; externalBytes: number };
-    pipelines?: Record<string, {
-      total: number;
-      errors: number;
-      errorRate: number;
-      averageLatencyMs: number;
-      maximumLatencyMs: number;
-      lastLatencyMs: number;
-    }>;
-    caches?: Record<string, { hits: number; misses: number; hitRate: number }>;
-    platforms?: Record<string, { requests: number; errors: number; errorRate: number }>;
   } | null;
   queues: {
     media: number;

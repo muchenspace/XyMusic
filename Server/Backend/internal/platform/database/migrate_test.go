@@ -7,56 +7,21 @@ import (
 	"testing"
 )
 
-func TestMigrationsCanBeRead(t *testing.T) {
+func TestLegacyMigrationsCanBeRead(t *testing.T) {
 	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(migrations) != 32 {
-		t.Fatalf("expected 32 migrations, got %d", len(migrations))
+	if len(migrations) != 29 {
+		t.Fatalf("expected 29 migrations, got %d", len(migrations))
 	}
 	if migrations[0].Tag != "0000_initial" || migrations[25].Tag != "0025_track_permanent_delete_batches" ||
 		migrations[26].Tag != "0026_remove_writeback_backup_references" ||
-		migrations[27].Tag != "0027_artist_artwork_scraping_jobs" || migrations[28].Tag != "0028_lyrics_timing" ||
-		migrations[29].Tag != "0029_media_variant_reuse" || migrations[30].Tag != "0030_tag_scraping_progress_and_cancellation" || migrations[31].Tag != "0031_tag_scraping_lease_index" {
-		t.Fatalf("unexpected migration boundaries: %s - %s - %s - %s - %s - %s - %s - %s", migrations[0].Tag, migrations[25].Tag, migrations[26].Tag, migrations[27].Tag, migrations[28].Tag, migrations[29].Tag, migrations[30].Tag, migrations[31].Tag)
+		migrations[27].Tag != "0027_artist_artwork_scraping_jobs" || migrations[28].Tag != "0028_lyrics_timing" {
+		t.Fatalf("unexpected migration boundaries: %s - %s - %s - %s - %s", migrations[0].Tag, migrations[25].Tag, migrations[26].Tag, migrations[27].Tag, migrations[28].Tag)
 	}
 	if len(migrations[0].SQL) < 2 || len(migrations[0].Hash) != 64 {
 		t.Fatalf("migration parsing is incompatible: %#v", migrations[0])
-	}
-}
-
-func TestReviewedTagScrapingMigrationHashRemainsCompatible(t *testing.T) {
-	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	applied := make([]AppliedMigration, 0, 31)
-	for _, migration := range migrations[:30] {
-		applied = append(applied, AppliedMigration{CreatedAt: migration.CreatedAt, Hash: migration.Hash})
-	}
-	applied = append(applied, AppliedMigration{
-		CreatedAt: migrations[30].CreatedAt,
-		Hash:      "c3e35920280ffc708af6b90234524cfa7ff091d9ad6c25619849935b4abe5c5a",
-	})
-	if err := AssertCompatible(migrations, applied); err != nil {
-		t.Fatal("reviewed 0030 compatibility hash was rejected")
-	}
-}
-
-func TestMediaVariantReuseMigrationAddsReuseMetadata(t *testing.T) {
-	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	sql := strings.ToUpper(strings.Join(migrations[29].SQL, "\n"))
-	for _, expected := range []string{
-		"ALTER TABLE TRACK_VARIANTS", "SOURCE_CHECKSUM_SHA256", "PROFILE_VERSION",
-		"TRACK_VARIANTS_REUSE_INDEX", "WHERE STATUS = 'READY'",
-	} {
-		if !strings.Contains(sql, expected) {
-			t.Fatalf("media variant reuse migration does not contain %q: %s", expected, sql)
-		}
 	}
 }
 

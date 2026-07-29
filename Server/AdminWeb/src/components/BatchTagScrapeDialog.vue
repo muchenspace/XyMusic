@@ -20,7 +20,6 @@ import {
 import {
   batchItemMessage,
   batchItemStatusPresentation,
-  batchStageLabel,
   batchJobStatusPresentation,
   isNoScrapingNeededError,
   noScrapingNeededDetail,
@@ -32,7 +31,6 @@ const props = defineProps<{ tracks: TrackSummary[] }>();
 const emit = defineEmits<{ completed: [] }>();
 const scraping = useTagScraping();
 const sources = ref<TagSource[]>(["qmusic", "netease", "kugou"]);
-const channelConcurrency = reactive<Record<TagSource, number>>({ qmusic: 64, netease: 64, kugou: 64 });
 const verbatim = ref(false);
 const matchMode = ref<MatchMode>("strict");
 const missingFields = ref<TagScrapingMissingField[]>([]);
@@ -98,19 +96,12 @@ function beginPolling(id: string) {
   schedulePolling(id, pollGeneration);
 }
 function finishIfTerminal(update: TagScrapingBatch): boolean {
-  if (!["COMPLETED", "CANCELLED", "FAILED"].includes(update.status)) return false;
+  if (["PENDING", "RUNNING"].includes(update.status)) return false;
   if (!completedEmitted) { completedEmitted = true; emit("completed"); }
   return true;
 }
-function channelStatusEntries() {
-  return Object.entries(job.value?.channelStatus ?? {});
-}
 function submittedTrackTitle(trackId: string): string {
   return submittedTrackTitles.value.get(trackId) ?? "未知曲目";
-}
-function timestampLabel(value: string | null): string {
-  if (!value) return "";
-  return new Date(value).toLocaleTimeString();
 }
 async function refresh(id = job.value?.id, generation = pollGeneration) {
   if (!id || generation !== pollGeneration || !open.value) return;
@@ -161,7 +152,6 @@ async function start() {
       items: props.tracks.map((track) => ({ trackId: track.id, expectedVersion: track.metadataVersion! })),
       options: {
         sources: sources.value,
-        channelConcurrency: Object.fromEntries(sources.value.map((source) => [source, channelConcurrency[source]])),
         verbatim: verbatim.value,
         matchMode: matchMode.value,
         missingFields: missingFields.value,
@@ -226,7 +216,6 @@ async function retry() {
 <template>
   <BaseDialog v-model="open" :title="`批量刮削 ${submittedCount || tracks.length} 首曲目`" description="匹配、歌词、封面和字段应用全部由后端执行，关闭窗口不会中止任务。" width="xl">
     <template v-if="!job">
-      <div class="mt-4 grid gap-3 sm:grid-cols-3"><label v-for="source in visibleSourceOptions" :key="`concurrency-${source.value}`" class="ui-label">{{ source.label }} <input v-model.number="channelConcurrency[source.value]" class="ui-input mt-1" type="number" min="1" max="64" /></label></div>
       <p class="ui-label">来源优先级（按显示顺序）</p><div class="flex flex-wrap gap-2"><label v-for="source in visibleSourceOptions" :key="source.value" class="flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm"><input v-model="sources" type="checkbox" :value="source.value" />{{ source.label }}</label></div>
       <div class="mt-5 grid gap-4 sm:grid-cols-3"><div><label class="ui-label">匹配模式</label><select v-model="matchMode" class="ui-select"><option value="strict">严格匹配</option><option value="simple">宽松匹配</option></select></div><div><label class="ui-label">歌词类型</label><select v-model="verbatim" data-testid="batch-verbatim" class="ui-select"><option :value="false">普通歌词</option><option :value="true">逐字歌词</option></select></div><div><label class="ui-label">任务原因</label><input v-model="reason" class="ui-input" /></div></div>
       <p class="ui-label mt-5">仅刮削缺失以下字段的曲目</p><div class="grid grid-cols-2 gap-2 sm:grid-cols-3"><label v-for="item in [{k:'artist',l:'主要艺术家'},{k:'album',l:'专辑'},{k:'year',l:'发行年份'},{k:'genre',l:'流派'},{k:'lyrics',l:'歌词'},{k:'cover',l:'封面'}]" :key="item.k" class="flex items-center gap-2 rounded-lg border border-[var(--border)] p-2 text-sm"><input v-model="missingFields" type="checkbox" :value="item.k" />无{{ item.l }}</label></div><p class="mt-2 text-xs text-[var(--muted)]">不选择时刮削全部选中曲目；选择多项时满足任一条件即可。</p>
@@ -235,38 +224,6 @@ async function retry() {
       <label class="mt-4 flex items-start gap-3 rounded-xl border border-[var(--border)] p-4 text-sm" :class="!writebackControlCapability.canWriteBack && 'opacity-75'"><input v-model="writeBack" data-testid="batch-writeback" class="mt-0.5" type="checkbox" :disabled="!writebackControlCapability.canWriteBack" /><span><span class="block font-semibold">写回源文件 Tag</span><span class="mt-1 block text-xs leading-5 text-[var(--muted)]">{{ writebackHint }}</span></span></label>
     </template>
     <template v-else>
-      <div class="mb-4 grid gap-2 sm:grid-cols-3">
-        <div class="rounded-lg border border-[var(--border)] p-3 text-xs">
-          <div class="font-semibold">总曲目并发</div>
-          <div class="mt-1 text-[var(--muted)]">实际 {{ job.concurrency.totalActual }} 路，等待 {{ job.concurrency.totalWaiting }} 项，上限 {{ job.concurrency.totalLimit }} 路</div>
-        </div>
-        <div class="rounded-lg border border-[var(--border)] p-3 text-xs">
-          <div class="font-semibold">来源并发</div>
-          <div class="mt-1 text-[var(--muted)]">按 QQ、网易云、酷狗分别限流，单通道上限 64 路</div>
-        </div>
-        <div class="rounded-lg border border-[var(--border)] p-3 text-xs">
-          <div class="font-semibold">封面并发</div>
-          <div class="mt-1 text-[var(--muted)]">实际 {{ job.concurrency.coverActual }} 路，等待 {{ job.concurrency.coverWaiting }} 项，上限 {{ job.concurrency.coverLimit }} 路</div>
-        </div>
-      </div>
-      <div v-if="channelStatusEntries().length" class="mb-4 grid gap-2 sm:grid-cols-3">
-        <div v-for="[source, status] in channelStatusEntries()" :key="`detail-${source}`" class="rounded-lg border border-[var(--border)] p-2 text-xs">
-          <div class="font-semibold">{{ source }}</div>
-          <div class="mt-1 text-[var(--muted)]">实际 {{ status.actual }} 路，等待 {{ status.waiting }} 项，上限 {{ status.limit }} 路，{{ status.state }}</div>
-        </div>
-      </div>
-      <div class="mb-4 max-h-72 overflow-y-auto rounded-xl border border-[var(--border)]">
-        <div v-for="item in job.items" :key="`progress-${item.id}`" class="border-b border-[var(--border)] p-3 text-sm last:border-0">
-          <div class="flex items-center justify-between gap-3">
-            <span class="min-w-0 flex-1 truncate">#{{ item.position + 1 }} {{ submittedTrackTitle(item.trackId) }}</span>
-            <span class="shrink-0 text-xs font-semibold">{{ batchStageLabel(item.stage) }}</span>
-          </div>
-          <p class="mt-1 text-xs leading-5 text-[var(--muted)]">{{ batchItemMessage(item.status, item.message) }}</p>
-          <p v-if="item.retryCount || item.recoveryCount" class="mt-1 text-[10px] text-[var(--muted)]">重试 {{ item.retryCount }} 次，恢复 {{ item.recoveryCount }} 次</p>
-          <p v-if="item.heartbeatAt || item.retryAfterAt" class="mt-1 text-[10px] text-[var(--muted)]">心跳 {{ timestampLabel(item.heartbeatAt) }}<span v-if="item.retryAfterAt">，预计 {{ timestampLabel(item.retryAfterAt) }} 恢复</span></p>
-        </div>
-      </div>
-      <div v-if="channelStatusEntries().length" class="mb-4 grid gap-2 sm:grid-cols-3"><div v-for="[source, status] in channelStatusEntries()" :key="source" class="rounded-lg border border-[var(--border)] p-2 text-xs"><div class="font-semibold">{{ source }}</div><div class="mt-1 text-[var(--muted)]">{{ status.actual }} / {{ status.target }} · {{ status.state }}</div></div></div>
       <div class="rounded-xl bg-[var(--surface-muted)] p-4"><div class="flex items-center justify-between gap-3"><StatusBadge :status="job.status" :label="batchJobStatusPresentation(job.status).label" :tone="batchJobStatusPresentation(job.status).tone" dot /><span>{{ job.processed }} / {{ job.total }}</span></div><div class="mt-3 h-2 overflow-hidden rounded bg-[var(--surface-solid)]"><div class="progress-fill h-full bg-violet-500" :style="{ width: `${job.total ? job.processed / job.total * 100 : 0}%` }" /></div><p class="mt-2 text-xs text-[var(--muted)]">条件排除 {{ conditionExcluded }} · 成功 {{ job.succeeded }} · 已跳过 {{ job.skipped }} · 失败 {{ job.failed }}</p><p class="mt-1 text-[10px] text-[var(--muted)]">共选择 {{ submittedCount }} 首，{{ job.total }} 首进入刮削任务</p></div>
       <div class="mt-4 max-h-80 overflow-y-auto rounded-xl border border-[var(--border)]"><div v-for="item in job.items" :key="item.id" v-memo="[item.status, item.source, item.message]" class="flex items-center justify-between gap-3 border-b border-[var(--border)] p-3 text-sm last:border-0"><span class="min-w-0 flex-1 [overflow-wrap:anywhere]">#{{ item.position + 1 }} · {{ submittedTrackTitle(item.trackId) }} · {{ item.source ?? (item.status === 'PENDING' || item.status === 'RUNNING' ? '等待来源' : '未使用来源') }}</span><span class="flex shrink-0 items-center gap-2 text-right"><StatusBadge data-testid="batch-item-status" :status="item.status" :label="batchItemStatusPresentation(item.status).label" :tone="batchItemStatusPresentation(item.status).tone" /><span class="text-[var(--muted)]">{{ batchItemMessage(item.status, item.message) }}</span></span></div></div>
     </template>

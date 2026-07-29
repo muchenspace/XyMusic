@@ -11,7 +11,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,15 +36,6 @@ type Options struct {
 	ProbeTimeout     time.Duration
 	TranscodeTimeout time.Duration
 	TemporaryRoot    string
-	Workers          int
-	UploadWorkers    int
-	FFmpegThreads    int
-	ProfileVersion   string
-	Metrics          PerformanceMetrics
-}
-
-type PerformanceMetrics interface {
-	ObservePipeline(string, time.Duration, bool)
 }
 
 type Worker struct {
@@ -63,17 +53,12 @@ type Worker struct {
 	probeTimeout     time.Duration
 	transcodeTimeout time.Duration
 	temporaryRoot    string
-	workers          int
-	ffmpegThreads    int
-	profileVersion   string
-	uploadSemaphore  chan struct{}
-	metrics          PerformanceMetrics
 
 	lifecycle context.Context
 	stop      context.CancelCauseFunc
+	runMu     sync.Mutex
 	stateMu   sync.Mutex
 	closed    bool
-	quiescing bool
 	active    sync.WaitGroup
 }
 
@@ -117,23 +102,8 @@ func New(options Options) (*Worker, error) {
 	if options.TranscodeTimeout == 0 {
 		options.TranscodeTimeout = defaultTranscodeTimeout
 	}
-	if options.Workers == 0 {
-		options.Workers = 2
-	}
-	if options.UploadWorkers == 0 {
-		options.UploadWorkers = 2
-	}
-	ffmpegThreadLimit := max(1, runtime.GOMAXPROCS(0)/max(1, options.Workers))
-	if options.FFmpegThreads == 0 || options.FFmpegThreads > ffmpegThreadLimit {
-		options.FFmpegThreads = ffmpegThreadLimit
-	}
-	if options.ProfileVersion == "" {
-		options.ProfileVersion = "v1"
-	}
 	if options.Lease <= 0 || options.Heartbeat <= 0 || options.Heartbeat >= options.Lease ||
-		options.CancellationPoll <= 0 || options.ProbeTimeout <= 0 || options.TranscodeTimeout <= 0 ||
-		options.Workers < 1 || options.Workers > 4 || options.UploadWorkers < 1 || options.UploadWorkers > 2 ||
-		options.FFmpegThreads < 1 || options.FFmpegThreads > 64 || strings.TrimSpace(options.ProfileVersion) == "" {
+		options.CancellationPoll <= 0 || options.ProbeTimeout <= 0 || options.TranscodeTimeout <= 0 {
 		return nil, errors.New("media worker timing configuration is invalid")
 	}
 	lifecycle, stop := context.WithCancelCause(context.Background())
@@ -143,10 +113,7 @@ func New(options Options) (*Worker, error) {
 		workerID: options.WorkerID, runner: options.Runner, logger: options.Logger, clock: options.Clock,
 		lease: options.Lease, heartbeat: options.Heartbeat, cancellationPoll: options.CancellationPoll,
 		probeTimeout: options.ProbeTimeout, transcodeTimeout: options.TranscodeTimeout,
-		temporaryRoot: options.TemporaryRoot, workers: options.Workers,
-		ffmpegThreads: options.FFmpegThreads, profileVersion: strings.TrimSpace(options.ProfileVersion),
-		uploadSemaphore: make(chan struct{}, options.UploadWorkers), metrics: options.Metrics,
-		lifecycle: lifecycle, stop: stop,
+		temporaryRoot: options.TemporaryRoot, lifecycle: lifecycle, stop: stop,
 	}, nil
 }
 
@@ -183,6 +150,8 @@ func (worker *Worker) RunNext(ctx context.Context) (bool, error) {
 		return false, ErrWorkerClosed
 	}
 	defer worker.active.Done()
+	worker.runMu.Lock()
+	defer worker.runMu.Unlock()
 	if ctx.Err() != nil || worker.lifecycle.Err() != nil {
 		return false, nil
 	}
@@ -210,44 +179,18 @@ func (worker *Worker) Close() error {
 		return nil
 	}
 	worker.closed = true
-	worker.quiescing = true
 	worker.stop(newInterruptedError("WORKER_STOPPED", "media worker stopped"))
 	worker.stateMu.Unlock()
 	worker.active.Wait()
 	return nil
 }
 
-// Drain stops new claims and waits for already claimed jobs to finish.
-func (worker *Worker) Drain(ctx context.Context) error {
-	worker.stateMu.Lock()
-	if worker.closed {
-		worker.stateMu.Unlock()
-		return nil
-	}
-	worker.quiescing = true
-	worker.stateMu.Unlock()
-
-	done := make(chan struct{})
-	go func() {
-		worker.active.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
 func (worker *Worker) WorkerID() string { return worker.workerID }
-
-func (worker *Worker) WorkerCount() int { return worker.workers }
 
 func (worker *Worker) beginOperation() bool {
 	worker.stateMu.Lock()
 	defer worker.stateMu.Unlock()
-	if worker.closed || worker.quiescing {
+	if worker.closed {
 		return false
 	}
 	worker.active.Add(1)
@@ -345,24 +288,6 @@ func (worker *Worker) monitorMediaJob(
 }
 
 func (worker *Worker) process(ctx context.Context, job MediaJob) (processErr error) {
-	startedAt := time.Now()
-	var downloadDuration, probeDuration, transcodeDuration, uploadDuration, commitDuration time.Duration
-	defer func() {
-		if worker.metrics != nil {
-			worker.metrics.ObservePipeline("transcode", time.Since(startedAt), processErr != nil)
-		}
-		worker.logger.Info("media.job.timings", map[string]any{
-			"jobId":       job.ID,
-			"trackId":     job.TrackID,
-			"downloadMs":  downloadDuration.Milliseconds(),
-			"probeMs":     probeDuration.Milliseconds(),
-			"transcodeMs": transcodeDuration.Milliseconds(),
-			"uploadMs":    uploadDuration.Milliseconds(),
-			"commitMs":    commitDuration.Milliseconds(),
-			"totalMs":     time.Since(startedAt).Milliseconds(),
-			"error":       safeWorkerError(processErr),
-		})
-	}()
 	if job.AttemptID == nil {
 		return newWorkerError("JOB_ATTEMPT_MISSING", "claimed media job has no attempt id")
 	}
@@ -396,11 +321,9 @@ func (worker *Worker) process(ctx context.Context, job MediaJob) (processErr err
 		_ = os.RemoveAll(directory)
 	}()
 	inputPath := filepath.Join(directory, "source")
-	downloadStarted := time.Now()
 	downloaded, err := worker.storage.DownloadToFile(
 		ctx, source.ObjectKey, inputPath, source.SizeBytes,
 	)
-	downloadDuration = time.Since(downloadStarted)
 	if err != nil {
 		return contextError(ctx, err)
 	}
@@ -410,12 +333,10 @@ func (worker *Worker) process(ctx context.Context, job MediaJob) (processErr err
 	if source.ChecksumSHA256 != nil && downloaded.ChecksumSHA256 != *source.ChecksumSHA256 {
 		return newWorkerError("SOURCE_CHECKSUM_MISMATCH", "source asset checksum changed")
 	}
-	probeStarted := time.Now()
 	probeOutput, err := worker.runProcess(ctx, worker.ffprobePath, []string{
 		"-v", "error", "-show_entries", "format=duration:stream=codec_type,codec_name,sample_rate,bit_rate",
 		"-of", "json", inputPath,
 	}, worker.probeTimeout, "FFPROBE")
-	probeDuration = time.Since(probeStarted)
 	if err != nil {
 		return err
 	}
@@ -433,28 +354,12 @@ func (worker *Worker) process(ctx context.Context, job MediaJob) (processErr err
 	}
 	outputDurationMS := segment.EndMS - segment.StartMS
 	profiles := AudioVariantProfiles(audio.CodecName)
-	sourceChecksum := ""
-	if source.ChecksumSHA256 != nil {
-		sourceChecksum = *source.ChecksumSHA256
+	type plannedVariant struct {
+		Profile AudioVariantProfile
+		Path    string
 	}
-	reused := make(map[string]GeneratedVariant, len(profiles))
-	if reuseStore, ok := worker.store.(VariantReuseStore); ok && sourceChecksum != "" {
-		variants, reuseErr := reuseStore.FindReusableVariants(ctx, job.TrackID, sourceChecksum, worker.profileVersion, profiles)
-		if reuseErr != nil {
-			return contextError(ctx, reuseErr)
-		}
-		variants, reuseErr = verifyReusableVariants(ctx, worker.storage, variants)
-		if reuseErr != nil {
-			return contextError(ctx, reuseErr)
-		}
-		for _, variant := range variants {
-			variant.Reused = true
-			reused[variant.Profile.Quality] = variant
-			generated = append(generated, variant)
-		}
-	}
-	planned := make([]plannedVariant, 0, len(profiles)-len(reused))
-	arguments := []string{"-nostdin", "-v", "error", "-y", "-threads", strconv.Itoa(worker.ffmpegThreads)}
+	planned := make([]plannedVariant, 0, len(profiles))
+	arguments := []string{"-nostdin", "-v", "error", "-y"}
 	if segment.StartMS > 0 {
 		arguments = append(arguments, "-ss", seconds(segment.StartMS))
 	}
@@ -463,61 +368,45 @@ func (worker *Worker) process(ctx context.Context, job MediaJob) (processErr err
 	}
 	arguments = append(arguments, "-i", inputPath)
 	for _, profile := range profiles {
-		if _, exists := reused[profile.Quality]; exists {
-			continue
-		}
-		objectKey := VariantObjectKey(job.TrackID, job.ID, *job.AttemptID, profile)
-		checkpoint := sourceChecksum != ""
-		if checkpoint {
-			objectKey = checkpointVariantObjectKey(job.TrackID, sourceChecksum, worker.profileVersion, segment, profile)
-			sizeBytes, checksum, exists, statErr := worker.storage.StatObject(ctx, objectKey)
-			if statErr != nil {
-				return contextError(ctx, statErr)
-			}
-			if exists && sizeBytes > 0 && checksum != "" {
-				generated = append(generated, GeneratedVariant{
-					Profile: profile, ObjectKey: objectKey, ChecksumSHA256: checksum,
-					SizeBytes: sizeBytes, SourceChecksumSHA256: sourceChecksum,
-					ProfileVersion: worker.profileVersion,
-				})
-				continue
-			}
-		}
 		outputPath := filepath.Join(
 			directory, strings.ToLower(profile.Quality)+"."+profile.Extension,
 		)
-		planned = append(planned, plannedVariant{
-			Profile: profile, Path: outputPath, ObjectKey: objectKey, Checkpoint: checkpoint,
-		})
+		planned = append(planned, plannedVariant{Profile: profile, Path: outputPath})
 		arguments = append(arguments, "-map", "0:a:0", "-vn")
 		arguments = append(arguments, profile.FFmpegArgs...)
 		arguments = append(arguments, outputPath)
 	}
-	if len(planned) > 0 {
-		transcodeStarted := time.Now()
-		if _, err := worker.runProcess(
-			ctx, worker.ffmpegPath, arguments, worker.transcodeTimeout, "FFMPEG",
-		); err != nil {
-			transcodeDuration = time.Since(transcodeStarted)
-			return err
-		}
-		transcodeDuration = time.Since(transcodeStarted)
-	}
-	uploadStarted := time.Now()
-	newVariants, uploadedObjectKeys, err := worker.uploadVariants(ctx, planned, sourceChecksum)
-	uploadDuration = time.Since(uploadStarted)
-	attemptedObjectKeys = append(attemptedObjectKeys, uploadedObjectKeys...)
-	if err != nil {
+	if _, err := worker.runProcess(
+		ctx, worker.ffmpegPath, arguments, worker.transcodeTimeout, "FFMPEG",
+	); err != nil {
 		return err
 	}
-	generated = append(generated, newVariants...)
-	commitStarted := time.Now()
+	for _, output := range planned {
+		if err := contextCause(ctx); err != nil {
+			return err
+		}
+		checksum, err := sha256File(output.Path)
+		if err != nil {
+			return err
+		}
+		objectKey := VariantObjectKey(job.TrackID, job.ID, *job.AttemptID, output.Profile)
+		attemptedObjectKeys = append(attemptedObjectKeys, objectKey)
+		sizeBytes, err := worker.storage.UploadFile(
+			ctx, objectKey, output.Path, output.Profile.MIMEType, checksum,
+		)
+		if err != nil {
+			return contextError(ctx, err)
+		}
+		generated = append(generated, GeneratedVariant{
+			Profile: output.Profile, ObjectKey: objectKey,
+			ChecksumSHA256: checksum, SizeBytes: sizeBytes,
+		})
+	}
 	completedAt := worker.clock.Now()
 	replacedAssetIDs, err := worker.store.CommitMediaJob(ctx, CommitMediaJob{
 		Job: job, WorkerID: worker.workerID, DurationMS: outputDurationMS,
 		SampleRate: audio.sampleRate(), Generated: generated, CompletedAt: completedAt,
 	})
-	commitDuration = time.Since(commitStarted)
 	if err != nil {
 		return contextError(ctx, err)
 	}
@@ -532,148 +421,6 @@ func (worker *Worker) process(ctx context.Context, job MediaJob) (processErr err
 		})
 	}
 	return nil
-}
-
-func verifyReusableVariants(
-	ctx context.Context,
-	verifier ObjectStorage,
-	variants []GeneratedVariant,
-) ([]GeneratedVariant, error) {
-	verified := make([]GeneratedVariant, 0, len(variants))
-	for _, variant := range variants {
-		sizeBytes, checksum, exists, err := verifier.StatObject(ctx, variant.ObjectKey)
-		if err != nil {
-			return nil, fmt.Errorf("verify reusable media variant object: %w", err)
-		}
-		if !exists || sizeBytes != variant.SizeBytes {
-			continue
-		}
-		if variant.ChecksumSHA256 != "" &&
-			(checksum == "" || !strings.EqualFold(checksum, variant.ChecksumSHA256)) {
-			continue
-		}
-		verified = append(verified, variant)
-	}
-	return verified, nil
-}
-
-type plannedVariant struct {
-	Profile    AudioVariantProfile
-	Path       string
-	ObjectKey  string
-	Checkpoint bool
-}
-
-type uploadedVariant struct {
-	Index      int
-	Variant    GeneratedVariant
-	ObjectKey  string
-	Attempted  bool
-	Checkpoint bool
-	Err        error
-}
-
-func (worker *Worker) uploadVariants(
-	ctx context.Context,
-	planned []plannedVariant,
-	sourceChecksum string,
-) ([]GeneratedVariant, []string, error) {
-	if len(planned) == 0 {
-		return nil, nil, nil
-	}
-	uploadContext, cancel := context.WithCancelCause(ctx)
-	defer cancel(nil)
-	uploadedObjectKeys := make([]string, 0, len(planned))
-	workerCount := min(cap(worker.uploadSemaphore), len(planned))
-	if workerCount < 1 {
-		workerCount = 1
-	}
-	tasks := make(chan struct {
-		index int
-		value plannedVariant
-	}, len(planned))
-	results := make(chan uploadedVariant, len(planned))
-	var group sync.WaitGroup
-	for index := 0; index < workerCount; index++ {
-		group.Add(1)
-		go func() {
-			defer group.Done()
-			for task := range tasks {
-				variant, attempted, err := worker.uploadVariant(uploadContext, task.value, sourceChecksum)
-				result := uploadedVariant{
-					Index: task.index, Variant: variant, ObjectKey: task.value.ObjectKey,
-					Attempted: attempted, Checkpoint: task.value.Checkpoint, Err: err,
-				}
-				if result.Err != nil {
-					cancel(result.Err)
-				}
-				results <- result
-			}
-		}()
-	}
-	for index, value := range planned {
-		tasks <- struct {
-			index int
-			value plannedVariant
-		}{index: index, value: value}
-	}
-	close(tasks)
-	group.Wait()
-	close(results)
-	ordered := make([]GeneratedVariant, len(planned))
-	completed := make([]bool, len(planned))
-	var firstErr error
-	for result := range results {
-		if result.Attempted && (!result.Checkpoint || result.Err != nil) {
-			uploadedObjectKeys = append(uploadedObjectKeys, result.ObjectKey)
-		}
-		if result.Err != nil {
-			if firstErr == nil {
-				firstErr = result.Err
-			}
-			continue
-		}
-		ordered[result.Index] = result.Variant
-		completed[result.Index] = true
-	}
-	if firstErr != nil {
-		return nil, uploadedObjectKeys, contextError(ctx, firstErr)
-	}
-	for index := range ordered {
-		if !completed[index] {
-			return nil, uploadedObjectKeys, newWorkerError("MEDIA_UPLOAD_INCOMPLETE", "media variant upload did not complete")
-		}
-	}
-	return ordered, uploadedObjectKeys, nil
-}
-
-func (worker *Worker) uploadVariant(
-	ctx context.Context,
-	planned plannedVariant,
-	sourceChecksum string,
-) (GeneratedVariant, bool, error) {
-	if err := contextCause(ctx); err != nil {
-		return GeneratedVariant{}, false, err
-	}
-	checksum, err := sha256File(planned.Path)
-	if err != nil {
-		return GeneratedVariant{}, false, err
-	}
-	if err := worker.acquireUpload(ctx); err != nil {
-		return GeneratedVariant{}, false, err
-	}
-	sizeBytes, uploadErr := worker.storage.UploadFile(
-		ctx, planned.ObjectKey, planned.Path, planned.Profile.MIMEType, checksum,
-	)
-	worker.releaseUpload()
-	if uploadErr != nil {
-		return GeneratedVariant{}, true, contextError(ctx, uploadErr)
-	}
-	return GeneratedVariant{
-		Profile: planned.Profile, ObjectKey: planned.ObjectKey,
-		ChecksumSHA256: checksum, SizeBytes: sizeBytes,
-		SourceChecksumSHA256: sourceChecksum, ProfileVersion: worker.profileVersion,
-	}, true, nil
 }
 
 func (worker *Worker) runCleanupNext(ctx context.Context) (bool, error) {
@@ -738,19 +485,6 @@ func (worker *Worker) runProcess(
 		return "", newWorkerError(label+"_FAILED", lastRunes(result.Stderr, 1_000))
 	}
 	return result.Stdout, nil
-}
-
-func (worker *Worker) acquireUpload(ctx context.Context) error {
-	select {
-	case worker.uploadSemaphore <- struct{}{}:
-		return nil
-	case <-ctx.Done():
-		return contextError(ctx, ctx.Err())
-	}
-}
-
-func (worker *Worker) releaseUpload() {
-	<-worker.uploadSemaphore
 }
 
 type probeResult struct {

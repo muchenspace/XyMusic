@@ -1,8 +1,6 @@
 package media
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,18 +54,6 @@ func VariantObjectKey(trackID, jobID, attemptID string, profile AudioVariantProf
 	return fmt.Sprintf(
 		"media/variants/%s/%s/%s/%s.%s",
 		trackID, jobID, attemptID, strings.ToLower(profile.Quality), profile.Extension,
-	)
-}
-
-func checkpointVariantObjectKey(
-	trackID, sourceFingerprint, profileVersion string, segment mediaRange, profile AudioVariantProfile,
-) string {
-	fingerprint := sha256.Sum256([]byte(fmt.Sprintf(
-		"%s|%s|%d|%d|%s", sourceFingerprint, profileVersion, segment.StartMS, segment.EndMS, profile.Quality,
-	)))
-	return fmt.Sprintf(
-		"media/checkpoints/%s/%s/%s.%s", trackID, hex.EncodeToString(fingerprint[:]),
-		strings.ToLower(profile.Quality), profile.Extension,
 	)
 }
 
