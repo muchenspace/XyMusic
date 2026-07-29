@@ -493,6 +493,12 @@ func TestProductionSynchronizerPersistsFilesMetadataAndCUEInConfiguredDatabase(t
 	if metadataVersion != 1 || revisionCount != 1 {
 		t.Fatalf("metadata version/revisions=%d/%d", metadataVersion, revisionCount)
 	}
+	var lyricVersion int
+	var lyricUpdatedAt time.Time
+	if err := transaction.QueryRow(ctx, `SELECT version,updated_at FROM lyrics
+		WHERE track_id=$1 AND language='und'`, trackID).Scan(&lyricVersion, &lyricUpdatedAt); err != nil {
+		t.Fatal(err)
+	}
 	if err := synchronizer.ProcessFile(ctx, rootID, "", DiscoveredFile{
 		AudioPath: audioPath, RelativePath: "song.flac",
 	}, seenAt.Add(time.Second)); err != nil {
@@ -504,6 +510,16 @@ func TestProductionSynchronizerPersistsFilesMetadataAndCUEInConfiguredDatabase(t
 	}
 	if jobCount != 1 {
 		t.Fatalf("unchanged job count=%d", jobCount)
+	}
+	var unchangedLyricVersion int
+	var unchangedLyricUpdatedAt time.Time
+	if err := transaction.QueryRow(ctx, `SELECT version,updated_at FROM lyrics
+		WHERE track_id=$1 AND language='und'`, trackID).Scan(&unchangedLyricVersion, &unchangedLyricUpdatedAt); err != nil {
+		t.Fatal(err)
+	}
+	if unchangedLyricVersion != lyricVersion || !unchangedLyricUpdatedAt.Equal(lyricUpdatedAt) {
+		t.Fatalf("unchanged lyric version/updated_at=%d/%s want=%d/%s",
+			unchangedLyricVersion, unchangedLyricUpdatedAt, lyricVersion, lyricUpdatedAt)
 	}
 	if _, err := transaction.Exec(ctx, `UPDATE media_jobs SET status='READY',updated_at=now() WHERE id=$1`, jobID); err != nil {
 		t.Fatal(err)

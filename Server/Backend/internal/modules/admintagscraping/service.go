@@ -402,7 +402,7 @@ func (service *Service) lyrics(ctx context.Context, candidate Candidate, verbati
 	if candidate.Source == SourceAcoustID {
 		return LyricResult{}, nil
 	}
-	result, err := service.music.Lyric(ctx, candidate.Source, candidate, verbatim)
+	result, err := service.lyricFromSource(ctx, candidate.Source, candidate, verbatim)
 	if err == nil && strings.TrimSpace(result.Content) != "" {
 		return result, nil
 	}
@@ -410,7 +410,7 @@ func (service *Service) lyrics(ctx context.Context, candidate Candidate, verbati
 		return LyricResult{}, err
 	}
 	if candidate.Source != SourceQMusic && candidate.Name != "" {
-		matches, searchErr := service.music.Search(ctx, SourceQMusic, candidate.Name)
+		matches, searchErr := service.searchFromSource(ctx, SourceQMusic, candidate.Name)
 		if searchErr != nil {
 			return LyricResult{}, searchErr
 		}
@@ -428,10 +428,33 @@ func (service *Service) lyrics(ctx context.Context, candidate Candidate, verbati
 		}
 		sort.SliceStable(fallbacks, func(left, right int) bool { return fallbacks[left].score > fallbacks[right].score })
 		if len(fallbacks) > 0 && fallbacks[0].score >= 2 {
-			return service.music.Lyric(ctx, SourceQMusic, fallbacks[0].candidate, verbatim)
+			return service.lyricFromSource(ctx, SourceQMusic, fallbacks[0].candidate, verbatim)
 		}
 	}
 	return LyricResult{}, nil
+}
+
+func (service *Service) searchFromSource(ctx context.Context, source Source, query string) ([]Candidate, error) {
+	release, err := acquireBatchChannel(ctx, source)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return service.music.Search(ctx, source, query)
+}
+
+func (service *Service) lyricFromSource(
+	ctx context.Context,
+	source Source,
+	candidate Candidate,
+	verbatim bool,
+) (LyricResult, error) {
+	release, err := acquireBatchChannel(ctx, source)
+	if err != nil {
+		return LyricResult{}, err
+	}
+	defer release()
+	return service.music.Lyric(ctx, source, candidate, verbatim)
 }
 
 func metadataLyrics(result LyricResult) (*MetadataLyrics, error) {

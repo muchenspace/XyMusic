@@ -22,6 +22,13 @@ type BatchMutationFence struct {
 
 type batchMutationContextKey struct{}
 
+type batchChannelLease struct {
+	held    Source
+	acquire func(context.Context, Source) (func(), error)
+}
+
+type batchChannelContextKey struct{}
+
 func withBatchMutationFence(ctx context.Context, fence *BatchMutationFence) context.Context {
 	if fence == nil {
 		return ctx
@@ -35,6 +42,28 @@ func batchMutationFenceFromContext(ctx context.Context) *BatchMutationFence {
 	}
 	fence, _ := ctx.Value(batchMutationContextKey{}).(*BatchMutationFence)
 	return fence
+}
+
+func withBatchChannelLease(
+	ctx context.Context,
+	held Source,
+	acquire func(context.Context, Source) (func(), error),
+) context.Context {
+	if ctx == nil || acquire == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, batchChannelContextKey{}, batchChannelLease{held: held, acquire: acquire})
+}
+
+func acquireBatchChannel(ctx context.Context, source Source) (func(), error) {
+	if ctx == nil {
+		return func() {}, nil
+	}
+	lease, _ := ctx.Value(batchChannelContextKey{}).(batchChannelLease)
+	if lease.acquire == nil || lease.held == source {
+		return func() {}, nil
+	}
+	return lease.acquire(ctx, source)
 }
 
 // Lock serializes a batch mutation with cancellation, lease renewal, reclaim,
