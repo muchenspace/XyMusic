@@ -200,11 +200,12 @@ type DownloadedArtwork struct {
 type JobStatus string
 
 const (
-	JobPending   JobStatus = "PENDING"
-	JobRunning   JobStatus = "RUNNING"
-	JobCompleted JobStatus = "COMPLETED"
-	JobCancelled JobStatus = "CANCELLED"
-	JobFailed    JobStatus = "FAILED"
+	JobPending    JobStatus = "PENDING"
+	JobRunning    JobStatus = "RUNNING"
+	JobCancelling JobStatus = "CANCELLING"
+	JobCompleted  JobStatus = "COMPLETED"
+	JobCancelled  JobStatus = "CANCELLED"
+	JobFailed     JobStatus = "FAILED"
 )
 
 type ItemStatus string
@@ -215,6 +216,23 @@ const (
 	ItemSucceeded ItemStatus = "SUCCEEDED"
 	ItemFailed    ItemStatus = "FAILED"
 	ItemSkipped   ItemStatus = "SKIPPED"
+	ItemCancelled ItemStatus = "CANCELLED"
+)
+
+type ItemStage string
+
+const (
+	StageWaitingExecution ItemStage = "WAITING_EXECUTION"
+	StageSearchCandidates ItemStage = "SEARCH_CANDIDATES"
+	StageWaitingRateLimit ItemStage = "WAITING_RATE_LIMIT"
+	StageGetLyrics        ItemStage = "GET_LYRICS"
+	StageUpdateMetadata   ItemStage = "UPDATE_METADATA"
+	StageWaitingCover     ItemStage = "WAITING_COVER_QUEUE"
+	StageDownloadCover    ItemStage = "DOWNLOAD_COVER"
+	StageApplyCover       ItemStage = "APPLY_COVER"
+	StageRetryWaiting     ItemStage = "RETRY_WAITING"
+	StageCancelling       ItemStage = "CANCELLING"
+	StageCancelled        ItemStage = "CANCELLED"
 )
 
 type BatchJobRecord struct {
@@ -240,6 +258,11 @@ type BatchItemRecord struct {
 	ExpectedVersion int
 	Position        int
 	Status          ItemStatus
+	Stage           ItemStage
+	HeartbeatAt     *time.Time
+	RetryCount      int
+	RetryAfterAt    *time.Time
+	RecoveryCount   int
 	AttemptID       *string
 	LockedBy        *string
 	LockedUntil     *time.Time

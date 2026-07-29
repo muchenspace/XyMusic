@@ -11,6 +11,7 @@ export interface BatchStatusPresentation {
 const jobStatusPresentations: Record<BatchJobStatus, BatchStatusPresentation> = {
   PENDING: { label: "等待执行", tone: "info" },
   RUNNING: { label: "执行中", tone: "info" },
+  CANCELLING: { label: "正在取消", tone: "warning" },
   COMPLETED: { label: "已完成", tone: "success" },
   CANCELLED: { label: "已取消", tone: "warning" },
   FAILED: { label: "存在失败项", tone: "danger" },
@@ -22,6 +23,21 @@ const itemStatusPresentations: Record<BatchItemStatus, BatchStatusPresentation> 
   SUCCEEDED: { label: "成功", tone: "success" },
   FAILED: { label: "失败", tone: "danger" },
   SKIPPED: { label: "已跳过", tone: "neutral" },
+  CANCELLED: { label: "已取消", tone: "warning" },
+};
+
+const stageLabels: Record<string, string> = {
+  WAITING_EXECUTION: "等待执行",
+  SEARCH_CANDIDATES: "搜索候选",
+  WAITING_RATE_LIMIT: "等待平台限流",
+  GET_LYRICS: "获取歌词",
+  UPDATE_METADATA: "更新元数据",
+  WAITING_COVER_QUEUE: "等待封面队列",
+  DOWNLOAD_COVER: "下载封面",
+  APPLY_COVER: "上传并应用封面",
+  RETRY_WAITING: "重试等待",
+  CANCELLING: "取消中",
+  CANCELLED: "已取消",
 };
 
 const knownMessages: Record<string, string> = {
@@ -54,6 +70,10 @@ export function batchItemMessage(status: BatchItemStatus, message: string | null
   if (message?.startsWith("No trustworthy exact artist match with artwork was found")) return "未找到可靠头像";
   if (message) return knownMessages[message] ?? message;
   return itemStatusPresentations[status].label;
+}
+
+export function batchStageLabel(stage: string | null | undefined): string {
+  return stageLabels[stage ?? ""] ?? stage ?? "等待执行";
 }
 
 export function isNoScrapingNeededError(error: unknown): error is ApiError {

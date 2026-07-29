@@ -57,6 +57,11 @@ type BatchItemDTO struct {
 	ExpectedVersion int        `json:"expectedVersion"`
 	Position        int        `json:"position"`
 	Status          ItemStatus `json:"status"`
+	Stage           ItemStage  `json:"stage"`
+	HeartbeatAt     *string    `json:"heartbeatAt"`
+	RetryCount      int        `json:"retryCount"`
+	RetryAfterAt    *string    `json:"retryAfterAt"`
+	RecoveryCount   int        `json:"recoveryCount"`
 	Candidate       *Candidate `json:"candidate"`
 	Source          *Source    `json:"source"`
 	Message         *string    `json:"message"`
@@ -76,6 +81,7 @@ type BatchJobDTO struct {
 	Succeeded       int                           `json:"succeeded"`
 	Failed          int                           `json:"failed"`
 	Skipped         int                           `json:"skipped"`
+	Cancelled       int                           `json:"cancelled"`
 	CancelRequested bool                          `json:"cancelRequested"`
 	StartedAt       *string                       `json:"startedAt"`
 	CompletedAt     *string                       `json:"completedAt"`

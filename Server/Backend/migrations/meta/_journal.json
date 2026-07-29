@@ -211,6 +211,13 @@
       "when": 1785340800000,
       "tag": "0029_media_variant_reuse",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1785369600000,
+      "tag": "0030_tag_scraping_progress_and_cancellation",
+      "breakpoints": true
     }
   ]
 }

@@ -223,7 +223,11 @@ func (platform *ProductionMusicPlatform) searchUncached(ctx context.Context, sou
 }
 
 func (platform *ProductionMusicPlatform) Lyric(ctx context.Context, source Source, candidate Candidate, verbatim bool) (LyricResult, error) {
-	key := string(source) + "\x00" + candidate.ID + "\x00" + candidate.LyricID + "\x00" + strconv.FormatBool(verbatim)
+	key := strings.Join([]string{
+		string(source), candidate.ID, candidate.LyricID,
+		normalizeForTagMatch(candidate.Artist), tagVersionSignature(candidate.Name),
+		strconv.FormatBool(verbatim),
+	}, "\x00")
 	platform.lyricsMu.Lock()
 	if cached, ok := platform.lyricsCache[key]; ok {
 		if time.Now().Before(cached.expiresAt) {

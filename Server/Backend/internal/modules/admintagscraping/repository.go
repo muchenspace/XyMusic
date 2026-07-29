@@ -518,9 +518,15 @@ func (repository *Repository) Batch(ctx context.Context, jobID string, updatedAf
 func (repository *Repository) RequestBatchCancel(ctx context.Context, jobID string) error {
 	var updated string
 	err := repository.pool.QueryRow(ctx, `
-		UPDATE tag_scraping_jobs SET cancel_requested = true, updated_at = now()
-		WHERE id = $1 AND status IN ('PENDING', 'RUNNING') RETURNING id`, jobID).Scan(&updated)
+		UPDATE tag_scraping_jobs SET status = 'CANCELLING', cancel_requested = true, updated_at = now()
+		WHERE id = $1 AND status IN ('PENDING', 'RUNNING', 'CANCELLING') RETURNING id`, jobID).Scan(&updated)
 	if err == nil {
+		if _, progressErr := repository.pool.Exec(ctx, `
+			UPDATE tag_scraping_job_items SET status = 'CANCELLED', stage = 'CANCELLED',
+				message = 'The batch was cancelled', heartbeat_at = now(), completed_at = now(), updated_at = now()
+			WHERE job_id = $1 AND status = 'PENDING'`, jobID); progressErr != nil {
+			return fmt.Errorf("cancel pending tag scraping items: %w", progressErr)
+		}
 		return nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -555,8 +561,8 @@ func (repository *Repository) RetryBatch(ctx context.Context, jobID string) erro
 	}
 	command, err := tx.Exec(ctx, `
 		UPDATE tag_scraping_job_items SET
-			status = 'PENDING', attempt_id = NULL, locked_by = NULL, locked_until = NULL,
-			candidate = NULL, source = NULL, message = NULL, started_at = NULL,
+			status = 'PENDING', stage = 'WAITING_EXECUTION', attempt_id = NULL, locked_by = NULL, locked_until = NULL,
+			candidate = NULL, source = NULL, message = NULL, heartbeat_at = NULL, retry_count = 0, retry_after_at = NULL, recovery_count = 0, started_at = NULL,
 			completed_at = NULL, updated_at = now()
 		WHERE job_id = $1 AND status = 'FAILED'`, jobID)
 	if err != nil {
@@ -585,15 +591,36 @@ func (repository *Repository) RetryBatch(ctx context.Context, jobID string) erro
 }
 
 func (repository *Repository) RecoverExpiredBatchItems(ctx context.Context, now time.Time) error {
-	_, err := repository.pool.Exec(ctx, `
-		UPDATE tag_scraping_job_items SET
-			status = 'PENDING', attempt_id = NULL, locked_by = NULL, locked_until = NULL,
-			started_at = NULL, updated_at = $1
-		WHERE status = 'RUNNING' AND (locked_until IS NULL OR locked_until < $1)`, now)
-	if err != nil {
+	if err := recoverExpiredBatchItems(ctx, repository.pool, now); err != nil {
 		return fmt.Errorf("recover expired tag scraping items: %w", err)
 	}
 	return nil
+}
+
+func recoverExpiredBatchItems(ctx context.Context, database metadataDatabase, now time.Time) error {
+	_, err := database.Exec(ctx, `
+		UPDATE tag_scraping_job_items item SET
+			status = CASE
+				WHEN job.cancel_requested THEN 'CANCELLED'::tag_scraping_item_status
+				WHEN item.recovery_count + 1 >= $2 THEN 'FAILED'::tag_scraping_item_status
+				ELSE 'PENDING'::tag_scraping_item_status
+			END,
+			stage = CASE WHEN job.cancel_requested THEN 'CANCELLED' ELSE 'WAITING_EXECUTION' END,
+			attempt_id = NULL, locked_by = NULL, locked_until = NULL,
+			heartbeat_at = $1, retry_after_at = NULL,
+			recovery_count = item.recovery_count + 1,
+			message = CASE
+				WHEN job.cancel_requested THEN 'The batch was cancelled'
+				WHEN item.recovery_count + 1 >= $2 THEN 'Worker lease lost; recovery failed after ' || $2::text || ' attempts'
+				ELSE 'Worker lease lost; requeued for recovery'
+			END,
+			started_at = NULL,
+			completed_at = CASE WHEN job.cancel_requested OR item.recovery_count + 1 >= $2 THEN $1 ELSE NULL END,
+			updated_at = $1
+		FROM tag_scraping_jobs job
+		WHERE item.job_id = job.id AND item.status = 'RUNNING'
+			AND (item.locked_until IS NULL OR item.locked_until < $1)`, now, maximumBatchRecoveryAttempts)
+	return err
 }
 
 func (repository *Repository) ClaimBatchItem(
@@ -607,8 +634,11 @@ func (repository *Repository) ClaimBatchItem(
 		return ClaimResult{}, fmt.Errorf("begin tag scraping claim: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	if err := recoverExpiredBatchItems(ctx, tx, now); err != nil {
+		return ClaimResult{}, fmt.Errorf("recover expired tag scraping items before claim: %w", err)
+	}
 	job, err := scanBatchJob(tx.QueryRow(ctx, batchJobSelect+`
-		WHERE status IN ('PENDING','RUNNING')
+		WHERE status IN ('PENDING','RUNNING','CANCELLING')
 		  AND (
 			EXISTS (
 				SELECT 1 FROM tag_scraping_job_items claimable
@@ -634,8 +664,8 @@ func (repository *Repository) ClaimBatchItem(
 	if job.CancelRequested {
 		if _, err := tx.Exec(ctx, `
 			UPDATE tag_scraping_job_items SET
-				status = 'SKIPPED', attempt_id = NULL, locked_by = NULL, locked_until = NULL,
-				message = 'The batch was cancelled', completed_at = $2, updated_at = $2
+				status = 'CANCELLED', stage = 'CANCELLED', attempt_id = NULL, locked_by = NULL, locked_until = NULL,
+				message = 'The batch was cancelled', heartbeat_at = $2, completed_at = $2, updated_at = $2
 			WHERE job_id = $1 AND (
 				status = 'PENDING' OR (status = 'RUNNING' AND (locked_until IS NULL OR locked_until < $2))
 			)`, job.ID, now); err != nil {
@@ -663,8 +693,8 @@ func (repository *Repository) ClaimBatchItem(
 	attemptID := uuid.NewString()
 	command, err := tx.Exec(ctx, `
 		UPDATE tag_scraping_job_items SET
-			status = 'RUNNING', attempt_id = $2, locked_by = $3, locked_until = $4,
-			started_at = $5, completed_at = NULL, updated_at = $5
+			status = 'RUNNING', stage = 'SEARCH_CANDIDATES', attempt_id = $2, locked_by = $3, locked_until = $4,
+			heartbeat_at = $5, retry_after_at = NULL, started_at = $5, completed_at = NULL, updated_at = $5
 		WHERE id = $1`, item.ID, attemptID, workerID, now.Add(lease), now)
 	if err != nil || command.RowsAffected() != 1 {
 		if err == nil {
@@ -688,11 +718,13 @@ func (repository *Repository) ClaimBatchItem(
 		return ClaimResult{}, fmt.Errorf("commit tag scraping claim: %w", err)
 	}
 	item.Status = ItemRunning
+	item.Stage = StageSearchCandidates
 	item.AttemptID = &attemptID
 	item.LockedBy = &workerID
 	lockedUntil := now.Add(lease)
 	item.LockedUntil = &lockedUntil
 	item.StartedAt = &now
+	item.HeartbeatAt = &now
 	return ClaimResult{Item: &ClaimedBatchItem{Job: job, Item: item, AttemptID: attemptID}}, nil
 }
 
@@ -720,7 +752,7 @@ func (repository *Repository) RenewBatchItemLease(
 	if err != nil {
 		return BatchLeaseControl{}, fmt.Errorf("lock tag scraping lease job: %w", err)
 	}
-	if jobStatus != string(JobPending) && jobStatus != string(JobRunning) {
+	if jobStatus != string(JobPending) && jobStatus != string(JobRunning) && jobStatus != string(JobCancelling) {
 		return BatchLeaseControl{}, nil
 	}
 	var itemStatus string
@@ -744,7 +776,7 @@ func (repository *Repository) RenewBatchItemLease(
 	}
 	if !cancelRequested {
 		if _, err := tx.Exec(ctx, `
-			UPDATE tag_scraping_job_items SET locked_until = $2, updated_at = now()
+			UPDATE tag_scraping_job_items SET locked_until = $2, heartbeat_at = now(), updated_at = now()
 			WHERE id = $1`, itemID, lockedUntil); err != nil {
 			return BatchLeaseControl{}, fmt.Errorf("renew tag scraping item lease: %w", err)
 		}
@@ -753,6 +785,38 @@ func (repository *Repository) RenewBatchItemLease(
 		return BatchLeaseControl{}, fmt.Errorf("commit tag scraping lease renewal: %w", err)
 	}
 	return BatchLeaseControl{Owned: true, CancelRequested: cancelRequested}, nil
+}
+
+func (repository *Repository) UpdateBatchItemProgress(
+	ctx context.Context,
+	itemID string,
+	attemptID string,
+	workerID string,
+	stage ItemStage,
+	message string,
+	retryCount int,
+	retryAfterAt *time.Time,
+	heartbeatAt time.Time,
+) error {
+	if len(message) > 4_000 {
+		message = message[:4_000]
+	}
+	if retryCount < 0 {
+		retryCount = 0
+	}
+	command, err := repository.pool.Exec(ctx, `
+		UPDATE tag_scraping_job_items SET
+			stage = $4, message = $5, retry_count = $6, retry_after_at = $7,
+			heartbeat_at = $8, updated_at = $8
+		WHERE id = $1 AND status = 'RUNNING' AND attempt_id = $2 AND locked_by = $3`,
+		itemID, attemptID, workerID, string(stage), message, retryCount, retryAfterAt, heartbeatAt)
+	if err != nil {
+		return fmt.Errorf("update tag scraping progress: %w", err)
+	}
+	if command.RowsAffected() != 1 {
+		return ErrBatchLeaseLost
+	}
+	return nil
 }
 
 func (repository *Repository) BatchCancelRequested(ctx context.Context, jobID string) (bool, error) {
@@ -803,7 +867,7 @@ func (repository *Repository) CompleteBatchItem(
 	if err != nil {
 		return false, fmt.Errorf("lock tag scraping item completion: %w", err)
 	}
-	if jobStatus != string(JobPending) && jobStatus != string(JobRunning) {
+	if jobStatus != string(JobPending) && jobStatus != string(JobRunning) && jobStatus != string(JobCancelling) {
 		return false, ErrBatchLeaseLost
 	}
 	var itemStatus string
@@ -827,13 +891,13 @@ func (repository *Repository) CompleteBatchItem(
 	}
 	finalStatus := status
 	if cancelRequested {
-		finalStatus, candidateJSON, source, message = ItemSkipped, nil, nil, "The batch was cancelled"
+		finalStatus, candidateJSON, source, message = ItemCancelled, nil, nil, "The batch was cancelled"
 	}
 	command, err := tx.Exec(ctx, `
 		UPDATE tag_scraping_job_items SET
-			status = $4, attempt_id = NULL, locked_by = NULL, locked_until = NULL,
+			status = $4, stage = CASE WHEN $4 = 'CANCELLED' THEN 'CANCELLED' ELSE stage END, attempt_id = NULL, locked_by = NULL, locked_until = NULL,
 			candidate = $5::jsonb, source = $6, message = $7,
-			completed_at = $8, updated_at = $8
+			heartbeat_at = $8, retry_after_at = NULL, completed_at = $8, updated_at = $8
 		WHERE id = $1 AND job_id = $2 AND attempt_id = $3`, itemID, jobID, attemptID,
 		string(finalStatus), nullableJSON(candidateJSON), source, message, now)
 	if err != nil {
@@ -866,8 +930,8 @@ func (repository *Repository) ReleaseBatchItem(
 ) error {
 	command, err := repository.pool.Exec(ctx, `
 		UPDATE tag_scraping_job_items SET
-			status = 'PENDING', attempt_id = NULL, locked_by = NULL, locked_until = NULL,
-			started_at = NULL, updated_at = $4
+			status = 'PENDING', stage = 'WAITING_EXECUTION', attempt_id = NULL, locked_by = NULL, locked_until = NULL,
+			heartbeat_at = NULL, retry_after_at = NULL, started_at = NULL, updated_at = $4
 		WHERE id = $1 AND status = 'RUNNING' AND attempt_id = $2 AND locked_by = $3`,
 		itemID, attemptID, workerID, now)
 	if err != nil {
@@ -915,7 +979,7 @@ func (repository *Repository) FinishBatch(ctx context.Context, jobID string, now
 		UPDATE tag_scraping_jobs SET
 			status = $2, processed = $3, succeeded = $4, failed = $5,
 			completed_at = $6, updated_at = $6
-		WHERE id = $1 AND status IN ('PENDING','RUNNING')`,
+		WHERE id = $1 AND status IN ('PENDING','RUNNING','CANCELLING')`,
 		jobID, string(status), total, succeeded, failed, now); err != nil {
 		return false, fmt.Errorf("finish tag scraping batch: %w", err)
 	}
@@ -1352,7 +1416,8 @@ func scanBatchItem(row rowScanner) (BatchItemRecord, error) {
 	var source *string
 	err := row.Scan(
 		&result.ID, &result.JobID, &result.TrackID, &result.ExpectedVersion, &result.Position,
-		&status, &result.AttemptID, &result.LockedBy, &result.LockedUntil, &candidateJSON,
+		&status, &result.Stage, &result.HeartbeatAt, &result.RetryCount, &result.RetryAfterAt, &result.RecoveryCount,
+		&result.AttemptID, &result.LockedBy, &result.LockedUntil, &candidateJSON,
 		&source, &result.Message, &result.StartedAt, &result.CompletedAt, &result.CreatedAt, &result.UpdatedAt,
 	)
 	if err != nil {
@@ -1578,6 +1643,7 @@ const batchJobSelect = `
 
 const batchItemSelect = `
 	SELECT id, job_id, track_id, expected_version, position, status::text,
+	       stage, heartbeat_at, retry_count, retry_after_at, recovery_count,
 	       attempt_id, locked_by, locked_until, candidate, source, message,
 	       started_at, completed_at, created_at, updated_at
 	FROM tag_scraping_job_items`
