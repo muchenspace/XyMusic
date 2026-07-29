@@ -1394,7 +1394,7 @@ func scanBatchJob(row pgx.Row) (BatchJobRecord, error) {
 	var status string
 	err := row.Scan(
 		&result.ID, &result.RequestedBy, &optionsJSON, &status, &result.Total,
-		&result.Processed, &result.Succeeded, &result.Failed, &result.CancelRequested,
+		&result.Processed, &result.Succeeded, &result.Failed, &result.Cancelled, &result.CancelRequested,
 		&result.StartedAt, &result.CompletedAt, &result.CreatedAt, &result.UpdatedAt,
 	)
 	if err != nil {
@@ -1638,6 +1638,8 @@ var metadataFields = []string{
 
 const batchJobSelect = `
 	SELECT id, requested_by, options, status::text, total, processed, succeeded, failed,
+	       (SELECT count(*)::int FROM tag_scraping_job_items cancelled
+	        WHERE cancelled.job_id = tag_scraping_jobs.id AND cancelled.status = 'CANCELLED'),
 	       cancel_requested, started_at, completed_at, created_at, updated_at
 	FROM tag_scraping_jobs`
 

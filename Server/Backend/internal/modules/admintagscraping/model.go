@@ -244,6 +244,7 @@ type BatchJobRecord struct {
 	Processed       int
 	Succeeded       int
 	Failed          int
+	Cancelled       int
 	CancelRequested bool
 	StartedAt       *time.Time
 	CompletedAt     *time.Time

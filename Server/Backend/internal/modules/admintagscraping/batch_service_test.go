@@ -22,6 +22,17 @@ func TestBatchPresentationSeparatesSkippedAndKeepsUnsuccessful(t *testing.T) {
 	}
 }
 
+func TestBatchPresentationKeepsCancelledOutOfSkippedOnPartialUpdates(t *testing.T) {
+	now := time.Date(2026, 7, 16, 1, 2, 3, 0, time.UTC)
+	dto := presentBatch(BatchJobRecord{
+		ID: "job", Status: JobCancelled, Total: 3, Processed: 3, Cancelled: 2,
+		CreatedAt: now, UpdatedAt: now,
+	}, nil, true)
+	if dto.Cancelled != 2 || dto.Skipped != 1 || dto.Unsuccessful != 3 {
+		t.Fatalf("partial cancellation summary = %#v", dto)
+	}
+}
+
 func TestCreateBatchRejectsMixedSelectionBeforeCreatingWritebackJob(t *testing.T) {
 	preflightErr := apperror.New(
 		apperror.CodeForbidden,

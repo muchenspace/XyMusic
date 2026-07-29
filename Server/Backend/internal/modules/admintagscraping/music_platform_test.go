@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -16,6 +17,23 @@ import (
 
 	"xymusic/server/internal/shared/apperror"
 )
+
+func TestPlatformRequestTimeoutRetriesBeforeReturningDependencyError(t *testing.T) {
+	var attempts atomic.Int32
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		attempts.Add(1)
+		<-request.Context().Done()
+		return nil, request.Context().Err()
+	})}
+	platform := NewMusicPlatformClient(client, "")
+	_, err := platform.requestBytes(context.Background(), "https://y.qq.com/timeout", requestOptions{
+		Timeout: 10 * time.Millisecond,
+	}, 1024)
+	var timeout *upstreamTimeoutError
+	if !errors.As(err, &timeout) || attempts.Load() != maximumRequestAttempts {
+		t.Fatalf("timeout error/attempts = %v/%d, want upstream timeout/%d", err, attempts.Load(), maximumRequestAttempts)
+	}
+}
 
 func TestArtworkDownloadsAreCoalescedAndContentValidated(t *testing.T) {
 	var calls atomic.Int32

@@ -434,21 +434,24 @@ func (service *Service) lyrics(ctx context.Context, candidate Candidate, verbati
 		if searchErr != nil {
 			return LyricResult{}, searchErr
 		}
-		type fallback struct {
-			candidate Candidate
-			score     float64
+		artistQuery := candidate.Artist
+		if artists := splitArtists(candidate.Artist); len(artists) > 0 {
+			artistQuery = artists[0]
 		}
-		fallbacks := make([]fallback, 0, len(matches))
+		fallbackInput := SearchInput{Title: &candidate.Name, Artist: &artistQuery}
+		if strings.TrimSpace(candidate.Album) != "" {
+			fallbackInput.Album = &candidate.Album
+		}
+		var fallbackCandidate *Candidate
 		for _, match := range matches {
-			artist := candidate.Artist
-			if artist == "" {
-				artist = candidate.Name
+			if reliableTagMatch(fallbackInput, match, MatchStrict) {
+				fallback := match
+				fallbackCandidate = &fallback
+				break
 			}
-			fallbacks = append(fallbacks, fallback{candidate: match, score: tagMatchScore(candidate.Name, match.Name) + tagArtistMatchScore(artist, match.Artist)})
 		}
-		sort.SliceStable(fallbacks, func(left, right int) bool { return fallbacks[left].score > fallbacks[right].score })
-		if len(fallbacks) > 0 && fallbacks[0].score >= 2 {
-			return service.lyricFromSource(ctx, SourceQMusic, fallbacks[0].candidate, verbatim)
+		if fallbackCandidate != nil {
+			return service.lyricFromSource(ctx, SourceQMusic, *fallbackCandidate, verbatim)
 		}
 	}
 	return LyricResult{}, nil
