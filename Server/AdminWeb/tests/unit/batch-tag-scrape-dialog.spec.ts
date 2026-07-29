@@ -169,6 +169,27 @@ describe("BatchTagScrapeDialog", () => {
     expect(wrapper.html()).not.toContain("bg-rose-500/10");
   });
 
+  it("keeps polling while a batch is cancelling", async () => {
+    const update = completedBatch();
+    update.status = "CANCELLING";
+    update.cancelRequested = true;
+    update.completedAt = null;
+    update.items = [{
+      ...update.items[0]!,
+      status: "CANCELLED",
+      stage: "CANCELLING",
+      message: "正在取消，等待当前操作和封面上传清理完成",
+    }];
+    scraping.createBatch.mockResolvedValue(update);
+    const wrapper = mountDialog([track("1")]);
+
+    await startButton(wrapper).trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("取消中");
+    expect(scraping.batch).not.toHaveBeenCalled();
+  });
+
   it("defers writeback validation to eligible items when a missing-field filter is active", async () => {
     scraping.createBatch.mockResolvedValue(completedBatch());
     const wrapper = mountDialog([track("1", source(true)), track("2", source(false))]);
