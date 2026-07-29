@@ -3,7 +3,6 @@ package com.xymusic.app.core.ui.component
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -17,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -94,43 +94,53 @@ private const val ROTATION_DURATION_MILLIS = 8_000
 
 @Composable
 private fun VinylDisc(modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier.fillMaxSize()) {
-        val center = Offset(size.width / 2f, size.height / 2f)
-        val radius = size.minDimension / 2f
+    Box(
+        modifier =
+        modifier
+            .fillMaxSize()
+            .drawWithCache {
+                val center = Offset(size.width / 2f, size.height / 2f)
+                val radius = size.minDimension / 2f
+                val ringStroke = 1.5.dp.toPx()
+                val highlightStroke = 0.5.dp.toPx()
+                val ringRadii = (1..15).map { index -> radius * (0.7f + index * 0.018f) }
+                val discBrush =
+                    Brush.radialGradient(
+                        colors =
+                        listOf(
+                            Color(0xFF2A2A2A),
+                            Color(0xFF1A1A1A),
+                            Color(0xFF0A0A0A),
+                            Color(0xFF1A1A1A),
+                            Color(0xFF2A2A2A),
+                        ),
+                        center = center,
+                        radius = radius,
+                    )
 
-        drawCircle(
-            brush =
-            Brush.radialGradient(
-                colors =
-                listOf(
-                    Color(0xFF2A2A2A),
-                    Color(0xFF1A1A1A),
-                    Color(0xFF0A0A0A),
-                    Color(0xFF1A1A1A),
-                    Color(0xFF2A2A2A),
-                ),
-                center = center,
-                radius = radius,
-            ),
-            radius = radius,
-            center = center,
-        )
+                onDrawBehind {
+                    drawCircle(
+                        brush = discBrush,
+                        radius = radius,
+                        center = center,
+                    )
 
-        for (i in 1..15) {
-            val ringRadius = radius * (0.7f + i * 0.018f)
-            drawCircle(
-                color = Color(0x08000000),
-                radius = ringRadius,
-                center = center,
-                style = Stroke(width = 1.5.dp.toPx()),
-            )
-        }
+                    ringRadii.forEach { ringRadius ->
+                        drawCircle(
+                            color = Color(0x08000000),
+                            radius = ringRadius,
+                            center = center,
+                            style = Stroke(width = ringStroke),
+                        )
+                    }
 
-        drawCircle(
-            color = Color(0x1FFFFFFF),
-            radius = radius * 0.92f,
-            center = center,
-            style = Stroke(width = 0.5.dp.toPx()),
-        )
-    }
+                    drawCircle(
+                        color = Color(0x1FFFFFFF),
+                        radius = radius * 0.92f,
+                        center = center,
+                        style = Stroke(width = highlightStroke),
+                    )
+                }
+            },
+    )
 }

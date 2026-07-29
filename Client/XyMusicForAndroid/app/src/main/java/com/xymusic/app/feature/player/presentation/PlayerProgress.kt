@@ -7,9 +7,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.withFrameNanos
 import com.xymusic.app.feature.player.domain.model.PlayerState
 import kotlin.math.abs
@@ -18,57 +17,63 @@ import kotlinx.coroutines.isActive
 @Composable
 internal fun rememberPlaybackPositionState(player: PlayerState): State<Float> {
     val displayedPosition = remember { mutableFloatStateOf(player.positionMs.toFloat()) }
-    var previousSample by remember { mutableStateOf<PlaybackPositionClockSample?>(null) }
+    val latestPlayer by rememberUpdatedState(player)
 
     LaunchedEffect(
         player.currentQueueItemId,
-        player.positionMs,
-        player.positionAnchorElapsedRealtimeMs,
         player.positionDiscontinuitySequence,
         player.isPlaying,
-        player.playbackSpeed,
-        player.durationMs,
     ) {
-        val nowElapsedRealtimeMs = SystemClock.elapsedRealtime()
-        if (player.positionAnchorElapsedRealtimeMs == null) {
-            displayedPosition.floatValue = player.positionMs.toFloat()
-            previousSample = PlaybackPositionClockSample.from(player)
-            return@LaunchedEffect
-        }
-        val clockPlayer = player
-        val targetPosition = anchoredPlaybackPositionMs(clockPlayer, nowElapsedRealtimeMs)
-        val shouldSnap =
-            shouldSnapPlaybackPosition(
-                previousSample = previousSample,
-                player = clockPlayer,
-                displayedPositionMs = displayedPosition.floatValue,
-                nowElapsedRealtimeMs = nowElapsedRealtimeMs,
-            )
-        val correction =
-            if (shouldSnap) {
-                null
-            } else {
-                playbackPositionCorrection(
-                    displayedPositionMs = displayedPosition.floatValue,
-                    targetPositionMs = targetPosition,
-                    startElapsedRealtimeMs = nowElapsedRealtimeMs,
-                )
-            }
-        if (shouldSnap) displayedPosition.floatValue = targetPosition
-        previousSample = PlaybackPositionClockSample.from(player)
-
-        if (!player.isPlaying) return@LaunchedEffect
+        var previousSample: PlaybackPositionClockSample? = null
+        var lastAnchorElapsedRealtimeMs: Long? = null
+        var lastPositionMs = Long.MIN_VALUE
+        var correction: PlaybackPositionCorrection? = null
         while (isActive) {
+            val currentPlayer = latestPlayer
+            if (!currentPlayer.isPlaying) {
+                displayedPosition.floatValue = currentPlayer.positionMs.toFloat()
+                return@LaunchedEffect
+            }
+            val hasNewPlayerSample =
+                previousSample == null ||
+                    lastAnchorElapsedRealtimeMs != currentPlayer.positionAnchorElapsedRealtimeMs ||
+                    lastPositionMs != currentPlayer.positionMs
+            if (hasNewPlayerSample) {
+                val nowElapsedRealtimeMs = SystemClock.elapsedRealtime()
+                val targetPosition = anchoredPlaybackPositionMs(currentPlayer, nowElapsedRealtimeMs)
+                val shouldSnap =
+                    shouldSnapPlaybackPosition(
+                        previousSample = previousSample,
+                        player = currentPlayer,
+                        displayedPositionMs = displayedPosition.floatValue,
+                        nowElapsedRealtimeMs = nowElapsedRealtimeMs,
+                    )
+                correction =
+                    if (shouldSnap) {
+                        null
+                    } else {
+                        playbackPositionCorrection(
+                            displayedPositionMs = displayedPosition.floatValue,
+                            targetPositionMs = targetPosition,
+                            startElapsedRealtimeMs = nowElapsedRealtimeMs,
+                        )
+                    }
+                if (shouldSnap) displayedPosition.floatValue = targetPosition
+                previousSample = PlaybackPositionClockSample.from(currentPlayer)
+                lastAnchorElapsedRealtimeMs = currentPlayer.positionAnchorElapsedRealtimeMs
+                lastPositionMs = currentPlayer.positionMs
+            }
             withFrameNanos {
+                val framePlayer = latestPlayer
                 val frameElapsedRealtimeMs = SystemClock.elapsedRealtime()
-                val basePosition = anchoredPlaybackPositionMs(clockPlayer, frameElapsedRealtimeMs)
+                val basePosition = anchoredPlaybackPositionMs(framePlayer, frameElapsedRealtimeMs)
                 val correctedPosition =
                     basePosition + (correction?.remainingOffset(frameElapsedRealtimeMs) ?: 0f)
                 displayedPosition.floatValue =
                     monotonicPlaybackPosition(
                         previousPositionMs = displayedPosition.floatValue,
                         candidatePositionMs =
-                        correctedPosition.clampPlaybackPosition(durationMs = player.durationMs),
+                        correctedPosition.clampPlaybackPosition(durationMs = framePlayer.durationMs),
                     )
             }
         }
