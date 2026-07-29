@@ -1019,10 +1019,11 @@ func onlyQQMusicSource(sources []Source) bool {
 
 func presentBatch(job BatchJobRecord, items []BatchItemRecord, partial bool) BatchJobDTO {
 	skipped := 0
-	cancelled := 0
+	cancelled := job.Cancelled
 	if partial {
-		skipped = max(0, job.Processed-job.Succeeded-job.Failed)
+		skipped = max(0, job.Processed-job.Succeeded-job.Failed-job.Cancelled)
 	} else {
+		cancelled = 0
 		for _, item := range items {
 			switch item.Status {
 			case ItemSkipped:
