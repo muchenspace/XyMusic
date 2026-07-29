@@ -819,7 +819,8 @@ func (s *Service) buildConfig(input SetupInput) (config.Config, error) {
 		Scraping: config.Scraping{
 			FPcalcPath:     optionalTrim(input.Media.FPcalcPath),
 			AcoustIDClient: optionalTrim(input.Media.AcoustIDClient),
-			BatchWorkers:   48,
+			BatchWorkers:   64,
+			CoverWorkers:   8,
 		},
 		LocalLibrary: config.LocalLibrary{
 			Name:                strings.TrimSpace(input.Source.Name),

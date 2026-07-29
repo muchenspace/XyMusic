@@ -83,13 +83,25 @@ type BatchJobDTO struct {
 	UpdatedAt       string                        `json:"updatedAt"`
 	Unsuccessful    int                           `json:"unsuccessful"`
 	ChannelStatus   map[Source]BatchChannelStatus `json:"channelStatus"`
+	Concurrency     BatchConcurrencyStatus        `json:"concurrency"`
 	PartialItems    bool                          `json:"partialItems"`
 	Items           []BatchItemDTO                `json:"items"`
+}
+
+type BatchConcurrencyStatus struct {
+	TotalActual  int `json:"totalActual"`
+	TotalWaiting int `json:"totalWaiting"`
+	TotalLimit   int `json:"totalLimit"`
+	CoverActual  int `json:"coverActual"`
+	CoverWaiting int `json:"coverWaiting"`
+	CoverLimit   int `json:"coverLimit"`
 }
 
 type BatchChannelStatus struct {
 	Target              int     `json:"target"`
 	Actual              int     `json:"actual"`
+	Waiting             int     `json:"waiting"`
+	Limit               int     `json:"limit"`
 	State               string  `json:"state"`
 	RetryAfterSeconds   int     `json:"retryAfterSeconds,omitempty"`
 	ConsecutiveFailures int     `json:"consecutiveFailures,omitempty"`

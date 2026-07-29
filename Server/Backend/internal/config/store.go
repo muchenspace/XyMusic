@@ -137,7 +137,7 @@ func (s *Store) Save(cfg Config) error {
 		"LOCAL_MUSIC_SCAN_INTERVAL_MINUTES", "LOCAL_MUSIC_INCLUDE_PATTERNS",
 		"LOCAL_MUSIC_EXCLUDE_PATTERNS", "LOCAL_MUSIC_SCAN_WORKERS",
 		"MEDIA_WORKERS", "MEDIA_UPLOAD_WORKERS", "MEDIA_FFMPEG_THREADS",
-		"MEDIA_VARIANT_PROFILE_VERSION", "TAG_SCRAPING_WORKERS", "REGISTRATION_ENABLED",
+		"MEDIA_VARIANT_PROFILE_VERSION", "TAG_SCRAPING_WORKERS", "TAG_COVER_WORKERS", "REGISTRATION_ENABLED",
 	}
 	var content strings.Builder
 	for _, key := range keys {
@@ -193,6 +193,7 @@ func ToEnvironment(cfg Config) map[string]string {
 		"MEDIA_FFMPEG_THREADS":              strconv.Itoa(cfg.Media.FFmpegThreads),
 		"MEDIA_VARIANT_PROFILE_VERSION":     cfg.Media.ProfileVersion,
 		"TAG_SCRAPING_WORKERS":              strconv.Itoa(cfg.Scraping.BatchWorkers),
+		"TAG_COVER_WORKERS":                 strconv.Itoa(cfg.Scraping.CoverWorkers),
 		"FPCALC_PATH":                       cfg.Scraping.FPcalcPath,
 		"ACOUSTID_CLIENT":                   cfg.Scraping.AcoustIDClient,
 		"LOCAL_MUSIC_SOURCE_NAME":           cfg.LocalLibrary.Name,
