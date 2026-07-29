@@ -25,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,8 +42,6 @@ import com.xymusic.app.R
 import com.xymusic.app.core.ui.component.MediaArtwork
 import com.xymusic.app.core.ui.component.XyMarqueeText
 import com.xymusic.app.feature.player.domain.model.PlaybackState
-import com.xymusic.app.feature.player.domain.model.PlayerQueueItem
-import com.xymusic.app.feature.player.domain.model.PlayerState
 
 internal val PlayerMiniBarHeight = 64.dp
 internal val CompactPlayerMiniBarHeight = 52.dp
@@ -61,6 +60,12 @@ fun PlayerMiniBar(
     val colorScheme = MaterialTheme.colorScheme
     val displayedPlaybackPosition = playbackPosition ?: rememberPlaybackPositionState(uiState.player)
     val metrics = playerMiniBarMetrics(compact)
+    val artistLine =
+        remember(current.queueItemId, current.artistNames) {
+            current.artistNames.joinToString(" / ")
+        }.ifBlank {
+            stringResource(R.string.catalog_unknown_artist)
+        }
 
     Box(
         modifier =
@@ -75,8 +80,12 @@ fun PlayerMiniBar(
             modifier = Modifier.align(Alignment.TopCenter),
         )
         PlayerMiniBarContent(
-            item = current,
-            player = uiState.player,
+            title = current.title,
+            artistLine = artistLine,
+            artworkUrl = current.artworkUrl,
+            artworkCacheKey = current.artworkCacheKey,
+            isPlaying = uiState.player.isPlaying,
+            isBuffering = uiState.player.playbackState == PlaybackState.BUFFERING,
             metrics = metrics,
             onOpenPlayer = onOpenPlayer,
             onTogglePlayback = onTogglePlayback,
@@ -92,8 +101,12 @@ fun PlayerMiniBar(
 
 @Composable
 private fun PlayerMiniBarContent(
-    item: PlayerQueueItem,
-    player: PlayerState,
+    title: String,
+    artistLine: String,
+    artworkUrl: String?,
+    artworkCacheKey: String?,
+    isPlaying: Boolean,
+    isBuffering: Boolean,
     metrics: PlayerMiniBarMetrics,
     onOpenPlayer: () -> Unit,
     onTogglePlayback: () -> Unit,
@@ -112,8 +125,8 @@ private fun PlayerMiniBarContent(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         MediaArtwork(
-            url = item.artworkUrl,
-            cacheKey = item.artworkCacheKey,
+            url = artworkUrl,
+            cacheKey = artworkCacheKey,
             contentDescription = null,
             fallbackImageRes = R.drawable.xymusic,
             modifier =
@@ -125,12 +138,14 @@ private fun PlayerMiniBarContent(
         )
         Spacer(modifier = Modifier.width(metrics.artworkGap))
         MiniBarTrackInfo(
-            item = item,
+            title = title,
+            artistLine = artistLine,
             onOpenPlayer = onOpenPlayer,
             modifier = Modifier.weight(1f),
         )
         MiniBarPlaybackButton(
-            player = player,
+            isPlaying = isPlaying,
+            isBuffering = isBuffering,
             metrics = metrics,
             onClick = onTogglePlayback,
         )
@@ -139,7 +154,12 @@ private fun PlayerMiniBarContent(
 }
 
 @Composable
-private fun MiniBarTrackInfo(item: PlayerQueueItem, onOpenPlayer: () -> Unit, modifier: Modifier = Modifier) {
+private fun MiniBarTrackInfo(
+    title: String,
+    artistLine: String,
+    onOpenPlayer: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Column(
         modifier =
         modifier
@@ -147,15 +167,13 @@ private fun MiniBarTrackInfo(item: PlayerQueueItem, onOpenPlayer: () -> Unit, mo
             .clickable(role = Role.Button, onClick = onOpenPlayer),
     ) {
         XyMarqueeText(
-            text = item.title,
+            text = title,
             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
             color = MaterialTheme.colorScheme.onSurface,
         )
         Text(
             text =
-            item.artistNames.joinToString(" / ").ifBlank {
-                stringResource(R.string.catalog_unknown_artist)
-            },
+            artistLine,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -165,13 +183,18 @@ private fun MiniBarTrackInfo(item: PlayerQueueItem, onOpenPlayer: () -> Unit, mo
 }
 
 @Composable
-private fun MiniBarPlaybackButton(player: PlayerState, metrics: PlayerMiniBarMetrics, onClick: () -> Unit) {
+private fun MiniBarPlaybackButton(
+    isPlaying: Boolean,
+    isBuffering: Boolean,
+    metrics: PlayerMiniBarMetrics,
+    onClick: () -> Unit,
+) {
     IconButton(
         onClick = onClick,
         modifier = Modifier.size(metrics.controlSize).testTag(PlayerTestTags.TogglePlayback),
         colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
     ) {
-        if (player.playbackState == PlaybackState.BUFFERING) {
+        if (isBuffering) {
             CircularProgressIndicator(
                 modifier = Modifier.size(21.dp),
                 strokeWidth = 2.dp,
@@ -179,10 +202,10 @@ private fun MiniBarPlaybackButton(player: PlayerState, metrics: PlayerMiniBarMet
             )
         } else {
             Icon(
-                imageVector = if (player.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                 contentDescription =
                 stringResource(
-                    if (player.isPlaying) R.string.player_pause else R.string.player_play,
+                    if (isPlaying) R.string.player_pause else R.string.player_play,
                 ),
                 modifier = Modifier.size(metrics.toggleIconSize),
             )

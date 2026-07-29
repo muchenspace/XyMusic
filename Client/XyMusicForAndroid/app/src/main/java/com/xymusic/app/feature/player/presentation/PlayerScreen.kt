@@ -87,6 +87,7 @@ fun PlayerScreen(
     var showSleepTimerDialog by rememberSaveable { mutableStateOf(false) }
     val current = uiState.player.currentItem
     val displayedPlaybackPosition = playbackPosition ?: rememberPlaybackPositionState(uiState.player)
+    val queueUiState = remember(uiState.player.queue) { PlayerQueueUiState(uiState.player.queue) }
     var draggedPosition by remember(current?.queueItemId) { mutableStateOf<Float?>(null) }
     val colorScheme = MaterialTheme.colorScheme
     val darkPlayer = colorScheme.background.luminance() < 0.5f
@@ -321,7 +322,7 @@ fun PlayerScreen(
                                 )
                             LandscapePlayerPage.Queue ->
                                 QueueContent(
-                                    queue = uiState.player.queue,
+                                    queue = queueUiState,
                                     currentQueueItemId = uiState.player.currentQueueItemId,
                                     shuffleEnabled = uiState.player.shuffleEnabled,
                                     repeatMode = uiState.player.repeatMode,
@@ -388,7 +389,7 @@ fun PlayerScreen(
                                             )
                                         PlayerContentTab.Queue ->
                                             QueueContent(
-                                                queue = uiState.player.queue,
+                                                queue = queueUiState,
                                                 currentQueueItemId = uiState.player.currentQueueItemId,
                                                 shuffleEnabled = uiState.player.shuffleEnabled,
                                                 repeatMode = uiState.player.repeatMode,
