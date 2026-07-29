@@ -47,10 +47,10 @@ type Store interface {
 	RequestBatchCancel(context.Context, string) error
 	RetryBatch(context.Context, string) error
 	RecoverExpiredBatchItems(context.Context, time.Time) error
-	ClaimBatchItem(context.Context, string, time.Time, time.Duration) (ClaimResult, error)
-	RenewBatchItemLease(context.Context, string, string, string, string, time.Time) (BatchLeaseControl, error)
+	ClaimBatchItem(context.Context, string, time.Duration) (ClaimResult, error)
+	RenewBatchItemLease(context.Context, string, string, string, string, time.Duration) (BatchLeaseControl, error)
 	BatchCancelRequested(context.Context, string) (bool, error)
-	CompleteBatchItem(context.Context, string, string, string, string, ItemStatus, *Candidate, string, time.Time) (bool, error)
+	CompleteBatchItem(context.Context, string, string, string, string, ItemStatus, *Candidate, string, time.Time) (BatchCompletionResult, error)
 	ReleaseBatchItem(context.Context, string, string, string, time.Time) error
 	FinishBatch(context.Context, string, time.Time) (bool, error)
 }

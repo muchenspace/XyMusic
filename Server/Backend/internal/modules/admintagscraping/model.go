@@ -208,6 +208,10 @@ const (
 	JobFailed     JobStatus = "FAILED"
 )
 
+func isTerminalJobStatus(status JobStatus) bool {
+	return status == JobCompleted || status == JobCancelled || status == JobFailed
+}
+
 type ItemStatus string
 
 const (
@@ -287,9 +291,16 @@ type ClaimResult struct {
 	FinishJobID string
 }
 
+type BatchCompletionResult struct {
+	ItemCompleted bool
+	JobFinished   bool
+}
+
 type BatchLeaseControl struct {
 	Owned           bool
 	CancelRequested bool
+	LockedUntil     *time.Time
+	HeartbeatAt     *time.Time
 }
 
 type MetadataPatch map[string]any

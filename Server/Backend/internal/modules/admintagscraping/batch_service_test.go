@@ -33,6 +33,27 @@ func TestBatchPresentationKeepsCancelledOutOfSkippedOnPartialUpdates(t *testing.
 	}
 }
 
+func TestBatchJobDoesNotFinishBatchAsPartOfRead(t *testing.T) {
+	now := time.Date(2026, 7, 30, 1, 2, 3, 0, time.UTC)
+	store := &reconcilingBatchStore{storeStub: &storeStub{
+		batchJob: BatchJobRecord{ID: "job", Status: JobRunning, Total: 1, CreatedAt: now, UpdatedAt: now},
+	}}
+	service, err := NewBatchService(BatchServiceDependencies{
+		Store: store, Processor: &batchProcessorStub{}, Clock: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	job, err := service.Job(context.Background(), "job", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.finishCalls != 0 || job.Status != JobRunning {
+		t.Fatalf("read changed job = %+v, finish calls = %d", job, store.finishCalls)
+	}
+}
+
 func TestCreateBatchRejectsMixedSelectionBeforeCreatingWritebackJob(t *testing.T) {
 	preflightErr := apperror.New(
 		apperror.CodeForbidden,
@@ -661,13 +682,26 @@ type batchFaultStore struct {
 	releaseErr  error
 }
 
+type reconcilingBatchStore struct {
+	*storeStub
+	finishCalls int
+}
+
+func (store *reconcilingBatchStore) FinishBatch(context.Context, string, time.Time) (bool, error) {
+	store.finishCalls++
+	store.batchJob.Status = JobCompleted
+	store.batchJob.Processed = store.batchJob.Total
+	store.batchJob.CompletedAt = &store.batchJob.UpdatedAt
+	return true, nil
+}
+
 func (store *batchFaultStore) RenewBatchItemLease(
 	context.Context,
 	string,
 	string,
 	string,
 	string,
-	time.Time,
+	time.Duration,
 ) (BatchLeaseControl, error) {
 	if store.renewErr != nil {
 		return BatchLeaseControl{}, store.renewErr
@@ -685,11 +719,11 @@ func (store *batchFaultStore) CompleteBatchItem(
 	*Candidate,
 	string,
 	time.Time,
-) (bool, error) {
+) (BatchCompletionResult, error) {
 	if store.completeErr != nil {
-		return false, store.completeErr
+		return BatchCompletionResult{}, store.completeErr
 	}
-	return true, nil
+	return BatchCompletionResult{ItemCompleted: true}, nil
 }
 
 func (store *batchFaultStore) ReleaseBatchItem(context.Context, string, string, string, time.Time) error {
@@ -781,7 +815,7 @@ func (store *splitCancellationStore) BatchCancelRequested(context.Context, strin
 	return store.cancelled.Load(), nil
 }
 
-func (store *splitCancellationStore) RenewBatchItemLease(context.Context, string, string, string, string, time.Time) (BatchLeaseControl, error) {
+func (store *splitCancellationStore) RenewBatchItemLease(context.Context, string, string, string, string, time.Duration) (BatchLeaseControl, error) {
 	store.renewCalls.Add(1)
 	return BatchLeaseControl{Owned: true, CancelRequested: store.cancelled.Load()}, nil
 }
@@ -793,9 +827,9 @@ func (store *splitCancellationStore) CompleteBatchItem(
 	_ *Candidate,
 	_ string,
 	_ time.Time,
-) (bool, error) {
+) (BatchCompletionResult, error) {
 	store.completed <- status
-	return true, nil
+	return BatchCompletionResult{ItemCompleted: true}, nil
 }
 
 type blockingBatchProcessor struct {

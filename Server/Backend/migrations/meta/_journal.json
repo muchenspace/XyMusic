@@ -218,6 +218,13 @@
       "when": 1785369600000,
       "tag": "0030_tag_scraping_progress_and_cancellation",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1785373200000,
+      "tag": "0031_tag_scraping_lease_index",
+      "breakpoints": true
     }
   ]
 }

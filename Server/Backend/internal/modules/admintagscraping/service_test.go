@@ -734,17 +734,17 @@ func (stub *storeStub) RecoverExpiredBatchItems(context.Context, time.Time) erro
 	stub.recoverCalls++
 	return nil
 }
-func (stub *storeStub) ClaimBatchItem(context.Context, string, time.Time, time.Duration) (ClaimResult, error) {
+func (stub *storeStub) ClaimBatchItem(context.Context, string, time.Duration) (ClaimResult, error) {
 	return stub.claim, stub.claimErr
 }
-func (stub *storeStub) RenewBatchItemLease(context.Context, string, string, string, string, time.Time) (BatchLeaseControl, error) {
+func (stub *storeStub) RenewBatchItemLease(context.Context, string, string, string, string, time.Duration) (BatchLeaseControl, error) {
 	return BatchLeaseControl{Owned: true, CancelRequested: stub.cancelled}, nil
 }
 func (stub *storeStub) BatchCancelRequested(context.Context, string) (bool, error) {
 	return stub.cancelled, nil
 }
-func (stub *storeStub) CompleteBatchItem(context.Context, string, string, string, string, ItemStatus, *Candidate, string, time.Time) (bool, error) {
-	return true, nil
+func (stub *storeStub) CompleteBatchItem(context.Context, string, string, string, string, ItemStatus, *Candidate, string, time.Time) (BatchCompletionResult, error) {
+	return BatchCompletionResult{ItemCompleted: true}, nil
 }
 func (stub *storeStub) ReleaseBatchItem(context.Context, string, string, string, time.Time) error {
 	return nil
