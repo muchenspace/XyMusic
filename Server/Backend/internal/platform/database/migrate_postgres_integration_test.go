@@ -79,6 +79,113 @@ func TestLyricsTimingMigrationPostgresBehavior(t *testing.T) {
 	assertLyricsTimingRequiresExplicitInsert(t, ctx, transaction)
 }
 
+func TestTagScrapingProgressMigrationPostgresBehavior(t *testing.T) {
+	databaseURL := strings.TrimSpace(os.Getenv(migrationTestDatabaseEnvironment))
+	if databaseURL == "" {
+		t.Skip("set " + migrationTestDatabaseEnvironment + " to run the PostgreSQL migration behavior test")
+	}
+	testsupport.RequireWriteIntegration(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	connection, err := pgx.Connect(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to migration test database: %v", err)
+	}
+	defer connection.Close(context.WithoutCancel(ctx))
+
+	schema := "xymusic_migration_0030_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	schemaIdentifier := pgx.Identifier{schema}.Sanitize()
+	if _, err := connection.Exec(ctx, "CREATE SCHEMA "+schemaIdentifier); err != nil {
+		t.Fatalf("create isolated migration schema: %v", err)
+	}
+	defer func() {
+		_, _ = connection.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+schemaIdentifier+" CASCADE")
+	}()
+
+	itemStatusType := schemaIdentifier + ".\"tag_scraping_item_status\""
+	jobStatusType := schemaIdentifier + ".\"tag_scraping_job_status\""
+	itemsTable := schemaIdentifier + ".\"tag_scraping_job_items\""
+	for _, statement := range []string{
+		`CREATE TYPE ` + jobStatusType + ` AS ENUM ('PENDING', 'RUNNING', 'COMPLETED', 'CANCELLED', 'FAILED')`,
+		`CREATE TYPE ` + itemStatusType + ` AS ENUM ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'SKIPPED')`,
+		`CREATE TABLE ` + itemsTable + ` (
+			id text PRIMARY KEY,
+			status ` + itemStatusType + ` NOT NULL,
+			created_at timestamp with time zone NOT NULL DEFAULT now(),
+			updated_at timestamp with time zone NOT NULL DEFAULT now()
+		)`,
+		`INSERT INTO ` + itemsTable + ` (id, status) VALUES ('pending', 'PENDING'), ('running', 'RUNNING')`,
+	} {
+		if _, err := connection.Exec(ctx, statement); err != nil {
+			t.Fatalf("create migration fixture: %v", err)
+		}
+	}
+	for _, statement := range []string{
+		`ALTER TYPE ` + jobStatusType + ` ADD VALUE IF NOT EXISTS 'CANCELLING'`,
+		`ALTER TYPE ` + itemStatusType + ` ADD VALUE IF NOT EXISTS 'CANCELLED'`,
+	} {
+		if _, err := connection.Exec(ctx, statement); err != nil {
+			t.Fatalf("prepare migration enum: %v", err)
+		}
+	}
+
+	transaction, err := connection.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer transaction.Rollback(context.WithoutCancel(ctx))
+	if _, err := transaction.Exec(ctx, "SET LOCAL search_path TO "+schemaIdentifier); err != nil {
+		t.Fatalf("isolate migration search path: %v", err)
+	}
+
+	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(migrations) <= 30 || migrations[30].Tag != "0030_tag_scraping_progress_and_cancellation" {
+		t.Fatalf("tag scraping progress migration is unavailable: count=%d", len(migrations))
+	}
+	statement := strings.ReplaceAll(
+		strings.Join(migrations[30].SQL, "\n"),
+		`"public".`,
+		schemaIdentifier+".",
+	)
+	if _, err := transaction.Exec(ctx, statement); err != nil {
+		t.Fatalf("execute tag scraping progress migration in one transaction: %v", err)
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		t.Fatalf("commit tag scraping progress migration: %v", err)
+	}
+
+	for _, fixture := range []struct {
+		id    string
+		stage string
+	}{
+		{id: "pending", stage: "WAITING_EXECUTION"},
+		{id: "running", stage: "WAITING_EXECUTION"},
+	} {
+		var stage string
+		if err := connection.QueryRow(ctx, "SELECT stage FROM "+itemsTable+" WHERE id=$1", fixture.id).Scan(&stage); err != nil {
+			t.Fatalf("read migrated stage for %s: %v", fixture.id, err)
+		}
+		if stage != fixture.stage {
+			t.Fatalf("migrated stage for %s = %q, want %q", fixture.id, stage, fixture.stage)
+		}
+	}
+
+	if _, err := connection.Exec(ctx, "INSERT INTO "+itemsTable+" (id, status) VALUES ('cancelled', 'CANCELLED')"); err != nil {
+		t.Fatalf("use new item status after migration commit: %v", err)
+	}
+	var status string
+	if err := connection.QueryRow(ctx, "SELECT status::text FROM "+itemsTable+" WHERE id='cancelled'").Scan(&status); err != nil {
+		t.Fatalf("read newly added item status: %v", err)
+	}
+	if status != "CANCELLED" {
+		t.Fatalf("new item status = %q, want CANCELLED", status)
+	}
+}
+
 func createLyricsTimingMigrationTables(t *testing.T, ctx context.Context, transaction pgx.Tx) {
 	t.Helper()
 	statements := []string{

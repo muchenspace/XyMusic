@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -284,7 +285,7 @@ func (service *BatchService) Job(ctx context.Context, jobID string, updatedAfter
 	if err != nil {
 		return BatchJobDTO{}, err
 	}
-	result := presentBatch(job, items, updatedAfter != nil)
+	result := presentBatch(job, items, updatedAfter != nil && !isTerminalJobStatus(job.Status))
 	result.ChannelStatus = service.channelStatus(job.ID, job.Options)
 	result.Concurrency = service.concurrencyStatus(job)
 	return result, nil
@@ -354,17 +355,13 @@ func (service *BatchService) runWorker(ctx context.Context) {
 }
 
 func (service *BatchService) processNext(ctx context.Context) (bool, error) {
-	now := service.now().UTC()
-	claim, err := service.store.ClaimBatchItem(ctx, service.workerID, now, service.lease)
+	claim, err := service.store.ClaimBatchItem(ctx, service.workerID, service.lease)
 	if err != nil {
 		return false, err
 	}
 	if claim.FinishJobID != "" {
-		finished, err := service.store.FinishBatch(ctx, claim.FinishJobID, service.now().UTC())
-		if finished {
-			service.deleteChannelGates(claim.FinishJobID)
-		}
-		return finished, err
+		service.deleteChannelGates(claim.FinishJobID)
+		return true, nil
 	}
 	if claim.Item == nil {
 		return false, nil
@@ -404,23 +401,46 @@ func (service *BatchService) processItem(workerContext context.Context, claim Cl
 	startedAt := time.Now()
 	itemContext, cancel := context.WithCancel(workerContext)
 	progress := newBatchProgress()
+	var ownershipLost atomic.Bool
+	var completionAttempted atomic.Bool
 	itemContext = withBatchProgressReporter(itemContext, func(stage ItemStage, message string, retryCount int, retryAfterAt *time.Time) {
 		service.updateBatchProgress(itemContext, claim, progress, stage, message, retryCount, retryAfterAt)
 	})
 	activeItem := service.setActiveWithCancellation(claim.Job.ID, cancel, func() {
 		_, _, retryCount, _ := progress.snapshot()
-		service.updateBatchProgress(itemContext, claim, progress, StageCancelling,
+		cleanupContext, cleanupCancel := context.WithTimeout(context.WithoutCancel(workerContext), 2*time.Second)
+		defer cleanupCancel()
+		service.updateBatchProgress(cleanupContext, claim, progress, StageCancelling,
 			"正在取消，等待当前操作和封面上传清理完成", retryCount, nil)
 	})
 	defer func() {
 		cancel()
 		service.clearActive(claim.Job.ID, activeItem)
+		if recovered := recover(); recovered != nil {
+			stack := string(debug.Stack())
+			service.logger.Error("tag_scraping.batch.processor_panic", map[string]any{
+				"jobId": claim.Job.ID, "itemId": claim.Item.ID, "attemptId": claim.AttemptID,
+				"workerId": service.workerID, "stack": stack,
+			})
+			if !completionAttempted.Load() && !ownershipLost.Load() {
+				service.completePanickedItem(workerContext, claim, stack)
+			}
+		}
 	}()
-	var ownershipLost atomic.Bool
 	var cancelRequested atomic.Bool
 	heartbeatDone := make(chan struct{})
 	go func() {
-		defer close(heartbeatDone)
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				ownershipLost.Store(true)
+				cancel()
+				service.logger.Error("tag_scraping.batch.heartbeat_panic", map[string]any{
+					"jobId": claim.Job.ID, "itemId": claim.Item.ID, "attemptId": claim.AttemptID,
+					"workerId": service.workerID, "stack": string(debug.Stack()),
+				})
+			}
+			close(heartbeatDone)
+		}()
 		ticker := time.NewTicker(service.heartbeat)
 		defer ticker.Stop()
 		for {
@@ -430,7 +450,7 @@ func (service *BatchService) processItem(workerContext context.Context, claim Cl
 			case <-ticker.C:
 				control, err := service.store.RenewBatchItemLease(
 					itemContext, claim.Job.ID, claim.Item.ID, claim.AttemptID, service.workerID,
-					service.now().UTC().Add(service.lease),
+					service.lease,
 				)
 				if itemContext.Err() != nil {
 					return
@@ -455,13 +475,10 @@ func (service *BatchService) processItem(workerContext context.Context, claim Cl
 					return
 				}
 				if control.CancelRequested {
-					service.updateBatchProgress(itemContext, claim, progress, StageCancelling, "The batch is cancelling; waiting for the current operation to stop", 0, nil)
 					cancelRequested.Store(true)
 					cancel()
 					return
 				}
-				stage, message, retryCount, retryAfterAt := progress.snapshot()
-				service.updateBatchProgress(itemContext, claim, progress, stage, message, retryCount, retryAfterAt)
 			}
 		}
 	}()
@@ -476,8 +493,10 @@ func (service *BatchService) processItem(workerContext context.Context, claim Cl
 		return
 	}
 	if workerContext.Err() != nil {
+		releaseContext, releaseCancel := context.WithTimeout(context.WithoutCancel(workerContext), 10*time.Second)
+		defer releaseCancel()
 		if err := service.store.ReleaseBatchItem(
-			context.WithoutCancel(workerContext), claim.Item.ID, claim.AttemptID,
+			releaseContext, claim.Item.ID, claim.AttemptID,
 			service.workerID, service.now().UTC(),
 		); err != nil {
 			service.logger.Warn("tag_scraping.batch.release_failed", map[string]any{
@@ -488,15 +507,18 @@ func (service *BatchService) processItem(workerContext context.Context, claim Cl
 		}
 		return
 	}
-	if cancelRequested.Load() {
+	if cancelRequested.Load() && status != ItemSucceeded {
 		status, candidate, message = ItemCancelled, nil, "The batch was cancelled"
 	}
-	if requested, err := service.store.BatchCancelRequested(context.WithoutCancel(itemContext), claim.Job.ID); err == nil && requested {
+	cleanupContext, cleanupCancel := context.WithTimeout(context.WithoutCancel(workerContext), 10*time.Second)
+	defer cleanupCancel()
+	if requested, err := service.store.BatchCancelRequested(cleanupContext, claim.Job.ID); err == nil && requested && status != ItemSucceeded {
 		status, candidate, message = ItemCancelled, nil, "The batch was cancelled"
 		cancelRequested.Store(true)
 	}
-	completed, err := service.store.CompleteBatchItem(
-		context.WithoutCancel(itemContext), claim.Job.ID, claim.Item.ID, claim.AttemptID,
+	completionAttempted.Store(true)
+	completion, err := service.store.CompleteBatchItem(
+		cleanupContext, claim.Job.ID, claim.Item.ID, claim.AttemptID,
 		service.workerID, status, candidate, message, service.now().UTC(),
 	)
 	if err != nil {
@@ -507,18 +529,40 @@ func (service *BatchService) processItem(workerContext context.Context, claim Cl
 		})
 		return
 	}
-	if !completed {
+	if !completion.ItemCompleted {
 		service.logger.Warn("tag_scraping.batch.complete_rejected", map[string]any{
 			"jobId": claim.Job.ID, "itemId": claim.Item.ID,
 			"attemptId": claim.AttemptID, "workerId": service.workerID,
 		})
 		return
 	}
+	if completion.JobFinished {
+		service.deleteChannelGates(claim.Job.ID)
+	}
 	service.logger.Info("tag_scraping.batch.item_completed", map[string]any{
 		"jobId": claim.Job.ID, "itemId": claim.Item.ID,
 		"attemptId": claim.AttemptID, "workerId": service.workerID,
 		"status": string(status),
 	})
+}
+
+func (service *BatchService) completePanickedItem(parent context.Context, claim ClaimedBatchItem, stack string) {
+	cleanupContext, cleanupCancel := context.WithTimeout(context.WithoutCancel(parent), 10*time.Second)
+	defer cleanupCancel()
+	completion, err := service.store.CompleteBatchItem(
+		cleanupContext, claim.Job.ID, claim.Item.ID, claim.AttemptID, service.workerID,
+		ItemFailed, nil, "Worker processor panicked: "+stack, service.now().UTC(),
+	)
+	if err != nil {
+		service.logger.Error("tag_scraping.batch.panic_completion_failed", map[string]any{
+			"jobId": claim.Job.ID, "itemId": claim.Item.ID, "attemptId": claim.AttemptID,
+			"workerId": service.workerID, "message": messageOf(err),
+		})
+		return
+	}
+	if completion.JobFinished {
+		service.deleteChannelGates(claim.Job.ID)
+	}
 }
 
 func (service *BatchService) executeItem(
@@ -591,8 +635,10 @@ func (service *BatchService) executeItem(
 			return service.itemErrorStatus(ctx, acquireErr, ownershipLost)
 		}
 		reportBatchProgress(ctx, StageSearchCandidates, fmt.Sprintf("正在搜索 %s 候选", source), retryCount, nil)
-		matches, searchErr := service.processor.Search(ctx, query)
-		releaseChannel()
+		matches, searchErr := func() ([]Candidate, error) {
+			defer releaseChannel()
+			return service.processor.Search(ctx, query)
+		}()
 		if err := service.ensureBatchActive(ctx, claim.Job.ID); err != nil {
 			return service.itemErrorStatus(ctx, err, ownershipLost)
 		}
@@ -647,18 +693,20 @@ func (service *BatchService) executeItem(
 	applyContext := withBatchChannelLease(ctx, selected.Source, func(channelContext context.Context, source Source) (func(), error) {
 		return service.acquireChannel(channelContext, claim.Job.ID, source, claim.Job.Options.ChannelConcurrency[source])
 	})
-	result, err := service.processor.Apply(applyContext, *claim.Job.RequestedBy, uuid.NewString(), claim.Item.TrackID, ApplyInput{
-		ExpectedVersion: claim.Item.ExpectedVersion,
-		Candidate:       *selected,
-		Verbatim:        claim.Job.Options.Verbatim,
-		Fields:          claim.Job.Options.Fields,
-		WriteBack:       claim.Job.Options.WriteBack,
-		Reason:          claim.Job.Options.Reason,
-		cancellationCheck: func(checkContext context.Context) error {
-			return service.ensureBatchActive(checkContext, claim.Job.ID)
-		},
-	})
-	releaseChannel()
+	result, err := func() (ApplyResult, error) {
+		defer releaseChannel()
+		return service.processor.Apply(applyContext, *claim.Job.RequestedBy, uuid.NewString(), claim.Item.TrackID, ApplyInput{
+			ExpectedVersion: claim.Item.ExpectedVersion,
+			Candidate:       *selected,
+			Verbatim:        claim.Job.Options.Verbatim,
+			Fields:          claim.Job.Options.Fields,
+			WriteBack:       claim.Job.Options.WriteBack,
+			Reason:          claim.Job.Options.Reason,
+			cancellationCheck: func(checkContext context.Context) error {
+				return service.ensureBatchActive(checkContext, claim.Job.ID)
+			},
+		})
+	}()
 	if err != nil {
 		return service.itemErrorStatus(ctx, err, ownershipLost)
 	}
@@ -757,10 +805,10 @@ func (service *BatchService) cancelJob(jobID string) {
 	active := append([]*activeBatchItem(nil), service.active[jobID]...)
 	service.activeMu.Unlock()
 	for _, item := range active {
-		if item.cancelling != nil {
-			item.cancelling()
-		}
 		item.cancel()
+		if item.cancelling != nil {
+			go item.cancelling()
+		}
 	}
 }
 

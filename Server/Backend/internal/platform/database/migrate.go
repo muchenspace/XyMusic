@@ -18,9 +18,18 @@ import (
 )
 
 const (
-	migrationLockName       = "xymusic.schema-migrations"
-	migrationCleanupTimeout = 5 * time.Second
+	migrationLockName            = "xymusic.schema-migrations"
+	migrationCleanupTimeout      = 5 * time.Second
+	tagScrapingProgressMigration = "0030_tag_scraping_progress_and_cancellation"
 )
+
+// This is the reviewed hash of the briefly deployed 0030 variant that cast
+// item status to text before comparing it with the newly added enum value.
+// It remains accepted only for that migration; all other history mismatches
+// remain permanent compatibility errors.
+var compatibleMigrationHashes = map[int64]map[string]struct{}{
+	1785369600000: {"c3e35920280ffc708af6b90234524cfa7ff091d9ad6c25619849935b4abe5c5a": {}},
+}
 
 type Migration struct {
 	Tag       string
@@ -96,6 +105,11 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool, directory string) er
 	}
 
 	for _, migration := range available[len(applied):] {
+		if migration.Tag == tagScrapingProgressMigration {
+			if err := prepareTagScrapingProgressEnums(ctx, connection); err != nil {
+				return err
+			}
+		}
 		if err := applyMigration(ctx, connection, migration); err != nil {
 			return err
 		}
@@ -176,13 +190,43 @@ func AssertCompatible(available []Migration, applied []AppliedMigration) error {
 				Migration: actual.CreatedAt,
 			}
 		}
-		if expected.Hash != actual.Hash {
+		if expected.Hash != actual.Hash && !isCompatibleMigrationHash(expected.CreatedAt, actual.Hash) {
 			return &CompatibilityError{
 				Kind:      CompatibilityHashMismatch,
 				Message:   fmt.Sprintf("Database migration %d does not match this XyMusic release", actual.CreatedAt),
 				Migration: actual.CreatedAt,
 			}
 		}
+	}
+	return nil
+}
+
+func isCompatibleMigrationHash(createdAt int64, hash string) bool {
+	accepted := compatibleMigrationHashes[createdAt]
+	_, ok := accepted[hash]
+	return ok
+}
+
+func prepareTagScrapingProgressEnums(ctx context.Context, connection *pgxpool.Conn) error {
+	tx, err := connection.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin tag scraping enum preparation: %w", err)
+	}
+	defer func() {
+		cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), migrationCleanupTimeout)
+		defer cancel()
+		_ = tx.Rollback(cleanupContext)
+	}()
+	for _, statement := range []string{
+		`ALTER TYPE "public"."tag_scraping_job_status" ADD VALUE IF NOT EXISTS 'CANCELLING'`,
+		`ALTER TYPE "public"."tag_scraping_item_status" ADD VALUE IF NOT EXISTS 'CANCELLED'`,
+	} {
+		if _, err := tx.Exec(ctx, statement); err != nil {
+			return fmt.Errorf("prepare tag scraping enum: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit tag scraping enum preparation: %w", err)
 	}
 	return nil
 }

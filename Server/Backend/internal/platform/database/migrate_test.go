@@ -12,14 +12,14 @@ func TestMigrationsCanBeRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(migrations) != 31 {
-		t.Fatalf("expected 31 migrations, got %d", len(migrations))
+	if len(migrations) != 32 {
+		t.Fatalf("expected 32 migrations, got %d", len(migrations))
 	}
 	if migrations[0].Tag != "0000_initial" || migrations[25].Tag != "0025_track_permanent_delete_batches" ||
 		migrations[26].Tag != "0026_remove_writeback_backup_references" ||
 		migrations[27].Tag != "0027_artist_artwork_scraping_jobs" || migrations[28].Tag != "0028_lyrics_timing" ||
-		migrations[29].Tag != "0029_media_variant_reuse" || migrations[30].Tag != "0030_tag_scraping_progress_and_cancellation" {
-		t.Fatalf("unexpected migration boundaries: %s - %s - %s - %s - %s - %s - %s", migrations[0].Tag, migrations[25].Tag, migrations[26].Tag, migrations[27].Tag, migrations[28].Tag, migrations[29].Tag, migrations[30].Tag)
+		migrations[29].Tag != "0029_media_variant_reuse" || migrations[30].Tag != "0030_tag_scraping_progress_and_cancellation" || migrations[31].Tag != "0031_tag_scraping_lease_index" {
+		t.Fatalf("unexpected migration boundaries: %s - %s - %s - %s - %s - %s - %s - %s", migrations[0].Tag, migrations[25].Tag, migrations[26].Tag, migrations[27].Tag, migrations[28].Tag, migrations[29].Tag, migrations[30].Tag, migrations[31].Tag)
 	}
 	if len(migrations[0].SQL) < 2 || len(migrations[0].Hash) != 64 {
 		t.Fatalf("migration parsing is incompatible: %#v", migrations[0])
