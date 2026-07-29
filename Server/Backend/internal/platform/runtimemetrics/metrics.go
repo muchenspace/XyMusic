@@ -45,46 +45,12 @@ type MemorySnapshot struct {
 	ExternalBytes  uint64 `json:"externalBytes"`
 }
 
-type PipelineSnapshot struct {
-	Total            uint64  `json:"total"`
-	Errors           uint64  `json:"errors"`
-	ErrorRate        float64 `json:"errorRate"`
-	AverageLatencyMS float64 `json:"averageLatencyMs"`
-	MaximumLatencyMS float64 `json:"maximumLatencyMs"`
-	LastLatencyMS    float64 `json:"lastLatencyMs"`
-}
-
-type CacheSnapshot struct {
-	Hits    uint64  `json:"hits"`
-	Misses  uint64  `json:"misses"`
-	HitRate float64 `json:"hitRate"`
-}
-
-type PlatformSnapshot struct {
-	Requests  uint64  `json:"requests"`
-	Errors    uint64  `json:"errors"`
-	ErrorRate float64 `json:"errorRate"`
-}
-
 type Snapshot struct {
-	CollectedSince string                      `json:"collectedSince"`
-	Requests       RequestSnapshot             `json:"requests"`
-	EventLoop      EventLoopSnapshot           `json:"eventLoop"`
-	Memory         MemorySnapshot              `json:"memory"`
-	Pipelines      map[string]PipelineSnapshot `json:"pipelines,omitempty"`
-	Caches         map[string]CacheSnapshot    `json:"caches,omitempty"`
-	Platforms      map[string]PlatformSnapshot `json:"platforms,omitempty"`
+	CollectedSince string            `json:"collectedSince"`
+	Requests       RequestSnapshot   `json:"requests"`
+	EventLoop      EventLoopSnapshot `json:"eventLoop"`
+	Memory         MemorySnapshot    `json:"memory"`
 }
-
-type pipelineMetric struct {
-	total, errors              uint64
-	durationTotalMS, maximumMS float64
-	lastMS                     float64
-}
-
-type cacheMetric struct{ hits, misses uint64 }
-
-type platformMetric struct{ requests, errors uint64 }
 
 type Collector struct {
 	mu sync.Mutex
@@ -102,9 +68,6 @@ type Collector struct {
 	maximumDurationMS  float64
 	eventLoopLagMS     float64
 	maximumLoopLagMS   float64
-	pipelines          map[string]*pipelineMetric
-	caches             map[string]*cacheMetric
-	platforms          map[string]*platformMetric
 
 	stop      chan struct{}
 	done      chan struct{}
@@ -172,106 +135,12 @@ func (collector *Collector) RequestFinished(status int, duration time.Duration) 
 	collector.mu.Unlock()
 }
 
-func (collector *Collector) ObservePipeline(stage string, duration time.Duration, failed bool) {
-	if collector == nil || stage == "" {
-		return
-	}
-	durationMS := max(0, float64(duration)/float64(time.Millisecond))
-	collector.mu.Lock()
-	defer collector.mu.Unlock()
-	if collector.pipelines == nil {
-		collector.pipelines = make(map[string]*pipelineMetric)
-	}
-	metric := collector.pipelines[stage]
-	if metric == nil {
-		metric = &pipelineMetric{}
-		collector.pipelines[stage] = metric
-	}
-	metric.total++
-	if failed {
-		metric.errors++
-	}
-	metric.durationTotalMS += durationMS
-	metric.maximumMS = max(metric.maximumMS, durationMS)
-	metric.lastMS = durationMS
-}
-
-func (collector *Collector) ObserveCache(name string, hit bool) {
-	if collector == nil || name == "" {
-		return
-	}
-	collector.mu.Lock()
-	defer collector.mu.Unlock()
-	if collector.caches == nil {
-		collector.caches = make(map[string]*cacheMetric)
-	}
-	metric := collector.caches[name]
-	if metric == nil {
-		metric = &cacheMetric{}
-		collector.caches[name] = metric
-	}
-	if hit {
-		metric.hits++
-	} else {
-		metric.misses++
-	}
-}
-
-func (collector *Collector) ObservePlatform(source string, failed bool) {
-	if collector == nil || source == "" {
-		return
-	}
-	collector.mu.Lock()
-	defer collector.mu.Unlock()
-	if collector.platforms == nil {
-		collector.platforms = make(map[string]*platformMetric)
-	}
-	metric := collector.platforms[source]
-	if metric == nil {
-		metric = &platformMetric{}
-		collector.platforms[source] = metric
-	}
-	metric.requests++
-	if failed {
-		metric.errors++
-	}
-}
-
 func (collector *Collector) Snapshot() Snapshot {
 	if collector == nil {
 		return Snapshot{}
 	}
 	collector.mu.Lock()
 	durations := append([]float64(nil), collector.durations[:collector.durationCount]...)
-	var pipelines map[string]PipelineSnapshot
-	if len(collector.pipelines) > 0 {
-		pipelines = make(map[string]PipelineSnapshot, len(collector.pipelines))
-		for name, metric := range collector.pipelines {
-			pipelines[name] = PipelineSnapshot{
-				Total: metric.total, Errors: metric.errors,
-				ErrorRate:        ratio(float64(metric.errors), float64(metric.total)),
-				AverageLatencyMS: rounded(ratio(metric.durationTotalMS, float64(metric.total))),
-				MaximumLatencyMS: rounded(metric.maximumMS), LastLatencyMS: rounded(metric.lastMS),
-			}
-		}
-	}
-	var caches map[string]CacheSnapshot
-	if len(collector.caches) > 0 {
-		caches = make(map[string]CacheSnapshot, len(collector.caches))
-		for name, metric := range collector.caches {
-			total := metric.hits + metric.misses
-			caches[name] = CacheSnapshot{Hits: metric.hits, Misses: metric.misses,
-				HitRate: ratio(float64(metric.hits), float64(total))}
-		}
-	}
-	var platforms map[string]PlatformSnapshot
-	if len(collector.platforms) > 0 {
-		platforms = make(map[string]PlatformSnapshot, len(collector.platforms))
-		for name, metric := range collector.platforms {
-			platforms[name] = PlatformSnapshot{Requests: metric.requests, Errors: metric.errors,
-				ErrorRate: ratio(float64(metric.errors), float64(metric.requests))}
-		}
-	}
 	requests := RequestSnapshot{
 		Total: collector.requestCount, InFlight: collector.inFlightRequests,
 		Errors: collector.errorCount, Slow: collector.slowRequestCount,
@@ -307,7 +176,6 @@ func (collector *Collector) Snapshot() Snapshot {
 			RSSBytes: memory.Sys, HeapUsedBytes: memory.HeapAlloc,
 			HeapTotalBytes: memory.HeapSys, ExternalBytes: external,
 		},
-		Pipelines: pipelines, Caches: caches, Platforms: platforms,
 	}
 }
 

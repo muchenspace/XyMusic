@@ -71,19 +71,12 @@ function completedBatch(): TagScrapingBatch {
     skipped: 1,
     failed: 0,
     unsuccessful: 1,
-    cancelled: 0,
-    concurrency: { totalActual: 0, totalWaiting: 0, totalLimit: 64, coverActual: 0, coverWaiting: 0, coverLimit: 8 },
     cancelRequested: false,
     items: [{
       id: "item-1",
       trackId: "track-1",
       position: 0,
       status: "SKIPPED",
-      stage: "SEARCH_CANDIDATES",
-      heartbeatAt: null,
-      retryCount: 0,
-      retryAfterAt: null,
-      recoveryCount: 0,
       source: null,
       message: "No reliable match was found",
       candidate: null,
@@ -167,27 +160,6 @@ describe("BatchTagScrapeDialog", () => {
     expect(wrapper.text()).toContain("所选曲目均已包含指定字段，无需刮削");
     expect(wrapper.text()).toContain("条件排除 2 首");
     expect(wrapper.html()).not.toContain("bg-rose-500/10");
-  });
-
-  it("keeps polling while a batch is cancelling", async () => {
-    const update = completedBatch();
-    update.status = "CANCELLING";
-    update.cancelRequested = true;
-    update.completedAt = null;
-    update.items = [{
-      ...update.items[0]!,
-      status: "CANCELLED",
-      stage: "CANCELLING",
-      message: "正在取消，等待当前操作和封面上传清理完成",
-    }];
-    scraping.createBatch.mockResolvedValue(update);
-    const wrapper = mountDialog([track("1")]);
-
-    await startButton(wrapper).trigger("click");
-    await flushPromises();
-
-    expect(wrapper.text()).toContain("取消中");
-    expect(scraping.batch).not.toHaveBeenCalled();
   });
 
   it("defers writeback validation to eligible items when a missing-field filter is active", async () => {

@@ -60,7 +60,6 @@ func presentSettings(cfg config.Config, version int, source string, listener Lis
 		},
 		Scraping: ScrapingDTO{
 			FPcalcPath: cfg.Scraping.FPcalcPath, AcoustIDClient: cfg.Scraping.AcoustIDClient,
-			GlobalConcurrency: cfg.Scraping.BatchWorkers, CoverConcurrency: cfg.Scraping.CoverWorkers,
 			LockedFields: empty(),
 		},
 		LocalLibrary: LocalLibraryDTO{

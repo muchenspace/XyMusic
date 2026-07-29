@@ -65,14 +65,11 @@ export interface ApplyArtistArtworkResult {
   version: number;
 }
 
-export type BatchJobStatus = "PENDING" | "RUNNING" | "CANCELLING" | "COMPLETED" | "CANCELLED" | "FAILED";
-export type BatchItemStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "SKIPPED" | "CANCELLED";
-export type BatchItemStage = "WAITING_EXECUTION" | "SEARCH_CANDIDATES" | "WAITING_RATE_LIMIT" | "GET_LYRICS" | "UPDATE_METADATA" | "WAITING_COVER_QUEUE" | "DOWNLOAD_COVER" | "APPLY_COVER" | "RETRY_WAITING" | "CANCELLING" | "CANCELLED";
-export interface BatchItem { id: string; trackId: string; position: number; status: BatchItemStatus; stage: BatchItemStage; heartbeatAt: string | null; retryCount: number; retryAfterAt: string | null; recoveryCount: number; source: string | null; message: string | null; candidate: TagCandidate | null }
+export type BatchJobStatus = "PENDING" | "RUNNING" | "COMPLETED" | "CANCELLED" | "FAILED";
+export type BatchItemStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "SKIPPED";
+export interface BatchItem { id: string; trackId: string; position: number; status: BatchItemStatus; source: string | null; message: string | null; candidate: TagCandidate | null }
 export interface TagScrapingBatch {
-  id: string; status: BatchJobStatus; total: number; processed: number; succeeded: number; skipped: number; cancelled: number; failed: number; unsuccessful: number;
-  channelStatus?: Partial<Record<TagSource, { target: number; actual: number; waiting: number; limit: number; state: string; retryAfterSeconds?: number }>>;
-  concurrency: { totalActual: number; totalWaiting: number; totalLimit: number; coverActual: number; coverWaiting: number; coverLimit: number };
+  id: string; status: BatchJobStatus; total: number; processed: number; succeeded: number; skipped: number; failed: number; unsuccessful: number;
   cancelRequested: boolean; items: BatchItem[]; createdAt: string; updatedAt: string; completedAt: string | null;
   partialItems?: boolean;
 }
@@ -80,7 +77,6 @@ export interface CreateBatchInput {
   items: Array<{ trackId: string; expectedVersion: number }>;
   options: {
     sources: TagSource[];
-    channelConcurrency?: Partial<Record<TagSource, number>>;
     verbatim: boolean;
     matchMode: MatchMode;
     missingFields: TagScrapingMissingField[];

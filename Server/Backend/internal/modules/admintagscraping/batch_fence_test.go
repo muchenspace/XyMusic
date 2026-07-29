@@ -11,14 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-func TestAcquireBatchChannelAllowsNilContext(t *testing.T) {
-	release, err := acquireBatchChannel(nil, SourceQMusic)
-	if err != nil {
-		t.Fatal(err)
-	}
-	release()
-}
-
 func TestBatchMutationFenceLockUsesJobThenItemOrder(t *testing.T) {
 	tx := &batchFenceTxStub{
 		t: t,

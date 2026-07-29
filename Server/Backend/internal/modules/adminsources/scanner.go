@@ -27,7 +27,6 @@ type DiscoveredFile struct {
 	AudioPath    string
 	RelativePath string
 	CuePath      string
-	SidecarPaths []string
 	ScanError    error
 }
 
@@ -38,33 +37,14 @@ type FileSynchronizer interface {
 
 type FilesystemScanner struct {
 	synchronizer FileSynchronizer
-	workers      int
 	now          func() time.Time
 }
 
 func NewFilesystemScanner(synchronizer FileSynchronizer) (*FilesystemScanner, error) {
-	return NewFilesystemScannerWithOptions(synchronizer, FilesystemScannerOptions{})
-}
-
-type FilesystemScannerOptions struct {
-	Workers int
-	Now     func() time.Time
-}
-
-func NewFilesystemScannerWithOptions(synchronizer FileSynchronizer, options FilesystemScannerOptions) (*FilesystemScanner, error) {
 	if synchronizer == nil {
 		return nil, errors.New("local library file synchronizer is required")
 	}
-	if options.Workers == 0 {
-		options.Workers = 8
-	}
-	if options.Workers < 1 || options.Workers > 128 {
-		return nil, errors.New("local library scanner workers must be from 1 to 128")
-	}
-	if options.Now == nil {
-		options.Now = func() time.Time { return time.Now().UTC() }
-	}
-	return &FilesystemScanner{synchronizer: synchronizer, workers: options.Workers, now: options.Now}, nil
+	return &FilesystemScanner{synchronizer: synchronizer, now: func() time.Time { return time.Now().UTC() }}, nil
 }
 
 func (scanner *FilesystemScanner) Scan(ctx context.Context, input ScanInput) (ScanResult, error) {
@@ -95,63 +75,50 @@ func (scanner *FilesystemScanner) Scan(ctx context.Context, input ScanInput) (Sc
 		return ScanResult{}, err
 	}
 	progress.DiscoveredFiles = len(files)
-	if cancelled, err := scanCancelled(ctx, input.IsCancelled); err != nil {
-		return ScanResult{}, err
-	} else if cancelled {
-		return ScanResult{}, ErrScanCancelled
-	}
-	workContext, cancelWork := context.WithCancel(ctx)
-	defer cancelWork()
-	jobs := make(chan DiscoveredFile, len(files))
-	results := make(chan error, len(files))
-	for _, file := range files {
-		jobs <- file
-	}
-	close(jobs)
-	workerCount := min(scanner.workers, max(1, len(files)))
-	var group sync.WaitGroup
-	for index := 0; index < workerCount; index++ {
-		group.Add(1)
-		go func() {
-			defer group.Done()
-			for file := range jobs {
-				if file.ScanError != nil {
-					recordErr := scanner.synchronizer.ProcessFile(workContext, input.RootID, input.ScanRunID, file, startedAt)
-					results <- errors.Join(file.ScanError, recordErr)
-					continue
-				}
-				cancelled, checkErr := scanCancelled(workContext, input.IsCancelled)
-				if checkErr != nil {
-					results <- checkErr
-				} else if cancelled {
-					results <- ErrScanCancelled
-				} else {
-					results <- scanner.synchronizer.ProcessFile(workContext, input.RootID, input.ScanRunID, file, startedAt)
-				}
-			}
-		}()
-	}
-	group.Wait()
-	close(results)
-	var progressErr error
-	for processErr := range results {
-		if errors.Is(processErr, ErrScanCancelled) || errors.Is(processErr, context.Canceled) {
-			cancelWork()
+	for start := 0; start < len(files); start += 4 {
+		if cancelled, err := scanCancelled(ctx, input.IsCancelled); err != nil {
+			return ScanResult{}, err
+		} else if cancelled {
 			return ScanResult{}, ErrScanCancelled
 		}
-		progress.ProcessedFiles++
-		if processErr != nil {
-			progress.FailedFiles++
+		end := min(start+4, len(files))
+		batch := files[start:end]
+		errorsByIndex := make([]error, len(batch))
+		var group sync.WaitGroup
+		for index, file := range batch {
+			index, file := index, file
+			group.Add(1)
+			go func() {
+				defer group.Done()
+				if file.ScanError != nil {
+					recordErr := scanner.synchronizer.ProcessFile(ctx, input.RootID, input.ScanRunID, file, startedAt)
+					errorsByIndex[index] = errors.Join(file.ScanError, recordErr)
+					return
+				}
+				if cancelled, err := scanCancelled(ctx, input.IsCancelled); err != nil {
+					errorsByIndex[index] = err
+				} else if cancelled {
+					errorsByIndex[index] = ErrScanCancelled
+				} else {
+					errorsByIndex[index] = scanner.synchronizer.ProcessFile(ctx, input.RootID, input.ScanRunID, file, startedAt)
+				}
+			}()
 		}
-		if input.OnProgress != nil && progressErr == nil {
-			if err := input.OnProgress(ctx, progress); err != nil {
-				progressErr = err
-				cancelWork()
+		group.Wait()
+		for _, processErr := range errorsByIndex {
+			if errors.Is(processErr, ErrScanCancelled) || errors.Is(processErr, context.Canceled) {
+				return ScanResult{}, ErrScanCancelled
+			}
+			progress.ProcessedFiles++
+			if processErr != nil {
+				progress.FailedFiles++
+			}
+			if input.OnProgress != nil {
+				if err := input.OnProgress(ctx, progress); err != nil {
+					return ScanResult{}, err
+				}
 			}
 		}
-	}
-	if progressErr != nil {
-		return ScanResult{}, progressErr
 	}
 	if cancelled, err := scanCancelled(ctx, input.IsCancelled); err != nil {
 		return ScanResult{}, err
@@ -169,10 +136,7 @@ func (scanner *FilesystemScanner) Scan(ctx context.Context, input ScanInput) (Sc
 }
 
 func discoverLibraryFiles(root string, include, exclude []*regexp.Regexp) ([]DiscoveredFile, error) {
-	files := make([]DiscoveredFile, 0)
-	audioPaths := make([]string, 0)
-	sidecarsByDirectory := make(map[string]map[string][]string)
-	cueOwned := make(map[string]string)
+	directories := make([]string, 0)
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -184,18 +148,32 @@ func discoverLibraryFiles(root string, include, exclude []*regexp.Regexp) ([]Dis
 			return nil
 		}
 		if entry.IsDir() {
-			return nil
+			directories = append(directories, path)
 		}
-		extension := strings.ToLower(filepath.Ext(entry.Name()))
-		if extension == ".cue" {
-			cuePath := path
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	files := make([]DiscoveredFile, 0)
+	cueOwned := make(map[string]string)
+	for _, directory := range directories {
+		entries, err := os.ReadDir(directory)
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || strings.ToLower(filepath.Ext(entry.Name())) != ".cue" {
+				continue
+			}
+			cuePath := filepath.Join(directory, entry.Name())
 			references, parseErr := cueReferences(cuePath)
 			if parseErr != nil {
 				files = append(files, DiscoveredFile{AudioPath: cuePath, RelativePath: relativeLibraryPath(root, cuePath), CuePath: cuePath, ScanError: parseErr})
-				return nil
+				continue
 			}
 			for _, reference := range references {
-				target, resolveErr := resolveFileWithinRoot(root, filepath.Join(filepath.Dir(cuePath), reference))
+				target, resolveErr := resolveFileWithinRoot(root, filepath.Join(directory, reference))
 				if resolveErr == nil {
 					if _, supported := supportedAudioExtensions[strings.ToLower(filepath.Ext(target))]; !supported {
 						resolveErr = errors.New("CUE referenced an unsupported audio container")
@@ -217,57 +195,32 @@ func discoverLibraryFiles(root string, include, exclude []*regexp.Regexp) ([]Dis
 				cueOwned[normalizedTarget] = cuePath
 				files = append(files, DiscoveredFile{AudioPath: target, RelativePath: relativeLibraryPath(root, target), CuePath: cuePath})
 			}
-			return nil
-		}
-		if _, supported := supportedAudioExtensions[extension]; supported {
-			audioPaths = append(audioPaths, path)
-			return nil
-		}
-		if extension == ".lrc" || extension == ".txt" {
-			directoryKey := normalizePlatformPath(filepath.Dir(path))
-			stem := normalizePlatformPath(strings.TrimSuffix(entry.Name(), extension))
-			byStem := sidecarsByDirectory[directoryKey]
-			if byStem == nil {
-				byStem = make(map[string][]string)
-				sidecarsByDirectory[directoryKey] = byStem
-			}
-			byStem[stem] = append(byStem[stem], path)
-			if separator := strings.LastIndex(stem, "."); separator > 0 {
-				byStem[stem[:separator]] = append(byStem[stem[:separator]], path)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	for _, path := range audioPaths {
-		if _, owned := cueOwned[normalizePlatformPath(path)]; owned {
-			continue
-		}
-		relative := normalizedRelativeLibraryPath(root, path)
-		if matchesPatterns(relative, include, exclude) {
-			files = append(files, DiscoveredFile{AudioPath: path, RelativePath: relativeLibraryPath(root, path), SidecarPaths: sidecarPathsForAudio(sidecarsByDirectory, path)})
 		}
 	}
-	for index := range files {
-		if files[index].AudioPath == "" || files[index].ScanError != nil {
-			continue
+	for _, directory := range directories {
+		entries, err := os.ReadDir(directory)
+		if err != nil {
+			return nil, err
 		}
-		files[index].SidecarPaths = sidecarPathsForAudio(sidecarsByDirectory, files[index].AudioPath)
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			path := filepath.Join(directory, entry.Name())
+			if _, supported := supportedAudioExtensions[strings.ToLower(filepath.Ext(path))]; !supported {
+				continue
+			}
+			if _, owned := cueOwned[normalizePlatformPath(path)]; owned {
+				continue
+			}
+			relative := normalizedRelativeLibraryPath(root, path)
+			if matchesPatterns(relative, include, exclude) {
+				files = append(files, DiscoveredFile{AudioPath: path, RelativePath: relativeLibraryPath(root, path)})
+			}
+		}
 	}
 	sort.SliceStable(files, func(i, j int) bool { return files[i].RelativePath < files[j].RelativePath })
 	return files, nil
-}
-
-func sidecarPathsForAudio(index map[string]map[string][]string, audioPath string) []string {
-	directory := index[normalizePlatformPath(filepath.Dir(audioPath))]
-	if directory == nil {
-		return []string{}
-	}
-	stem := normalizePlatformPath(strings.TrimSuffix(filepath.Base(audioPath), filepath.Ext(audioPath)))
-	paths := directory[stem]
-	return append([]string{}, paths...)
 }
 
 func cueReferences(path string) ([]string, error) {

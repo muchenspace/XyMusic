@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -23,17 +22,6 @@ type BatchMutationFence struct {
 
 type batchMutationContextKey struct{}
 
-type batchChannelLease struct {
-	held    Source
-	acquire func(context.Context, Source) (func(), error)
-}
-
-type batchProgressReporter func(ItemStage, string, int, *time.Time)
-
-type batchProgressContextKey struct{}
-
-type batchChannelContextKey struct{}
-
 func withBatchMutationFence(ctx context.Context, fence *BatchMutationFence) context.Context {
 	if fence == nil {
 		return ctx
@@ -47,44 +35,6 @@ func batchMutationFenceFromContext(ctx context.Context) *BatchMutationFence {
 	}
 	fence, _ := ctx.Value(batchMutationContextKey{}).(*BatchMutationFence)
 	return fence
-}
-
-func withBatchChannelLease(
-	ctx context.Context,
-	held Source,
-	acquire func(context.Context, Source) (func(), error),
-) context.Context {
-	if ctx == nil || acquire == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, batchChannelContextKey{}, batchChannelLease{held: held, acquire: acquire})
-}
-
-func acquireBatchChannel(ctx context.Context, source Source) (func(), error) {
-	if ctx == nil {
-		return func() {}, nil
-	}
-	lease, _ := ctx.Value(batchChannelContextKey{}).(batchChannelLease)
-	if lease.acquire == nil || lease.held == source {
-		return func() {}, nil
-	}
-	return lease.acquire(ctx, source)
-}
-
-func withBatchProgressReporter(ctx context.Context, reporter batchProgressReporter) context.Context {
-	if ctx == nil || reporter == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, batchProgressContextKey{}, reporter)
-}
-
-func reportBatchProgress(ctx context.Context, stage ItemStage, message string, retryCount int, retryAfter *time.Time) {
-	if ctx == nil {
-		return
-	}
-	if reporter, ok := ctx.Value(batchProgressContextKey{}).(batchProgressReporter); ok && reporter != nil {
-		reporter(stage, message, retryCount, retryAfter)
-	}
 }
 
 // Lock serializes a batch mutation with cancellation, lease renewal, reclaim,

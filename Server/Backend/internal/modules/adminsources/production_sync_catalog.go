@@ -626,13 +626,7 @@ func syncScannedLyrics(ctx context.Context, transaction pgx.Tx, trackID string, 
 		) VALUES($1,$2,$3,$4,$5,$6,false)
 		ON CONFLICT(track_id,language) DO UPDATE SET format=EXCLUDED.format,timing=EXCLUDED.timing,content=EXCLUDED.content,
 			origin=EXCLUDED.origin,asset_id=NULL,version=lyrics.version+1,updated_at=now()
-		WHERE lyrics.origin IN('SCAN','EXTERNAL') AND (
-			lyrics.format IS DISTINCT FROM EXCLUDED.format OR
-			lyrics.timing IS DISTINCT FROM EXCLUDED.timing OR
-			lyrics.content IS DISTINCT FROM EXCLUDED.content OR
-			lyrics.origin IS DISTINCT FROM EXCLUDED.origin OR
-			lyrics.asset_id IS NOT NULL
-		)`,
+		WHERE lyrics.origin IN('SCAN','EXTERNAL')`,
 			trackID, lyric.Language, lyric.Format, lyric.Timing, lyric.Content, lyric.Origin); err != nil {
 			return fmt.Errorf("store scanned local library lyric: %w", err)
 		}
@@ -661,12 +655,10 @@ func syncScannedLyrics(ctx context.Context, transaction pgx.Tx, trackID string, 
 	if err != nil {
 		return err
 	}
-	if _, err := transaction.Exec(ctx, `UPDATE lyrics SET is_default=false,updated_at=now()
-		WHERE track_id=$1 AND is_default=true AND id<>$2`, trackID, selectedID); err != nil {
+	if _, err := transaction.Exec(ctx, `UPDATE lyrics SET is_default=false,updated_at=now() WHERE track_id=$1`, trackID); err != nil {
 		return err
 	}
-	_, err = transaction.Exec(ctx, `UPDATE lyrics SET is_default=true,updated_at=now()
-		WHERE id=$1 AND is_default=false`, selectedID)
+	_, err = transaction.Exec(ctx, `UPDATE lyrics SET is_default=true,updated_at=now() WHERE id=$1`, selectedID)
 	return err
 }
 

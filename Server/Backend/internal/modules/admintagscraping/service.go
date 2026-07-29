@@ -27,7 +27,6 @@ type ServiceDependencies struct {
 	Fingerprinter           Fingerprinter
 	Artwork                 ArtworkApplier
 	DefaultLibraryDirectory string
-	Metrics                 PerformanceMetrics
 }
 
 type Service struct {
@@ -36,7 +35,6 @@ type Service struct {
 	fingerprinter           Fingerprinter
 	artwork                 ArtworkApplier
 	defaultLibraryDirectory string
-	metrics                 PerformanceMetrics
 }
 
 var (
@@ -60,18 +58,7 @@ func NewService(dependencies ServiceDependencies) (*Service, error) {
 	return &Service{
 		store: dependencies.Store, music: dependencies.Music, fingerprinter: dependencies.Fingerprinter,
 		artwork: dependencies.Artwork, defaultLibraryDirectory: dependencies.DefaultLibraryDirectory,
-		metrics: dependencies.Metrics,
 	}, nil
-}
-
-func (service *Service) ChannelHealth(source Source) ChannelHealth {
-	provider, ok := service.music.(interface {
-		ChannelHealth(Source) ChannelHealth
-	})
-	if !ok {
-		return ChannelHealth{State: "READY"}
-	}
-	return provider.ChannelHealth(source)
 }
 
 func (service *Service) Search(ctx context.Context, input SearchInput) ([]Candidate, error) {
@@ -81,12 +68,6 @@ func (service *Service) Search(ctx context.Context, input SearchInput) ([]Candid
 	}
 	if searchText == "" && input.Title != nil {
 		searchText = cleanScrapedText(*input.Title)
-		if input.Artist != nil {
-			artists := splitArtists(*input.Artist)
-			if len(artists) > 0 {
-				searchText = strings.TrimSpace(searchText + " " + artists[0])
-			}
-		}
 	}
 	if searchText == "" {
 		return nil, apperror.Validation("Search text must not be empty")
@@ -314,7 +295,6 @@ func (service *Service) Apply(
 		set("genres", genres, current.Effective.Genres, len(current.Effective.Genres) == 0)
 	}
 	if input.Fields.Lyrics && (input.Fields.Overwrite || current.Effective.Lyrics == nil) {
-		reportBatchProgress(ctx, StageGetLyrics, "正在获取歌词", 0, nil)
 		lyricResult, lyricErr := service.lyrics(ctx, candidate, input.Verbatim)
 		var metadata *MetadataLyrics
 		if lyricErr == nil {
@@ -335,7 +315,6 @@ func (service *Service) Apply(
 
 	metadata := current
 	if len(patch) > 0 {
-		reportBatchProgress(ctx, StageUpdateMetadata, "正在更新元数据", 0, nil)
 		if err := checkApplyCancellation(ctx, input); err != nil {
 			return ApplyResult{}, err
 		}
@@ -361,19 +340,11 @@ func (service *Service) Apply(
 		} else if albumID == nil {
 			warnings = append(warnings, "The track has no album; cover artwork was skipped")
 		} else {
-			message := "正在等待封面下载"
-			if healthProvider, ok := service.music.(interface{ ArtworkHealth() ArtworkHealth }); ok {
-				health := healthProvider.ArtworkHealth()
-				message = fmt.Sprintf("正在等待封面下载，%d/%d 路占用，前方 %d 项", health.Actual, health.Limit, health.Waiting)
-			}
-			reportBatchProgress(ctx, StageWaitingCover, message, 0, nil)
-			reportBatchProgress(ctx, StageDownloadCover, "正在下载封面", 0, nil)
 			artwork, artworkErr := service.music.DownloadArtwork(ctx, candidate.AlbumImg)
 			if artworkErr == nil {
 				artworkErr = checkApplyCancellation(ctx, input)
 			}
 			if artworkErr == nil {
-				reportBatchProgress(ctx, StageApplyCover, "正在上传并应用封面", 0, nil)
 				artworkErr = service.artwork.ApplyAlbumArtwork(ctx, actorID, traceID, *albumID, artwork)
 			}
 			if artworkErr != nil {
@@ -418,7 +389,7 @@ func (service *Service) lyrics(ctx context.Context, candidate Candidate, verbati
 	if candidate.Source == SourceAcoustID {
 		return LyricResult{}, nil
 	}
-	result, err := service.lyricFromSource(ctx, candidate.Source, candidate, verbatim)
+	result, err := service.music.Lyric(ctx, candidate.Source, candidate, verbatim)
 	if err == nil && strings.TrimSpace(result.Content) != "" {
 		return result, nil
 	}
@@ -426,58 +397,28 @@ func (service *Service) lyrics(ctx context.Context, candidate Candidate, verbati
 		return LyricResult{}, err
 	}
 	if candidate.Source != SourceQMusic && candidate.Name != "" {
-		fallbackQuery := candidate.Name
-		if artists := splitArtists(candidate.Artist); len(artists) > 0 {
-			fallbackQuery = strings.TrimSpace(fallbackQuery + " " + artists[0])
-		}
-		matches, searchErr := service.searchFromSource(ctx, SourceQMusic, fallbackQuery)
+		matches, searchErr := service.music.Search(ctx, SourceQMusic, candidate.Name)
 		if searchErr != nil {
 			return LyricResult{}, searchErr
 		}
-		artistQuery := candidate.Artist
-		if artists := splitArtists(candidate.Artist); len(artists) > 0 {
-			artistQuery = artists[0]
+		type fallback struct {
+			candidate Candidate
+			score     float64
 		}
-		fallbackInput := SearchInput{Title: &candidate.Name, Artist: &artistQuery}
-		if strings.TrimSpace(candidate.Album) != "" {
-			fallbackInput.Album = &candidate.Album
-		}
-		var fallbackCandidate *Candidate
+		fallbacks := make([]fallback, 0, len(matches))
 		for _, match := range matches {
-			if reliableTagMatch(fallbackInput, match, MatchStrict) {
-				fallback := match
-				fallbackCandidate = &fallback
-				break
+			artist := candidate.Artist
+			if artist == "" {
+				artist = candidate.Name
 			}
+			fallbacks = append(fallbacks, fallback{candidate: match, score: tagMatchScore(candidate.Name, match.Name) + tagArtistMatchScore(artist, match.Artist)})
 		}
-		if fallbackCandidate != nil {
-			return service.lyricFromSource(ctx, SourceQMusic, *fallbackCandidate, verbatim)
+		sort.SliceStable(fallbacks, func(left, right int) bool { return fallbacks[left].score > fallbacks[right].score })
+		if len(fallbacks) > 0 && fallbacks[0].score >= 2 {
+			return service.music.Lyric(ctx, SourceQMusic, fallbacks[0].candidate, verbatim)
 		}
 	}
 	return LyricResult{}, nil
-}
-
-func (service *Service) searchFromSource(ctx context.Context, source Source, query string) ([]Candidate, error) {
-	release, err := acquireBatchChannel(ctx, source)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	return service.music.Search(ctx, source, query)
-}
-
-func (service *Service) lyricFromSource(
-	ctx context.Context,
-	source Source,
-	candidate Candidate,
-	verbatim bool,
-) (LyricResult, error) {
-	release, err := acquireBatchChannel(ctx, source)
-	if err != nil {
-		return LyricResult{}, err
-	}
-	defer release()
-	return service.music.Lyric(ctx, source, candidate, verbatim)
 }
 
 func metadataLyrics(result LyricResult) (*MetadataLyrics, error) {
@@ -627,49 +568,11 @@ func scoreCandidate(query SearchInput, candidate Candidate) (float64, float64, f
 	return titleScore, artistScore, albumScore, titleScore + artistScore + albumScore
 }
 
-func reliableTagMatch(query SearchInput, candidate Candidate, mode MatchMode) bool {
-	title := ""
-	if query.Title != nil {
-		title = strings.TrimSpace(*query.Title)
-	}
-	if title == "" && query.Query != nil {
-		title = strings.TrimSpace(*query.Query)
-	}
-	if title == "" {
-		if mode == MatchSimple {
-			return valueOrZero(candidate.TitleScore) == 2
-		}
-		return valueOrZero(candidate.Score) >= 3
-	}
-	titleScore, artistScore, albumScore, _ := scoreCandidate(query, candidate)
-	if !sameTagVersion(title, candidate.Name) {
-		return false
-	}
+func reliableTagMatch(candidate Candidate, mode MatchMode) bool {
 	if mode == MatchSimple {
-		return titleScore == 2
+		return valueOrZero(candidate.TitleScore) == 2
 	}
-	if titleScore != 2 {
-		return false
-	}
-	if query.Artist != nil && strings.TrimSpace(*query.Artist) != "" && artistScore != 2 {
-		return false
-	}
-	return query.Album == nil || strings.TrimSpace(*query.Album) == "" || albumScore == 2
-}
-
-func sameTagVersion(query, candidate string) bool {
-	return tagVersionSignature(query) == tagVersionSignature(candidate)
-}
-
-func tagVersionSignature(value string) string {
-	text := strings.ToLower(norm.NFKC.String(cleanScrapedText(value)))
-	flags := make([]string, 0, 8)
-	for _, pattern := range tagVersionPatterns {
-		if pattern.re.MatchString(text) {
-			flags = append(flags, pattern.name)
-		}
-	}
-	return strings.Join(flags, ",")
+	return valueOrZero(candidate.Score) >= 3
 }
 
 func matchesMissingFields(metadata MetadataSnapshot, fields []MissingField) bool {
@@ -879,17 +782,3 @@ var (
 	releaseDatePattern = regexp.MustCompile(`\b(\d{4}(?:-\d{2}(?:-\d{2})?)?)\b`)
 	lrcPattern         = regexp.MustCompile(`\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?]`)
 )
-
-var tagVersionPatterns = []struct {
-	name string
-	re   *regexp.Regexp
-}{
-	{name: "live", re: regexp.MustCompile(`(?i)\blive\b|现场|现场版`)},
-	{name: "remix", re: regexp.MustCompile(`(?i)\bremix(?:ed)?\b|\b(?:radio|club|extended)\s+mix\b|混音`)},
-	{name: "instrumental", re: regexp.MustCompile(`(?i)\binstrumental\b|\b伴奏\b|伴奏版|卡拉 OK|karaoke`)},
-	{name: "cover", re: regexp.MustCompile(`(?i)\bcover\b|翻唱`)},
-	{name: "remaster", re: regexp.MustCompile(`(?i)\b(?:re-?master(?:ed)?|remaster(?:ed)?)\b|重制|重新母带`)},
-	{name: "acoustic", re: regexp.MustCompile(`(?i)\bacoustic\b|不插电`)},
-	{name: "demo", re: regexp.MustCompile(`(?i)\bdemo\b|试听`)},
-	{name: "original", re: regexp.MustCompile(`(?i)\boriginal\b|原版`)},
-}

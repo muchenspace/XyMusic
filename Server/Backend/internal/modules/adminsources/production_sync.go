@@ -302,7 +302,7 @@ func (synchronizer *ProductionSynchronizer) syncStandardFile(
 		assetReusable, checkErr = synchronizer.readySourceAssetReusable(ctx, existing)
 		return assetReusable, checkErr
 	}
-	if unchanged && existing.Status == SourceFileReady && existing.SourceAssetID != nil {
+	if unchanged && existing.Status == SourceFileReady {
 		reusable, err := checkReadyAsset()
 		if err != nil {
 			return localSourceRecord{}, err
@@ -312,7 +312,7 @@ func (synchronizer *ProductionSynchronizer) syncStandardFile(
 			if err != nil {
 				return localSourceRecord{}, err
 			}
-			sidecars, err := sidecarLyricsForFile(file)
+			sidecars, err := readSidecarLyrics(file.AudioPath)
 			if err != nil {
 				return localSourceRecord{}, err
 			}
@@ -420,7 +420,7 @@ func (synchronizer *ProductionSynchronizer) syncStandardFile(
 		return localSourceRecord{}, err
 	}
 	raw := probed.Metadata
-	sidecars, err := sidecarLyricsForFile(file)
+	sidecars, err := readSidecarLyrics(file.AudioPath)
 	if err != nil {
 		return localSourceRecord{}, err
 	}
