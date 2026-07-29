@@ -339,8 +339,8 @@ const DRAG_THRESHOLD_PX = 4;
                 v-for="(word, wordIndex) in line.words"
                 :key="`${word.time}-${wordIndex}`"
                 class="lyric-word"
-                :class="{ 'is-sung': activeWordProgresses[wordIndex] > 0, 'is-current': activeWordProgresses[wordIndex] > 0 && activeWordProgresses[wordIndex] < 1 }"
-                :style="{ '--lyric-word-progress': `${(activeWordProgresses[wordIndex] ?? 0) * 100}%` }"
+                :class="{ 'is-sung': index === activeIndex && activeWordProgresses[wordIndex] > 0, 'is-current': index === activeIndex && activeWordProgresses[wordIndex] > 0 && activeWordProgresses[wordIndex] < 1 }"
+                :style="{ '--lyric-word-progress': `${(index === activeIndex ? activeWordProgresses[wordIndex] ?? 0 : 0) * 100}%` }"
               >{{ word.text }}</span>
             </strong>
             <strong v-else>{{ line.text }}</strong>
