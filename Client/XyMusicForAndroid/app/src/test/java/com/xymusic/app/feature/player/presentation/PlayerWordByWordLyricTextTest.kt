@@ -37,4 +37,17 @@ class PlayerWordByWordLyricTextTest {
         assertThat(calculateWordTimedHighlightProgress(words, 4_001))
             .isEqualTo(WordTimedHighlightProgress(completedCount = 3, currentFraction = 0f))
     }
+
+    @Test
+    fun zeroDurationWordDoesNotBlockFollowingWords() {
+        val wordsWithZeroDurationWord =
+            listOf(
+                PlayerLyricWordUi(1_000, "first", endTimeMs = 2_000),
+                PlayerLyricWordUi(2_000, " ", endTimeMs = 2_000),
+                PlayerLyricWordUi(2_000, "second", endTimeMs = 3_000),
+            )
+
+        assertThat(calculateWordTimedHighlightProgress(wordsWithZeroDurationWord, 2_500))
+            .isEqualTo(WordTimedHighlightProgress(completedCount = 2, currentFraction = 0.5f))
+    }
 }
