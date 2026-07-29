@@ -108,9 +108,46 @@ describe("playback lyrics wheel controls", () => {
       mounted.wrapper.unmount();
     }
   });
+
+  it("does not reuse the active word progress for inactive lines while paused", async () => {
+    const mounted = await mountLyricsView({
+      timing: "WORD",
+      currentTime: 1.2,
+      lines: [
+        {
+          time: 0,
+          text: "first second",
+          words: [{ time: 0, endTime: 1, text: "first" }, { time: 1, endTime: 2, text: " second" }],
+        },
+        {
+          time: 3,
+          text: "third fourth",
+          words: [{ time: 3, endTime: 4, text: "third" }, { time: 4, endTime: 5, text: " fourth" }],
+        },
+      ],
+    });
+    try {
+      expect(mounted.player.isPlaying).toBe(false);
+      const lines = mounted.wrapper.findAll(".lyric-line");
+      expect(lines[0]?.findAll(".lyric-word.is-sung")).toHaveLength(2);
+      expect(lines[1]?.findAll(".lyric-word.is-sung")).toHaveLength(0);
+      expect(lines[1]?.findAll(".lyric-word").every((word) => word.attributes("style").includes("--lyric-word-progress: 0%;"))).toBe(true);
+
+      mounted.player.currentTime = 3.2;
+      await nextTick();
+      await nextTick();
+
+      const updatedLines = mounted.wrapper.findAll(".lyric-line");
+      expect(updatedLines[0]?.findAll(".lyric-word.is-sung")).toHaveLength(0);
+      expect(updatedLines[1]?.findAll(".lyric-word.is-sung")).toHaveLength(1);
+      expect(updatedLines[0]?.findAll(".lyric-word").every((word) => word.attributes("style").includes("--lyric-word-progress: 0%;"))).toBe(true);
+    } finally {
+      mounted.wrapper.unmount();
+    }
+  });
 });
 
-async function mountLyricsView(options: { timing: Lyrics["timing"]; lines?: Lyrics["lines"] }): Promise<{
+async function mountLyricsView(options: { timing: Lyrics["timing"]; lines?: Lyrics["lines"]; currentTime?: number }): Promise<{
   wrapper: VueWrapper;
   player: ReturnType<typeof usePlayerStore>;
   lyrics: ReturnType<typeof useLyricsStore>;
@@ -133,7 +170,7 @@ async function mountLyricsView(options: { timing: Lyrics["timing"]; lines?: Lyri
   const lyrics = useLyricsStore(pinia);
   player.queue = [track()];
   player.currentIndex = 0;
-  player.currentTime = 0;
+  player.currentTime = options.currentTime ?? 0;
   player.lyricsOpen = true;
   lyrics.lyrics = {
     trackId: "track-1",
