@@ -32,7 +32,7 @@ function formatTime(seconds: number): string {
   <section class="content-section random-tracks-section" aria-label="猜你喜欢">
     <div class="section-heading"><div><h2>猜你喜欢</h2></div></div>
     <div class="random-track-grid">
-      <article v-for="track in tracks" :key="track.id" class="random-track-card" :class="{ current: currentId === track.id }">
+      <article v-for="track in tracks" :key="track.id" v-memo="[track, currentId === track.id, currentId === track.id ? isPlaying : false]" class="random-track-card" :class="{ current: currentId === track.id }">
         <button type="button" class="random-track-main" :aria-label="currentId === track.id && isPlaying ? `暂停《${track.title}》` : `播放《${track.title}》`" @click="toggleTrack(track)">
           <ArtworkImage :src="track.coverUrl" :alt="`${track.title}封面`" kind="track" />
           <span class="random-track-copy">

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Languages, Minus, Plus, RotateCcw } from "@lucide/vue";
 import type { LyricLine, Track } from "../../domain/music";
 import { resolveLyricPlaybackPosition, resolveLyricWordProgress } from "../../domain/lyricsTimeline";
@@ -17,6 +17,7 @@ const lyricsStore = useLyricsStore();
 const displayedPlaybackTime = useSmoothLyricsPlaybackPosition({
   currentTime: () => player.currentTime,
   isPlaying: () => player.isPlaying,
+  isActive: () => player.lyricsOpen,
 });
 const desktopWindow = useApplicationServices().desktopWindow;
 const viewElement = ref<HTMLElement | null>(null);
@@ -26,6 +27,12 @@ const lyricsMenuElement = ref<HTMLElement | null>(null);
 const lyricsMenu = ref({ open: false, x: 0, y: 0 });
 const activeIndex = ref(-1);
 const activeWordIndex = ref(-1);
+const activeWordProgresses = computed(() => {
+  const line = lyricsStore.lyrics?.lines[activeIndex.value];
+  if (!line?.words?.length) return [];
+  const playbackTime = displayedPlaybackTime.value + lyricsStore.offset;
+  return line.words.map((word) => resolveLyricWordProgress(word, playbackTime));
+});
 const draggingLyrics = ref(false);
 let previouslyFocused: HTMLElement | null = null;
 let lyricsMenuReturnFocus: HTMLElement | null = null;
@@ -57,12 +64,6 @@ function updateActivePosition(): void {
   const position = resolveLyricPlaybackPosition(lyricsStore.lyrics, playbackTime);
   activeIndex.value = position.lineIndex;
   activeWordIndex.value = position.wordIndex;
-}
-
-function lyricWordProgress(line: LyricLine, lineIndex: number, wordIndex: number): number {
-	if (lineIndex !== activeIndex.value) return 0;
-  const word = line.words?.[wordIndex];
-  return word ? resolveLyricWordProgress(word, displayedPlaybackTime.value + lyricsStore.offset) : 0;
 }
 
 watch(
@@ -338,8 +339,8 @@ const DRAG_THRESHOLD_PX = 4;
                 v-for="(word, wordIndex) in line.words"
                 :key="`${word.time}-${wordIndex}`"
                 class="lyric-word"
-                :class="{ 'is-sung': lyricWordProgress(line, index, wordIndex) > 0, 'is-current': lyricWordProgress(line, index, wordIndex) > 0 && lyricWordProgress(line, index, wordIndex) < 1 }"
-                :style="{ '--lyric-word-progress': `${lyricWordProgress(line, index, wordIndex) * 100}%` }"
+                :class="{ 'is-sung': activeWordProgresses[wordIndex] > 0, 'is-current': activeWordProgresses[wordIndex] > 0 && activeWordProgresses[wordIndex] < 1 }"
+                :style="{ '--lyric-word-progress': `${(activeWordProgresses[wordIndex] ?? 0) * 100}%` }"
               >{{ word.text }}</span>
             </strong>
             <strong v-else>{{ line.text }}</strong>

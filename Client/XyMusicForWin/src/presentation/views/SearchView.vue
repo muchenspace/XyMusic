@@ -13,7 +13,7 @@ defineProps<{
   loadingMore: SearchScope | null;
   albumPlayLoadingId?: string;
   currentId?: string;
-  isPlaying: boolean;
+  isPlaying?: boolean;
 }>();
 
 defineEmits<{
@@ -35,7 +35,7 @@ defineEmits<{
     <p v-if="resultsQuery !== query.trim()" class="search-results-status" role="status" aria-live="polite">
       {{ searching ? `正在搜索“${query.trim()}”，当前仍显示“${resultsQuery}”的结果。` : `当前显示“${resultsQuery}”的结果。` }}
     </p>
-    <TrackTable v-if="results.tracks.length" :tracks="results.tracks" title="歌曲" description="匹配的歌曲" empty-title="没有找到歌曲" empty-description="尝试更换关键词。" :current-id="currentId" :is-playing="isPlaying" @play="$emit('playTrack', $event)" @toggle="$emit('toggle')" @favorite="$emit('favorite', $event)" @add="$emit('add', $event)" />
+    <TrackTable v-if="results.tracks.length" :tracks="results.tracks" title="歌曲" description="匹配的歌曲" empty-title="没有找到歌曲" empty-description="尝试更换关键词。" :current-id="currentId" @play="$emit('playTrack', $event)" @toggle="$emit('toggle')" @favorite="$emit('favorite', $event)" @add="$emit('add', $event)" />
     <div v-if="results.nextCursors?.tracks" class="pagination-footer"><button type="button" class="secondary-button" :disabled="searching || resultsQuery !== query.trim() || loadingMore !== null" @click="$emit('loadMore', 'tracks')">{{ loadingMore === 'tracks' ? '正在加载…' : '加载更多歌曲' }}</button></div>
     <ArtistGrid v-if="results.artists.length" :artists="results.artists" @open="$emit('openArtist', $event)" />
     <div v-if="results.nextCursors?.artists" class="pagination-footer"><button type="button" class="secondary-button" :disabled="searching || resultsQuery !== query.trim() || loadingMore !== null" @click="$emit('loadMore', 'artists')">{{ loadingMore === 'artists' ? '正在加载…' : '加载更多歌手' }}</button></div>

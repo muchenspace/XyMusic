@@ -9,7 +9,7 @@ import EmptyState from "./ui/EmptyState.vue";
 const props = withDefaults(defineProps<{
   tracks: Track[];
   currentId?: string;
-  isPlaying: boolean;
+  isPlaying?: boolean;
   entries?: PlaylistEntry[];
   currentEntryId?: string;
   title?: string;
@@ -38,6 +38,14 @@ const emit = defineEmits<{
   reorder: [orderedEntryIds: string[]];
 }>();
 
+interface RenderedTrack {
+  track: Track;
+  index: number;
+  entry?: PlaylistEntry;
+  current: boolean;
+  selected: boolean;
+}
+
 const rowGroup = ref<HTMLElement | null>(null);
 const selectedEntryIds = ref<string[]>([]);
 const draggedEntryId = ref<string | null>(null);
@@ -45,10 +53,24 @@ const dragOverEntryId = ref<string | null>(null);
 const trackCount = computed(() => props.tracks.length);
 const playlistMode = computed(() => Boolean(props.entries));
 const allSelected = computed(() => Boolean(props.entries?.length) && selectedEntryIds.value.length === props.entries?.length);
+const selectedEntrySet = computed(() => new Set(selectedEntryIds.value));
 const virtualRows = useVirtualRows(trackCount, rowGroup, { rowHeight: 64 });
-const renderedTracks = computed(() => props.tracks
-  .slice(virtualRows.start.value, virtualRows.end.value)
-  .map((track, offset) => ({ track, index: virtualRows.start.value + offset })));
+const renderedTracks = computed<RenderedTrack[]>(() => {
+  const start = virtualRows.start.value;
+  return props.tracks
+    .slice(start, virtualRows.end.value)
+    .map((track, offset) => {
+      const index = start + offset;
+      const entry = props.entries?.[index];
+      return {
+        track,
+        index,
+        entry,
+        current: entry ? Boolean(props.currentEntryId) && props.currentEntryId === entry.id : props.currentId === track.id,
+        selected: entry ? selectedEntrySet.value.has(entry.id) : false,
+      };
+    });
+});
 
 watch(() => props.entries?.map((entry) => entry.id), (ids = []) => {
   const available = new Set(ids);
@@ -150,40 +172,40 @@ function formatDate(value: string): string {
       <div ref="rowGroup" class="track-row-group" role="rowgroup" :data-virtualized="virtualRows.enabled.value || undefined">
         <div v-if="virtualRows.topSpacer.value" class="track-virtual-spacer" :style="{ height: `${virtualRows.topSpacer.value}px` }" aria-hidden="true"></div>
         <div
-          v-for="{ track, index } in renderedTracks"
-          :key="entryAt(index)?.id ?? track.id"
+          v-for="row in renderedTracks"
+          :key="row.entry?.id ?? row.track.id"
           class="track-row"
-          :class="{ current: isCurrent(track, index), dragging: draggedEntryId === entryAt(index)?.id, 'drag-over': dragOverEntryId === entryAt(index)?.id }"
+          :class="{ current: row.current, dragging: draggedEntryId === row.entry?.id, 'drag-over': dragOverEntryId === row.entry?.id }"
           role="row"
-          :aria-rowindex="index + 2"
-          :aria-current="isCurrent(track, index) ? 'true' : undefined"
+          :aria-rowindex="row.index + 2"
+          :aria-current="row.current ? 'true' : undefined"
           tabindex="0"
-          @click="handleRowClick($event, track, index)"
-          @keydown.enter.self="toggleTrack(track, index)"
-          @dragover.prevent="dragOverEntryId = entryAt(index)?.id ?? null"
-          @drop.prevent="entryAt(index) && dropOn(entryAt(index)!.id)"
+          @click="handleRowClick($event, row.track, row.index)"
+          @keydown.enter.self="toggleTrack(row.track, row.index)"
+          @dragover.prevent="dragOverEntryId = row.entry?.id ?? null"
+          @drop.prevent="row.entry && dropOn(row.entry.id)"
         >
           <span class="track-index" role="cell">
-            <input v-if="entryAt(index)" type="checkbox" :checked="selectedEntryIds.includes(entryAt(index)!.id)" :disabled="busy" :aria-label="`选择《${track.title}》`" @click.stop @change="toggleEntry(entryAt(index)!.id, ($event.target as HTMLInputElement).checked)" />
-            <span v-else aria-hidden="true">{{ String(index + 1).padStart(2, "0") }}</span>
+            <input v-if="row.entry" type="checkbox" :checked="row.selected" :disabled="busy" :aria-label="`选择《${row.track.title}》`" @click.stop @change="toggleEntry(row.entry.id, ($event.target as HTMLInputElement).checked)" />
+            <span v-else aria-hidden="true">{{ String(row.index + 1).padStart(2, "0") }}</span>
           </span>
           <span class="track-title" role="cell">
-            <ArtworkImage :src="track.coverUrl" :alt="`${track.title}封面`" kind="track" />
-            <span><strong class="track-main-title">{{ track.title }}</strong><small>{{ track.artist }}</small></span>
+            <ArtworkImage :src="row.track.coverUrl" :alt="`${row.track.title}封面`" kind="track" />
+            <span><strong class="track-main-title">{{ row.track.title }}</strong><small>{{ row.track.artist }}</small></span>
           </span>
-          <span class="track-album" role="cell" :title="track.album">{{ track.album || "未知专辑" }}</span>
-          <time role="cell" :datetime="track.publishedAt">{{ formatDate(track.publishedAt) }}</time>
-          <span role="cell">{{ formatTime(track.duration) }}</span>
+          <span class="track-album" role="cell" :title="row.track.album">{{ row.track.album || "未知专辑" }}</span>
+          <time role="cell" :datetime="row.track.publishedAt">{{ formatDate(row.track.publishedAt) }}</time>
+          <span role="cell">{{ formatTime(row.track.duration) }}</span>
           <span class="track-actions" role="cell">
-            <template v-if="entryAt(index)">
-              <button type="button" :disabled="busy || reorderDisabled || index === 0" :title="reorderDisabled ? '加载完整歌单后可排序' : `上移《${track.title}》`" @click.stop="emit('move', entryAt(index)!.id, -1)"><ArrowUp :size="16" /></button>
-              <button type="button" :disabled="busy || reorderDisabled || index === tracks.length - 1" :title="reorderDisabled ? '加载完整歌单后可排序' : `下移《${track.title}》`" @click.stop="emit('move', entryAt(index)!.id, 1)"><ArrowDown :size="16" /></button>
-              <button type="button" class="danger-action" :disabled="busy" :title="`从歌单移除《${track.title}》`" @click.stop="emit('remove', entryAt(index)!.id)"><Trash2 :size="16" /></button>
-              <button type="button" class="drag-handle" :disabled="busy || reorderDisabled" :draggable="!busy && !reorderDisabled" :title="reorderDisabled ? '加载完整歌单后可排序' : `拖动《${track.title}》排序`" @click.stop @dragstart.stop="startDrag($event, entryAt(index)!.id)" @dragend="clearDrag"><GripVertical :size="17" /></button>
+            <template v-if="row.entry">
+              <button type="button" :disabled="busy || reorderDisabled || row.index === 0" :title="reorderDisabled ? '加载完整歌单后可排序' : `上移《${row.track.title}》`" @click.stop="emit('move', row.entry.id, -1)"><ArrowUp :size="16" /></button>
+              <button type="button" :disabled="busy || reorderDisabled || row.index === tracks.length - 1" :title="reorderDisabled ? '加载完整歌单后可排序' : `下移《${row.track.title}》`" @click.stop="emit('move', row.entry.id, 1)"><ArrowDown :size="16" /></button>
+              <button type="button" class="danger-action" :disabled="busy" :title="`从歌单移除《${row.track.title}》`" @click.stop="emit('remove', row.entry.id)"><Trash2 :size="16" /></button>
+              <button type="button" class="drag-handle" :disabled="busy || reorderDisabled" :draggable="!busy && !reorderDisabled" :title="reorderDisabled ? '加载完整歌单后可排序' : `拖动《${row.track.title}》排序`" @click.stop @dragstart.stop="startDrag($event, row.entry.id)" @dragend="clearDrag"><GripVertical :size="17" /></button>
             </template>
             <template v-else>
-              <button type="button" :class="{ liked: track.liked }" :title="track.liked ? `取消收藏《${track.title}》` : `收藏《${track.title}》`" :aria-pressed="track.liked" @click.stop="emit('favorite', track)"><Heart :size="17" :fill="track.liked ? 'currentColor' : 'none'" /></button>
-              <button type="button" :title="`添加《${track.title}》到歌单`" @click.stop="emit('add', track)"><ListPlus :size="17" /></button>
+              <button type="button" :class="{ liked: row.track.liked }" :title="row.track.liked ? `取消收藏《${row.track.title}》` : `收藏《${row.track.title}》`" :aria-pressed="row.track.liked" @click.stop="emit('favorite', row.track)"><Heart :size="17" :fill="row.track.liked ? 'currentColor' : 'none'" /></button>
+              <button type="button" :title="`添加《${row.track.title}》到歌单`" @click.stop="emit('add', row.track)"><ListPlus :size="17" /></button>
             </template>
           </span>
         </div>

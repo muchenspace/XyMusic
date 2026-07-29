@@ -49,4 +49,33 @@ describe("smooth lyrics playback position", () => {
     expect(displayedPosition.value).toBeLessThan(0.08);
     wrapper.unmount();
   });
+
+  it("does not keep an animation loop alive while the lyrics view is hidden", async () => {
+    const nativePosition = ref(0);
+    const playing = ref(true);
+    const active = ref(false);
+    const wrapper = mount({
+      setup() {
+        useSmoothLyricsPlaybackPosition({
+          currentTime: () => nativePosition.value,
+          isPlaying: () => playing.value,
+          isActive: () => active.value,
+        });
+        return () => null;
+      },
+    });
+
+    await nextTick();
+    expect(animationFrames).toHaveLength(0);
+
+    active.value = true;
+    await nextTick();
+    expect(animationFrames).toHaveLength(1);
+
+    active.value = false;
+    await nextTick();
+    animationFrames.shift()?.(16);
+    expect(animationFrames).toHaveLength(0);
+    wrapper.unmount();
+  });
 });

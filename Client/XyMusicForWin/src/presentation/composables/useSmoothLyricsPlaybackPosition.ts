@@ -8,29 +8,38 @@ import {
 interface PlaybackSource {
   currentTime: () => number;
   isPlaying: () => boolean;
+  isActive?: () => boolean;
 }
 
 export function useSmoothLyricsPlaybackPosition(source: PlaybackSource) {
+  const isActive = source.isActive ?? (() => true);
   const displayedPosition = ref(normalizePosition(source.currentTime()));
   let clock: LyricPlaybackClock = createClock(source);
   let animationFrame: number | null = null;
   let disposed = false;
+  let lastUpdateAt = 0;
 
   const update = () => {
     animationFrame = null;
-    if (disposed || !clock.isPlaying) return;
-    displayedPosition.value = interpolateLyricPlaybackSeconds(clock, Date.now());
+    if (disposed || !isActive() || !clock.isPlaying) return;
+    const nowMs = Date.now();
+    if (lastUpdateAt === 0 || nowMs - lastUpdateAt >= LYRICS_UPDATE_INTERVAL_MS) {
+      displayedPosition.value = interpolateLyricPlaybackSeconds(clock, nowMs);
+      lastUpdateAt = nowMs;
+    }
     animationFrame = requestAnimationFrame(update);
   };
 
   const stop = () => {
     if (animationFrame !== null) cancelAnimationFrame(animationFrame);
     animationFrame = null;
+    lastUpdateAt = 0;
   };
 
   const start = () => {
     if (
       disposed ||
+      !isActive() ||
       !clock.isPlaying ||
       animationFrame !== null ||
       typeof window.requestAnimationFrame !== "function"
@@ -39,6 +48,10 @@ export function useSmoothLyricsPlaybackPosition(source: PlaybackSource) {
   };
 
   const reanchor = () => {
+    if (!isActive()) {
+      stop();
+      return;
+    }
     const nextClock = createClock(source);
     const nowMs = Date.now();
     const isDiscontinuous = shouldReanchorLyricPlaybackClock(clock, nextClock, nowMs);
@@ -50,7 +63,7 @@ export function useSmoothLyricsPlaybackPosition(source: PlaybackSource) {
     else stop();
   };
 
-  watch([source.currentTime, source.isPlaying], reanchor, { immediate: true });
+  watch([source.currentTime, source.isPlaying, isActive], reanchor, { immediate: true });
 
   onBeforeUnmount(() => {
     disposed = true;
@@ -71,3 +84,5 @@ function createClock(source: PlaybackSource): LyricPlaybackClock {
 function normalizePosition(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0;
 }
+
+const LYRICS_UPDATE_INTERVAL_MS = 1_000 / 30;

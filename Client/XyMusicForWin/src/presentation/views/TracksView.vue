@@ -5,7 +5,7 @@ import TrackTable from "../components/TrackTable.vue";
 import PageHeader from "../components/ui/PageHeader.vue";
 import PaginationFooter from "../components/ui/PaginationFooter.vue";
 
-defineProps<{ title: string; description: string; tracks: Track[]; currentId?: string; isPlaying: boolean; sort?: FavoriteSort; error?: string; hasMore: boolean; loadingMore: boolean; pageKey?: string | null }>();
+defineProps<{ title: string; description: string; tracks: Track[]; currentId?: string; isPlaying?: boolean; sort?: FavoriteSort; error?: string; hasMore: boolean; loadingMore: boolean; pageKey?: string | null }>();
 defineEmits<{ play: [track: Track]; toggle: []; favorite: [track: Track]; add: [track: Track]; changeSort: [value: string]; loadMore: [] }>();
 </script>
 
@@ -21,6 +21,6 @@ defineEmits<{ play: [track: Track]; toggle: []; favorite: [track: Track]; add: [
       </label>
     </template>
   </PageHeader>
-  <TrackTable :tracks="tracks" :current-id="currentId" :is-playing="isPlaying" @play="$emit('play', $event)" @toggle="$emit('toggle')" @favorite="$emit('favorite', $event)" @add="$emit('add', $event)" />
+  <TrackTable :tracks="tracks" :current-id="currentId" @play="$emit('play', $event)" @toggle="$emit('toggle')" @favorite="$emit('favorite', $event)" @add="$emit('add', $event)" />
   <PaginationFooter :has-more="hasMore" :loading="loadingMore" :error="hasMore ? error : ''" :page-key="pageKey" @load-more="$emit('loadMore')" />
 </template>
