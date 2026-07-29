@@ -869,9 +869,9 @@ func (repository *Repository) UpdateBatchItemProgress(
 	command, err := repository.pool.Exec(ctx, `
 		UPDATE tag_scraping_job_items SET
 			stage = $4, message = $5, retry_count = $6, retry_after_at = $7,
-			heartbeat_at = $8, updated_at = $8
+			heartbeat_at = clock_timestamp(), updated_at = clock_timestamp()
 		WHERE id = $1 AND status = 'RUNNING' AND attempt_id = $2 AND locked_by = $3`,
-		itemID, attemptID, workerID, string(stage), message, retryCount, retryAfterAt, heartbeatAt)
+		itemID, attemptID, workerID, string(stage), message, retryCount, retryAfterAt)
 	if err != nil {
 		return fmt.Errorf("update tag scraping progress: %w", err)
 	}
