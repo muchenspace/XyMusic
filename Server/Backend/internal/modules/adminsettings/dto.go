@@ -75,8 +75,10 @@ type MediaToolsInput struct {
 }
 
 type ScrapingInput struct {
-	FPcalcPath     *string `json:"fpcalcPath,omitempty"`
-	AcoustIDClient *string `json:"acoustIdClient,omitempty"`
+	FPcalcPath        *string `json:"fpcalcPath,omitempty"`
+	AcoustIDClient    *string `json:"acoustIdClient,omitempty"`
+	GlobalConcurrency *int    `json:"globalConcurrency,omitempty"`
+	CoverConcurrency  *int    `json:"coverConcurrency,omitempty"`
 }
 
 type LocalLibraryInput struct {
@@ -201,9 +203,11 @@ type MediaToolsDTO struct {
 }
 
 type ScrapingDTO struct {
-	FPcalcPath     string   `json:"fpcalcPath"`
-	AcoustIDClient string   `json:"acoustIdClient"`
-	LockedFields   []string `json:"lockedFields"`
+	FPcalcPath        string   `json:"fpcalcPath"`
+	AcoustIDClient    string   `json:"acoustIdClient"`
+	GlobalConcurrency int      `json:"globalConcurrency"`
+	CoverConcurrency  int      `json:"coverConcurrency"`
+	LockedFields      []string `json:"lockedFields"`
 }
 
 type LocalLibraryDTO struct {

@@ -32,7 +32,7 @@ const form = reactive({
   database: { host: "", port: 0, database: "", username: "", sslMode: "prefer" as "disable" | "prefer" | "require" | "verify-full", maximumConnections: 0 },
   storage: { endpoint: "", publicBaseUrl: "", region: "", bucket: "", accessKeyId: "", forcePathStyle: false, signedUrlTtlSeconds: 0, maxUploadBytes: 0 },
   mediaTools: { directory: "", ffmpegPath: "", ffprobePath: "" },
-  scraping: { fpcalcPath: "", acoustIdClient: "" },
+  scraping: { fpcalcPath: "", acoustIdClient: "", globalConcurrency: 64, coverConcurrency: 8 },
   localLibrary: { name: "", directory: "", mode: "READ_ONLY" as "READ_ONLY" | "READ_WRITE", enabled: false, syncOnStartup: false, scanIntervalMinutes: null as number | null },
   registration: { enabled: false },
   security: { accessTokenTtlSeconds: 0, refreshTokenTtlSeconds: 0 },
@@ -48,7 +48,12 @@ function applySettings(settings: RuntimeSettings): void {
   Object.assign(form.storage, { endpoint: settings.storage.endpoint ?? "", publicBaseUrl: settings.storage.publicBaseUrl ?? "", region: settings.storage.region, bucket: settings.storage.bucket, accessKeyId: settings.storage.accessKeyId, forcePathStyle: settings.storage.forcePathStyle, signedUrlTtlSeconds: settings.storage.signedUrlTtlSeconds, maxUploadBytes: settings.storage.maxUploadBytes });
   autoDetectMedia.value = Boolean(settings.mediaTools.directory);
   Object.assign(form.mediaTools, { directory: settings.mediaTools.directory ?? "", ffmpegPath: settings.mediaTools.ffmpegPath, ffprobePath: settings.mediaTools.ffprobePath });
-  Object.assign(form.scraping, { fpcalcPath: settings.scraping.fpcalcPath, acoustIdClient: settings.scraping.acoustIdClient });
+  Object.assign(form.scraping, {
+    fpcalcPath: settings.scraping.fpcalcPath,
+    acoustIdClient: settings.scraping.acoustIdClient,
+    globalConcurrency: settings.scraping.globalConcurrency,
+    coverConcurrency: settings.scraping.coverConcurrency,
+  });
   Object.assign(form.localLibrary, { name: settings.localLibrary.name, directory: settings.localLibrary.directory, mode: settings.localLibrary.mode, enabled: settings.localLibrary.enabled, syncOnStartup: settings.localLibrary.syncOnStartup, scanIntervalMinutes: settings.localLibrary.scanIntervalMinutes });
   Object.assign(form.registration, { enabled: settings.registration.enabled });
   Object.assign(form.security, { accessTokenTtlSeconds: settings.security.accessTokenTtlSeconds, refreshTokenTtlSeconds: settings.security.refreshTokenTtlSeconds });
@@ -125,6 +130,8 @@ function payload(): RuntimeSettingsUpdate {
     scraping: {
       fpcalcPath: form.scraping.fpcalcPath.trim(),
       acoustIdClient: form.scraping.acoustIdClient.trim(),
+      globalConcurrency: form.scraping.globalConcurrency,
+      coverConcurrency: form.scraping.coverConcurrency,
     },
     localLibrary: { ...form.localLibrary, includePatterns: lines(includePatterns.value), excludePatterns: lines(excludePatterns.value) },
     registration: { enabled: form.registration.enabled },
@@ -207,6 +214,8 @@ const platformMetrics = computed(() => Object.entries(systemQuery.data.value?.me
               <div class="grid gap-5 sm:grid-cols-2">
                 <SettingField label="fpcalc 路径" :locked="locked('scraping','fpcalcPath')" :hint="executableRelativePathHint"><input v-model="form.scraping.fpcalcPath" class="ui-input font-mono" :disabled="locked('scraping','fpcalcPath')" placeholder="tools\\fpcalc.exe" /></SettingField>
                 <SettingField label="AcoustID Client ID" :locked="locked('scraping','acoustIdClient')" hint="仅启用音频指纹识别时填写。"><input v-model="form.scraping.acoustIdClient" class="ui-input font-mono" :disabled="locked('scraping','acoustIdClient')" /></SettingField>
+                <SettingField label="全局刮削并发上限" :locked="locked('scraping','globalConcurrency')" hint="总曲目并发，范围 1-64；单次批量任务不能超过此上限。"><input v-model.number="form.scraping.globalConcurrency" class="ui-input" type="number" min="1" max="64" :disabled="locked('scraping','globalConcurrency')" /></SettingField>
+                <SettingField label="封面并发上限" :locked="locked('scraping','coverConcurrency')" hint="封面下载 worker 数，范围 1-64；队列满时继续等待。"><input v-model.number="form.scraping.coverConcurrency" class="ui-input" type="number" min="1" max="64" :disabled="locked('scraping','coverConcurrency')" /></SettingField>
               </div>
             </div>
           </div>

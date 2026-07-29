@@ -19,19 +19,19 @@ const (
 	defaultBatchHeartbeat = 30 * time.Second
 	defaultBatchIdlePoll  = 5 * time.Second
 	defaultBatchWorkPoll  = 250 * time.Millisecond
-	defaultBatchWorkers   = 48
+	defaultBatchWorkers   = 64
 )
 
 var defaultBatchChannelConcurrency = map[Source]int{
-	SourceQMusic:  128,
-	SourceNetease: 256,
-	SourceKugou:   128,
+	SourceQMusic:  64,
+	SourceNetease: 64,
+	SourceKugou:   64,
 }
 
 var maximumBatchChannelConcurrency = map[Source]int{
-	SourceQMusic:  512,
-	SourceNetease: 1024,
-	SourceKugou:   128,
+	SourceQMusic:  64,
+	SourceNetease: 64,
+	SourceKugou:   64,
 }
 
 type BatchProcessor interface {
@@ -249,6 +249,7 @@ func (service *BatchService) Job(ctx context.Context, jobID string, updatedAfter
 	}
 	result := presentBatch(job, items, updatedAfter != nil)
 	result.ChannelStatus = service.channelStatus(job.ID, job.Options)
+	result.Concurrency = service.concurrencyStatus(job)
 	return result, nil
 }
 
@@ -723,6 +724,8 @@ func cloneChannelConcurrency(values map[Source]int) map[Source]int {
 
 type batchChannelGate struct {
 	semaphore chan struct{}
+	mu        sync.Mutex
+	waiting   int
 }
 
 func newBatchChannelGate(limit int) *batchChannelGate {
@@ -735,10 +738,34 @@ func (gate *batchChannelGate) acquire(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	default:
+	}
+	gate.mu.Lock()
+	gate.waiting++
+	gate.mu.Unlock()
+	defer func() {
+		gate.mu.Lock()
+		gate.waiting--
+		gate.mu.Unlock()
+	}()
+	select {
+	case gate.semaphore <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
 func (gate *batchChannelGate) release() { <-gate.semaphore }
+
+func gateWaiting(gate *batchChannelGate) int {
+	if gate == nil {
+		return 0
+	}
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	return gate.waiting
+}
 
 func (service *BatchService) acquireChannel(
 	ctx context.Context,
@@ -754,7 +781,7 @@ func (service *BatchService) acquireChannel(
 	}
 	maximum := maximumBatchChannelConcurrency[source]
 	if maximum < 1 {
-		maximum = 128
+		maximum = 64
 	}
 	if target > maximum {
 		target = maximum
@@ -823,6 +850,8 @@ func (service *BatchService) channelStatus(jobID string, options BatchOptions) m
 			state = "ACTIVE"
 		}
 		status := BatchChannelStatus{Target: target, Actual: actual, State: state}
+		status.Limit = maximumBatchChannelConcurrency[source]
+		status.Waiting = gateWaiting(perJob[source])
 		if healthProvider != nil {
 			health := healthProvider.ChannelHealth(source)
 			if health.State != "" && health.State != "READY" {
@@ -833,6 +862,23 @@ func (service *BatchService) channelStatus(jobID string, options BatchOptions) m
 			status.ErrorRate = health.ErrorRate
 		}
 		result[source] = status
+	}
+	return result
+}
+
+func (service *BatchService) concurrencyStatus(job BatchJobRecord) BatchConcurrencyStatus {
+	service.activeMu.Lock()
+	actual := len(service.active[job.ID])
+	service.activeMu.Unlock()
+	waiting := max(0, job.Total-job.Processed-actual)
+	result := BatchConcurrencyStatus{
+		TotalActual: actual, TotalWaiting: waiting, TotalLimit: service.workers,
+	}
+	if provider, ok := service.processor.(interface{ ArtworkHealth() ArtworkHealth }); ok {
+		health := provider.ArtworkHealth()
+		result.CoverActual = health.Actual
+		result.CoverWaiting = health.Waiting
+		result.CoverLimit = health.Limit
 	}
 	return result
 }

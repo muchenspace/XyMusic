@@ -100,6 +100,7 @@ type Scraping struct {
 	FPcalcPath     string
 	AcoustIDClient string
 	BatchWorkers   int
+	CoverWorkers   int
 }
 
 type LocalLibrary struct {
@@ -306,7 +307,11 @@ func Parse(env map[string]string) (Config, error) {
 	if len(mediaProfileVersion) > 100 {
 		return Config{}, errors.New("MEDIA_VARIANT_PROFILE_VERSION is too long")
 	}
-	scrapingBatchWorkers, err := integer(env, "TAG_SCRAPING_WORKERS", 48, 1, 64)
+	scrapingBatchWorkers, err := integer(env, "TAG_SCRAPING_WORKERS", 64, 1, 64)
+	if err != nil {
+		return Config{}, err
+	}
+	scrapingCoverWorkers, err := integer(env, "TAG_COVER_WORKERS", 8, 1, 64)
 	if err != nil {
 		return Config{}, err
 	}
@@ -375,7 +380,10 @@ func Parse(env map[string]string) (Config, error) {
 			Workers: mediaWorkers, UploadWorkers: mediaUploadWorkers,
 			FFmpegThreads: mediaFFmpegThreads, ProfileVersion: mediaProfileVersion,
 		},
-		Scraping: Scraping{FPcalcPath: fpcalcPath, AcoustIDClient: acoustIDClient, BatchWorkers: scrapingBatchWorkers},
+		Scraping: Scraping{
+			FPcalcPath: fpcalcPath, AcoustIDClient: acoustIDClient,
+			BatchWorkers: scrapingBatchWorkers, CoverWorkers: scrapingCoverWorkers,
+		},
 		LocalLibrary: LocalLibrary{
 			Name:                value(env, "LOCAL_MUSIC_SOURCE_NAME", "Music"),
 			Directory:           paths.LocalMusicDirectory,

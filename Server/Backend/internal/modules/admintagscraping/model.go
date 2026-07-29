@@ -27,6 +27,12 @@ type ChannelHealth struct {
 	ErrorRate           float64 `json:"errorRate"`
 }
 
+type ArtworkHealth struct {
+	Limit   int
+	Actual  int
+	Waiting int
+}
+
 type MatchMode string
 
 const (
