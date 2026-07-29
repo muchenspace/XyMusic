@@ -89,6 +89,7 @@ onBeforeUnmount(() => previouslyFocused?.focus());
           <div
             v-for="{ track, index, key } in renderedQueue"
             :key="key"
+            v-memo="[track, index === player.currentIndex, index === player.currentIndex ? player.isPlaying : false]"
             class="queue-item"
             :class="{ active: player.currentIndex === index }"
             role="listitem"

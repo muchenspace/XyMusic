@@ -15,7 +15,7 @@ const props = defineProps<{
   artist?: Artist | null;
   currentId?: string;
   currentEntryId?: string;
-  isPlaying: boolean;
+  isPlaying?: boolean;
   playlistBusy?: boolean;
   playAllLoading?: boolean;
   error?: string;
@@ -62,6 +62,6 @@ defineEmits<{
       <button v-if="playlist" class="secondary-button" type="button" @click="$emit('editPlaylist', playlist)">编辑歌单</button>
     </div>
   </div>
-  <TrackTable :tracks="tracks" :entries="entries" :current-id="currentId" :current-entry-id="currentEntryId" :is-playing="isPlaying" :busy="playlistBusy" :reorder-disabled="reorderDisabled" empty-title="这个集合还没有歌曲" empty-description="稍后添加歌曲或返回音乐库浏览其他内容。" @play="(track, index) => $emit('play', track, index)" @toggle="$emit('toggle')" @favorite="$emit('favorite', $event)" @add="$emit('add', $event)" @remove="$emit('remove', $event)" @remove-selected="$emit('removeSelected', $event)" @move="(id, direction) => $emit('move', id, direction)" @reorder="$emit('reorder', $event)" />
+  <TrackTable :tracks="tracks" :entries="entries" :current-id="currentId" :current-entry-id="currentEntryId" :busy="playlistBusy" :reorder-disabled="reorderDisabled" empty-title="这个集合还没有歌曲" empty-description="稍后添加歌曲或返回音乐库浏览其他内容。" @play="(track, index) => $emit('play', track, index)" @toggle="$emit('toggle')" @favorite="$emit('favorite', $event)" @add="$emit('add', $event)" @remove="$emit('remove', $event)" @remove-selected="$emit('removeSelected', $event)" @move="(id, direction) => $emit('move', id, direction)" @reorder="$emit('reorder', $event)" />
   <PaginationFooter :has-more="hasMore" :loading="loadingMore" :error="hasMore ? error : ''" :page-key="pageKey" @load-more="$emit('loadMore')" />
 </template>

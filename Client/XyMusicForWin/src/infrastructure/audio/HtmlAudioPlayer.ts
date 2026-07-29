@@ -22,8 +22,9 @@ export class HtmlAudioPlayer implements AudioPlayer {
   private preloadController: AbortController | null = null;
   private transitionController: AbortController | null = null;
   private transitionGains: TransitionGains | null = null;
-  private updateFrame: number | null = null;
+  private updateTimer: number | null = null;
   private lastAnimationUpdate = 0;
+  private lastEmittedSnapshot: AudioSnapshot | null = null;
   private preparedUrl = "";
   private configuredVolume = 1;
   private readonly updateListeners = new Set<(snapshot: AudioSnapshot) => void>();
@@ -31,6 +32,11 @@ export class HtmlAudioPlayer implements AudioPlayer {
   private readonly errorListeners = new Set<(message: string) => void>();
   private readonly emitUpdate = () => {
     const snapshot = this.snapshot();
+    if (this.lastEmittedSnapshot
+      && this.lastEmittedSnapshot.currentTime === snapshot.currentTime
+      && this.lastEmittedSnapshot.duration === snapshot.duration
+      && this.lastEmittedSnapshot.paused === snapshot.paused) return;
+    this.lastEmittedSnapshot = snapshot;
     for (const listener of this.updateListeners) listener(snapshot);
   };
   private readonly handlePlay = () => {
@@ -321,23 +327,24 @@ export class HtmlAudioPlayer implements AudioPlayer {
   }
 
   private startUpdateLoop(): void {
-    if (this.updateFrame !== null || this.audio.paused || !this.updateListeners.size) return;
+    if (this.updateTimer !== null || this.audio.paused || !this.updateListeners.size) return;
     this.lastAnimationUpdate = performance.now();
-    const tick = (now: number) => {
-      this.updateFrame = null;
+    const tick = () => {
+      this.updateTimer = null;
       if (this.audio.paused || !this.updateListeners.size) return;
+      const now = performance.now();
       if (now - this.lastAnimationUpdate >= UPDATE_INTERVAL_MS) {
         this.lastAnimationUpdate = now;
         this.emitUpdate();
       }
-      this.updateFrame = requestFrame(tick);
+      this.updateTimer = window.setTimeout(tick, UPDATE_INTERVAL_MS);
     };
-    this.updateFrame = requestFrame(tick);
+    this.updateTimer = window.setTimeout(tick, UPDATE_INTERVAL_MS);
   }
 
   private stopUpdateLoop(): void {
-    if (this.updateFrame !== null) cancelFrame(this.updateFrame);
-    this.updateFrame = null;
+    if (this.updateTimer !== null) window.clearTimeout(this.updateTimer);
+    this.updateTimer = null;
   }
 
   private cancelTransition(): void {
@@ -372,7 +379,7 @@ function abortError(): DOMException {
 
 const HAVE_FUTURE_DATA = 3;
 const AUDIO_LOAD_TIMEOUT_MS = 30_000;
-const UPDATE_INTERVAL_MS = 1_000 / 30;
+const UPDATE_INTERVAL_MS = 1_000 / 15;
 
 async function waitUntilPlayable(audio: HTMLAudioElement, url: string, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) throw signal.reason ?? abortError();
