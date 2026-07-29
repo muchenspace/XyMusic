@@ -382,6 +382,67 @@ func TestBatchLifecycleRecoversLeasesAndCancelInterruptsActiveItem(t *testing.T)
 	}
 }
 
+func TestBatchCancellationRetainsUnfinishedItemsWhenCompletionOrderInterleaves(t *testing.T) {
+	firstContext, firstCancel := context.WithCancel(context.Background())
+	secondContext, secondCancel := context.WithCancel(context.Background())
+	service := &BatchService{active: make(map[string][]*activeBatchItem)}
+	first := service.setActive("job", firstCancel)
+	second := service.setActive("job", secondCancel)
+
+	service.clearActive("job", second)
+	service.cancelJob("job")
+
+	select {
+	case <-firstContext.Done():
+	default:
+		t.Fatal("unfinished batch item was not cancelled")
+	}
+	select {
+	case <-secondContext.Done():
+		t.Fatal("completed batch item remained active")
+	default:
+	}
+	service.clearActive("job", first)
+}
+
+func TestBatchChannelGateReportsConfiguredTargetAndActualUsage(t *testing.T) {
+	service := &BatchService{
+		channelGates:  make(map[string]map[Source]*batchChannelGate),
+		channelGlobal: make(map[Source]*batchChannelGate),
+		channelActive: make(map[Source]int),
+	}
+	firstRelease, err := service.acquireChannel(context.Background(), "job", SourceQMusic, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondRelease, err := service.acquireChannel(context.Background(), "job", SourceQMusic, 2)
+	if err != nil {
+		firstRelease()
+		t.Fatal(err)
+	}
+	checkContext, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := service.acquireChannel(checkContext, "job", SourceQMusic, 2); err == nil {
+		t.Fatal("third request exceeded the batch channel limit")
+	}
+	status := service.channelStatus(BatchOptions{
+		Sources:            []Source{SourceQMusic},
+		ChannelConcurrency: map[Source]int{SourceQMusic: 2},
+	})
+	if status[SourceQMusic].Target != 2 || status[SourceQMusic].Actual != 2 || status[SourceQMusic].State != "ACTIVE" {
+		t.Fatalf("channel status = %#v", status)
+	}
+	firstRelease()
+	secondRelease()
+	status = service.channelStatus(BatchOptions{
+		Sources:            []Source{SourceQMusic},
+		ChannelConcurrency: map[Source]int{SourceQMusic: 2},
+	})
+	if status[SourceQMusic].Actual != 0 || status[SourceQMusic].State != "READY" {
+		t.Fatalf("released channel status = %#v", status)
+	}
+}
+
 func TestBatchWorkerLogsPollFailure(t *testing.T) {
 	pollErr := errors.New("claim database unavailable")
 	logger := newBatchLogRecorder()

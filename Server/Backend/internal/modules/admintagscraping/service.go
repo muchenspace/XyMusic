@@ -27,6 +27,7 @@ type ServiceDependencies struct {
 	Fingerprinter           Fingerprinter
 	Artwork                 ArtworkApplier
 	DefaultLibraryDirectory string
+	Metrics                 PerformanceMetrics
 }
 
 type Service struct {
@@ -35,6 +36,7 @@ type Service struct {
 	fingerprinter           Fingerprinter
 	artwork                 ArtworkApplier
 	defaultLibraryDirectory string
+	metrics                 PerformanceMetrics
 }
 
 var (
@@ -58,7 +60,18 @@ func NewService(dependencies ServiceDependencies) (*Service, error) {
 	return &Service{
 		store: dependencies.Store, music: dependencies.Music, fingerprinter: dependencies.Fingerprinter,
 		artwork: dependencies.Artwork, defaultLibraryDirectory: dependencies.DefaultLibraryDirectory,
+		metrics: dependencies.Metrics,
 	}, nil
+}
+
+func (service *Service) ChannelHealth(source Source) ChannelHealth {
+	provider, ok := service.music.(interface {
+		ChannelHealth(Source) ChannelHealth
+	})
+	if !ok {
+		return ChannelHealth{State: "READY"}
+	}
+	return provider.ChannelHealth(source)
 }
 
 func (service *Service) Search(ctx context.Context, input SearchInput) ([]Candidate, error) {

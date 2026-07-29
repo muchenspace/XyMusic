@@ -72,6 +72,98 @@ func TestArtworkFailureOpensShortHostCircuit(t *testing.T) {
 	}
 }
 
+func TestSearchCacheAvoidsRepeatedUpstreamRequests(t *testing.T) {
+	var calls atomic.Int32
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		body := []byte(`{"data":{"song":{"list":[{"songmid":"mid","songid":1,"songname":"Song","singer":[],"albummid":"album","albumname":"Album"}]}}}`)
+		return responseFor(request, http.StatusOK, "application/json", body), nil
+	})}
+	platform := NewMusicPlatformClient(client, "")
+	for index := 0; index < 2; index++ {
+		result, err := platform.Search(context.Background(), SourceQMusic, "Song")
+		if err != nil || len(result) != 1 {
+			t.Fatalf("search %d result/error = %#v / %v", index, result, err)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("upstream calls = %d, want 1", calls.Load())
+	}
+}
+
+func TestConcurrentSearchesAreCoalescedIntoOneUpstreamRequest(t *testing.T) {
+	var calls atomic.Int32
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		once.Do(func() { close(started) })
+		<-release
+		body := []byte(`{"data":{"song":{"list":[]}}}`)
+		return responseFor(request, http.StatusOK, "application/json", body), nil
+	})}
+	platform := NewMusicPlatformClient(client, "")
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := platform.Search(context.Background(), SourceQMusic, "Concurrent Song")
+			results <- err
+		}()
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("upstream search did not start")
+	}
+	time.Sleep(20 * time.Millisecond)
+	if calls.Load() != 1 {
+		t.Fatalf("upstream calls while coalesced = %d, want 1", calls.Load())
+	}
+	close(release)
+	for range 2 {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestSourceCircuitIsIndependentPerChannel(t *testing.T) {
+	var qmusicCalls, neteaseCalls atomic.Int32
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		switch request.URL.Host {
+		case "c.y.qq.com":
+			qmusicCalls.Add(1)
+			return responseFor(request, http.StatusServiceUnavailable, "text/plain", nil), nil
+		case "music.163.com":
+			neteaseCalls.Add(1)
+			return responseFor(request, http.StatusOK, "application/json", []byte(`{"result":{"songs":[]}}`)), nil
+		default:
+			t.Fatalf("unexpected host: %s", request.URL.Host)
+			return nil, nil
+		}
+	})}
+	platform := NewMusicPlatformClient(client, "")
+	for index := 0; index < maximumSourceFailures; index++ {
+		platform.recordSourceFailure(SourceQMusic, &upstreamHTTPError{status: http.StatusInternalServerError})
+	}
+	if health := platform.ChannelHealth(SourceQMusic); health.State != "OPEN" || health.RetryAfterSeconds <= 0 {
+		t.Fatalf("QQ health = %#v", health)
+	}
+	if _, err := platform.Search(context.Background(), SourceQMusic, "blocked"); !apperror.IsCode(err, apperror.CodeDependencyUnavailable) {
+		t.Fatalf("QQ circuit error = %v", err)
+	}
+	if qmusicCalls.Load() != 0 {
+		t.Fatalf("QQ requests while circuit open = %d", qmusicCalls.Load())
+	}
+	if _, err := platform.Search(context.Background(), SourceNetease, "available"); err != nil {
+		t.Fatal(err)
+	}
+	if neteaseCalls.Load() != 1 {
+		t.Fatalf("Netease requests = %d, want 1", neteaseCalls.Load())
+	}
+}
+
 func TestArtworkRejectsUntrustedHostsWithoutNetworkAccess(t *testing.T) {
 	var calls atomic.Int32
 	platform := NewMusicPlatformClient(&http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -114,6 +206,25 @@ func TestSearchArtistsParsesQQSmartboxCandidates(t *testing.T) {
 		result[0].ImageURL != "https://y.qq.com/music/photo_new/T001R500x500M000qq-mid.jpg" ||
 		result[0].Aliases == nil {
 		t.Fatalf("QQ artist results = %#v", result)
+	}
+}
+
+func TestSearchArtistsCacheAvoidsRepeatedUpstreamRequests(t *testing.T) {
+	var calls atomic.Int32
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		body := []byte(`{"data":{"singer":{"itemlist":[{"mid":"artist","name":"Artist"}]}}}`)
+		return responseFor(request, http.StatusOK, "application/json", body), nil
+	})}
+	platform := NewMusicPlatformClient(client, "")
+	for _, query := range []string{"Artist", " Artist "} {
+		result, err := platform.SearchArtists(context.Background(), SourceQMusic, query)
+		if err != nil || len(result) != 1 {
+			t.Fatalf("artist search result/error = %#v / %v", result, err)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("upstream artist calls = %d, want 1", calls.Load())
 	}
 }
 

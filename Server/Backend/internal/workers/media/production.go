@@ -21,6 +21,11 @@ type ProductionOptions struct {
 	Lease            time.Duration
 	Heartbeat        time.Duration
 	CancellationPoll time.Duration
+	Workers          int
+	UploadWorkers    int
+	FFmpegThreads    int
+	ProfileVersion   string
+	Metrics          PerformanceMetrics
 }
 
 func NewProduction(options ProductionOptions) (*Worker, error) {
@@ -41,6 +46,8 @@ func NewProduction(options ProductionOptions) (*Worker, error) {
 		WorkerID: options.WorkerID, Logger: options.Logger, Clock: options.Clock,
 		Runner: options.Runner, TemporaryRoot: options.TemporaryRoot,
 		Lease: options.Lease, Heartbeat: options.Heartbeat,
-		CancellationPoll: options.CancellationPoll,
+		CancellationPoll: options.CancellationPoll, Workers: options.Workers,
+		UploadWorkers: options.UploadWorkers, FFmpegThreads: options.FFmpegThreads,
+		ProfileVersion: options.ProfileVersion, Metrics: options.Metrics,
 	})
 }

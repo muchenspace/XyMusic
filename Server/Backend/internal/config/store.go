@@ -135,7 +135,9 @@ func (s *Store) Save(cfg Config) error {
 		"ACOUSTID_CLIENT", "LOCAL_MUSIC_SOURCE_NAME", "LOCAL_MUSIC_SOURCE_MODE",
 		"LOCAL_MUSIC_SOURCE_ENABLED", "LOCAL_MUSIC_SYNC_ON_STARTUP",
 		"LOCAL_MUSIC_SCAN_INTERVAL_MINUTES", "LOCAL_MUSIC_INCLUDE_PATTERNS",
-		"LOCAL_MUSIC_EXCLUDE_PATTERNS", "REGISTRATION_ENABLED",
+		"LOCAL_MUSIC_EXCLUDE_PATTERNS", "LOCAL_MUSIC_SCAN_WORKERS",
+		"MEDIA_WORKERS", "MEDIA_UPLOAD_WORKERS", "MEDIA_FFMPEG_THREADS",
+		"MEDIA_VARIANT_PROFILE_VERSION", "TAG_SCRAPING_WORKERS", "REGISTRATION_ENABLED",
 	}
 	var content strings.Builder
 	for _, key := range keys {
@@ -186,6 +188,11 @@ func ToEnvironment(cfg Config) map[string]string {
 		"MEDIA_MAX_UPLOAD_BYTES":            strconv.FormatInt(cfg.Storage.MaxUploadBytes, 10),
 		"FFMPEG_PATH":                       cfg.Media.FFmpegPath,
 		"FFPROBE_PATH":                      cfg.Media.FFprobePath,
+		"MEDIA_WORKERS":                     strconv.Itoa(cfg.Media.Workers),
+		"MEDIA_UPLOAD_WORKERS":              strconv.Itoa(cfg.Media.UploadWorkers),
+		"MEDIA_FFMPEG_THREADS":              strconv.Itoa(cfg.Media.FFmpegThreads),
+		"MEDIA_VARIANT_PROFILE_VERSION":     cfg.Media.ProfileVersion,
+		"TAG_SCRAPING_WORKERS":              strconv.Itoa(cfg.Scraping.BatchWorkers),
 		"FPCALC_PATH":                       cfg.Scraping.FPcalcPath,
 		"ACOUSTID_CLIENT":                   cfg.Scraping.AcoustIDClient,
 		"LOCAL_MUSIC_SOURCE_NAME":           cfg.LocalLibrary.Name,
@@ -195,6 +202,7 @@ func ToEnvironment(cfg Config) map[string]string {
 		"LOCAL_MUSIC_SCAN_INTERVAL_MINUTES": scanInterval,
 		"LOCAL_MUSIC_INCLUDE_PATTERNS":      include,
 		"LOCAL_MUSIC_EXCLUDE_PATTERNS":      exclude,
+		"LOCAL_MUSIC_SCAN_WORKERS":          strconv.Itoa(cfg.LocalLibrary.ScanWorkers),
 		"REGISTRATION_ENABLED":              strconv.FormatBool(cfg.Registration.Enabled),
 	}
 }

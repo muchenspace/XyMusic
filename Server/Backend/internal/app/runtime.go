@@ -252,13 +252,15 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	if err != nil {
 		return nil, fmt.Errorf("create local library synchronizer: %w", err)
 	}
-	sourceScanner, err := adminsources.NewFilesystemScanner(sourceSynchronizer)
+	sourceScanner, err := adminsources.NewFilesystemScannerWithOptions(sourceSynchronizer, adminsources.FilesystemScannerOptions{
+		Workers: resolved.LocalLibrary.ScanWorkers,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("create local library scanner: %w", err)
 	}
 	sourceWorker, err := adminsources.NewWorker(adminsources.WorkerOptions{
 		Store: sourceRepository, Scanner: sourceScanner, RootDirectory: options.RootDirectory,
-		DefaultRoot: resolved.LocalLibrary,
+		DefaultRoot: resolved.LocalLibrary, Metrics: metrics,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create local library scan worker: %w", err)
@@ -295,15 +297,16 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	}
 	tagScrapingService, err := admintagscraping.NewService(admintagscraping.ServiceDependencies{
 		Store:         tagRepository,
-		Music:         admintagscraping.NewMusicPlatformClient(nil, resolved.Scraping.AcoustIDClient),
+		Music:         admintagscraping.NewMusicPlatformClient(nil, resolved.Scraping.AcoustIDClient, metrics),
 		Fingerprinter: admintagscraping.ConfiguredFingerprinter(resolved.Scraping.FPcalcPath),
-		Artwork:       tagArtwork, DefaultLibraryDirectory: resolved.LocalLibrary.Directory,
+		Artwork:       tagArtwork, DefaultLibraryDirectory: resolved.LocalLibrary.Directory, Metrics: metrics,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create tag scraping service: %w", err)
 	}
 	tagBatchService, err := admintagscraping.NewBatchService(admintagscraping.BatchServiceDependencies{
 		Store: tagRepository, Processor: tagScrapingService, Logger: workerLogger,
+		Workers: resolved.Scraping.BatchWorkers, Metrics: metrics,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create tag scraping batch service: %w", err)
@@ -562,7 +565,9 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	if options.StartBackground {
 		mediaWorker, err = mediaworker.NewProduction(mediaworker.ProductionOptions{
 			Database: db.Pool, Storage: resolved.Storage, Media: resolved.Media,
-			Logger: workerLogger,
+			Logger: workerLogger, Workers: resolved.Media.Workers,
+			UploadWorkers: resolved.Media.UploadWorkers, FFmpegThreads: resolved.Media.FFmpegThreads,
+			ProfileVersion: resolved.Media.ProfileVersion, Metrics: metrics,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("create media worker: %w", err)
@@ -594,12 +599,15 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 			return nil, fmt.Errorf("start artist artwork scraping batch service: %w", err)
 		}
 		metadataWorkerID := "metadata-" + uuid.NewString()
-		background = startBackgroundGroup(
-			logger,
-			backgroundTask{
-				name: "media",
+		backgroundTasks := make([]backgroundTask, 0, resolved.Media.Workers+4)
+		for index := 0; index < resolved.Media.Workers; index++ {
+			workerIndex := index + 1
+			backgroundTasks = append(backgroundTasks, backgroundTask{
+				name: fmt.Sprintf("media-%d", workerIndex),
 				run:  func(ctx context.Context) (bool, error) { return mediaWorker.RunNext(ctx) },
-			},
+			})
+		}
+		backgroundTasks = append(backgroundTasks,
 			backgroundTask{
 				name: "library-source-scan",
 				run:  func(ctx context.Context) (bool, error) { return sourceWorker.RunNextScan(ctx) },
@@ -620,6 +628,7 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 				},
 			},
 		)
+		background = startBackgroundGroup(logger, backgroundTasks...)
 	}
 
 	failed = false

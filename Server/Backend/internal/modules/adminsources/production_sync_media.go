@@ -19,25 +19,40 @@ import (
 
 func readSidecarLyrics(audioPath string) ([]scannedLyric, error) {
 	directory := filepath.Dir(audioPath)
-	stem := normalizePlatformPath(strings.TrimSuffix(filepath.Base(audioPath), filepath.Ext(audioPath)))
 	entries, err := os.ReadDir(directory)
 	if err != nil {
 		return nil, err
 	}
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			paths = append(paths, filepath.Join(directory, entry.Name()))
+		}
+	}
+	return readSidecarLyricsFromPaths(audioPath, paths)
+}
+
+func readSidecarLyricsFromPaths(audioPath string, paths []string) ([]scannedLyric, error) {
+	stem := normalizePlatformPath(strings.TrimSuffix(filepath.Base(audioPath), filepath.Ext(audioPath)))
 	type candidate struct {
 		path, language, format string
 		base                   bool
 	}
 	candidates := make([]candidate, 0)
-	for _, entry := range entries {
+	for _, path := range paths {
+		entry, err := os.Stat(path)
+		if err != nil {
+			return nil, err
+		}
 		if entry.IsDir() {
 			continue
 		}
-		extension := strings.ToLower(filepath.Ext(entry.Name()))
+		name := filepath.Base(path)
+		extension := strings.ToLower(filepath.Ext(name))
 		if extension != ".lrc" && extension != ".txt" {
 			continue
 		}
-		rawStem := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
+		rawStem := strings.TrimSuffix(name, filepath.Ext(name))
 		candidateStem := normalizePlatformPath(rawStem)
 		language := "und"
 		base := candidateStem == stem
@@ -53,7 +68,7 @@ func readSidecarLyrics(audioPath string) ([]scannedLyric, error) {
 			format = "LRC"
 		}
 		candidates = append(candidates, candidate{
-			path: filepath.Join(directory, entry.Name()), language: language, format: format, base: base,
+			path: path, language: language, format: format, base: base,
 		})
 	}
 	sort.Slice(candidates, func(i, j int) bool {
@@ -97,6 +112,13 @@ func readSidecarLyrics(audioPath string) ([]scannedLyric, error) {
 		})
 	}
 	return result, nil
+}
+
+func sidecarLyricsForFile(file DiscoveredFile) ([]scannedLyric, error) {
+	if file.SidecarPaths != nil {
+		return readSidecarLyricsFromPaths(file.AudioPath, file.SidecarPaths)
+	}
+	return readSidecarLyrics(file.AudioPath)
 }
 
 func mergeLyrics(sidecars []scannedLyric, embedded *adminmetadata.MetadataLyrics) []scannedLyric {

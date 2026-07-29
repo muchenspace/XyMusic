@@ -19,6 +19,14 @@ const (
 
 var searchableSources = []Source{SourceNetease, SourceQMusic, SourceKugou}
 
+type ChannelHealth struct {
+	State               string  `json:"state"`
+	Actual              int     `json:"actual"`
+	RetryAfterSeconds   int     `json:"retryAfterSeconds"`
+	ConsecutiveFailures int     `json:"consecutiveFailures"`
+	ErrorRate           float64 `json:"errorRate"`
+}
+
 type MatchMode string
 
 const (
@@ -75,13 +83,14 @@ type ApplyFields struct {
 }
 
 type BatchOptions struct {
-	Sources       []Source       `json:"sources"`
-	Verbatim      bool           `json:"verbatim"`
-	MatchMode     MatchMode      `json:"matchMode"`
-	MissingFields []MissingField `json:"missingFields"`
-	Fields        ApplyFields    `json:"fields"`
-	WriteBack     bool           `json:"writeBack"`
-	Reason        string         `json:"reason"`
+	Sources            []Source       `json:"sources"`
+	ChannelConcurrency map[Source]int `json:"channelConcurrency,omitempty"`
+	Verbatim           bool           `json:"verbatim"`
+	MatchMode          MatchMode      `json:"matchMode"`
+	MissingFields      []MissingField `json:"missingFields"`
+	Fields             ApplyFields    `json:"fields"`
+	WriteBack          bool           `json:"writeBack"`
+	Reason             string         `json:"reason"`
 }
 
 type MetadataCredit struct {

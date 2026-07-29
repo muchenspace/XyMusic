@@ -19,7 +19,20 @@ const (
 	defaultBatchHeartbeat = 30 * time.Second
 	defaultBatchIdlePoll  = 5 * time.Second
 	defaultBatchWorkPoll  = 250 * time.Millisecond
+	defaultBatchWorkers   = 48
 )
+
+var defaultBatchChannelConcurrency = map[Source]int{
+	SourceQMusic:  128,
+	SourceNetease: 256,
+	SourceKugou:   128,
+}
+
+var maximumBatchChannelConcurrency = map[Source]int{
+	SourceQMusic:  512,
+	SourceNetease: 1024,
+	SourceKugou:   128,
+}
 
 type BatchProcessor interface {
 	TrackMetadata(context.Context, string) (TrackMetadata, error)
@@ -37,6 +50,8 @@ type BatchServiceDependencies struct {
 	Heartbeat   time.Duration
 	IdlePoll    time.Duration
 	WorkingPoll time.Duration
+	Workers     int
+	Metrics     PerformanceMetrics
 }
 
 type BatchService struct {
@@ -49,6 +64,8 @@ type BatchService struct {
 	heartbeat   time.Duration
 	idlePoll    time.Duration
 	workingPoll time.Duration
+	workers     int
+	metrics     PerformanceMetrics
 	wake        chan struct{}
 
 	lifecycleMu sync.Mutex
@@ -58,7 +75,16 @@ type BatchService struct {
 	done        chan struct{}
 
 	activeMu sync.Mutex
-	active   map[string]context.CancelFunc
+	active   map[string][]*activeBatchItem
+
+	channelMu     sync.Mutex
+	channelGates  map[string]map[Source]*batchChannelGate
+	channelGlobal map[Source]*batchChannelGate
+	channelActive map[Source]int
+}
+
+type activeBatchItem struct {
+	cancel context.CancelFunc
 }
 
 var _ BatchAPI = (*BatchService)(nil)
@@ -100,12 +126,21 @@ func NewBatchService(dependencies BatchServiceDependencies) (*BatchService, erro
 	if dependencies.WorkingPoll <= 0 {
 		dependencies.WorkingPoll = defaultBatchWorkPoll
 	}
+	if dependencies.Workers == 0 {
+		dependencies.Workers = defaultBatchWorkers
+	}
+	if dependencies.Workers < 1 || dependencies.Workers > 64 {
+		return nil, errors.New("admin tag scraping workers must be from 1 to 64")
+	}
 	return &BatchService{
 		store: dependencies.Store, processor: dependencies.Processor, logger: dependencies.Logger,
 		workerID: dependencies.WorkerID,
 		now:      dependencies.Clock, lease: dependencies.Lease, heartbeat: dependencies.Heartbeat,
 		idlePoll: dependencies.IdlePoll, workingPoll: dependencies.WorkingPoll,
-		wake: make(chan struct{}, 1), active: make(map[string]context.CancelFunc),
+		workers: dependencies.Workers, wake: make(chan struct{}, 1), active: make(map[string][]*activeBatchItem),
+		metrics:       dependencies.Metrics,
+		channelGates:  make(map[string]map[Source]*batchChannelGate),
+		channelGlobal: make(map[Source]*batchChannelGate), channelActive: make(map[Source]int),
 	}, nil
 }
 
@@ -160,6 +195,7 @@ func (service *BatchService) Close(ctx context.Context) error {
 }
 
 func (service *BatchService) Create(ctx context.Context, actorID string, input CreateBatchInput) (BatchJobDTO, error) {
+	input.Options = normalizeBatchOptions(input.Options)
 	if err := validateCreateBatch(input); err != nil {
 		return BatchJobDTO{}, err
 	}
@@ -211,7 +247,9 @@ func (service *BatchService) Job(ctx context.Context, jobID string, updatedAfter
 	if err != nil {
 		return BatchJobDTO{}, err
 	}
-	return presentBatch(job, items, updatedAfter != nil), nil
+	result := presentBatch(job, items, updatedAfter != nil)
+	result.ChannelStatus = service.channelStatus(job.Options)
+	return result, nil
 }
 
 func (service *BatchService) Cancel(ctx context.Context, jobID string) (BatchJobDTO, error) {
@@ -233,6 +271,18 @@ func (service *BatchService) Retry(ctx context.Context, jobID string) (BatchJobD
 
 func (service *BatchService) run(ctx context.Context, done chan struct{}) {
 	defer close(done)
+	var group sync.WaitGroup
+	for index := 0; index < service.workers; index++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			service.runWorker(ctx)
+		}()
+	}
+	group.Wait()
+}
+
+func (service *BatchService) runWorker(ctx context.Context) {
 	delay := time.Duration(0)
 	for {
 		if delay > 0 {
@@ -245,12 +295,8 @@ func (service *BatchService) run(ctx context.Context, done chan struct{}) {
 				timer.Stop()
 			case <-timer.C:
 			}
-		} else {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
+		} else if ctx.Err() != nil {
+			return
 		}
 		worked, err := service.processNext(ctx)
 		if err != nil {
@@ -277,6 +323,9 @@ func (service *BatchService) processNext(ctx context.Context) (bool, error) {
 	}
 	if claim.FinishJobID != "" {
 		finished, err := service.store.FinishBatch(ctx, claim.FinishJobID, service.now().UTC())
+		if finished {
+			service.deleteChannelGates(claim.FinishJobID)
+		}
 		return finished, err
 	}
 	if claim.Item == nil {
@@ -287,11 +336,12 @@ func (service *BatchService) processNext(ctx context.Context) (bool, error) {
 }
 
 func (service *BatchService) processItem(workerContext context.Context, claim ClaimedBatchItem) {
+	startedAt := time.Now()
 	itemContext, cancel := context.WithCancel(workerContext)
-	service.setActive(claim.Job.ID, cancel)
+	activeItem := service.setActive(claim.Job.ID, cancel)
 	defer func() {
 		cancel()
-		service.clearActive(claim.Job.ID, cancel)
+		service.clearActive(claim.Job.ID, activeItem)
 	}()
 	var ownershipLost atomic.Bool
 	var cancelRequested atomic.Bool
@@ -341,6 +391,9 @@ func (service *BatchService) processItem(workerContext context.Context, claim Cl
 	}()
 
 	status, candidate, message := service.executeItem(itemContext, claim, &ownershipLost)
+	if service.metrics != nil {
+		service.metrics.ObservePipeline("scraping", time.Since(startedAt), status == ItemFailed)
+	}
 	cancel()
 	<-heartbeatDone
 	if ownershipLost.Load() {
@@ -440,7 +493,12 @@ func (service *BatchService) executeItem(
 			return service.itemErrorStatus(ctx, err, ownershipLost)
 		}
 		query.Source = source
+		releaseChannel, acquireErr := service.acquireChannel(ctx, claim.Job.ID, source, claim.Job.Options.ChannelConcurrency[source])
+		if acquireErr != nil {
+			return service.itemErrorStatus(ctx, acquireErr, ownershipLost)
+		}
 		matches, searchErr := service.processor.Search(ctx, query)
+		releaseChannel()
 		if err := service.ensureBatchActive(ctx, claim.Job.ID); err != nil {
 			return service.itemErrorStatus(ctx, err, ownershipLost)
 		}
@@ -535,32 +593,48 @@ func (service *BatchService) signal() {
 	}
 }
 
-func (service *BatchService) setActive(jobID string, cancel context.CancelFunc) {
+func (service *BatchService) setActive(jobID string, cancel context.CancelFunc) *activeBatchItem {
+	item := &activeBatchItem{cancel: cancel}
 	service.activeMu.Lock()
-	service.active[jobID] = cancel
+	service.active[jobID] = append(service.active[jobID], item)
 	service.activeMu.Unlock()
+	return item
 }
 
-func (service *BatchService) clearActive(jobID string, _ context.CancelFunc) {
+func (service *BatchService) clearActive(jobID string, item *activeBatchItem) {
 	service.activeMu.Lock()
-	delete(service.active, jobID)
-	service.activeMu.Unlock()
+	defer service.activeMu.Unlock()
+	active := service.active[jobID]
+	for index, current := range active {
+		if current != item {
+			continue
+		}
+		active = append(active[:index], active[index+1:]...)
+		if len(active) == 0 {
+			delete(service.active, jobID)
+		} else {
+			service.active[jobID] = active
+		}
+		return
+	}
 }
 
 func (service *BatchService) cancelJob(jobID string) {
 	service.activeMu.Lock()
-	cancel := service.active[jobID]
+	active := append([]*activeBatchItem(nil), service.active[jobID]...)
 	service.activeMu.Unlock()
-	if cancel != nil {
-		cancel()
+	for _, item := range active {
+		item.cancel()
 	}
 }
 
 func (service *BatchService) cancelActive() {
 	service.activeMu.Lock()
 	cancellations := make([]context.CancelFunc, 0, len(service.active))
-	for _, cancel := range service.active {
-		cancellations = append(cancellations, cancel)
+	for _, active := range service.active {
+		for _, item := range active {
+			cancellations = append(cancellations, item.cancel)
+		}
 	}
 	service.activeMu.Unlock()
 	for _, cancel := range cancellations {
@@ -585,6 +659,19 @@ func validateCreateBatch(input CreateBatchInput) error {
 	if len(input.Options.Sources) < 1 || len(input.Options.Sources) > 5 || !uniqueSources(input.Options.Sources) {
 		return apperror.Validation("Batch scraping sources are invalid")
 	}
+	for source, limit := range input.Options.ChannelConcurrency {
+		maximum, known := maximumBatchChannelConcurrency[source]
+		if !known || limit < 1 || limit > maximum {
+			return apperror.Validation("Batch channel concurrency is invalid")
+		}
+	}
+	for _, source := range input.Options.Sources {
+		limit := input.Options.ChannelConcurrency[source]
+		maximum := maximumBatchChannelConcurrency[source]
+		if limit < 1 || maximum < 1 || limit > maximum {
+			return apperror.Validation("Batch channel concurrency is invalid")
+		}
+	}
 	if input.Options.Verbatim && !onlyQQMusicSource(input.Options.Sources) {
 		return unsupportedVerbatimSourceError()
 	}
@@ -598,6 +685,142 @@ func validateCreateBatch(input CreateBatchInput) error {
 		return apperror.Validation("Batch reason is invalid")
 	}
 	return nil
+}
+
+func normalizeBatchOptions(options BatchOptions) BatchOptions {
+	options.ChannelConcurrency = cloneChannelConcurrency(options.ChannelConcurrency)
+	if options.ChannelConcurrency == nil {
+		options.ChannelConcurrency = make(map[Source]int, len(options.Sources))
+	}
+	for _, source := range options.Sources {
+		if _, exists := options.ChannelConcurrency[source]; !exists {
+			options.ChannelConcurrency[source] = defaultBatchChannelConcurrency[source]
+		}
+	}
+	return options
+}
+
+func cloneChannelConcurrency(values map[Source]int) map[Source]int {
+	if values == nil {
+		return nil
+	}
+	result := make(map[Source]int, len(values))
+	for source, value := range values {
+		result[source] = value
+	}
+	return result
+}
+
+type batchChannelGate struct {
+	semaphore chan struct{}
+}
+
+func newBatchChannelGate(limit int) *batchChannelGate {
+	return &batchChannelGate{semaphore: make(chan struct{}, limit)}
+}
+
+func (gate *batchChannelGate) acquire(ctx context.Context) error {
+	select {
+	case gate.semaphore <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (gate *batchChannelGate) release() { <-gate.semaphore }
+
+func (service *BatchService) acquireChannel(
+	ctx context.Context,
+	jobID string,
+	source Source,
+	target int,
+) (func(), error) {
+	if target < 1 {
+		target = defaultBatchChannelConcurrency[source]
+	}
+	if target < 1 {
+		target = 1
+	}
+	maximum := maximumBatchChannelConcurrency[source]
+	if maximum < 1 {
+		maximum = 128
+	}
+	if target > maximum {
+		target = maximum
+	}
+	service.channelMu.Lock()
+	perJob := service.channelGates[jobID]
+	if perJob == nil {
+		perJob = make(map[Source]*batchChannelGate)
+		service.channelGates[jobID] = perJob
+	}
+	batchGate := perJob[source]
+	if batchGate == nil {
+		batchGate = newBatchChannelGate(target)
+		perJob[source] = batchGate
+	}
+	globalGate := service.channelGlobal[source]
+	if globalGate == nil {
+		globalGate = newBatchChannelGate(maximum)
+		service.channelGlobal[source] = globalGate
+	}
+	service.channelMu.Unlock()
+	if err := batchGate.acquire(ctx); err != nil {
+		return nil, err
+	}
+	if err := globalGate.acquire(ctx); err != nil {
+		batchGate.release()
+		return nil, err
+	}
+	service.channelMu.Lock()
+	service.channelActive[source]++
+	service.channelMu.Unlock()
+	return func() {
+		globalGate.release()
+		batchGate.release()
+		service.channelMu.Lock()
+		if service.channelActive[source] > 0 {
+			service.channelActive[source]--
+		}
+		service.channelMu.Unlock()
+	}, nil
+}
+
+func (service *BatchService) deleteChannelGates(jobID string) {
+	service.channelMu.Lock()
+	delete(service.channelGates, jobID)
+	service.channelMu.Unlock()
+}
+
+func (service *BatchService) channelStatus(options BatchOptions) map[Source]BatchChannelStatus {
+	options = normalizeBatchOptions(options)
+	healthProvider, _ := service.processor.(interface {
+		ChannelHealth(Source) ChannelHealth
+	})
+	service.channelMu.Lock()
+	defer service.channelMu.Unlock()
+	result := make(map[Source]BatchChannelStatus, len(options.Sources))
+	for _, source := range options.Sources {
+		target := options.ChannelConcurrency[source]
+		actual := service.channelActive[source]
+		state := "READY"
+		if actual > 0 {
+			state = "ACTIVE"
+		}
+		status := BatchChannelStatus{Target: target, Actual: actual, State: state}
+		if healthProvider != nil {
+			health := healthProvider.ChannelHealth(source)
+			if health.State != "" && health.State != "READY" {
+				status.State = health.State
+			}
+			status.RetryAfterSeconds = health.RetryAfterSeconds
+			status.ConsecutiveFailures = health.ConsecutiveFailures
+			status.ErrorRate = health.ErrorRate
+		}
+		result[source] = status
+	}
+	return result
 }
 
 func onlyQQMusicSource(sources []Source) bool {
