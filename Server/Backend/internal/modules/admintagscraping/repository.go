@@ -693,9 +693,11 @@ func (repository *Repository) ClaimBatchItem(
 		return ClaimResult{}, fmt.Errorf("begin tag scraping claim: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	if _, err := repository.recoverExpiredBatchItemsTx(ctx, tx); err != nil {
+	recoveredFinished, err := repository.recoverExpiredBatchItemsTx(ctx, tx)
+	if err != nil {
 		return ClaimResult{}, fmt.Errorf("recover expired tag scraping items before claim: %w", err)
 	}
+	finishedJobIDs := finishedJobIDs(recoveredFinished)
 	job, err := scanBatchJob(tx.QueryRow(ctx, batchJobSelect+`
 		WHERE status IN ('PENDING','RUNNING','CANCELLING')
 		  AND EXISTS (
@@ -704,7 +706,10 @@ func (repository *Repository) ClaimBatchItem(
 		  )
 		ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1`))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ClaimResult{}, nil
+		if err := tx.Commit(ctx); err != nil {
+			return ClaimResult{}, fmt.Errorf("commit empty tag scraping batch claim: %w", err)
+		}
+		return ClaimResult{FinishedJobIDs: finishedJobIDs}, nil
 	}
 	if err != nil {
 		return ClaimResult{}, fmt.Errorf("claim tag scraping batch: %w", err)
@@ -725,9 +730,9 @@ func (repository *Repository) ClaimBatchItem(
 			return ClaimResult{}, fmt.Errorf("commit cancelled tag scraping claim: %w", err)
 		}
 		if jobFinished {
-			return ClaimResult{FinishJobID: job.ID}, nil
+			finishedJobIDs = append(finishedJobIDs, job.ID)
 		}
-		return ClaimResult{}, nil
+		return ClaimResult{FinishedJobIDs: finishedJobIDs}, nil
 	}
 	item, err := scanBatchItem(tx.QueryRow(ctx, batchItemSelect+`
 		WHERE job_id = $1 AND status = 'PENDING'
@@ -736,7 +741,7 @@ func (repository *Repository) ClaimBatchItem(
 		if err := tx.Commit(ctx); err != nil {
 			return ClaimResult{}, fmt.Errorf("commit empty tag scraping claim: %w", err)
 		}
-		return ClaimResult{FinishJobID: job.ID}, nil
+		return ClaimResult{FinishJobID: job.ID, FinishedJobIDs: finishedJobIDs}, nil
 	}
 	if err != nil {
 		return ClaimResult{}, fmt.Errorf("claim tag scraping item: %w", err)
@@ -779,7 +784,21 @@ func (repository *Repository) ClaimBatchItem(
 	item.LockedUntil = &lockedUntil
 	item.StartedAt = &heartbeatAt
 	item.HeartbeatAt = &heartbeatAt
-	return ClaimResult{Item: &ClaimedBatchItem{Job: job, Item: item, AttemptID: attemptID}}, nil
+	return ClaimResult{
+		Item:           &ClaimedBatchItem{Job: job, Item: item, AttemptID: attemptID},
+		FinishedJobIDs: finishedJobIDs,
+	}, nil
+}
+
+func finishedJobIDs(finished map[string]bool) []string {
+	result := make([]string, 0, len(finished))
+	for jobID, isFinished := range finished {
+		if isFinished {
+			result = append(result, jobID)
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 func (repository *Repository) RenewBatchItemLease(

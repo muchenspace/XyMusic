@@ -366,6 +366,9 @@ func (service *BatchService) processNext(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	for _, jobID := range claim.FinishedJobIDs {
+		service.deleteChannelGates(jobID)
+	}
 	if claim.FinishJobID != "" {
 		service.deleteChannelGates(claim.FinishJobID)
 		return true, nil
