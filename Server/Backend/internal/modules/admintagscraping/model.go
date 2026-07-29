@@ -288,8 +288,9 @@ type ClaimedBatchItem struct {
 }
 
 type ClaimResult struct {
-	Item        *ClaimedBatchItem
-	FinishJobID string
+	Item           *ClaimedBatchItem
+	FinishJobID    string
+	FinishedJobIDs []string
 }
 
 type BatchCompletionResult struct {
