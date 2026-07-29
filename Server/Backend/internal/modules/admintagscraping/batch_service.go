@@ -20,6 +20,7 @@ const (
 	defaultBatchHeartbeat        = 30 * time.Second
 	defaultBatchIdlePoll         = 5 * time.Second
 	defaultBatchWorkPoll         = 250 * time.Millisecond
+	defaultBatchRecoveryPoll     = 5 * time.Second
 	defaultBatchWorkers          = 64
 	maximumBatchRecoveryAttempts = 3
 )
@@ -43,32 +44,34 @@ type BatchProcessor interface {
 }
 
 type BatchServiceDependencies struct {
-	Store       Store
-	Processor   BatchProcessor
-	Logger      Logger
-	WorkerID    string
-	Clock       func() time.Time
-	Lease       time.Duration
-	Heartbeat   time.Duration
-	IdlePoll    time.Duration
-	WorkingPoll time.Duration
-	Workers     int
-	Metrics     PerformanceMetrics
+	Store        Store
+	Processor    BatchProcessor
+	Logger       Logger
+	WorkerID     string
+	Clock        func() time.Time
+	Lease        time.Duration
+	Heartbeat    time.Duration
+	IdlePoll     time.Duration
+	WorkingPoll  time.Duration
+	RecoveryPoll time.Duration
+	Workers      int
+	Metrics      PerformanceMetrics
 }
 
 type BatchService struct {
-	store       Store
-	processor   BatchProcessor
-	logger      Logger
-	workerID    string
-	now         func() time.Time
-	lease       time.Duration
-	heartbeat   time.Duration
-	idlePoll    time.Duration
-	workingPoll time.Duration
-	workers     int
-	metrics     PerformanceMetrics
-	wake        chan struct{}
+	store        Store
+	processor    BatchProcessor
+	logger       Logger
+	workerID     string
+	now          func() time.Time
+	lease        time.Duration
+	heartbeat    time.Duration
+	idlePoll     time.Duration
+	workingPoll  time.Duration
+	recoveryPoll time.Duration
+	workers      int
+	metrics      PerformanceMetrics
+	wake         chan struct{}
 
 	lifecycleMu sync.Mutex
 	started     bool
@@ -164,6 +167,9 @@ func NewBatchService(dependencies BatchServiceDependencies) (*BatchService, erro
 	if dependencies.WorkingPoll <= 0 {
 		dependencies.WorkingPoll = defaultBatchWorkPoll
 	}
+	if dependencies.RecoveryPoll <= 0 {
+		dependencies.RecoveryPoll = defaultBatchRecoveryPoll
+	}
 	if dependencies.Workers == 0 {
 		dependencies.Workers = defaultBatchWorkers
 	}
@@ -175,7 +181,8 @@ func NewBatchService(dependencies BatchServiceDependencies) (*BatchService, erro
 		workerID: dependencies.WorkerID,
 		now:      dependencies.Clock, lease: dependencies.Lease, heartbeat: dependencies.Heartbeat,
 		idlePoll: dependencies.IdlePoll, workingPoll: dependencies.WorkingPoll,
-		workers: dependencies.Workers, wake: make(chan struct{}, 1), active: make(map[string][]*activeBatchItem),
+		recoveryPoll: dependencies.RecoveryPoll,
+		workers:      dependencies.Workers, wake: make(chan struct{}, 1), active: make(map[string][]*activeBatchItem),
 		metrics:       dependencies.Metrics,
 		channelGates:  make(map[string]map[Source]*batchChannelGate),
 		channelGlobal: make(map[Source]*batchChannelGate), channelActive: make(map[Source]int),
@@ -196,8 +203,12 @@ func (service *BatchService) Start(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := service.store.RecoverExpiredBatchItems(ctx, service.now().UTC()); err != nil {
+	finishedJobIDs, err := service.store.RecoverExpiredBatchItems(ctx, service.now().UTC())
+	if err != nil {
 		return err
+	}
+	for _, jobID := range finishedJobIDs {
+		service.deleteChannelGates(jobID)
 	}
 	workerContext, cancel := context.WithCancel(ctx)
 	service.cancel = cancel
@@ -318,6 +329,11 @@ func (service *BatchService) Retry(ctx context.Context, jobID string) (BatchJobD
 func (service *BatchService) run(ctx context.Context, done chan struct{}) {
 	defer close(done)
 	var group sync.WaitGroup
+	group.Add(1)
+	go func() {
+		defer group.Done()
+		service.runRecoverySweeper(ctx)
+	}()
 	for index := 0; index < service.workers; index++ {
 		group.Add(1)
 		go func() {
@@ -326,6 +342,30 @@ func (service *BatchService) run(ctx context.Context, done chan struct{}) {
 		}()
 	}
 	group.Wait()
+}
+
+func (service *BatchService) runRecoverySweeper(ctx context.Context) {
+	ticker := time.NewTicker(service.recoveryPoll)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			finishedJobIDs, err := service.store.RecoverExpiredBatchItems(ctx, service.now().UTC())
+			if err != nil {
+				service.logger.Warn("tag_scraping.batch.recovery_failed", map[string]any{
+					"workerId": service.workerID,
+					"message":  messageOf(err),
+				})
+				continue
+			}
+			for _, jobID := range finishedJobIDs {
+				service.deleteChannelGates(jobID)
+			}
+			service.signal()
+		}
+	}
 }
 
 func (service *BatchService) runWorker(ctx context.Context) {

@@ -604,19 +604,20 @@ func (repository *Repository) RetryBatch(ctx context.Context, jobID string) erro
 	return nil
 }
 
-func (repository *Repository) RecoverExpiredBatchItems(ctx context.Context, _ time.Time) error {
+func (repository *Repository) RecoverExpiredBatchItems(ctx context.Context, _ time.Time) ([]string, error) {
 	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return fmt.Errorf("begin expired tag scraping recovery: %w", err)
+		return nil, fmt.Errorf("begin expired tag scraping recovery: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	if _, err := repository.recoverExpiredBatchItemsTx(ctx, tx); err != nil {
-		return fmt.Errorf("recover expired tag scraping items: %w", err)
+	finished, err := repository.recoverExpiredBatchItemsTx(ctx, tx)
+	if err != nil {
+		return nil, fmt.Errorf("recover expired tag scraping items: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit expired tag scraping recovery: %w", err)
+		return nil, fmt.Errorf("commit expired tag scraping recovery: %w", err)
 	}
-	return nil
+	return finishedJobIDs(finished), nil
 }
 
 func (repository *Repository) recoverExpiredBatchItemsTx(ctx context.Context, tx pgx.Tx) (map[string]bool, error) {
@@ -624,11 +625,17 @@ func (repository *Repository) recoverExpiredBatchItemsTx(ctx context.Context, tx
 		SELECT id
 		FROM tag_scraping_jobs
 		WHERE status IN ('PENDING', 'RUNNING', 'CANCELLING')
-		  AND EXISTS (
-			SELECT 1 FROM tag_scraping_job_items item
-			WHERE item.job_id = tag_scraping_jobs.id
-			  AND item.status = 'RUNNING'
-			  AND (item.locked_until IS NULL OR item.locked_until <= clock_timestamp())
+		  AND (
+			EXISTS (
+				SELECT 1 FROM tag_scraping_job_items item
+				WHERE item.job_id = tag_scraping_jobs.id
+				  AND item.status = 'RUNNING'
+				  AND (item.locked_until IS NULL OR item.locked_until <= clock_timestamp())
+			) OR NOT EXISTS (
+				SELECT 1 FROM tag_scraping_job_items active
+				WHERE active.job_id = tag_scraping_jobs.id
+				  AND active.status IN ('PENDING', 'RUNNING')
+			)
 		  )
 		ORDER BY created_at, id
 		FOR UPDATE SKIP LOCKED
@@ -636,13 +643,23 @@ func (repository *Repository) recoverExpiredBatchItemsTx(ctx context.Context, tx
 	if err != nil {
 		return nil, fmt.Errorf("lock expired tag scraping jobs: %w", err)
 	}
-	defer rows.Close()
-	finished := make(map[string]bool)
+	jobIDs := make([]string, 0, 64)
 	for rows.Next() {
 		var jobID string
 		if err := rows.Scan(&jobID); err != nil {
+			rows.Close()
 			return nil, fmt.Errorf("scan expired tag scraping job: %w", err)
 		}
+		jobIDs = append(jobIDs, jobID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("iterate expired tag scraping jobs: %w", err)
+	}
+	rows.Close()
+
+	finished := make(map[string]bool, len(jobIDs))
+	for _, jobID := range jobIDs {
 		if _, err := tx.Exec(ctx, `
 			UPDATE tag_scraping_job_items item SET
 				status = CASE
@@ -677,10 +694,18 @@ func (repository *Repository) recoverExpiredBatchItemsTx(ctx context.Context, tx
 		}
 		finished[jobID] = jobFinished
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate expired tag scraping jobs: %w", err)
-	}
 	return finished, nil
+}
+
+func finishedJobIDs(finished map[string]bool) []string {
+	result := make([]string, 0, len(finished))
+	for jobID, isFinished := range finished {
+		if isFinished {
+			result = append(result, jobID)
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 func (repository *Repository) ClaimBatchItem(
@@ -693,11 +718,6 @@ func (repository *Repository) ClaimBatchItem(
 		return ClaimResult{}, fmt.Errorf("begin tag scraping claim: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	recoveredFinished, err := repository.recoverExpiredBatchItemsTx(ctx, tx)
-	if err != nil {
-		return ClaimResult{}, fmt.Errorf("recover expired tag scraping items before claim: %w", err)
-	}
-	finishedJobIDs := finishedJobIDs(recoveredFinished)
 	job, err := scanBatchJob(tx.QueryRow(ctx, batchJobSelect+`
 		WHERE status IN ('PENDING','RUNNING','CANCELLING')
 		  AND (
@@ -714,7 +734,7 @@ func (repository *Repository) ClaimBatchItem(
 		if err := tx.Commit(ctx); err != nil {
 			return ClaimResult{}, fmt.Errorf("commit empty tag scraping batch claim: %w", err)
 		}
-		return ClaimResult{FinishedJobIDs: finishedJobIDs}, nil
+		return ClaimResult{}, nil
 	}
 	if err != nil {
 		return ClaimResult{}, fmt.Errorf("claim tag scraping batch: %w", err)
@@ -735,9 +755,9 @@ func (repository *Repository) ClaimBatchItem(
 			return ClaimResult{}, fmt.Errorf("commit cancelled tag scraping claim: %w", err)
 		}
 		if jobFinished {
-			finishedJobIDs = append(finishedJobIDs, job.ID)
+			return ClaimResult{FinishedJobIDs: []string{job.ID}}, nil
 		}
-		return ClaimResult{FinishedJobIDs: finishedJobIDs}, nil
+		return ClaimResult{}, nil
 	}
 	item, err := scanBatchItem(tx.QueryRow(ctx, batchItemSelect+`
 		WHERE job_id = $1 AND status = 'PENDING'
@@ -751,9 +771,9 @@ func (repository *Repository) ClaimBatchItem(
 			return ClaimResult{}, fmt.Errorf("commit empty tag scraping claim: %w", err)
 		}
 		if jobFinished {
-			finishedJobIDs = append(finishedJobIDs, job.ID)
+			return ClaimResult{FinishedJobIDs: []string{job.ID}}, nil
 		}
-		return ClaimResult{FinishedJobIDs: finishedJobIDs}, nil
+		return ClaimResult{}, nil
 	}
 	if err != nil {
 		return ClaimResult{}, fmt.Errorf("claim tag scraping item: %w", err)
@@ -797,20 +817,8 @@ func (repository *Repository) ClaimBatchItem(
 	item.StartedAt = &heartbeatAt
 	item.HeartbeatAt = &heartbeatAt
 	return ClaimResult{
-		Item:           &ClaimedBatchItem{Job: job, Item: item, AttemptID: attemptID},
-		FinishedJobIDs: finishedJobIDs,
+		Item: &ClaimedBatchItem{Job: job, Item: item, AttemptID: attemptID},
 	}, nil
-}
-
-func finishedJobIDs(finished map[string]bool) []string {
-	result := make([]string, 0, len(finished))
-	for jobID, isFinished := range finished {
-		if isFinished {
-			result = append(result, jobID)
-		}
-	}
-	sort.Strings(result)
-	return result
 }
 
 func (repository *Repository) RenewBatchItemLease(
