@@ -730,9 +730,9 @@ func (stub *storeStub) RetryBatch(context.Context, string) error {
 	stub.retryRequests++
 	return stub.retryErr
 }
-func (stub *storeStub) RecoverExpiredBatchItems(context.Context, time.Time) error {
+func (stub *storeStub) RecoverExpiredBatchItems(context.Context, time.Time) ([]string, error) {
 	stub.recoverCalls++
-	return nil
+	return nil, nil
 }
 func (stub *storeStub) ClaimBatchItem(context.Context, string, time.Duration) (ClaimResult, error) {
 	return stub.claim, stub.claimErr
