@@ -36,6 +36,7 @@ const (
 	maximumRedirects       = 5
 	maximumSourceFailures  = 3
 	maximumSourceCooldown  = 2 * time.Second
+	defaultArtworkWorkers  = 8
 	neteaseLinuxForwardKey = "rFgB&h#%2?^eDg:Q"
 	kugouSignatureSalt     = "NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt"
 )
@@ -129,8 +130,20 @@ type sourceCircuitState struct {
 }
 
 func NewMusicPlatformClient(client *http.Client, acoustIDClient string, metrics ...PerformanceMetrics) *ProductionMusicPlatform {
+	return NewMusicPlatformClientWithArtworkWorkers(client, acoustIDClient, defaultArtworkWorkers, metrics...)
+}
+
+func NewMusicPlatformClientWithArtworkWorkers(
+	client *http.Client,
+	acoustIDClient string,
+	artworkWorkers int,
+	metrics ...PerformanceMetrics,
+) *ProductionMusicPlatform {
 	if client == nil {
 		client = &http.Client{}
+	}
+	if artworkWorkers < 1 || artworkWorkers > 64 {
+		artworkWorkers = defaultArtworkWorkers
 	}
 	var observer PerformanceMetrics
 	if len(metrics) > 0 {
@@ -142,7 +155,7 @@ func NewMusicPlatformClient(client *http.Client, acoustIDClient string, metrics 
 		gate:    newRequestGate(6, 128), sourceGates: map[Source]*requestGate{
 			SourceQMusic: newRequestGate(512, 512), SourceNetease: newRequestGate(1024, 1024),
 			SourceKugou: newRequestGate(128, 512), SourceAcoustID: newRequestGate(64, 64),
-		}, artworkGate: newRequestGate(2, 32),
+		}, artworkGate: newRequestGate(artworkWorkers, 0),
 		artworkCalls: make(map[string]*artworkCall), artworkCache: make(map[string]cachedArtwork),
 		searchCache: make(map[string]cachedSearch), searchCalls: make(map[string]*searchCall),
 		artistCache: make(map[string]cachedArtists), artistCalls: make(map[string]*artistSearchCall),
@@ -361,8 +374,7 @@ func (platform *ProductionMusicPlatform) performArtwork(rawURL, host string, cal
 		}
 		platform.artworkMu.Unlock()
 	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
+	ctx := context.Background()
 	if err := platform.artworkGate.acquire(ctx); err != nil {
 		call.err = err
 		return
@@ -833,7 +845,7 @@ func (gate *requestGate) acquire(ctx context.Context) error {
 	default:
 	}
 	gate.mu.Lock()
-	if gate.waiting >= gate.maximum {
+	if gate.maximum > 0 && gate.waiting >= gate.maximum {
 		gate.mu.Unlock()
 		return &upstreamQueueFullError{}
 	}
@@ -853,6 +865,24 @@ func (gate *requestGate) acquire(ctx context.Context) error {
 }
 
 func (gate *requestGate) release() { <-gate.semaphore }
+
+func (gate *requestGate) snapshot() (actual, waiting, limit int) {
+	if gate == nil {
+		return 0, 0, 0
+	}
+	gate.mu.Lock()
+	waiting = gate.waiting
+	gate.mu.Unlock()
+	return len(gate.semaphore), waiting, cap(gate.semaphore)
+}
+
+func (platform *ProductionMusicPlatform) ArtworkHealth() ArtworkHealth {
+	if platform == nil {
+		return ArtworkHealth{}
+	}
+	actual, waiting, limit := platform.artworkGate.snapshot()
+	return ArtworkHealth{Limit: limit, Actual: actual, Waiting: waiting}
+}
 
 func (platform *ProductionMusicPlatform) circuitRetryAfter(host string) int {
 	platform.circuitMu.Lock()

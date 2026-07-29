@@ -297,7 +297,7 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	}
 	tagScrapingService, err := admintagscraping.NewService(admintagscraping.ServiceDependencies{
 		Store:         tagRepository,
-		Music:         admintagscraping.NewMusicPlatformClient(nil, resolved.Scraping.AcoustIDClient, metrics),
+		Music:         admintagscraping.NewMusicPlatformClientWithArtworkWorkers(nil, resolved.Scraping.AcoustIDClient, resolved.Scraping.CoverWorkers, metrics),
 		Fingerprinter: admintagscraping.ConfiguredFingerprinter(resolved.Scraping.FPcalcPath),
 		Artwork:       tagArtwork, DefaultLibraryDirectory: resolved.LocalLibrary.Directory, Metrics: metrics,
 	})
