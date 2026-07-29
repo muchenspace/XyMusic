@@ -63,7 +63,7 @@ import kotlin.math.abs
 
 @Composable
 internal fun QueueContent(
-    queue: List<PlayerQueueItem>,
+    queue: PlayerQueueUiState,
     currentQueueItemId: String?,
     shuffleEnabled: Boolean,
     repeatMode: RepeatMode,
@@ -74,6 +74,7 @@ internal fun QueueContent(
     onClear: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val queueItems = queue.items
     BoxWithConstraints(
         modifier = modifier.fillMaxSize().testTag(PlayerTestTags.QueueContent),
         contentAlignment = Alignment.TopCenter,
@@ -95,7 +96,7 @@ internal fun QueueContent(
         ) {
             if (compactLandscape) {
                 CompactLandscapeQueueHeader(
-                    queueIsNotEmpty = queue.isNotEmpty(),
+                    queueIsNotEmpty = queueItems.isNotEmpty(),
                     shuffleEnabled = shuffleEnabled,
                     repeatMode = repeatMode,
                     onCyclePlaybackMode = onCyclePlaybackMode,
@@ -107,9 +108,9 @@ internal fun QueueContent(
                     repeatMode = repeatMode,
                     onCyclePlaybackMode = onCyclePlaybackMode,
                 )
-                QueueHeader(queueIsNotEmpty = queue.isNotEmpty(), onClear = onClear)
+                QueueHeader(queueIsNotEmpty = queueItems.isNotEmpty(), onClear = onClear)
             }
-            if (queue.isEmpty()) {
+            if (queueItems.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
                         text = stringResource(R.string.player_queue_empty),
@@ -129,14 +130,14 @@ internal fun QueueContent(
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     itemsIndexed(
-                        items = queue,
+                        items = queueItems,
                         key = { _, item -> item.queueItemId },
                         contentType = { _, _ -> "player-queue-item" },
                     ) { index, item ->
                         QueueItem(
                             item = item,
                             index = index,
-                            lastIndex = queue.lastIndex,
+                            lastIndex = queueItems.lastIndex,
                             isCurrent = item.queueItemId == currentQueueItemId,
                             onSelect = { onSelect(item.queueItemId) },
                             onRemove = { onRemove(item.queueItemId) },

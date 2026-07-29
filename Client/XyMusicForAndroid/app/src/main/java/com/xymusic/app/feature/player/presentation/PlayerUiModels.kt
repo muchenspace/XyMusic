@@ -8,6 +8,7 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import com.xymusic.app.core.model.media.LyricsTiming
+import com.xymusic.app.feature.player.domain.model.PlayerQueueItem
 import com.xymusic.app.feature.player.domain.model.PlayerState
 import com.xymusic.app.feature.player.domain.model.RepeatMode
 
@@ -34,6 +35,13 @@ data class PlayerUiState(
     val lyricsTiming: LyricsTiming = LyricsTiming.LINE,
     val sleepTimerRemainingMs: Long? = null,
 )
+
+/**
+ * Keeps the queue collection stable across position-only player updates.
+ * The queue is replaced as a whole by the player repository and is never mutated in place.
+ */
+@Immutable
+internal data class PlayerQueueUiState(val items: List<PlayerQueueItem>)
 
 sealed interface PlayerUiEffect {
     data class ShowMessage(@StringRes val messageRes: Int) : PlayerUiEffect

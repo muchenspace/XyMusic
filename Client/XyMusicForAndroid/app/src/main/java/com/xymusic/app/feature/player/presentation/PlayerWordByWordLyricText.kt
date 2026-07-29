@@ -87,10 +87,31 @@ internal fun calculateWordTimedHighlightProgress(
 private fun calculateWordTimedHighlightProgressForLayouts(
     words: List<TimedWordLayout>,
     playbackPositionMs: Float,
-): WordTimedHighlightProgress = calculateWordTimedHighlightProgressByTimes(
-	wordTimes = words.map { word -> WordTiming(word.timeMs, word.endTimeMs) },
-	playbackPositionMs = playbackPositionMs,
-)
+): WordTimedHighlightProgress {
+    if (words.isEmpty() || playbackPositionMs.isNaN()) {
+        return WordTimedHighlightProgress(completedCount = 0, currentFraction = 0f)
+    }
+    var completedCount = 0
+    for (word in words) {
+        if (playbackPositionMs < word.timeMs) {
+            return WordTimedHighlightProgress(completedCount, 0f)
+        }
+        val endTimeMs = word.endTimeMs
+        if (endTimeMs == null) {
+            return WordTimedHighlightProgress(completedCount, 0f)
+        }
+        if (endTimeMs <= word.timeMs || playbackPositionMs >= endTimeMs) {
+            completedCount += 1
+            continue
+        }
+        val fraction =
+            ((playbackPositionMs - word.timeMs).toDouble() / (endTimeMs - word.timeMs))
+                .toFloat()
+                .coerceIn(0f, 1f)
+        return WordTimedHighlightProgress(completedCount, fraction)
+    }
+    return WordTimedHighlightProgress(completedCount, 0f)
+}
 
 private fun calculateWordTimedHighlightProgressByTimes(
 	wordTimes: List<WordTiming>,

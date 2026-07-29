@@ -81,7 +81,10 @@ class PlayerQueueSheetComposeTest {
         setContent {
             XyMusicTheme(darkTheme = false) {
                 QueueContent(
-                    queue = listOf(queueItem("queue-1", "First Track"), queueItem("queue-2", "Second Track")),
+                    queue =
+                    PlayerQueueUiState(
+                        listOf(queueItem("queue-1", "First Track"), queueItem("queue-2", "Second Track")),
+                    ),
                     currentQueueItemId = "queue-1",
                     shuffleEnabled = false,
                     repeatMode = RepeatMode.OFF,
