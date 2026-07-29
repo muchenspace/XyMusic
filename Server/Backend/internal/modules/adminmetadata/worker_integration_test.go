@@ -103,6 +103,7 @@ func TestProductionWritebackWorker(t *testing.T) {
 	}
 
 	var actorID, artistID, albumID, artworkAssetID, trackID, rootID, sourceID string
+	var sourceObjectKey string
 	artworkObjectKey := "integration/writeback-artwork-" + suffix + ".jpg"
 	if err := pool.QueryRow(ctx, `
 		insert into users (username, normalized_username, password_hash, role)
@@ -121,6 +122,9 @@ func TestProductionWritebackWorker(t *testing.T) {
 		}
 		if artworkAssetID != "" {
 			_, _ = pool.Exec(cleanupContext, `delete from media_assets where id = $1`, artworkAssetID)
+		}
+		if sourceObjectKey != "" {
+			_ = objects.Delete(cleanupContext, sourceObjectKey)
 		}
 		_ = objects.Delete(cleanupContext, artworkObjectKey)
 		if artistID != "" {
@@ -213,7 +217,7 @@ func TestProductionWritebackWorker(t *testing.T) {
 	}
 	worker, err := NewWritebackWorker(WorkerDependencies{
 		Store: repository, FFmpegPath: cfg.Media.FFmpegPath, FFprobePath: cfg.Media.FFprobePath,
-		Artwork: objects, Runner: OSProcessRunner{}, Logger: NoopLogger{}, Clock: SystemClock{},
+		Artwork: objects, SourceStorage: objects, Runner: OSProcessRunner{}, Logger: NoopLogger{}, Clock: SystemClock{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -253,6 +257,18 @@ func TestProductionWritebackWorker(t *testing.T) {
 	}
 	if outputChecksum != *job.OutputChecksumSHA256 || outputChecksum == originalChecksum {
 		t.Fatalf("output checksum=%s job=%v original=%s", outputChecksum, job.OutputChecksumSHA256, originalChecksum)
+	}
+	sourceObjectKey = "library/sources/" + trackID + "/" + outputChecksum + ".flac"
+	var sourceAssetID, storedSourceKey, storedSourceChecksum string
+	if err := pool.QueryRow(ctx, `
+		select source.source_asset_id::text, asset.object_key, asset.checksum_sha256
+		from local_music_sources source
+		join media_assets asset on asset.id = source.source_asset_id
+		where source.id = $1`, sourceID).Scan(&sourceAssetID, &storedSourceKey, &storedSourceChecksum); err != nil {
+		t.Fatal(err)
+	}
+	if sourceAssetID == "" || storedSourceKey != sourceObjectKey || storedSourceChecksum != outputChecksum {
+		t.Fatalf("source asset id=%s key=%s checksum=%s", sourceAssetID, storedSourceKey, storedSourceChecksum)
 	}
 	entries, err := os.ReadDir(rootPath)
 	if err != nil {

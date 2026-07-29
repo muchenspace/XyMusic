@@ -348,27 +348,31 @@ func (store *PostgresStore) FailMediaJob(
 		attemptID == nil || job.AttemptID == nil || *attemptID != *job.AttemptID {
 		return nil
 	}
-	terminal := attempts >= maxAttempts
+	code := workerErrorCode(processErr)
+	persistedAttempts := attempts
+	if code == "WORKER_STOPPED" && persistedAttempts > 0 {
+		persistedAttempts--
+	}
+	terminal := persistedAttempts >= maxAttempts
 	nextStatus := "PENDING"
 	if cancelRequested {
 		nextStatus = "CANCELLED"
 	} else if terminal {
 		nextStatus = "FAILED"
 	}
-	delay := retryDelay(attempts)
+	delay := retryDelay(persistedAttempts)
 	if isInterrupted(processErr) {
 		delay = 0
 	}
 	message := safeWorkerError(processErr)
-	code := workerErrorCode(processErr)
 	if cancelRequested {
 		message = "Cancelled by an administrator"
 		code = "CANCELLED"
 	}
-	updated, err := transaction.Exec(ctx, `UPDATE media_jobs SET status=$4,locked_by=NULL,
-		locked_until=NULL,heartbeat_at=NULL,next_attempt_at=$5,last_error_code=$6,last_error=$7,
-		version=version+1,updated_at=$8 WHERE id=$1 AND locked_by=$2 AND attempt_id=$3`,
-		job.ID, workerID, *job.AttemptID, nextStatus, now.Add(delay), code, message, now)
+	updated, err := transaction.Exec(ctx, `UPDATE media_jobs SET status=$4,attempts=$5,locked_by=NULL,
+		locked_until=NULL,heartbeat_at=NULL,next_attempt_at=$6,last_error_code=$7,last_error=$8,
+		version=version+1,updated_at=$9 WHERE id=$1 AND locked_by=$2 AND attempt_id=$3`,
+		job.ID, workerID, *job.AttemptID, nextStatus, persistedAttempts, now.Add(delay), code, message, now)
 	if err != nil {
 		return fmt.Errorf("finalize failed media job: %w", err)
 	}

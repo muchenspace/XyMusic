@@ -236,7 +236,7 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	}
 	metadataWorker, err := adminmetadata.NewWritebackWorker(adminmetadata.WorkerDependencies{
 		Store: metadataRepository, FFmpegPath: resolved.Media.FFmpegPath, FFprobePath: resolved.Media.FFprobePath,
-		Artwork: objects, Logger: workerLogger,
+		Artwork: objects, SourceStorage: objects, Logger: workerLogger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create metadata writeback worker: %w", err)
@@ -685,8 +685,11 @@ func (runtime *Runtime) CloseContext(ctx context.Context) error {
 		return nil
 	}
 	var closeErr error
+	if runtime.mediaWorker != nil {
+		closeErr = runtime.mediaWorker.Drain(ctx)
+	}
 	if runtime.background != nil {
-		closeErr = runtime.background.Close(ctx)
+		closeErr = errors.Join(closeErr, runtime.background.Close(ctx))
 	}
 	if runtime.mediaWorker != nil {
 		closeErr = errors.Join(closeErr, runtime.mediaWorker.Close())

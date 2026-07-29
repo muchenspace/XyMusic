@@ -45,7 +45,7 @@ func TestWorkerProcessesLosslessSegmentAndCommitsFencedVariants(t *testing.T) {
 		t.Fatalf("commit = %#v", store.commit)
 	}
 	for _, output := range store.commit.Generated {
-		wantPrefix := "media/variants/" + store.job.TrackID + "/" + store.job.ID + "/" + attemptID + "/"
+		wantPrefix := "media/checkpoints/" + store.job.TrackID + "/"
 		if !strings.HasPrefix(output.ObjectKey, wantPrefix) || output.SizeBytes == 0 || output.ChecksumSHA256 == "" {
 			t.Fatalf("generated output = %#v", output)
 		}
@@ -114,6 +114,37 @@ func TestWorkerReusesReadyVariantsBySourceChecksumAndProfileVersion(t *testing.T
 	}
 }
 
+func TestWorkerReusesUploadedCheckpointBeforeRunningFFmpeg(t *testing.T) {
+	attemptID := "attempt"
+	source := []byte("source")
+	digest := sha256.Sum256(source)
+	checksum := hex.EncodeToString(digest[:])
+	profiles := AudioVariantProfiles("aac")
+	checkpointKey := checkpointVariantObjectKey("track", checksum, "v1", mediaRange{StartMS: 0, EndMS: 1_000}, profiles[0])
+	store := &workerStoreStub{
+		job: &MediaJob{ID: "job", SourceAssetID: "asset", TrackID: "track", Generation: 1, AttemptID: &attemptID},
+		source: &SourceAsset{ID: "asset", ObjectKey: "source", SizeBytes: int64(len(source)), ChecksumSHA256: &checksum},
+	}
+	storage := &workerStorageStub{source: source, objectStats: map[string]objectStat{
+		checkpointKey: {sizeBytes: 42, checksum: "checkpoint-checksum", exists: true},
+	}}
+	runner := &workerRunnerStub{
+		probe: `{"streams":[{"codec_type":"audio","codec_name":"aac"}],"format":{"duration":"1"}}`,
+	}
+	worker := newTestWorker(t, store, storage, runner, Options{})
+	worked, err := worker.RunNext(context.Background())
+	if err != nil || !worked {
+		t.Fatalf("worked=%v error=%v", worked, err)
+	}
+	if store.commit == nil || len(store.commit.Generated) != len(profiles) ||
+		store.commit.Generated[0].ObjectKey != checkpointKey || store.commit.Generated[0].Reused {
+		t.Fatalf("checkpoint commit = %#v", store.commit)
+	}
+	if len(storage.uploaded) != len(profiles)-1 || strings.Count(strings.Join(runner.ffmpegArguments, " "), "-map 0:a:0 -vn") != len(profiles)-1 {
+		t.Fatalf("checkpoint reuse uploads=%#v ffmpeg=%v", storage.uploaded, runner.ffmpegArguments)
+	}
+}
+
 func TestVerifyReusableVariantsDropsMissingOrChangedObjects(t *testing.T) {
 	checksum := "present-checksum"
 	variants := []GeneratedVariant{
@@ -146,6 +177,62 @@ func TestWorkerClampsConfiguredFFmpegThreadsToCPUShare(t *testing.T) {
 	}
 }
 
+func TestWorkerDrainWaitsForClaimedJobAndRejectsNewClaims(t *testing.T) {
+	attemptID := "attempt"
+	source := []byte("source")
+	digest := sha256.Sum256(source)
+	checksum := hex.EncodeToString(digest[:])
+	store := &workerStoreStub{
+		job: &MediaJob{ID: "job", SourceAssetID: "asset", TrackID: "track", Generation: 1, AttemptID: &attemptID},
+		source: &SourceAsset{ID: "asset", ObjectKey: "source", SizeBytes: int64(len(source)), ChecksumSHA256: &checksum},
+	}
+	runner := &workerRunnerStub{
+		probe: `{"streams":[{"codec_type":"audio","codec_name":"aac"}],"format":{"duration":"1"}}`,
+		blockFFmpeg: true, ffmpegStarted: make(chan struct{}), releaseFFmpeg: make(chan struct{}),
+	}
+	worker := newTestWorker(t, store, &workerStorageStub{source: source}, runner, Options{})
+	finished := make(chan error, 1)
+	go func() {
+		_, err := worker.RunNext(context.Background())
+		finished <- err
+	}()
+	select {
+	case <-runner.ffmpegStarted:
+	case <-time.After(time.Second):
+		t.Fatal("ffmpeg did not start")
+	}
+	if _, err := worker.RunNext(context.Background()); err != nil && !errors.Is(err, ErrWorkerClosed) {
+		t.Fatalf("claim while draining before drain = %v", err)
+	}
+	drainDone := make(chan error, 1)
+	go func() { drainDone <- worker.Drain(context.Background()) }()
+	select {
+	case err := <-drainDone:
+		t.Fatalf("drain returned before active job finished: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	if _, err := worker.RunNext(context.Background()); !errors.Is(err, ErrWorkerClosed) {
+		t.Fatalf("claim while draining error = %v", err)
+	}
+	close(runner.releaseFFmpeg)
+	select {
+	case err := <-finished:
+		if err != nil {
+			t.Fatalf("drained job error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("drained job did not finish")
+	}
+	select {
+	case err := <-drainDone:
+		if err != nil {
+			t.Fatalf("drain error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("drain did not finish")
+	}
+}
+
 func TestWorkerQueuesEveryUploadedObjectWhenCommitIsSuperseded(t *testing.T) {
 	attemptID := "attempt"
 	source := []byte("source")
@@ -163,7 +250,7 @@ func TestWorkerQueuesEveryUploadedObjectWhenCommitIsSuperseded(t *testing.T) {
 	if err != nil || !worked {
 		t.Fatalf("worked=%v error=%v", worked, err)
 	}
-	if len(store.enqueued) != 3 {
+	if len(store.enqueued) != 0 {
 		t.Fatalf("abandoned objects = %#v", store.enqueued)
 	}
 	for _, cleanup := range store.enqueued {
@@ -197,7 +284,7 @@ func TestWorkerQueuesCurrentObjectWhenUploadFailsAfterObjectCreation(t *testing.
 		t.Fatalf("abandoned objects = %#v", store.enqueued)
 	}
 	for _, cleanup := range store.enqueued {
-		if !strings.HasPrefix(cleanup.key, "media/variants/track/job/attempt/") ||
+		if !strings.HasPrefix(cleanup.key, "media/checkpoints/track/") ||
 			cleanup.reason != "ABANDONED_MEDIA_ATTEMPT" {
 			t.Fatalf("abandoned object cleanup = %#v", cleanup)
 		}
@@ -615,6 +702,7 @@ type workerRunnerStub struct {
 	blockFFmpeg       bool
 	ffmpegStarted     chan struct{}
 	ffmpegStartedOnce sync.Once
+	releaseFFmpeg     chan struct{}
 }
 
 func (runner *workerRunnerStub) Run(ctx context.Context, executable string, arguments []string, _ time.Duration) (ProcessResult, error) {
@@ -628,8 +716,15 @@ func (runner *workerRunnerStub) Run(ctx context.Context, executable string, argu
 		runner.ffmpegStartedOnce.Do(func() { close(runner.ffmpegStarted) })
 	}
 	if runner.blockFFmpeg {
-		<-ctx.Done()
-		return ProcessResult{}, context.Cause(ctx)
+		if runner.releaseFFmpeg == nil {
+			<-ctx.Done()
+			return ProcessResult{}, context.Cause(ctx)
+		}
+		select {
+		case <-ctx.Done():
+			return ProcessResult{}, context.Cause(ctx)
+		case <-runner.releaseFFmpeg:
+		}
 	}
 	for _, argument := range arguments {
 		if filepath.Ext(argument) != ".m4a" && filepath.Ext(argument) != ".flac" {

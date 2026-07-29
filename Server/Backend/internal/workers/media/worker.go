@@ -73,6 +73,7 @@ type Worker struct {
 	stop      context.CancelCauseFunc
 	stateMu   sync.Mutex
 	closed    bool
+	quiescing bool
 	active    sync.WaitGroup
 }
 
@@ -209,10 +210,34 @@ func (worker *Worker) Close() error {
 		return nil
 	}
 	worker.closed = true
+	worker.quiescing = true
 	worker.stop(newInterruptedError("WORKER_STOPPED", "media worker stopped"))
 	worker.stateMu.Unlock()
 	worker.active.Wait()
 	return nil
+}
+
+// Drain stops new claims and waits for already claimed jobs to finish.
+func (worker *Worker) Drain(ctx context.Context) error {
+	worker.stateMu.Lock()
+	if worker.closed {
+		worker.stateMu.Unlock()
+		return nil
+	}
+	worker.quiescing = true
+	worker.stateMu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		worker.active.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (worker *Worker) WorkerID() string { return worker.workerID }
@@ -222,7 +247,7 @@ func (worker *Worker) WorkerCount() int { return worker.workers }
 func (worker *Worker) beginOperation() bool {
 	worker.stateMu.Lock()
 	defer worker.stateMu.Unlock()
-	if worker.closed {
+	if worker.closed || worker.quiescing {
 		return false
 	}
 	worker.active.Add(1)
@@ -441,11 +466,29 @@ func (worker *Worker) process(ctx context.Context, job MediaJob) (processErr err
 		if _, exists := reused[profile.Quality]; exists {
 			continue
 		}
+		objectKey := VariantObjectKey(job.TrackID, job.ID, *job.AttemptID, profile)
+		checkpoint := sourceChecksum != ""
+		if checkpoint {
+			objectKey = checkpointVariantObjectKey(job.TrackID, sourceChecksum, worker.profileVersion, segment, profile)
+			sizeBytes, checksum, exists, statErr := worker.storage.StatObject(ctx, objectKey)
+			if statErr != nil {
+				return contextError(ctx, statErr)
+			}
+			if exists && sizeBytes > 0 && checksum != "" {
+				generated = append(generated, GeneratedVariant{
+					Profile: profile, ObjectKey: objectKey, ChecksumSHA256: checksum,
+					SizeBytes: sizeBytes, SourceChecksumSHA256: sourceChecksum,
+					ProfileVersion: worker.profileVersion,
+				})
+				continue
+			}
+		}
 		outputPath := filepath.Join(
 			directory, strings.ToLower(profile.Quality)+"."+profile.Extension,
 		)
-		objectKey := VariantObjectKey(job.TrackID, job.ID, *job.AttemptID, profile)
-		planned = append(planned, plannedVariant{Profile: profile, Path: outputPath, ObjectKey: objectKey})
+		planned = append(planned, plannedVariant{
+			Profile: profile, Path: outputPath, ObjectKey: objectKey, Checkpoint: checkpoint,
+		})
 		arguments = append(arguments, "-map", "0:a:0", "-vn")
 		arguments = append(arguments, profile.FFmpegArgs...)
 		arguments = append(arguments, outputPath)
@@ -515,17 +558,19 @@ func verifyReusableVariants(
 }
 
 type plannedVariant struct {
-	Profile   AudioVariantProfile
-	Path      string
-	ObjectKey string
+	Profile    AudioVariantProfile
+	Path       string
+	ObjectKey  string
+	Checkpoint bool
 }
 
 type uploadedVariant struct {
-	Index     int
-	Variant   GeneratedVariant
-	ObjectKey string
-	Attempted bool
-	Err       error
+	Index      int
+	Variant    GeneratedVariant
+	ObjectKey  string
+	Attempted  bool
+	Checkpoint bool
+	Err        error
 }
 
 func (worker *Worker) uploadVariants(
@@ -557,7 +602,7 @@ func (worker *Worker) uploadVariants(
 				variant, attempted, err := worker.uploadVariant(uploadContext, task.value, sourceChecksum)
 				result := uploadedVariant{
 					Index: task.index, Variant: variant, ObjectKey: task.value.ObjectKey,
-					Attempted: attempted, Err: err,
+					Attempted: attempted, Checkpoint: task.value.Checkpoint, Err: err,
 				}
 				if result.Err != nil {
 					cancel(result.Err)
@@ -579,7 +624,7 @@ func (worker *Worker) uploadVariants(
 	completed := make([]bool, len(planned))
 	var firstErr error
 	for result := range results {
-		if result.Attempted {
+		if result.Attempted && (!result.Checkpoint || result.Err != nil) {
 			uploadedObjectKeys = append(uploadedObjectKeys, result.ObjectKey)
 		}
 		if result.Err != nil {
