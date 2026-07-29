@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"time"
 
 	"xymusic/server/internal/modules/adminmedia"
 )
@@ -50,6 +51,42 @@ func TestAdminMediaArtworkApplierCompletesWithBoundedExecutionFence(t *testing.T
 	)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAdminMediaArtworkApplierTimesOutUploadAndAbandonsReservation(t *testing.T) {
+	requestContext, cancelRequest := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancelRequest()
+	abandoned := false
+	media := &artworkMediaStub{
+		createUpload: func(context.Context, string, string, adminmedia.CreateUploadInput) (adminmedia.UploadReservationDTO, error) {
+			return adminmedia.UploadReservationDTO{ID: "upload-1"}, nil
+		},
+		uploadContent: func(ctx context.Context, _ string, _ string, _ string, _ int64, _ io.Reader) error {
+			<-ctx.Done()
+			return ctx.Err()
+		},
+		abandonUpload: func(ctx context.Context, actorID, uploadID string) error {
+			if ctx.Err() != nil || actorID != "admin-1" || uploadID != "upload-1" {
+				t.Fatalf("abandon context/args = %v / %q / %q", ctx.Err(), actorID, uploadID)
+			}
+			abandoned = true
+			return nil
+		},
+	}
+	adapter, err := NewAdminMediaArtworkApplier(media)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = adapter.ApplyAlbumArtwork(
+		requestContext,
+		"admin-1",
+		"trace-12345678",
+		"album-1",
+		DownloadedArtwork{Bytes: []byte("image"), ContentType: "image/png", Extension: "png"},
+	)
+	if !errors.Is(err, context.DeadlineExceeded) || !abandoned {
+		t.Fatalf("upload timeout/abandonment = %v / %v", err, abandoned)
 	}
 }
 
