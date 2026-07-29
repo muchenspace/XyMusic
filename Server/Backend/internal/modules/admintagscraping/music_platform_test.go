@@ -54,6 +54,47 @@ func TestArtworkDownloadsAreCoalescedAndContentValidated(t *testing.T) {
 	}
 }
 
+func TestArtworkGateQueuesWithoutRejectingWhenWorkersAreBusy(t *testing.T) {
+	platform := NewMusicPlatformClientWithArtworkWorkers(nil, "", 1)
+	if err := platform.artworkGate.acquire(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	acquired := make(chan func(), 1)
+	go func() {
+		if acquireErr := platform.artworkGate.acquire(context.Background()); acquireErr != nil {
+			return
+		}
+		acquired <- platform.artworkGate.release
+	}()
+
+	deadline := time.After(time.Second)
+	for {
+		health := platform.ArtworkHealth()
+		waiting, limit := health.Waiting, health.Limit
+		if waiting == 1 {
+			if limit != 1 {
+				t.Fatalf("artwork limit = %d", limit)
+			}
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("artwork request did not enter the waiting queue")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	platform.artworkGate.release()
+	select {
+	case release := <-acquired:
+		release()
+	case <-time.After(time.Second):
+		t.Fatal("queued artwork request was not released")
+	}
+}
+
 func TestArtworkFailureOpensShortHostCircuit(t *testing.T) {
 	var calls atomic.Int32
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
