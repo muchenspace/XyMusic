@@ -2,8 +2,9 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Languages, Minus, Plus, RotateCcw } from "@lucide/vue";
 import type { LyricLine, Track } from "../../domain/music";
-import { resolveLyricPlaybackPosition } from "../../domain/lyricsTimeline";
+import { resolveLyricPlaybackPosition, resolveLyricWordProgress } from "../../domain/lyricsTimeline";
 import { useApplicationServices } from "../services";
+import { useSmoothLyricsPlaybackPosition } from "../composables/useSmoothLyricsPlaybackPosition";
 import { useLyricsStore } from "../stores/lyricsStore";
 import { usePlayerStore } from "../stores/playerStore";
 import LyricsPlayerControls from "./LyricsPlayerControls.vue";
@@ -13,6 +14,10 @@ const player = usePlayerStore();
 const props = withDefaults(defineProps<{ fullscreen?: boolean }>(), { fullscreen: false });
 const emit = defineEmits<{ favorite: [track: Track] }>();
 const lyricsStore = useLyricsStore();
+const displayedPlaybackTime = useSmoothLyricsPlaybackPosition({
+  currentTime: () => player.currentTime,
+  isPlaying: () => player.isPlaying,
+});
 const desktopWindow = useApplicationServices().desktopWindow;
 const viewElement = ref<HTMLElement | null>(null);
 const lyricsScrollElement = ref<HTMLElement | null>(null);
@@ -20,7 +25,7 @@ const lineElements = ref<HTMLElement[]>([]);
 const lyricsMenuElement = ref<HTMLElement | null>(null);
 const lyricsMenu = ref({ open: false, x: 0, y: 0 });
 const activeIndex = ref(-1);
-const activeLineProgress = ref(0);
+const activeWordIndex = ref(-1);
 const draggingLyrics = ref(false);
 let previouslyFocused: HTMLElement | null = null;
 let lyricsMenuReturnFocus: HTMLElement | null = null;
@@ -48,22 +53,21 @@ function toggleMaximizeWindow(): void {
 }
 
 function updateActivePosition(): void {
-  const playbackTime = player.currentTime + lyricsStore.offset;
+  const playbackTime = displayedPlaybackTime.value + lyricsStore.offset;
   const position = resolveLyricPlaybackPosition(lyricsStore.lyrics, playbackTime);
   activeIndex.value = position.lineIndex;
-  activeLineProgress.value = position.lineProgress;
+  activeWordIndex.value = position.wordIndex;
 }
 
-function lineProgressStyle(lineIndex: number): Record<string, string> {
-  const progress = lineIndex === activeIndex.value
-    ? (lyricsStore.wordLyricsEnabled ? activeLineProgress.value : 1)
-    : 0;
-  return { "--lyric-line-progress": `${Math.round(progress * 10_000) / 100}%` };
+function lyricWordProgress(line: LyricLine, lineIndex: number, wordIndex: number): number {
+	if (lineIndex !== activeIndex.value) return 0;
+  const word = line.words?.[wordIndex];
+  return word ? resolveLyricWordProgress(word, displayedPlaybackTime.value + lyricsStore.offset) : 0;
 }
 
 watch(
   () => player.lyricsOpen
-    ? [player.currentTime, lyricsStore.offset, lyricsStore.lyrics] as const
+    ? [displayedPlaybackTime.value, lyricsStore.offset, lyricsStore.lyrics] as const
     : null,
   (visiblePlayback) => {
     if (visiblePlayback) updateActivePosition();
@@ -319,7 +323,7 @@ const DRAG_THRESHOLD_PX = 4;
           <button
             v-for="(line, index) in lyricsStore.lyrics.lines"
             :key="`${lyricsStore.lyrics.trackId}-${line.time ?? 'plain'}-${index}`"
-            v-memo="[line, lyricsStore.showTranslation, lyricsStore.wordLyricsEnabled, index === activeIndex, index === activeIndex ? activeLineProgress : -1]"
+            v-memo="[line, lyricsStore.showTranslation, lyricsStore.lyrics.timing, index === activeIndex, index === activeIndex ? activeWordIndex : -1, index === activeIndex ? displayedPlaybackTime : 0]"
             ref="lineElements"
             type="button"
             class="lyric-line"
@@ -329,12 +333,16 @@ const DRAG_THRESHOLD_PX = 4;
             :aria-label="line.time === null ? line.text : `${line.text}，跳转到${formatTime(line.time)}`"
             @click="seek(line, $event)"
           >
-            <strong>
+            <strong v-if="lyricsStore.lyrics.timing === 'WORD'" class="lyric-line-words">
               <span
-                class="lyric-line-text"
-                :style="lineProgressStyle(index)"
-              ><span class="lyric-line-base">{{ line.text }}</span><span class="lyric-line-fill" aria-hidden="true">{{ line.text }}</span></span>
+                v-for="(word, wordIndex) in line.words"
+                :key="`${word.time}-${wordIndex}`"
+                class="lyric-word"
+                :class="{ 'is-sung': lyricWordProgress(line, index, wordIndex) > 0, 'is-current': lyricWordProgress(line, index, wordIndex) > 0 && lyricWordProgress(line, index, wordIndex) < 1 }"
+                :style="{ '--lyric-word-progress': `${lyricWordProgress(line, index, wordIndex) * 100}%` }"
+              >{{ word.text }}</span>
             </strong>
+            <strong v-else>{{ line.text }}</strong>
             <span v-if="lyricsStore.showTranslation && line.translation" class="lyric-translation">{{ line.translation }}</span>
           </button>
         </div>

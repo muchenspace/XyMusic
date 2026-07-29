@@ -12,13 +12,13 @@ func TestLegacyMigrationsCanBeRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(migrations) != 28 {
-		t.Fatalf("expected 28 migrations, got %d", len(migrations))
+	if len(migrations) != 29 {
+		t.Fatalf("expected 29 migrations, got %d", len(migrations))
 	}
 	if migrations[0].Tag != "0000_initial" || migrations[25].Tag != "0025_track_permanent_delete_batches" ||
 		migrations[26].Tag != "0026_remove_writeback_backup_references" ||
-		migrations[27].Tag != "0027_artist_artwork_scraping_jobs" {
-		t.Fatalf("unexpected migration boundaries: %s - %s - %s - %s", migrations[0].Tag, migrations[25].Tag, migrations[26].Tag, migrations[27].Tag)
+		migrations[27].Tag != "0027_artist_artwork_scraping_jobs" || migrations[28].Tag != "0028_lyrics_timing" {
+		t.Fatalf("unexpected migration boundaries: %s - %s - %s - %s - %s", migrations[0].Tag, migrations[25].Tag, migrations[26].Tag, migrations[27].Tag, migrations[28].Tag)
 	}
 	if len(migrations[0].SQL) < 2 || len(migrations[0].Hash) != 64 {
 		t.Fatalf("migration parsing is incompatible: %#v", migrations[0])
@@ -56,6 +56,118 @@ func TestArtistArtworkBatchMigrationHasDurableFencing(t *testing.T) {
 		if !strings.Contains(sql, expected) {
 			t.Fatalf("artist artwork batch migration does not contain %q", expected)
 		}
+	}
+}
+
+func TestLyricsTimingMigrationRecognizesEnhancedLRCFractionSeparators(t *testing.T) {
+	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.Join(migrations[28].SQL, "\n")
+	if !strings.Contains(sql, "([.:][0-9]{1,3})?") {
+		t.Fatalf("lyrics timing migration does not accept dot and colon fractions: %s", sql)
+	}
+	if !strings.Contains(sql, ":[0-5][0-9]") {
+		t.Fatalf("lyrics timing migration does not constrain seconds to 00-59: %s", sql)
+	}
+}
+
+func TestLyricsTimingMigrationRejectsDecreasingWordTimestamps(t *testing.T) {
+	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToUpper(strings.Join(migrations[28].SQL, "\n"))
+	for _, expected := range []string{
+		"REGEXP_MATCHES(",
+		"WITH ORDINALITY AS MARKER(PARTS, POSITION)",
+		"LAG(SEQUENCED.TIMESTAMP_MS) OVER (ORDER BY SEQUENCED.POSITION)",
+		"RPAD(MARKER.PARTS[4], 3, '0')",
+		"ORDERED.TIMESTAMP_MS < ORDERED.PREVIOUS_TIMESTAMP_MS",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("lyrics timing migration does not enforce nondecreasing word timestamps; missing %q: %s", expected, sql)
+		}
+	}
+}
+
+func TestLyricsTimingMigrationRequiresCompleteWordTimedDocument(t *testing.T) {
+	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToUpper(strings.Join(migrations[28].SQL, "\n"))
+	for _, expected := range []string{"REGEXP_SPLIT_TO_TABLE", "EXISTS", "NOT EXISTS", "REGEXP_REPLACE"} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("lyrics timing migration does not contain %q: %s", expected, sql)
+		}
+	}
+}
+
+func TestLyricsTimingMigrationRejectsNonMetadataUntimedLines(t *testing.T) {
+	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.Join(migrations[28].SQL, "\n")
+	for _, expected := range []string{
+		`btrim(raw.line, E' \t\n\r\f\v') <> ''`,
+		`raw.line !~ E'^\\s*(\\[[0-9]{1,3}:[0-5][0-9]([.:][0-9]{1,3})?\\])+'`,
+		`raw.line !~ E'^\\s*(\\[[A-Za-z][A-Za-z0-9_-]*:[^\\[\\]\\r\\n]*\\]\\s*)+$'`,
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("lyrics timing migration does not reject non-metadata untimed lines; missing %q: %s", expected, sql)
+		}
+	}
+}
+
+func TestLyricsTimingMigrationRejectsMalformedLaterWordMarkers(t *testing.T) {
+	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.Join(migrations[28].SQL, "\n")
+	if !strings.Contains(sql, "E'<[^>]*(>|$)'") {
+		t.Fatalf("lyrics timing migration does not reject malformed word markers: %s", sql)
+	}
+}
+
+func TestLyricsTimingMigrationBackfillsPersistedMetadataDocuments(t *testing.T) {
+	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToUpper(strings.Join(migrations[28].SQL, "\n"))
+	for _, expected := range []string{
+		"TRACK_METADATA", "RAW_TAGS", "OVERRIDES", "TRACK_METADATA_REVISIONS", "EFFECTIVE_TAGS",
+		"METADATA_WRITEBACK_JOBS", "METADATA_SNAPSHOT", "JSONB_SET", "DROP FUNCTION",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("lyrics timing migration does not backfill %q: %s", expected, sql)
+		}
+	}
+}
+
+func TestLyricsTimingMigrationRequiresExplicitFutureWrites(t *testing.T) {
+	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToUpper(strings.Join(migrations[28].SQL, "\n"))
+	if !strings.Contains(sql, "ALTER TABLE LYRICS ALTER COLUMN TIMING DROP DEFAULT") {
+		t.Fatalf("lyrics timing migration leaves an implicit LINE default: %s", sql)
+	}
+}
+
+func TestLyricsTimingMigrationInvalidatesPreContractIdempotentResponses(t *testing.T) {
+	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToUpper(strings.Join(migrations[28].SQL, "\n"))
+	if !strings.Contains(sql, "DELETE FROM IDEMPOTENCY_RECORDS") {
+		t.Fatalf("lyrics timing migration can replay pre-contract responses: %s", sql)
 	}
 }
 

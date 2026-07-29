@@ -206,14 +206,14 @@ func TestGetTrackReturnsLyricsWithTrackVersion(t *testing.T) {
 			}
 			return TrackRecord{ID: trackID, Title: "Song", PublishedAt: updated, Version: 7, Artists: []ArtistReferenceRecord{}}, nil
 		},
-		listLyrics: func(_ context.Context, query ListLyricsQuery) ([]LyricRecord, int, error) {
-			if query.TrackID != "track-1" || query.Limit != 20 || query.Offset != 0 {
-				t.Fatalf("lyric query = %#v", query)
+		findLyric: func(_ context.Context, trackID string) (*LyricRecord, error) {
+			if trackID != "track-1" {
+				t.Fatalf("lyric query track = %q", trackID)
 			}
-			return []LyricRecord{{
-				ID: "lyric-1", TrackID: query.TrackID, Language: "zh-CN", Format: "LRC",
-				Content: "[00:00]hello", IsDefault: true, UpdatedAt: updated,
-			}}, 41, nil
+			return &LyricRecord{
+				ID: "lyric-1", TrackID: trackID, Language: "zh-CN", Format: "LRC", Timing: "WORD",
+				Content: "[00:00]<00:00.00>hello", UpdatedAt: updated,
+			}, nil
 		},
 	}
 	service := newTestService(t, store, &signerStub{})
@@ -221,9 +221,29 @@ func TestGetTrackReturnsLyricsWithTrackVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTrack() error = %v", err)
 	}
-	if len(result.Lyrics) != 1 || result.Lyrics[0].TrackVersion != 7 || result.Lyrics[0].UpdatedAt != "2026-01-02T03:04:05.678Z" ||
-		result.LyricPage != 1 || result.LyricPageSize != 20 || result.LyricTotal != 41 || result.LyricTotalPages != 3 {
+	if result.Lyric == nil || result.Lyric.TrackVersion != 7 || result.Lyric.Timing != "WORD" ||
+		result.Lyric.Content != "[00:00]<00:00.00>hello" || result.Lyric.UpdatedAt != "2026-01-02T03:04:05.678Z" {
 		t.Fatalf("GetTrack() = %#v", result)
+	}
+}
+
+func TestGetTrackRejectsStoredLyricsWithInconsistentTiming(t *testing.T) {
+	updated := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	store := &storeStub{
+		findTrack: func(context.Context, string, string) (TrackRecord, error) {
+			return TrackRecord{ID: "track-1", Title: "Song", PublishedAt: updated, Version: 1, Artists: []ArtistReferenceRecord{}}, nil
+		},
+		findLyric: func(context.Context, string) (*LyricRecord, error) {
+			return &LyricRecord{
+				ID: "lyric-1", TrackID: "track-1", Language: "und", Format: "LRC", Timing: "WORD",
+				Content: "[00:01.00]<00:01.00>word\n[00:02.00]ordinary line", UpdatedAt: updated,
+			}, nil
+		},
+	}
+	service := newTestService(t, store, &signerStub{})
+	_, err := service.GetTrack(context.Background(), "user-1", "track-1", GetTrackInput{})
+	if !apperror.IsCode(err, apperror.CodeInternalError) {
+		t.Fatalf("GetTrack() error = %v", err)
 	}
 }
 
@@ -325,7 +345,7 @@ type storeStub struct {
 	randomTracks  func(context.Context, string, float64, bool, int) ([]TrackRecord, error)
 	findTracks    func(context.Context, string, []string) ([]TrackRecord, error)
 	findTrack     func(context.Context, string, string) (TrackRecord, error)
-	listLyrics    func(context.Context, ListLyricsQuery) ([]LyricRecord, int, error)
+	findLyric     func(context.Context, string) (*LyricRecord, error)
 	listArtists   func(context.Context, ListArtistsQuery) ([]ArtistRecord, error)
 	findArtist    func(context.Context, string) (ArtistRecord, error)
 	listAlbums    func(context.Context, ListAlbumsQuery) ([]AlbumRecord, error)
@@ -364,11 +384,11 @@ func (store *storeStub) FindTrack(ctx context.Context, userID, trackID string) (
 	return store.findTrack(ctx, userID, trackID)
 }
 
-func (store *storeStub) ListLyrics(ctx context.Context, query ListLyricsQuery) ([]LyricRecord, int, error) {
-	if store.listLyrics == nil {
-		return nil, 0, errors.New("unexpected ListLyrics call")
+func (store *storeStub) FindLyric(ctx context.Context, trackID string) (*LyricRecord, error) {
+	if store.findLyric == nil {
+		return nil, errors.New("unexpected FindLyric call")
 	}
-	return store.listLyrics(ctx, query)
+	return store.findLyric(ctx, trackID)
 }
 
 func (store *storeStub) ListArtists(ctx context.Context, query ListArtistsQuery) ([]ArtistRecord, error) {

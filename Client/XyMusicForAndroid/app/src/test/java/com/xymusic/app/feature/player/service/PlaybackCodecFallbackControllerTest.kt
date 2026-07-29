@@ -24,8 +24,10 @@ import java.lang.reflect.Proxy
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 @UnstableApi
 class PlaybackCodecFallbackControllerTest {
     @Test

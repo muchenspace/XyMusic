@@ -135,7 +135,7 @@ func TestProductionMetadataWritebackContainerRoundTrips(t *testing.T) {
 		expected := before.Metadata
 		expected.Lyrics = &MetadataLyrics{
 			Content: cleanMultiline(strings.Repeat("A long lyric line with =, ;, # and \\\r\n", 1_000)),
-			Format:  "PLAIN", Language: "zh-cn",
+			Format:  "PLAIN", Language: "zh-cn", Timing: "LINE",
 		}
 		if err := RemuxMetadataToFile(ctx, sourcePath, outputPath, "", ffmpegPath, expected, runner); err != nil {
 			t.Fatal(err)

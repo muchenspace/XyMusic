@@ -15,7 +15,6 @@ import (
 
 	"xymusic/server/internal/platform/httpserver"
 	"xymusic/server/internal/shared/apperror"
-	"xymusic/server/internal/shared/pagination"
 )
 
 type API interface {
@@ -130,17 +129,7 @@ func (routes *Routes) getTrack(c *gin.Context) error {
 	return nil
 }
 
-func bindGetTrack(c *gin.Context) (GetTrackInput, error) {
-	page, err := optionalInteger(c, "lyricPage", 1, pagination.MaxPage)
-	if err != nil {
-		return GetTrackInput{}, err
-	}
-	pageSize, err := optionalInteger(c, "lyricPageSize", 1, maximumPageLimit)
-	if err != nil {
-		return GetTrackInput{}, err
-	}
-	return GetTrackInput{LyricPage: page, LyricPageSize: pageSize}, nil
-}
+func bindGetTrack(*gin.Context) (GetTrackInput, error) { return GetTrackInput{}, nil }
 
 func (routes *Routes) listArtists(c *gin.Context) error {
 	input, err := bindListArtists(c)

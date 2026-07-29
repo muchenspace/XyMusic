@@ -145,7 +145,7 @@ func TestRepositoryProductionMetadataLifecycle(t *testing.T) {
 			"albumArtists": []any{updatedArtistName}, "album": albumTitle,
 			"releaseDate": "2026-07", "trackNumber": 1, "trackTotal": 9,
 			"genres": []any{"Rock"},
-			"lyrics": map[string]any{"content": "integration lyric", "format": "PLAIN", "language": "en"},
+			"lyrics": map[string]any{"content": "integration lyric", "format": "PLAIN", "language": "en", "timing": "LINE"},
 		},
 		Reason: "integration metadata update",
 	})

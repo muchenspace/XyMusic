@@ -121,7 +121,7 @@ constructor(private val catalogDao: CatalogDao) : CatalogLocalDataSource {
         catalogDao.mergeArtistReferences(item.artistReferences)
         item.albumReference?.let { catalogDao.mergeAlbumReferences(listOf(it)) }
         catalogDao.replaceTrackMetadata(item.track, item.credits)
-        catalogDao.replaceLyrics(item.track.id, requireNotNull(item.lyrics))
+        catalogDao.replaceLyrics(item.track.id, item.lyrics.orEmpty())
     }
 
     override suspend fun replaceArtist(detail: ArtistDetailDto, cachedAtEpochMs: Long) {

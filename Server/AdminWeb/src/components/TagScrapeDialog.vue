@@ -29,6 +29,14 @@ const detailOpen = ref(false);
 const detailCandidate = ref<TagCandidate>();
 const fields = reactive(defaultScrapingFields());
 const archived = computed(() => props.track?.status === "ARCHIVED");
+const sourceOptions = computed<Array<{ value: SearchSource; label: string }>>(() => verbatim.value
+  ? [{ value: "qmusic", label: "QQ 音乐" }]
+  : [
+      { value: "smart", label: "智能多源" },
+      { value: "netease", label: "网易云" },
+      { value: "qmusic", label: "QQ 音乐" },
+      { value: "kugou", label: "酷狗" },
+    ]);
 const writebackCapability = computed(() => sourceWritebackCapability(props.writebackSource));
 const writeBack = useWritebackSelection(writebackCapability);
 const reason = ref("在线 Tag 刮削");
@@ -57,6 +65,15 @@ function showCandidateDetail(candidate: TagCandidate): void {
 function selectCandidate(candidate: TagCandidate): void {
   selected.value = candidate;
 }
+
+watch(verbatim, (value) => {
+  source.value = value ? "qmusic" : "smart";
+  cancelLookup();
+  resetCandidateDetail();
+  candidates.value = [];
+  selected.value = undefined;
+  error.value = "";
+});
 
 watch(open, (value) => {
   applyGeneration += 1;
@@ -156,7 +173,7 @@ async function apply(): Promise<void> {
 <template>
   <BaseDialog v-model="open" title="在线 Tag 刮削" :description="track?.title" width="2xl">
     <div class="grid gap-4 lg:grid-cols-[180px_minmax(0,1fr)_160px_auto] lg:items-end">
-      <div><label class="ui-label">搜索来源</label><select v-model="source" class="ui-select" :disabled="archived"><option value="smart">智能多源</option><option value="netease">网易云</option><option value="qmusic">QQ 音乐</option><option value="kugou">酷狗</option></select></div>
+      <div><label class="ui-label">搜索来源</label><select v-model="source" class="ui-select" :disabled="archived"><option v-for="item in sourceOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></div>
       <div><label class="ui-label">搜索关键词</label><input v-model="query" class="ui-input" :disabled="archived" placeholder="歌曲、艺术家或专辑" @keyup.enter="search" /></div>
       <div><label class="ui-label">歌词类型</label><select v-model="verbatim" data-testid="tag-verbatim" class="ui-select" :disabled="archived"><option :value="false">普通歌词</option><option :value="true">逐字歌词</option></select></div>
       <div class="grid grid-cols-2 gap-2 lg:flex"><AppButton :loading="loading" :disabled="archived" @click="search"><template #icon><Search :size="15" /></template>搜索</AppButton><AppButton :loading="loading" :disabled="archived" @click="fingerprint"><template #icon><Fingerprint :size="15" /></template>音频指纹</AppButton></div>

@@ -18,7 +18,6 @@ const props = {
   theme: "dark" as const,
   themePreference: "system" as const,
   lyricsFontScale: 1,
-  lyricsWordLyricsEnabled: true,
   lyricsTextColor: "#8e98a3",
   lyricsHighlightColor: "#d7e6f3",
   desktopLyricsVisible: false,
@@ -27,7 +26,6 @@ const props = {
   desktopLyricsFontScale: 1,
   desktopLyricsTextColor: "#f4f5f7",
   desktopLyricsHighlightColor: "#cf9437",
-  desktopLyricsWordLyricsEnabled: true,
   desktopLyricsShowTranslation: true,
   savingProfile: false,
   uploadingAvatar: false,
@@ -53,8 +51,7 @@ describe("settings view", () => {
     await wrapper.get("#playback-lyrics-font-scale").setValue("1.15");
     expect(wrapper.emitted("update:lyricsFontScale")).toEqual([[1.15]]);
 
-    await wrapper.get("#playback-word-lyrics").setValue("false");
-    expect(wrapper.emitted("update:lyricsWordLyricsEnabled")).toEqual([[false]]);
+    expect(wrapper.find("#playback-word-lyrics").exists()).toBe(false);
 
     await wrapper.get("#playback-lyrics-text-color").setValue("#123456");
     expect(wrapper.emitted("update:lyricsTextColor")).toEqual([["#123456"]]);
@@ -62,7 +59,6 @@ describe("settings view", () => {
     await wrapper.get("#playback-lyrics-highlight-color").setValue("#abcdef");
     expect(wrapper.emitted("update:lyricsHighlightColor")).toEqual([["#abcdef"]]);
 
-    await wrapper.get("#desktop-word-lyrics").setValue("false");
-    expect(wrapper.emitted("update:desktopLyricsWordLyricsEnabled")).toEqual([[false]]);
+    expect(wrapper.find("#desktop-word-lyrics").exists()).toBe(false);
   });
 });

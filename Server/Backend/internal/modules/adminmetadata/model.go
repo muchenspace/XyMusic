@@ -3,6 +3,8 @@ package adminmetadata
 import (
 	"encoding/json"
 	"time"
+
+	"xymusic/server/internal/shared/lyrics"
 )
 
 type CreditRole string
@@ -47,9 +49,10 @@ type MetadataCredit struct {
 }
 
 type MetadataLyrics struct {
-	Content  string `json:"content"`
-	Format   string `json:"format"`
-	Language string `json:"language"`
+	Content  string        `json:"content"`
+	Format   string        `json:"format"`
+	Language string        `json:"language"`
+	Timing   lyrics.Timing `json:"timing"`
 }
 
 type MetadataSnapshot struct {

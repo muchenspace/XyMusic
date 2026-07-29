@@ -4,6 +4,7 @@ import androidx.room.TypeConverter
 import com.xymusic.app.core.database.model.ArtistCreditRole
 import com.xymusic.app.core.database.model.CatalogItemType
 import com.xymusic.app.core.database.model.LyricsFormat
+import com.xymusic.app.core.database.model.LyricsTiming
 import com.xymusic.app.core.database.model.PlaylistVisibility
 import com.xymusic.app.core.database.model.SearchScope
 import com.xymusic.app.core.database.model.SyncOperationStatus
@@ -22,6 +23,12 @@ class RoomConverters {
 
     @TypeConverter
     fun stringToLyricsFormat(value: String): LyricsFormat = LyricsFormat.valueOf(value)
+
+    @TypeConverter
+    fun lyricsTimingToString(value: LyricsTiming): String = value.name
+
+    @TypeConverter
+    fun stringToLyricsTiming(value: String): LyricsTiming = LyricsTiming.valueOf(value)
 
     @TypeConverter
     fun playlistVisibilityToString(value: PlaylistVisibility): String = value.name

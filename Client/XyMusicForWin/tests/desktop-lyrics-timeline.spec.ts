@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { Lyrics } from "../src/domain/music";
-import { buildDesktopLyricsFrame, estimatePlaybackSeconds, findActiveLyricIndex } from "../src/desktop-lyrics/timeline";
+import { shouldReanchorLyricPlaybackClock } from "../src/domain/lyricsTimeline";
+import { buildDesktopLyricsFrame, estimatePlaybackSeconds } from "../src/desktop-lyrics/timeline";
 import type { DesktopLyricsClockPayload } from "../src/desktop-lyrics/protocol";
 
 describe("desktop lyrics timeline", () => {
+  it("does not reanchor on a normal coarse sample but does reanchor a pause or jump", () => {
+    const current = clock({ isPlaying: true, positionSeconds: 0, anchoredAtMs: 0 });
+
+    expect(shouldReanchorLyricPlaybackClock(current, { ...current, positionSeconds: 0.1, anchoredAtMs: 34 }, 50)).toBe(false);
+    expect(shouldReanchorLyricPlaybackClock(current, { ...current, isPlaying: false, positionSeconds: 0.05, anchoredAtMs: 50 }, 50)).toBe(true);
+    expect(shouldReanchorLyricPlaybackClock(current, { ...current, positionSeconds: 1, anchoredAtMs: 50 }, 50)).toBe(true);
+  });
+
   it("interpolates a playing clock and keeps a paused clock fixed", () => {
     const playing = clock({ isPlaying: true, positionSeconds: 12, anchoredAtMs: 1_000 });
     const paused = clock({ isPlaying: false, positionSeconds: 12, anchoredAtMs: 1_000 });
@@ -13,15 +22,20 @@ describe("desktop lyrics timeline", () => {
   });
 
   it("selects the latest line for repeated timestamps", () => {
-    expect(findActiveLyricIndex([
-      { time: 0, text: "first" },
-      { time: 2, text: "second" },
-      { time: 2, text: "replacement" },
-      { time: 4, text: "fourth" },
-    ], 2)).toBe(2);
+    const lyrics: Lyrics = {
+      ...synchronizedLyrics(),
+      lines: [
+        { time: 0, text: "first" },
+        { time: 2, text: "second" },
+        { time: 2, text: "replacement" },
+        { time: 4, text: "fourth" },
+      ],
+    };
+
+    expect(buildDesktopLyricsFrame(lyrics, clock({ positionSeconds: 2 }), 0, 0).activeIndex).toBe(2);
   });
 
-  it("builds current, next, and ordinary LRC line progress from one anchor", () => {
+  it("builds current and next ordinary LRC lines without estimating line progress", () => {
     const frame = buildDesktopLyricsFrame(synchronizedLyrics(), clock({
       isPlaying: true,
       positionSeconds: 0.5,
@@ -30,24 +44,44 @@ describe("desktop lyrics timeline", () => {
 
     expect(frame.activeIndex).toBe(0);
     expect(frame.current?.line.text).toBe("hello world");
-    expect(frame.current?.progress).toBeCloseTo(0.25);
+    expect(frame.current?.wordIndex).toBe(-1);
     expect(frame.next?.line.text).toBe("next line");
   });
 
-  it("uses a four second duration for the final line", () => {
+  it("keeps the final line active without a fixed duration fallback", () => {
     const frame = buildDesktopLyricsFrame(synchronizedLyrics(), clock({ positionSeconds: 6 }), 0, 0);
 
     expect(frame.current?.line.text).toBe("last line");
     expect(frame.current?.started).toBe(true);
-    expect(frame.current?.progress).toBeCloseTo(0.5);
+    expect(frame.current?.wordIndex).toBe(-1);
   });
 
-  it("keeps the final line visible but clears its progress after four seconds", () => {
+  it("keeps the final line active after its start time", () => {
     const frame = buildDesktopLyricsFrame(synchronizedLyrics(), clock({ positionSeconds: 8 }), 0, 0);
 
     expect(frame.current?.line.text).toBe("last line");
-    expect(frame.current?.started).toBe(false);
-    expect(frame.current?.progress).toBe(0);
+    expect(frame.current?.started).toBe(true);
+  });
+
+  it("selects explicit word timing without deriving a line progress", () => {
+    const lyrics: Lyrics = {
+      trackId: "track-1",
+      source: "qmusic",
+      synchronized: true,
+      timing: "WORD",
+      lines: [{
+        time: 1,
+        text: "hello world",
+        words: [
+          { time: 1, endTime: 1.5, text: "hello" },
+          { time: 1.5, endTime: 2.5, text: " world" },
+        ],
+      }],
+    };
+    const frame = buildDesktopLyricsFrame(lyrics, clock({ positionSeconds: 1.75 }), 0, 0);
+
+    expect(frame.activeIndex).toBe(0);
+    expect(frame.current?.wordIndex).toBe(1);
   });
 
   it("applies the per-track offset and rejects stale track clocks", () => {
@@ -65,6 +99,7 @@ describe("desktop lyrics timeline", () => {
       trackId: "track-1",
       source: "plain",
       synchronized: false,
+      timing: "LINE",
       lines: [
         { time: null, text: "plain first" },
         { time: null, text: "plain second" },
@@ -81,7 +116,7 @@ describe("desktop lyrics timeline", () => {
 
 function clock(overrides: Partial<DesktopLyricsClockPayload> = {}): DesktopLyricsClockPayload {
   return {
-    version: 2,
+    version: 3,
     trackId: "track-1",
     isPlaying: false,
     positionSeconds: 0,
@@ -95,6 +130,7 @@ function synchronizedLyrics(): Lyrics {
     trackId: "track-1",
     source: "lrc",
     synchronized: true,
+    timing: "LINE",
     lines: [
       { time: 0, text: "hello world" },
       { time: 2, text: "next line" },

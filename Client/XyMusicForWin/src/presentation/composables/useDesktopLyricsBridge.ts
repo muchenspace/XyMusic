@@ -38,7 +38,6 @@ export function useDesktopLyricsBridge(): void {
     () => lyricsStore.lyrics,
     () => lyricsStore.offset,
     () => lyricsStore.showTranslation,
-    () => desktopLyrics.wordLyricsEnabled,
     () => desktopLyrics.locked,
     () => desktopLyrics.visible,
   ], () => {
@@ -127,7 +126,6 @@ export function useDesktopLyricsBridge(): void {
       anchoredAtMs: Date.now(),
       offsetSeconds: lyricsStore.offset,
       showTranslation: lyricsStore.showTranslation,
-      wordLyricsEnabled: desktopLyrics.wordLyricsEnabled,
       locked: desktopLyrics.locked,
       fontScale: desktopLyrics.fontScale,
       textColor: desktopLyrics.textColor,

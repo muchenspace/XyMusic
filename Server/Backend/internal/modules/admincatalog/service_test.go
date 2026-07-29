@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"xymusic/server/internal/modules/catalog"
+	"xymusic/server/internal/shared/apperror"
 )
 
 func TestListArtistsAppliesLegacyDefaultsAndPresentsArtwork(t *testing.T) {
@@ -127,7 +128,7 @@ func TestTrackPresentsAdminOperationalProjection(t *testing.T) {
 		ActiveWritebackJobID:     &writebackID,
 		LatestWritebackErrorCode: &writebackErrorCode,
 		LatestWritebackError:     &writebackError,
-		Lyrics:                   []LyricRecord{{ID: "lyric-1", Language: "zh", Format: "LRC", Content: &content, IsDefault: true, Version: 1, UpdatedAt: now}},
+		Lyrics:                   []LyricRecord{{ID: "lyric-1", Language: "zh", Format: "LRC", Timing: "LINE", Content: &content, IsDefault: true, Version: 1, UpdatedAt: now}},
 	}
 	store := &catalogStoreStub{findTrack: func(_ context.Context, id string, limit, offset int) (TrackRecord, int, error) {
 		if id != "track-1" || limit != 1 || offset != 1 {
@@ -161,6 +162,21 @@ func TestTrackPresentsAdminOperationalProjection(t *testing.T) {
 	}
 	if result.LyricPage != 2 || result.LyricPageSize != 1 || result.LyricTotal != 3 || result.LyricTotalPages != 3 || len(result.Lyrics) != 1 {
 		t.Fatalf("lyric page = %#v", result)
+	}
+}
+
+func TestTrackRejectsStoredLyricsWithInconsistentTiming(t *testing.T) {
+	content := "[00:01.00]<00:01.00>word\n[00:02.00]ordinary line"
+	store := &catalogStoreStub{findTrack: func(context.Context, string, int, int) (TrackRecord, int, error) {
+		return TrackRecord{
+			ID: "track-1", Title: "Track", Credits: []CreditRecord{},
+			Lyrics: []LyricRecord{{ID: "lyric-1", Language: "und", Format: "LRC", Timing: "WORD", Content: &content}},
+		}, 1, nil
+	}}
+	service := newCatalogService(t, store, catalogArtworkStub{})
+	_, err := service.Track(context.Background(), "track-1", PageInput{})
+	if !apperror.IsCode(err, apperror.CodeInternalError) {
+		t.Fatalf("Track() error = %v", err)
 	}
 }
 

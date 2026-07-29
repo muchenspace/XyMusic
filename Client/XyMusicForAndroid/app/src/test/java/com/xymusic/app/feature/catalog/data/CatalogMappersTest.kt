@@ -7,6 +7,7 @@ import com.xymusic.app.core.data.media.remote.LyricsResourceDto
 import com.xymusic.app.core.data.media.remote.TrackDetailDto
 import com.xymusic.app.core.data.media.remote.TrackSummaryDto
 import com.xymusic.app.core.data.media.toWriteModel
+import com.xymusic.app.core.database.model.LyricsTiming
 import org.junit.Test
 
 class CatalogMappersTest {
@@ -33,8 +34,7 @@ class CatalogMappersTest {
     }
 
     @Test
-    fun detailLyricsMustBeUniqueAndBelongToTrack() {
-        val lyric = lyrics()
+    fun detailLyricsMustBelongToTrack() {
         val detail =
             TrackDetailDto(
                 id = TRACK_ID,
@@ -47,13 +47,65 @@ class CatalogMappersTest {
                 discNumber = 1,
                 isFavorite = false,
                 publishedAt = "2026-07-11T00:00:00Z",
-                lyrics = listOf(lyric, lyric),
+                lyric = lyrics().copy(trackId = "55555555-5555-4555-8555-555555555555"),
             )
 
         val failure = runCatching { detail.toWriteModel(1_000L) }.exceptionOrNull()
 
         assertThat(failure).isInstanceOf(IllegalArgumentException::class.java)
     }
+
+    @Test
+    fun lyricTimingIsMappedAndUnknownValuesAreRejected() {
+        val wordDetail =
+            detail(lyrics().copy(timing = "WORD", content = "[00:00.00]<00:00.00>Track"))
+        val unknownDetail = detail(lyrics().copy(timing = "future-value"))
+
+        assertThat(wordDetail.toWriteModel(1_000L).lyrics!!.single().timing)
+            .isEqualTo(LyricsTiming.WORD)
+        assertThat(runCatching { unknownDetail.toWriteModel(1_000L) }.exceptionOrNull())
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun plainLyricsCannotDeclareWordTiming() {
+        val invalidDetail = detail(lyrics().copy(format = "PLAIN", timing = "WORD", content = "plain"))
+
+        assertThat(runCatching { invalidDetail.toWriteModel(1_000L) }.exceptionOrNull())
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun lrcLyricsMustMatchTheirDeclaredTimingBeforeCaching() {
+        val invalidLyrics =
+            listOf(
+                lyrics().copy(timing = "WORD", content = "[00:01.00]line"),
+                lyrics().copy(timing = "LINE", content = "[00:01.00]<00:01.00>word"),
+                lyrics().copy(
+                    timing = "WORD",
+                    content = "[00:01.00]<00:01.00>valid<00:60.00invalid",
+                ),
+            )
+
+        invalidLyrics.forEach { lyric ->
+            assertThat(runCatching { detail(lyric).toWriteModel(1_000L) }.exceptionOrNull())
+                .isInstanceOf(IllegalArgumentException::class.java)
+        }
+    }
+
+    private fun detail(lyric: LyricsResourceDto) = TrackDetailDto(
+        id = TRACK_ID,
+        title = "Track",
+        artists = listOf(ArtistReferenceDto(ARTIST_ID, "Artist")),
+        album = null,
+        artwork = null,
+        durationMs = 180_000,
+        trackNumber = null,
+        discNumber = 1,
+        isFavorite = false,
+        publishedAt = "2026-07-11T00:00:00Z",
+        lyric = lyric,
+    )
 
     private fun trackSummary() = TrackSummaryDto(
         id = TRACK_ID,
@@ -73,8 +125,8 @@ class CatalogMappersTest {
         trackId = TRACK_ID,
         language = "zh-CN",
         format = "LRC",
+        timing = "LINE",
         content = "[00:00.00]Track",
-        isDefault = true,
         trackVersion = 1,
         updatedAt = "2026-07-11T00:00:00Z",
     )

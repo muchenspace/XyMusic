@@ -80,9 +80,26 @@ func TestCreateBatchValidatesItemsBeforeMissingFieldPrefilter(t *testing.T) {
 	}
 }
 
+func TestCreateBatchRejectsUnsupportedVerbatimSources(t *testing.T) {
+	service, err := NewBatchService(BatchServiceDependencies{Store: &storeStub{}, Processor: &batchProcessorStub{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.Create(context.Background(), "admin", CreateBatchInput{
+		Items: []BatchItemInput{{TrackID: "track", ExpectedVersion: 1}},
+		Options: BatchOptions{
+			Sources: []Source{SourceQMusic, SourceNetease}, Verbatim: true,
+			MatchMode: MatchStrict, Fields: ApplyFields{Lyrics: true}, Reason: "verbatim source validation",
+		},
+	})
+	if !apperror.IsCode(err, apperror.CodeValidationError) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestCreateBatchPrefiltersMissingFieldsBeforeWritebackAndPersistence(t *testing.T) {
 	present := metadataFixture(11)
-	present.Effective.Lyrics = &MetadataLyrics{Content: "already present", Format: "PLAIN", Language: "und"}
+	present.Effective.Lyrics = &MetadataLyrics{Content: "already present", Format: "PLAIN", Language: "und", Timing: "LINE"}
 	missingFirst := metadataFixture(7)
 	missingSecond := metadataFixture(13)
 	processor := &batchProcessorStub{metadataByTrack: map[string]TrackMetadata{
@@ -132,7 +149,7 @@ func TestCreateBatchPrefiltersMissingFieldsBeforeWritebackAndPersistence(t *test
 
 func TestCreateBatchRejectsWhenEveryTrackAlreadyContainsMissingFields(t *testing.T) {
 	metadata := metadataFixture(3)
-	metadata.Effective.Lyrics = &MetadataLyrics{Content: "already present", Format: "PLAIN", Language: "und"}
+	metadata.Effective.Lyrics = &MetadataLyrics{Content: "already present", Format: "PLAIN", Language: "und", Timing: "LINE"}
 	processor := &batchProcessorStub{metadataByTrack: map[string]TrackMetadata{"track": metadata}}
 	store := &storeStub{}
 	service, _ := NewBatchService(BatchServiceDependencies{Store: store, Processor: processor})
@@ -260,7 +277,7 @@ func TestBatchItemAppliesFirstReliableCandidate(t *testing.T) {
 
 func TestBatchItemSkipsWhenMissingFieldConditionDoesNotMatch(t *testing.T) {
 	metadata := metadataFixture(1)
-	metadata.Effective.Lyrics = &MetadataLyrics{Content: "present", Format: "PLAIN", Language: "und"}
+	metadata.Effective.Lyrics = &MetadataLyrics{Content: "present", Format: "PLAIN", Language: "und", Timing: "LINE"}
 	processor := &batchProcessorStub{metadata: metadata}
 	service, _ := NewBatchService(BatchServiceDependencies{Store: &storeStub{}, Processor: processor})
 	actor := "admin"

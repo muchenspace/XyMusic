@@ -2,18 +2,54 @@ package com.xymusic.app.feature.player.presentation
 
 import com.google.common.truth.Truth.assertThat
 import com.xymusic.app.core.model.media.LyricsFormat
+import com.xymusic.app.core.model.media.LyricsTiming
 import org.junit.Test
 
 class PlayerLyricsParserTest {
+    @Test
+    fun wordLyricsUseExplicitWordTimestamps() {
+        val parsed = parsePlayerLyrics(
+            content = "[00:01.00]<00:01.00>Hello <00:01.50>world<00:02.00>",
+            format = LyricsFormat.LRC,
+            timing = LyricsTiming.WORD,
+            language = "en",
+        )
+
+        assertThat(parsed.timing).isEqualTo(LyricsTiming.WORD)
+        assertThat(parsed.lines.single().words)
+            .containsExactly(
+                PlayerLyricWordUi(1_000, "Hello ", endTimeMs = 1_500),
+                PlayerLyricWordUi(1_500, "world", endTimeMs = 2_000),
+            ).inOrder()
+        assertThat(parsed.lines.single().text).isEqualTo("Hello world")
+    }
+
+    @Test
+    fun wordLyricsRejectContentWithoutWordTimestamps() {
+        val failure =
+            runCatching {
+                parsePlayerLyrics(
+                    content = "[00:01.00]ordinary line",
+                    format = LyricsFormat.LRC,
+                    timing = LyricsTiming.WORD,
+                    language = "en",
+                )
+            }.exceptionOrNull()
+
+        assertThat(failure).isInstanceOf(IllegalArgumentException::class.java)
+    }
+
     @Test
     fun plainLyricsRemainStatic() {
         val parsed = parsePlayerLyrics(
             content = " First line \n\n<00:01.00>Still plain ",
             format = LyricsFormat.PLAIN,
+            timing = LyricsTiming.LINE,
             language = "en",
         )
 
         assertThat(parsed.synchronized).isFalse()
+        assertThat(parsed.timing).isEqualTo(LyricsTiming.LINE)
         assertThat(parsed.language).isEqualTo("en")
         assertThat(parsed.lines)
             .containsExactly(
@@ -21,19 +57,94 @@ class PlayerLyricsParserTest {
                 PlayerLyricLineUi(null, "<00:01.00>Still plain"),
             ).inOrder()
         assertThat(parsed.currentLineIndex(30_000)).isEqualTo(-1)
-        assertThat(estimatedWordByWordLyricProgress(parsed.lines, 30_000, 60_000)).isNull()
     }
 
     @Test
-    fun lrcClearsLineTagsAndExpandsMultipleTimestampsInTimeOrder() {
+    fun plainLyricsCannotDeclareWordTiming() {
+        val failure =
+            runCatching {
+                parsePlayerLyrics(
+                    content = "plain",
+                    format = LyricsFormat.PLAIN,
+                    timing = LyricsTiming.WORD,
+                    language = "en",
+                )
+            }.exceptionOrNull()
+
+        assertThat(failure).isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun lineLyricsRejectCompleteWordTimedContent() {
+		val failure =
+			runCatching {
+				parsePlayerLyrics(
+					content = "[00:01.00]<00:01.00>first <00:01.50>line",
+					format = LyricsFormat.LRC,
+					timing = LyricsTiming.LINE,
+					language = null,
+				)
+			}.exceptionOrNull()
+
+		assertThat(failure).isInstanceOf(IllegalArgumentException::class.java)
+	}
+
+	@Test
+	fun mixedLineLyricsIgnoreEmbeddedWordTimes() {
+		val parsed = parsePlayerLyrics(
+			content = "[00:01.00]<00:01.00>first <00:01.50>line\n[00:03.00]second line",
+			format = LyricsFormat.LRC,
+			timing = LyricsTiming.LINE,
+			language = null,
+		)
+
+		assertThat(parsed.timing).isEqualTo(LyricsTiming.LINE)
+		assertThat(parsed.lines.map(PlayerLyricLineUi::text)).containsExactly("first line", "second line").inOrder()
+		assertThat(parsed.lines.all { line -> line.words.isEmpty() }).isTrue()
+	}
+
+	@Test
+	fun wordLyricsRejectPrefixTextAndInvalidWordTimestamp() {
+		for (content in listOf(
+			"[00:01.00]prefix<00:01.00>word",
+			"[00:01.00]<00:60.00>word",
+		)) {
+			val failure = runCatching {
+				parsePlayerLyrics(content, LyricsFormat.LRC, LyricsTiming.WORD, null)
+			}.exceptionOrNull()
+			assertThat(failure).isInstanceOf(IllegalArgumentException::class.java)
+		}
+    }
+
+    @Test
+    fun wordLyricsRejectInvalidMarkerAfterAValidWordTimestamp() {
+        for (
+            content in
+                listOf(
+                    "[00:01.00]<00:01.00>valid<00:60.00>invalid",
+                    "[00:01.00]<00:01.00>valid<bad>invalid",
+                )
+        ) {
+            val failure =
+                runCatching {
+                    parsePlayerLyrics(content, LyricsFormat.LRC, LyricsTiming.WORD, null)
+                }.exceptionOrNull()
+
+            assertThat(failure).isInstanceOf(IllegalArgumentException::class.java)
+        }
+    }
+
+    @Test
+    fun lrcExpandsMultipleLineTimestampsInTimeOrder() {
         val parsed = parsePlayerLyrics(
             content =
-            """
+                """
                 [ar:Artist]
                 [00:10.50][00:20:5][Verse] Later
                 [00:01] First
-            """.trimIndent(),
+                """.trimIndent(),
             format = LyricsFormat.LRC,
+            timing = LyricsTiming.LINE,
             language = "und",
         )
 
@@ -46,104 +157,22 @@ class PlayerLyricsParserTest {
     }
 
     @Test
-    fun enhancedTimestampsAreRemovedButNeverUsedForWordTiming() {
-        val parsed = parsePlayerLyrics(
-            content =
-            "[00:00.00]<00:00.00>你<00:00.20>好\n" +
-                "[00:10.00]下一行",
-            format = LyricsFormat.LRC,
-            language = "zh",
-        )
-
-        assertThat(parsed.lines.first().text).isEqualTo("你好")
-        assertThat(parsed.lines.first().highlightEndOffsets).containsExactly(1, 2).inOrder()
-        assertThat(
-            estimatedWordByWordLyricProgress(parsed.lines, 1_000, 30_000)
-                ?.highlightedTextEndIndex,
-        ).isEqualTo(1)
-        assertThat(
-            estimatedWordByWordLyricProgress(parsed.lines, 5_000, 30_000)
-                ?.highlightedTextEndIndex,
-        ).isEqualTo(2)
-    }
-
-    @Test
-    fun graphemeOffsetsKeepChineseEnglishEmojiCombiningMarksAndPunctuationIntact() {
-        val parsed = parsePlayerLyrics(
-            content = "[00:00]你A👍🏽é，\n[00:06]结束",
-            format = LyricsFormat.LRC,
-            language = null,
-        )
-
-        assertThat(parsed.lines.first().highlightEndOffsets)
-            .containsExactly(1, 2, 6, 8, 9)
-            .inOrder()
-    }
-
-    @Test
     fun malformedAndOutOfRangeTimestampsAreIgnored() {
         val parsed = parsePlayerLyrics(
             content =
-            """
+                """
                 [00:60.00]Invalid seconds
                 [00:01.0000]Invalid fraction
                 [not-time]Metadata
                 [999:59.999]Valid upper bound
-            """.trimIndent(),
+                """.trimIndent(),
             format = LyricsFormat.LRC,
+            timing = LyricsTiming.LINE,
             language = null,
         )
 
         assertThat(parsed.lines).hasSize(1)
         assertThat(parsed.lines.single().timeMs).isEqualTo(59_999_999L)
         assertThat(parsed.lines.single().text).isEqualTo("Valid upper bound")
-    }
-
-    @Test
-    fun progressUsesTheCurrentLineToNextLineIntervalAndResetsOnLineChange() {
-        val parsed = parsePlayerLyrics(
-            content = "[00:01]ABCD\n[00:05]Next",
-            format = LyricsFormat.LRC,
-            language = null,
-        )
-
-        assertThat(
-            estimatedWordByWordLyricProgress(parsed.lines, 1_000, 20_000)
-                ?.highlightedTextEndIndex,
-        ).isEqualTo(1)
-        assertThat(
-            estimatedWordByWordLyricProgress(parsed.lines, 2_000, 20_000)
-                ?.highlightedTextEndIndex,
-        ).isEqualTo(2)
-        assertThat(
-            estimatedWordByWordLyricProgress(parsed.lines, 4_999, 20_000)
-                ?.highlightedTextEndIndex,
-        ).isEqualTo(4)
-        val nextLineProgress = estimatedWordByWordLyricProgress(parsed.lines, 5_000, 20_000)
-        assertThat(nextLineProgress?.lineIndex).isEqualTo(1)
-        assertThat(nextLineProgress?.highlightedTextEndIndex).isEqualTo(1)
-    }
-
-    @Test
-    fun finalLineUsesTrackDurationWithFallbackAndMaximum() {
-        val parsed = parsePlayerLyrics(
-            content = "[00:10]Final",
-            format = LyricsFormat.LRC,
-            language = null,
-        )
-
-        assertThat(
-            estimatedWordByWordLyricProgress(parsed.lines, 10_000, 14_000)
-                ?.lineEndTimeMs,
-        ).isEqualTo(14_000)
-        assertThat(
-            estimatedWordByWordLyricProgress(parsed.lines, 10_000, 0)
-                ?.lineEndTimeMs,
-        ).isEqualTo(16_000)
-        assertThat(
-            estimatedWordByWordLyricProgress(parsed.lines, 10_000, 100_000)
-                ?.lineEndTimeMs,
-        ).isEqualTo(22_000)
-        assertThat(estimatedWordByWordLyricProgress(parsed.lines, 22_000, 100_000)).isNull()
     }
 }

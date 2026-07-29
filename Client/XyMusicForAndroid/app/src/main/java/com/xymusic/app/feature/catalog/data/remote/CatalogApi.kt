@@ -30,11 +30,7 @@ interface CatalogApi {
     suspend fun randomTracks(@Body request: RandomCatalogRequestDto): Response<RandomTracksResponseDto>
 
     @GET("api/v1/tracks/{id}")
-    suspend fun track(
-        @Path("id") trackId: String,
-        @Query("lyricPage") lyricPage: Int = 1,
-        @Query("lyricPageSize") lyricPageSize: Int = 20,
-    ): Response<TrackDetailDto>
+    suspend fun track(@Path("id") trackId: String): Response<TrackDetailDto>
 
     @GET("api/v1/artists")
     suspend fun artists(

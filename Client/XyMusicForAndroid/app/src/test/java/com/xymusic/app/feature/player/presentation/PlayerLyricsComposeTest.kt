@@ -103,18 +103,26 @@ class PlayerLyricsComposeTest {
     }
 
     @Test
-    fun wordByWordHighlightOnlyAppliesToCurrentLineAndResetsPreviousLine() {
+    fun wordTimedHighlightOnlyAppliesToCurrentLineAndResetsPreviousLine() {
         val uiState =
             mutableStateOf(
                 PlayerUiState(
                     player = PlayerState(positionMs = 0, durationMs = 2_000),
                     lyrics =
                     listOf(
-                        PlayerLyricLineUi(0, "AB", highlightEndOffsets = listOf(1, 2)),
-                        PlayerLyricLineUi(1_000, "CD", highlightEndOffsets = listOf(1, 2)),
+                        PlayerLyricLineUi(
+                            0,
+                            "AB",
+                            words = listOf(PlayerLyricWordUi(0, "A"), PlayerLyricWordUi(500, "B")),
+                        ),
+                        PlayerLyricLineUi(
+                            1_000,
+                            "CD",
+                            words = listOf(PlayerLyricWordUi(1_000, "C"), PlayerLyricWordUi(1_500, "D")),
+                        ),
                     ),
                     synchronizedLyrics = true,
-                    wordByWordLyricsEnabled = true,
+                    lyricsTiming = com.xymusic.app.core.model.media.LyricsTiming.WORD,
                 ),
             )
         composeRule.setContent {

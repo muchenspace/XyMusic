@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"xymusic/server/internal/modules/adminmetadata"
+	sharedlyrics "xymusic/server/internal/shared/lyrics"
 )
 
 type SourceObjectStorage interface {
@@ -266,6 +267,7 @@ type scannedLyric struct {
 	Content   string
 	Format    string
 	Language  string
+	Timing    sharedlyrics.Timing
 	Origin    string
 	IsDefault bool
 }
@@ -432,7 +434,7 @@ func (synchronizer *ProductionSynchronizer) syncStandardFile(
 			}
 		}
 		raw.Lyrics = &adminmetadata.MetadataLyrics{
-			Content: defaultLyric.Content, Format: defaultLyric.Format, Language: defaultLyric.Language,
+			Content: defaultLyric.Content, Format: defaultLyric.Format, Language: defaultLyric.Language, Timing: defaultLyric.Timing,
 		}
 	}
 	trackID := uuid.NewString()

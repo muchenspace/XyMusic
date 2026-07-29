@@ -3,7 +3,6 @@ package com.xymusic.app.domain.settings
 data class AppSettings(
     val theme: ThemePreference = ThemePreference.SYSTEM,
     val dynamicColorEnabled: Boolean = false,
-    val wordByWordLyricsEnabled: Boolean = true,
     val streamingQuality: StreamingQuality = StreamingQuality.AUTO,
     val mobileDataPolicy: MobileDataPolicy = MobileDataPolicy.ALLOW_STREAMING,
     val cacheLimitMiB: Int = 512,

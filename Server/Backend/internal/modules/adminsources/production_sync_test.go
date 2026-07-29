@@ -9,7 +9,60 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"xymusic/server/internal/modules/adminmetadata"
+	sharedlyrics "xymusic/server/internal/shared/lyrics"
 )
+
+func TestRecordScanMetadataRejectsInvalidLyricTimingBeforeDatabase(t *testing.T) {
+	tests := []struct {
+		name    string
+		timing  sharedlyrics.Timing
+		content string
+	}{
+		{name: "missing timing", content: "[00:01.00]line"},
+		{name: "unknown timing", timing: "SYLLABLE", content: "[00:01.00]line"},
+		{name: "content mismatch", timing: sharedlyrics.TimingLine, content: "[00:01.00]<00:01.00>word"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("recordScanMetadata panicked before validating lyrics: %v", recovered)
+				}
+			}()
+			err := recordScanMetadata(context.Background(), nil, "track", "source", adminmetadata.MetadataSnapshot{
+				Lyrics: &adminmetadata.MetadataLyrics{
+					Format: "LRC", Timing: test.timing, Content: test.content, Language: "und",
+				},
+			}, "checksum", time.Now())
+			if err == nil || !strings.Contains(err.Error(), "validate scanned local library metadata lyrics") {
+				t.Fatalf("recordScanMetadata() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestSyncScannedLyricsRejectsInconsistentTimingBeforeDatabase(t *testing.T) {
+	transaction := &scannedLyricTransactionStub{}
+	err := syncScannedLyrics(context.Background(), transaction, "track", []scannedLyric{{
+		Format: "LRC", Timing: sharedlyrics.TimingWord,
+		Content: "[00:01.00]<00:01.00>word\n[00:02.00]ordinary line", Language: "und", Origin: "EXTERNAL",
+	}})
+	if err == nil || transaction.calls != 0 {
+		t.Fatalf("syncScannedLyrics() error/calls = %v/%d", err, transaction.calls)
+	}
+}
+
+type scannedLyricTransactionStub struct {
+	pgx.Tx
+	calls int
+}
+
+func (transaction *scannedLyricTransactionStub) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	transaction.calls++
+	return pgconn.CommandTag{}, errors.New("unexpected database call")
+}
 
 func TestProcessFileTouchesExistingSourceBeforeRecordingProcessingFailure(t *testing.T) {
 	seenAt := time.Date(2026, 7, 18, 1, 2, 3, 0, time.UTC)

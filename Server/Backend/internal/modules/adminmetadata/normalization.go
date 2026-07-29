@@ -14,6 +14,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/lyrics"
 )
 
 var (
@@ -425,19 +426,19 @@ func normalizeLyrics(value any) (*MetadataLyrics, error) {
 		return nil, nil
 	}
 	if typed, ok := value.(MetadataLyrics); ok {
-		value = map[string]any{"content": typed.Content, "format": typed.Format, "language": typed.Language}
+		value = map[string]any{"content": typed.Content, "format": typed.Format, "language": typed.Language, "timing": string(typed.Timing)}
 	}
 	if typed, ok := value.(*MetadataLyrics); ok {
 		if typed == nil {
 			return nil, nil
 		}
-		value = map[string]any{"content": typed.Content, "format": typed.Format, "language": typed.Language}
+		value = map[string]any{"content": typed.Content, "format": typed.Format, "language": typed.Language, "timing": string(typed.Timing)}
 	}
 	input, err := objectValue(value, "lyrics")
 	if err != nil {
 		return nil, err
 	}
-	if err := rejectUnknownKeys(input, map[string]struct{}{"content": {}, "format": {}, "language": {}}); err != nil {
+	if err := rejectUnknownKeys(input, map[string]struct{}{"content": {}, "format": {}, "language": {}, "timing": {}}); err != nil {
 		return nil, err
 	}
 	content, err := requiredRawText(input["content"], "lyrics.content", 500_000)
@@ -456,7 +457,18 @@ func normalizeLyrics(value any) (*MetadataLyrics, error) {
 	if !languagePattern.MatchString(language) {
 		return nil, apperror.Validation("lyrics.language must be a valid language tag")
 	}
-	return &MetadataLyrics{Content: content, Format: format, Language: language}, nil
+	timingValue, ok := input["timing"].(string)
+	if !ok {
+		return nil, apperror.Validation("lyrics.timing is required")
+	}
+	if !lyrics.ValidTiming(timingValue) {
+		return nil, apperror.Validation("lyrics.timing is invalid")
+	}
+	timing := lyrics.Timing(timingValue)
+	if err := lyrics.ValidateDocument(format, timing, content); err != nil {
+		return nil, apperror.Validation("lyrics.timing does not match lyrics.content")
+	}
+	return &MetadataLyrics{Content: content, Format: format, Language: language, Timing: timing}, nil
 }
 
 func normalizeReleaseDate(value any) (*string, error) {

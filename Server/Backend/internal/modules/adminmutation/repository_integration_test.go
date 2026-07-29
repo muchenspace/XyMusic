@@ -98,7 +98,7 @@ func TestAdminMutationProductionLifecycle(t *testing.T) {
 	}
 	createdIDs = append(createdIDs, targetTrack.ID, sourceTrack.ID)
 	content := "[00:00.00] integration"
-	lyric, err := service.UpsertLyrics(ctx, actorID, "mutation-lyrics", targetTrack.ID, LyricsInput{ExpectedVersion: targetTrack.Version, Language: "zh", Format: "LRC", Content: OptionalString{Set: true, Value: content}, IsDefault: OptionalBool{Set: true, Value: true}})
+	lyric, err := service.UpsertLyrics(ctx, actorID, "mutation-lyrics", targetTrack.ID, LyricsInput{ExpectedVersion: targetTrack.Version, Language: "zh", Format: "LRC", Timing: "LINE", Content: OptionalString{Set: true, Value: content}, IsDefault: OptionalBool{Set: true, Value: true}})
 	if err != nil || lyric.TrackVersion != 2 {
 		t.Fatalf("UpsertLyrics=%#v,%v", lyric, err)
 	}
@@ -131,7 +131,7 @@ func TestAdminMutationProductionLifecycle(t *testing.T) {
 		t.Fatalf("UpdateTrack archived error=%v", err)
 	}
 	if _, err := service.UpsertLyrics(ctx, actorID, "mutation-lyrics-archived", sourceTrack.ID, LyricsInput{
-		ExpectedVersion: sourceTrack.Version, Language: "zh", Format: "LRC",
+		ExpectedVersion: sourceTrack.Version, Language: "zh", Format: "LRC", Timing: "LINE",
 		Content: OptionalString{Set: true, Value: "[00:00.00] archived"}, IsDefault: OptionalBool{Set: true, Value: true},
 	}); !apperror.IsCode(err, apperror.CodeInvalidStateTransition) {
 		t.Fatalf("UpsertLyrics archived error=%v", err)

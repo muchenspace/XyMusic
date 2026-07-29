@@ -68,7 +68,7 @@ function candidate(id: string, name: string): TagCandidate {
 function detail(item: TagCandidate): TagCandidateDetail {
   return {
     candidate: item,
-    lyrics: { content: `${item.name} 的歌词`, format: "PLAIN", language: "und" },
+    lyrics: { content: `${item.name} 的歌词`, format: "PLAIN", language: "und", timing: "LINE" },
   };
 }
 
@@ -121,7 +121,7 @@ describe("TagScrapeDialog candidate details", () => {
     await button(wrapper, "搜索").trigger("click");
     await flushPromises();
 
-    expect(scraping.search).toHaveBeenCalledWith(expect.objectContaining({ verbatim: true }), expect.any(AbortSignal));
+    expect(scraping.search).toHaveBeenCalledWith(expect.objectContaining({ source: "qmusic", verbatim: true }), expect.any(AbortSignal));
 
     let cards = wrapper.findAll("[data-testid='tag-candidate']");
     expect(cards).toHaveLength(2);

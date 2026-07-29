@@ -1,11 +1,12 @@
 import type { LyricLine, Lyrics } from "../domain/music";
+import { interpolateLyricPlaybackSeconds, resolveLyricPlaybackPosition } from "../domain/lyricsTimeline";
 import type { DesktopLyricsClockPayload } from "./protocol";
 
 export interface DesktopLyricLineFrame {
   index: number;
   line: LyricLine;
-  progress: number;
   started: boolean;
+  wordIndex: number;
 }
 
 export interface DesktopLyricsFrame {
@@ -15,32 +16,8 @@ export interface DesktopLyricsFrame {
   next: DesktopLyricLineFrame | null;
 }
 
-const DEFAULT_LINE_DURATION_SECONDS = 4;
-
 export function estimatePlaybackSeconds(clock: DesktopLyricsClockPayload, nowMs = Date.now()): number {
-  const position = finiteNonNegative(clock.positionSeconds);
-  if (!clock.isPlaying) return position;
-  const elapsed = Math.max(0, finiteNumber(nowMs) - finiteNumber(clock.anchoredAtMs)) / 1_000;
-  return position + elapsed;
-}
-
-export function findActiveLyricIndex(lines: readonly LyricLine[], playbackSeconds: number): number {
-  const playback = finiteNumber(playbackSeconds);
-  let result = -1;
-  for (let index = 0; index < lines.length; index += 1) {
-    const time = lines[index]?.time;
-    if (time === null || !Number.isFinite(time)) continue;
-    if (time > playback) break;
-    result = index;
-  }
-  return result;
-}
-
-export function progressBetween(playbackSeconds: number, startSeconds: number, endSeconds: number): number {
-  const start = finiteNumber(startSeconds);
-  const end = Math.max(start, finiteNumber(endSeconds));
-  if (end <= start) return playbackSeconds >= end ? 1 : 0;
-  return clamp01((finiteNumber(playbackSeconds) - start) / (end - start));
+  return interpolateLyricPlaybackSeconds(clock, nowMs);
 }
 
 export function buildDesktopLyricsFrame(
@@ -54,60 +31,35 @@ export function buildDesktopLyricsFrame(
     return { playbackSeconds, activeIndex: -1, current: null, next: null };
   }
 
-  const activeIndex = lyrics.synchronized ? findActiveLyricIndex(lyrics.lines, playbackSeconds) : -1;
+  const position = lyrics.synchronized
+    ? resolveLyricPlaybackPosition(lyrics, playbackSeconds)
+    : { lineIndex: -1, wordIndex: -1 };
+  const activeIndex = position.lineIndex;
   const currentIndex = activeIndex >= 0 ? activeIndex : 0;
   const nextIndex = currentIndex + 1;
   return {
     playbackSeconds,
     activeIndex,
-    current: lineFrame(lyrics.lines, currentIndex, playbackSeconds, activeIndex >= 0),
-    next: lineFrame(lyrics.lines, nextIndex, playbackSeconds, false),
+    current: lineFrame(lyrics.lines, currentIndex, activeIndex === currentIndex, activeIndex === currentIndex ? position.wordIndex : -1),
+    next: lineFrame(lyrics.lines, nextIndex, false, -1),
   };
 }
 
 function lineFrame(
   lines: readonly LyricLine[],
   index: number,
-  playbackSeconds: number,
   started: boolean,
+  wordIndex: number,
 ): DesktopLyricLineFrame | null {
   const line = lines[index];
   if (!line) return null;
-  const start = line.time;
-  const nextLineTime = nextTimedLineTime(lines, index + 1);
-  const lineEnd = start === null
-    ? 0
-    : nextLineTime ?? start + DEFAULT_LINE_DURATION_SECONDS;
-  const isActive = started
-    && start !== null
-    && playbackSeconds >= start
-    && playbackSeconds < lineEnd;
-  const progress = isActive
-    ? progressBetween(playbackSeconds, start, lineEnd)
-    : 0;
-  return { index, line, progress, started: isActive };
+  return { index, line, started, wordIndex };
 }
 
 function isMatchingTrack(lyrics: Lyrics, clock: DesktopLyricsClockPayload): boolean {
   return clock.trackId !== null && lyrics.trackId === clock.trackId;
 }
 
-function nextTimedLineTime(lines: readonly LyricLine[], fromIndex: number): number | null {
-  for (let index = fromIndex; index < lines.length; index += 1) {
-    const time = lines[index]?.time;
-    if (time !== null && Number.isFinite(time)) return time;
-  }
-  return null;
-}
-
-function finiteNonNegative(value: number): number {
-  return Math.max(0, finiteNumber(value));
-}
-
 function finiteNumber(value: number): number {
   return Number.isFinite(value) ? value : 0;
-}
-
-function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, value));
 }

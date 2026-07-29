@@ -42,22 +42,11 @@ export class HttpCatalogRepository implements CatalogRepository {
   }
 
   async getLyrics(trackId: string, signal?: AbortSignal): Promise<Lyrics | null> {
-    const resources: TrackDetailDto["lyrics"] = [];
-    const seenLyricIds = new Set<string>();
-    let requestedPage = 1;
-    let expected: LyricPageMetadata | undefined;
-    while (true) {
-      const params = new URLSearchParams({ lyricPage: String(requestedPage), lyricPageSize: "100" });
-      const detail = await this.api.request<TrackDetailDto>(
-        `api/v1/tracks/${encodeURIComponent(trackId)}?${params}`,
-        { signal },
-      );
-      const metadata = validateLyricPage(detail, trackId, requestedPage, seenLyricIds, expected);
-      expected ??= metadata;
-      resources.push(...detail.lyrics);
-      if (requestedPage >= metadata.totalPages) return buildLyrics(trackId, resources);
-      requestedPage += 1;
-    }
+    const detail = await this.api.request<TrackDetailDto>(
+      `api/v1/tracks/${encodeURIComponent(trackId)}`,
+      { signal },
+    );
+    return buildLyrics(trackId, validateLyricDetail(detail, trackId));
   }
 
   getAlbumTracks(albumId: string, signal?: AbortSignal): Promise<Track[]> {
@@ -123,52 +112,21 @@ export class HttpCatalogRepository implements CatalogRepository {
   }
 }
 
-interface LyricPageMetadata {
-  pageSize: number;
-  total: number;
-  totalPages: number;
-  trackVersion: number | null;
-}
-
-function validateLyricPage(
+function validateLyricDetail(
   detail: TrackDetailDto | null | undefined,
   trackId: string,
-  requestedPage: number,
-  seenLyricIds: Set<string>,
-  expected?: LyricPageMetadata,
-): LyricPageMetadata {
-  if (!detail || detail.id !== trackId || !Array.isArray(detail.lyrics)) {
-    throw paginationError("歌词分页响应格式无效");
+): TrackDetailDto["lyric"] {
+  if (!detail || detail.id !== trackId || !Object.prototype.hasOwnProperty.call(detail, "lyric")) {
+    throw paginationError("歌词响应格式无效");
   }
-  const { lyricPage, lyricPageSize, lyricTotal, lyricTotalPages } = detail;
-  if (!Number.isInteger(lyricPage) || lyricPage !== requestedPage ||
-      !Number.isInteger(lyricPageSize) || lyricPageSize < 1 || lyricPageSize > 100 ||
-      !Number.isInteger(lyricTotal) || lyricTotal < 0 ||
-      !Number.isInteger(lyricTotalPages) || lyricTotalPages < 0 ||
-      lyricTotalPages !== Math.ceil(lyricTotal / lyricPageSize) ||
-      (lyricTotalPages > 0 && lyricPage > lyricTotalPages)) {
-    throw paginationError("歌词分页页码或统计信息无效");
+  const lyric = detail.lyric;
+  if (lyric === null) return null;
+  if (!lyric || typeof lyric.id !== "string" || !lyric.id || lyric.trackId !== trackId ||
+      (lyric.timing !== "LINE" && lyric.timing !== "WORD") ||
+      !Number.isInteger(lyric.trackVersion) || lyric.trackVersion < 1) {
+    throw paginationError("歌词资源格式无效");
   }
-  const remaining = Math.max(0, lyricTotal - (lyricPage - 1) * lyricPageSize);
-  if (detail.lyrics.length !== Math.min(lyricPageSize, remaining)) {
-    throw paginationError("歌词分页数据数量与统计信息不一致");
-  }
-  let trackVersion: number | null = null;
-  for (const lyric of detail.lyrics) {
-    if (!lyric || typeof lyric.id !== "string" || !lyric.id || lyric.trackId !== trackId ||
-        !Number.isInteger(lyric.trackVersion) || lyric.trackVersion < 1 ||
-        (trackVersion !== null && lyric.trackVersion !== trackVersion) || seenLyricIds.has(lyric.id)) {
-      throw paginationError("歌词分页包含不一致或重复的数据");
-    }
-    trackVersion = lyric.trackVersion;
-    seenLyricIds.add(lyric.id);
-  }
-  const metadata = { pageSize: lyricPageSize, total: lyricTotal, totalPages: lyricTotalPages, trackVersion };
-  if (expected && (metadata.pageSize !== expected.pageSize || metadata.total !== expected.total ||
-      metadata.totalPages !== expected.totalPages || metadata.trackVersion !== expected.trackVersion)) {
-    throw paginationError("歌词分页统计信息在翻页过程中发生变化");
-  }
-  return metadata;
+  return lyric;
 }
 
 function randomLimit(value: number): number {

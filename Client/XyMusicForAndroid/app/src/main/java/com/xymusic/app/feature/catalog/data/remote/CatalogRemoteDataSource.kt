@@ -5,7 +5,6 @@ import com.xymusic.app.core.data.media.remote.AlbumSummaryDto
 import com.xymusic.app.core.data.media.remote.ArtistDetailDto
 import com.xymusic.app.core.data.media.remote.ArtistSummaryDto
 import com.xymusic.app.core.data.media.remote.CatalogProtocolException
-import com.xymusic.app.core.data.media.remote.LyricsResourceDto
 import com.xymusic.app.core.data.media.remote.RandomCatalogRequestDto
 import com.xymusic.app.core.data.media.remote.RemotePage
 import com.xymusic.app.core.data.media.remote.TrackDetailDto
@@ -78,37 +77,9 @@ constructor(
     }
 
     override suspend fun track(trackId: String): TrackDetailDto {
-        val first = body(api.track(trackId, lyricPage = 1, lyricPageSize = LYRIC_PAGE_SIZE))
-        validateLyricPage(first, trackId, page = 1)
-        if (first.lyricTotalPages <= 1) return first
-
-        val lyrics = first.lyrics.toMutableList()
-        val lyricIds = lyrics.mapTo(hashSetOf(), LyricsResourceDto::id)
-        val lyricTrackVersion = first.lyrics.first().trackVersion
-        for (pageNumber in 2..first.lyricTotalPages) {
-            val page = body(api.track(trackId, lyricPage = pageNumber, lyricPageSize = LYRIC_PAGE_SIZE))
-            validateLyricPage(page, trackId, pageNumber)
-            requireCatalogProtocol(
-                page.sameTrackAs(first),
-                "Track metadata changed while paging lyrics",
-            )
-            requireCatalogProtocol(
-                page.lyrics.none { lyric -> lyric.trackVersion != lyricTrackVersion },
-                "Track lyrics changed version while paging",
-            )
-            page.lyrics.forEach { lyric ->
-                requireCatalogProtocol(
-                    lyricIds.add(lyric.id),
-                    "Track lyric paging returned duplicate lyric IDs",
-                )
-            }
-            lyrics += page.lyrics
-        }
-        requireCatalogProtocol(
-            lyrics.size == first.lyricTotal,
-            "Track lyric paging ended before every lyric was returned",
-        )
-        return first.copy(lyrics = lyrics)
+        val detail = body(api.track(trackId))
+        validateLyric(detail, trackId)
+        return detail
     }
 
     override suspend fun artist(artistId: String): ArtistDetailDto = body(api.artist(artistId))
@@ -132,7 +103,6 @@ constructor(
     private companion object {
         const val TRACE_ID_HEADER = "X-Trace-Id"
         const val RETRY_AFTER_HEADER = "Retry-After"
-        const val LYRIC_PAGE_SIZE = 100
         const val MIN_RANDOM_LIMIT = 1
         const val MAX_RANDOM_LIMIT = 50
 
@@ -142,59 +112,18 @@ constructor(
             }
         }
 
-        fun validateLyricPage(detail: TrackDetailDto, trackId: String, page: Int) {
+        fun validateLyric(detail: TrackDetailDto, trackId: String) {
             requireCatalogProtocol(
                 detail.id == trackId,
-                "Track detail ID mismatch while paging lyrics",
+                "Track detail ID mismatch",
             )
+            val lyric = detail.lyric ?: return
+            requireCatalogProtocol(lyric.id.isNotBlank(), "Track lyric ID is missing")
+            requireCatalogProtocol(lyric.trackId == trackId, "Track lyric belongs to another track")
+            requireCatalogProtocol(lyric.trackVersion >= 1, "Track lyric version must be positive")
             requireCatalogProtocol(
-                detail.lyricTotal >= 0 && detail.lyricTotalPages >= 0,
-                "Track lyric pagination totals cannot be negative",
-            )
-            requireCatalogProtocol(
-                detail.lyricPage == page && detail.lyricPageSize == LYRIC_PAGE_SIZE,
-                "Track lyric pagination did not return the requested page",
-            )
-            val expectedPages =
-                if (detail.lyricTotal == 0) {
-                    0
-                } else {
-                    ((detail.lyricTotal.toLong() + LYRIC_PAGE_SIZE - 1) / LYRIC_PAGE_SIZE).toInt()
-                }
-            requireCatalogProtocol(
-                detail.lyricTotalPages == expectedPages ||
-                    (detail.lyricTotal == 0 && detail.lyricTotalPages == 1),
-                "Track lyric pagination totals are inconsistent",
-            )
-            requireCatalogProtocol(
-                detail.lyrics.size <= LYRIC_PAGE_SIZE,
-                "Track lyric page exceeds the requested limit",
-            )
-            val expectedItemCount =
-                when {
-                    detail.lyricTotal == 0 -> 0
-                    page < detail.lyricTotalPages -> LYRIC_PAGE_SIZE
-                    else ->
-                        (
-                            detail.lyricTotal.toLong() -
-                                (detail.lyricTotalPages - 1L) * LYRIC_PAGE_SIZE
-                            ).toInt()
-                }
-            requireCatalogProtocol(
-                detail.lyrics.size == expectedItemCount,
-                "Track lyric page item count is inconsistent",
-            )
-            requireCatalogProtocol(
-                detail.lyrics.map(LyricsResourceDto::id).distinct().size == detail.lyrics.size,
-                "Track lyric page contains duplicate lyric IDs",
-            )
-            requireCatalogProtocol(
-                detail.lyrics.none { lyric -> lyric.trackId != trackId },
-                "Track lyric page contains lyrics for another track",
-            )
-            requireCatalogProtocol(
-                detail.lyrics.map(LyricsResourceDto::trackVersion).distinct().size <= 1,
-                "Track lyric page contains multiple track versions",
+                lyric.timing == "LINE" || lyric.timing == "WORD",
+                "Track lyric timing is invalid",
             )
         }
 
@@ -205,17 +134,5 @@ constructor(
         }
     }
 }
-
-private fun TrackDetailDto.sameTrackAs(other: TrackDetailDto): Boolean = id == other.id &&
-    title == other.title &&
-    artists == other.artists &&
-    album == other.album &&
-    durationMs == other.durationMs &&
-    trackNumber == other.trackNumber &&
-    discNumber == other.discNumber &&
-    isFavorite == other.isFavorite &&
-    publishedAt == other.publishedAt &&
-    lyricTotal == other.lyricTotal &&
-    lyricTotalPages == other.lyricTotalPages
 
 class CatalogRemoteException(val domainError: DomainError) : IOException("Catalog request was rejected")

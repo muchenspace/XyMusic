@@ -143,6 +143,7 @@ type LyricDTO struct {
 	ID        string  `json:"id"`
 	Language  string  `json:"language"`
 	Format    string  `json:"format"`
+	Timing    string  `json:"timing"`
 	Content   *string `json:"content"`
 	IsDefault bool    `json:"isDefault"`
 	Version   int     `json:"version"`

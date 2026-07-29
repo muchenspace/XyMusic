@@ -15,12 +15,12 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"xymusic/server/internal/shared/apperror"
+	sharedlyrics "xymusic/server/internal/shared/lyrics"
 	"xymusic/server/internal/shared/pagination"
 )
 
 const (
-	defaultPageLimit     = 20
-	defaultLyricPageSize = 20
+	defaultPageLimit = 20
 	maximumPageLimit     = 100
 	maximumRandom        = 50
 )
@@ -132,11 +132,7 @@ func (s *Service) RandomTracks(ctx context.Context, userID string, requestedLimi
 	return RandomTracksDTO{Items: items}, nil
 }
 
-func (s *Service) GetTrack(ctx context.Context, userID, trackID string, input GetTrackInput) (TrackDetailDTO, error) {
-	page, err := pagination.ParseOffset(input.LyricPage, input.LyricPageSize, defaultLyricPageSize)
-	if err != nil {
-		return TrackDetailDTO{}, err
-	}
+func (s *Service) GetTrack(ctx context.Context, userID, trackID string, _ GetTrackInput) (TrackDetailDTO, error) {
 	record, err := s.repository.FindTrack(ctx, userID, trackID)
 	if errors.Is(err, ErrNotFound) {
 		return TrackDetailDTO{}, apperror.NotFound("Track was not found")
@@ -144,11 +140,7 @@ func (s *Service) GetTrack(ctx context.Context, userID, trackID string, input Ge
 	if err != nil {
 		return TrackDetailDTO{}, err
 	}
-	lyrics, lyricTotal, err := s.repository.ListLyrics(ctx, ListLyricsQuery{
-		TrackID: trackID,
-		Limit:   page.PageSize,
-		Offset:  page.Offset,
-	})
+	lyric, err := s.repository.FindLyric(ctx, trackID)
 	if err != nil {
 		return TrackDetailDTO{}, err
 	}
@@ -156,34 +148,29 @@ func (s *Service) GetTrack(ctx context.Context, userID, trackID string, input Ge
 	if err != nil {
 		return TrackDetailDTO{}, err
 	}
-	lyricDTOs := make([]LyricDTO, 0, len(lyrics))
-	for _, item := range lyrics {
-		lyricDTOs = append(lyricDTOs, LyricDTO{
-			ID:           item.ID,
-			TrackID:      item.TrackID,
-			Language:     item.Language,
-			Format:       item.Format,
-			Content:      item.Content,
-			IsDefault:    item.IsDefault,
+	var lyricDTO *LyricDTO
+	if lyric != nil {
+		if !sharedlyrics.ValidTiming(lyric.Timing) {
+			return TrackDetailDTO{}, apperror.Internal("Stored lyrics timing is invalid", nil)
+		}
+		if err := sharedlyrics.ValidateDocument(lyric.Format, sharedlyrics.Timing(lyric.Timing), lyric.Content); err != nil {
+			return TrackDetailDTO{}, apperror.Internal("Stored lyrics violate the timing contract", err)
+		}
+		lyricDTO = &LyricDTO{
+			ID:           lyric.ID,
+			TrackID:      lyric.TrackID,
+			Language:     lyric.Language,
+			Format:       lyric.Format,
+			Timing:       lyric.Timing,
+			Content:      lyric.Content,
 			TrackVersion: record.Version,
-			UpdatedAt:    formatTimestamp(item.UpdatedAt),
-		})
+			UpdatedAt:    formatTimestamp(lyric.UpdatedAt),
+		}
 	}
 	return TrackDetailDTO{
 		TrackSummaryDTO: summaries[0],
-		Lyrics:          lyricDTOs,
-		LyricPage:       page.Page,
-		LyricPageSize:   page.PageSize,
-		LyricTotal:      lyricTotal,
-		LyricTotalPages: totalPages(lyricTotal, page.PageSize),
+		Lyric:           lyricDTO,
 	}, nil
-}
-
-func totalPages(total, pageSize int) int {
-	if total <= 0 || pageSize <= 0 {
-		return 0
-	}
-	return (total + pageSize - 1) / pageSize
 }
 
 // TrackSummaries returns playable tracks in the caller's requested order.

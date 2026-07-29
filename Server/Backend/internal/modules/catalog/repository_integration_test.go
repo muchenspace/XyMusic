@@ -62,8 +62,8 @@ func TestRepositoryAgainstConfiguredPostgres(t *testing.T) {
 		if _, err := repository.FindTrack(ctx, userID, tracks[0].ID); err != nil {
 			t.Fatalf("FindTrack: %v", err)
 		}
-		if _, _, err := repository.ListLyrics(ctx, ListLyricsQuery{TrackID: tracks[0].ID, Limit: 20}); err != nil {
-			t.Fatalf("ListLyrics: %v", err)
+		if _, err := repository.FindLyric(ctx, tracks[0].ID); err != nil {
+			t.Fatalf("FindLyric: %v", err)
 		}
 	}
 	cursorTime := time.Now().UTC()

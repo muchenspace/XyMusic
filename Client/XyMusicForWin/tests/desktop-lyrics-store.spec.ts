@@ -54,12 +54,10 @@ describe("desktop lyrics store", () => {
           fontScale: 1.2,
           textColor: "#abcdef",
           highlightColor: "#123456",
-          wordLyricsEnabled: true,
         }),
         writeDesktopLyricsVisible: writeVisible,
         writeDesktopLyricsLocked: writeLocked,
         writeDesktopLyricsFullscreenBehavior: writeFullscreenBehavior,
-        writeDesktopLyricsWordLyricsEnabled() {},
       },
     } as unknown as ApplicationServices;
     let store!: ReturnType<typeof useDesktopLyricsStore>;
@@ -136,12 +134,10 @@ describe("desktop lyrics store", () => {
           fontScale: 1,
           textColor: "#f4f5f7",
           highlightColor: "#cf9437",
-          wordLyricsEnabled: true,
         }),
         writeDesktopLyricsVisible() {},
         writeDesktopLyricsLocked() {},
         writeDesktopLyricsFullscreenBehavior() {},
-        writeDesktopLyricsWordLyricsEnabled() {},
       },
     } as unknown as ApplicationServices;
     let store!: ReturnType<typeof useDesktopLyricsStore>;

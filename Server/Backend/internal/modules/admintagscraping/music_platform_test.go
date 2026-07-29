@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/zlib"
 	"context"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -169,34 +168,78 @@ func TestSearchKugouUsesResultIDForLyricLookup(t *testing.T) {
 	}
 }
 
-func TestNeteaseVerbatimLyricUsesEAPIAndRendersYRC(t *testing.T) {
+func TestOrdinaryLyricProvidersReturnLineTiming(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if request.URL.Host != "interface.music.163.com" || request.URL.Path != "/eapi/song/lyric/v1" || request.Method != http.MethodPost {
-			t.Fatalf("unexpected Netease lyric request: %s", request.URL.String())
+		switch {
+		case request.URL.Host == "music.163.com" && request.URL.Path == "/api/linux/forward":
+			return responseFor(request, http.StatusOK, "application/json", []byte(`{"lrc":{"lyric":"[00:01.00]line"}}`)), nil
+		case request.URL.Host == "m.kugou.com" && request.URL.Path == "/app/i/krc.php":
+			return responseFor(request, http.StatusOK, "text/plain", []byte("[00:01.00]line")), nil
+		default:
+			t.Fatalf("unexpected lyric request: %s", request.URL.String())
+			return nil, nil
 		}
-		if !strings.HasPrefix(request.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
-			t.Fatalf("content type = %q", request.Header.Get("Content-Type"))
-		}
-		body, err := io.ReadAll(request.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(body), "params=") {
-			t.Fatalf("encrypted request body = %q", body)
-		}
-		response, err := encryptECB([]byte(neteaseEAPIKey), []byte(`{"code":200,"yrc":{"lyric":"[0,1000](0,500,0)你(500,500,0)好"}}`))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return responseFor(request, http.StatusOK, "application/octet-stream", response), nil
 	})}
 	platform := NewMusicPlatformClient(client, "")
-	result, err := platform.Lyric(context.Background(), SourceNetease, Candidate{ID: "123"}, true)
+	for _, test := range []struct {
+		name      string
+		source    Source
+		candidate Candidate
+	}{
+		{name: "netease", source: SourceNetease, candidate: Candidate{ID: "163", Name: "Song"}},
+		{name: "kugou", source: SourceKugou, candidate: Candidate{ID: "hash", Name: "Song"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := platform.Lyric(context.Background(), test.source, test.candidate, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Content != "[00:01.00]line" || string(result.Timing) != "LINE" {
+				t.Fatalf("lyric result = %#v", result)
+			}
+		})
+	}
+}
+
+func TestNeteaseEnhancedLyricReturnsWordTimingWithoutVerbatim(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return responseFor(request, http.StatusOK, "application/json", []byte(`{"lrc":{"lyric":"[00:01.00]<00:01.00>word"}}`)), nil
+	})}
+	platform := NewMusicPlatformClient(client, "")
+	result, err := platform.Lyric(context.Background(), SourceNetease, Candidate{ID: "163", Name: "Song"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != "[00:00.00]<00:00.00>你<00:00.50>好" {
-		t.Fatalf("verbatim lyrics = %q", result)
+	if result.Content != "[00:01.00]<00:01.00>word" || result.Timing != "WORD" {
+		t.Fatalf("enhanced lyric result = %#v", result)
+	}
+}
+
+func TestQQVerbatimLyricWithoutWordMarkersStaysLineTiming(t *testing.T) {
+	qrc := `<Lyric_1 LyricType="1" LyricContent="[0,1000]ordinary line"/>`
+	encrypted, err := encryptQRCForTest([]byte(qrc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		body, _ := json.Marshal(map[string]any{
+			"code": 0,
+			"request": map[string]any{
+				"code": 0,
+				"data": map[string]any{"lyric": hex.EncodeToString(encrypted), "qrc_t": "1"},
+			},
+		})
+		return responseFor(request, http.StatusOK, "application/json", body), nil
+	})}
+	platform := NewMusicPlatformClient(client, "")
+	result, err := platform.Lyric(context.Background(), SourceQMusic, Candidate{
+		ID: "123", Name: "Song", Artist: "Artist", Album: "Album", DurationMS: 1_000,
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "[00:00.000]ordinary line" || string(result.Timing) != "LINE" {
+		t.Fatalf("ordinary QRC result = %#v", result)
 	}
 }
 
@@ -240,52 +283,8 @@ func TestQQVerbatimLyricUsesMusicUAndDecryptsQRC(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != "[00:00.00]<00:00.00>你<00:00.50>好" {
-		t.Fatalf("verbatim lyrics = %q", result)
-	}
-}
-
-func TestKugouVerbatimLyricSearchesAndDownloadsKRC(t *testing.T) {
-	krc := "[0,1000]<0,500,0>你<500,500,0>好"
-	encrypted, err := encryptKRCForTest([]byte(krc))
-	if err != nil {
-		t.Fatal(err)
-	}
-	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		switch request.URL.Path {
-		case "/v1/search":
-			query := request.URL.Query()
-			for _, key := range []string{"album_audio_id", "duration", "hash", "keyword", "lrctxt", "man", "appid", "clientver", "signature"} {
-				if query.Get(key) == "" {
-					t.Fatalf("missing Kugou lyric search parameter %q: %s", key, request.URL.String())
-				}
-			}
-			if query.Get("appid") != "3116" || query.Get("clientver") != "11070" {
-				t.Fatalf("unexpected Kugou lyric search client parameters: %s", request.URL.String())
-			}
-			return responseFor(request, http.StatusOK, "application/json", []byte(`{"candidates":[{"id":"lyric-id","accesskey":"access-key"}]} `)), nil
-		case "/download":
-			query := request.URL.Query()
-			if query.Get("id") != "lyric-id" || query.Get("accesskey") != "access-key" || query.Get("fmt") != "krc" ||
-				query.Get("appid") != "3116" || query.Get("clientver") != "11070" || query.Get("signature") == "" {
-				t.Fatalf("unexpected Kugou download query: %s", request.URL.String())
-			}
-			body, _ := json.Marshal(map[string]any{"contenttype": 1, "content": base64.StdEncoding.EncodeToString(encrypted)})
-			return responseFor(request, http.StatusOK, "application/json", body), nil
-		default:
-			t.Fatalf("unexpected Kugou lyric request: %s", request.URL.String())
-			return nil, nil
-		}
-	})}
-	platform := NewMusicPlatformClient(client, "")
-	result, err := platform.Lyric(context.Background(), SourceKugou, Candidate{
-		ID: "file-hash", LyricID: "audio-id", Name: "歌曲", Artist: "歌手", DurationMS: 1_000,
-	}, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result != "[00:00.00]<00:00.00>你<00:00.50>好" {
-		t.Fatalf("verbatim lyrics = %q", result)
+	if result.Content != "[00:00.000]<00:00.000>你<00:00.500>好<00:01.000>" || result.Timing != "WORD" {
+		t.Fatalf("verbatim lyrics = %#v", result)
 	}
 }
 
@@ -306,22 +305,6 @@ func encryptQRCForTest(content []byte) ([]byte, error) {
 	encrypted := make([]byte, 0, len(plain))
 	for offset := 0; offset < len(plain); offset += 8 {
 		encrypted = append(encrypted, qrcTripleCryptBlock(plain[offset:offset+8], schedule)...)
-	}
-	return encrypted, nil
-}
-
-func encryptKRCForTest(content []byte) ([]byte, error) {
-	var compressed bytes.Buffer
-	writer := zlib.NewWriter(&compressed)
-	if _, err := writer.Write(content); err != nil {
-		return nil, err
-	}
-	if err := writer.Close(); err != nil {
-		return nil, err
-	}
-	encrypted := append([]byte("krc1"), compressed.Bytes()...)
-	for index := 4; index < len(encrypted); index++ {
-		encrypted[index] ^= krcKey[(index-4)%len(krcKey)]
 	}
 	return encrypted, nil
 }

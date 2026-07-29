@@ -17,32 +17,26 @@ export const useLyricsStore = defineStore("lyrics", () => {
   const offset = ref(0);
   const showTranslation = ref(storedPreferences.showTranslation);
   const fontScale = ref(storedPreferences.fontScale);
-  const wordLyricsEnabled = ref(storedPreferences.wordLyricsEnabled ?? true);
   const colors = reactive({
     dark: { ...storedPreferences.colors.dark },
     light: { ...storedPreferences.colors.light },
   });
   let currentTrackId = "";
-  let loaded = false;
   let requestId = 0;
   let requestController: AbortController | null = null;
   const lyricsCache = new Map<string, Lyrics | null>();
 
   async function load(trackId: string) {
-    if (currentTrackId === trackId && loaded) return;
-    loaded = false;
+    if (currentTrackId === trackId && requestController) return;
     requestController?.abort();
     requestController = null;
     const currentRequest = ++requestId;
     currentTrackId = trackId;
-    loading.value = true;
     error.value = "";
     offset.value = uiPreferences.readLyricsOffset(trackId);
-    if (restoreCachedLyrics(trackId)) {
-      loading.value = false;
-      loaded = true;
-      return;
-    }
+    const restoredFromCache = restoreCachedLyrics(trackId);
+    if (!restoredFromCache) lyrics.value = null;
+    loading.value = !restoredFromCache;
 
     const controller = new AbortController();
     requestController = controller;
@@ -51,10 +45,10 @@ export const useLyricsStore = defineStore("lyrics", () => {
       if (currentRequest !== requestId || controller.signal.aborted) return;
       lyrics.value = result;
       rememberLyrics(trackId, result);
-      loaded = true;
     } catch (cause) {
       if (currentRequest !== requestId || controller.signal.aborted) return;
       lyrics.value = null;
+      lyricsCache.delete(trackId);
       error.value = errorMessage(cause, "歌词加载失败");
     } finally {
       if (currentRequest === requestId) {
@@ -84,11 +78,6 @@ export const useLyricsStore = defineStore("lyrics", () => {
     uiPreferences.writeLyricsTranslation(visible);
   }
 
-  function setWordLyricsEnabled(enabled: boolean) {
-    wordLyricsEnabled.value = enabled;
-    uiPreferences.writeLyricsWordLyricsEnabled(enabled);
-  }
-
   function setTextColor(scheme: LyricsColorScheme, value: string) {
     colors[scheme].textColor = normalizeColor(value, DEFAULT_PLAYBACK_LYRICS_COLORS[scheme].textColor);
     uiPreferences.writeLyricsTextColor(scheme, colors[scheme].textColor);
@@ -109,7 +98,6 @@ export const useLyricsStore = defineStore("lyrics", () => {
     requestController?.abort();
     requestController = null;
     currentTrackId = "";
-    loaded = false;
     lyrics.value = null;
     loading.value = false;
     error.value = "";
@@ -137,7 +125,7 @@ export const useLyricsStore = defineStore("lyrics", () => {
     while (lyricsCache.size > MAX_LYRICS_CACHE_ENTRIES) lyricsCache.delete(lyricsCache.keys().next().value!);
   }
 
-  return { lyrics, loading, error, offset, showTranslation, fontScale, wordLyricsEnabled, colors, load, adjustOffset, adjustFont, setFontScale, setTranslationVisible, setWordLyricsEnabled, setTextColor, setHighlightColor, resetOffset, reset, clearServerCache };
+  return { lyrics, loading, error, offset, showTranslation, fontScale, colors, load, adjustOffset, adjustFont, setFontScale, setTranslationVisible, setTextColor, setHighlightColor, resetOffset, reset, clearServerCache };
 });
 
 const MAX_LYRICS_CACHE_ENTRIES = 30;

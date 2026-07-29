@@ -94,28 +94,25 @@ body,
   color: var(--desktop-lyric-idle);
 }
 
-.desktop-lyric-fill {
-  --desktop-lyric-progress: 0%;
-  position: relative;
-  display: inline-block;
-  color: var(--desktop-lyric-idle);
-  white-space: pre;
-}
-
-.desktop-lyric-base {
-  color: var(--desktop-lyric-idle);
-}
-
-.desktop-lyric-progress {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: var(--desktop-lyric-progress);
-  overflow: hidden;
+.desktop-lyric-line-current.has-started .desktop-lyric-primary {
   color: var(--desktop-lyric-highlight);
+}
+
+.desktop-lyric-words {
+  color: var(--desktop-lyric-idle);
   white-space: pre;
-  pointer-events: none;
-  -webkit-text-stroke: 0;
-  text-shadow: none;
+}
+
+.desktop-lyric-word {
+  color: transparent;
+  background: linear-gradient(
+    90deg,
+    var(--desktop-lyric-highlight) 0 var(--desktop-lyric-word-progress, 0%),
+    var(--desktop-lyric-idle) var(--desktop-lyric-word-progress, 0%) 100%
+  );
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .desktop-lyric-line-next {
@@ -278,7 +275,7 @@ body,
 }
 
 @media (forced-colors: active) {
-  .desktop-lyric-fill, .desktop-lyric-base, .desktop-lyric-progress { color: CanvasText; }
+  .desktop-lyric-words, .desktop-lyric-word { color: CanvasText; }
   .desktop-lyrics-toolbar { border: 1px solid CanvasText; background: Canvas; }
   .desktop-lyrics-toolbar button { color: ButtonText; }
 }

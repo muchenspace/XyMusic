@@ -7,6 +7,7 @@ export type { AudioStatus } from "@/shared/domain/audio-status";
 export type TrackStatus = "READY" | "ERROR" | "ARCHIVED";
 export type MetadataStatus = "ORIGINAL" | "OVERRIDDEN" | "PENDING_WRITE" | "WRITE_FAILED";
 export type CreditRole = "PRIMARY" | "FEATURED" | "COMPOSER" | "LYRICIST" | "PRODUCER";
+export type LyricTiming = "LINE" | "WORD";
 
 export interface ArtistCredit {
   artist: { id: string; name: string };
@@ -124,6 +125,7 @@ export interface MetadataLyrics {
   content: string;
   format: "PLAIN" | "LRC";
   language: string;
+  timing: LyricTiming;
 }
 
 export interface TrackTagValues {
@@ -146,7 +148,7 @@ export interface TrackTagValues {
 }
 
 export interface TrackDetail extends TrackSummary {
-  lyrics: Array<{ id: string; language: string; format: "PLAIN" | "LRC"; content: string; isDefault: boolean; version: number; updatedAt: string }>;
+  lyrics: Array<{ id: string; language: string; format: "PLAIN" | "LRC"; timing: LyricTiming; content: string; isDefault: boolean; version: number; updatedAt: string }>;
   variants: Array<{ id: string; quality: string; mimeType: string; codec: string; container: string; bitrate: number | null; sampleRate: number | null; status: string; updatedAt: string }>;
 }
 
@@ -174,7 +176,7 @@ export interface TrackTagRevision {
   album: string | null;
   albumArtists: string[];
   overriddenFields: string[];
-  lyrics: { format: "PLAIN" | "LRC"; language: string; hasContent: true } | null;
+  lyrics: { format: "PLAIN" | "LRC"; timing: LyricTiming; language: string; hasContent: true } | null;
   actorId: string | null;
   reason: string | null;
   createdAt: string;

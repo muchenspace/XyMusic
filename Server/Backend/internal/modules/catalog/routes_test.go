@@ -70,12 +70,12 @@ func TestRoutesRegisterAllNineCatalogEndpointsAndAuthenticate(t *testing.T) {
 	if api.searchInput.Scope != SearchScopeAll || api.searchInput.Limit != nil {
 		t.Fatalf("ALL search input = %#v", api.searchInput)
 	}
-	if api.getTrackInput.LyricPage != 2 || api.getTrackInput.LyricPageSize != 50 {
+	if api.getTrackInput != (GetTrackInput{}) {
 		t.Fatalf("track detail input = %#v", api.getTrackInput)
 	}
 }
 
-func TestTrackRouteRejectsInvalidLyricPaginationBeforeAuthentication(t *testing.T) {
+func TestTrackRouteIgnoresRemovedLyricPaginationParameters(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	api := &apiStub{calls: make(map[string]int)}
 	auth := &authStub{userID: "user-1"}
@@ -85,7 +85,7 @@ func TestTrackRouteRejectsInvalidLyricPaginationBeforeAuthentication(t *testing.
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/tracks/00000000-0000-0000-0000-000000000001?lyricPageSize=101", nil)
 	response := httptest.NewRecorder()
 	engine.ServeHTTP(response, request)
-	if response.Code != http.StatusBadRequest || auth.calls != 0 || api.calls["getTrack"] != 0 {
+	if response.Code != http.StatusOK || auth.calls != 1 || api.calls["getTrack"] != 1 {
 		t.Fatalf("status/auth/service = %d/%d/%d, body = %s", response.Code, auth.calls, api.calls["getTrack"], response.Body.String())
 	}
 }
@@ -172,7 +172,7 @@ func (api *apiStub) GetTrack(_ context.Context, userID, _ string, input GetTrack
 	api.calls["getTrack"]++
 	api.trackUserID = userID
 	api.getTrackInput = input
-	return TrackDetailDTO{Lyrics: []LyricDTO{}}, nil
+	return TrackDetailDTO{Lyric: nil}, nil
 }
 
 func (api *apiStub) ListArtists(_ context.Context, input ListArtistsInput) (ArtistPageDTO, error) {

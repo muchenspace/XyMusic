@@ -17,35 +17,35 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.ResolvedTextDirection
-import kotlin.math.floor
 
 @Composable
 internal fun WordByWordLyricText(
     text: String,
-    highlightEndOffsets: List<Int>,
+    words: List<PlayerLyricWordUi>,
     playbackPosition: State<Float>,
-    lineStartTimeMs: Long,
-    lineEndTimeMs: Long?,
     modifier: Modifier = Modifier,
     baseColor: Color,
     highlightColor: Color,
     style: TextStyle,
-    highlightProgressOverride: WordByWordHighlightProgress? = null,
-    highlightAlpha: Float = 1f,
 ) {
-    val normalizedHighlightEndOffsets =
-        remember(text, highlightEndOffsets) {
-            highlightEndOffsets
-                .asSequence()
-                .filter { offset -> offset in 1..text.length }
-                .distinct()
-                .sorted()
-                .toList()
+    val normalizedWords =
+        remember(text, words) {
+            var endOffset = 0
+            words.mapNotNull { word ->
+                if (word.text.isEmpty()) {
+                    null
+				} else {
+					val nextEndOffset = endOffset + word.text.length
+					if (nextEndOffset > text.length) {
+						null
+					} else {
+						endOffset = nextEndOffset
+						TimedWordLayout(word.timeMs, word.endTimeMs, nextEndOffset)
+					}
+				}
+            }
         }
-    val drawCache =
-        remember(text, normalizedHighlightEndOffsets) {
-            WordByWordLyricDrawCache(normalizedHighlightEndOffsets)
-        }
+    val drawCache = remember(text, normalizedWords) { WordByWordLyricDrawCache(normalizedWords) }
 
     Box(modifier = modifier) {
         Text(
@@ -56,79 +56,88 @@ internal fun WordByWordLyricText(
         Text(
             text = text,
             modifier =
-            Modifier
-                .clearAndSetSemantics {}
-                .drawWithContent {
-                    val progress =
-                        highlightProgressOverride
-                            ?: lineEndTimeMs?.let { endTimeMs ->
-                                calculateWordByWordHighlightProgress(
-                                    playbackPositionMs = playbackPosition.value,
-                                    lineStartTimeMs = lineStartTimeMs,
-                                    lineEndTimeMs = endTimeMs,
-                                    graphemeCount = normalizedHighlightEndOffsets.size,
-                                )
-                            }
-                            ?: WordByWordHighlightProgress(completedCount = 0, currentFraction = 0f)
-                    drawCache.drawHighlight(this, progress)
-                },
-            color = highlightColor.copy(alpha = highlightAlpha.coerceIn(0f, 1f)),
+                Modifier
+                    .clearAndSetSemantics {}
+                    .drawWithContent {
+                        drawCache.drawHighlight(
+                            this,
+                            calculateWordTimedHighlightProgressForLayouts(
+                                words = normalizedWords,
+                                playbackPositionMs = playbackPosition.value,
+                            ),
+                        )
+                    },
+            color = highlightColor,
             style = style,
             onTextLayout = drawCache::updateLayout,
         )
     }
 }
 
-internal data class WordByWordHighlightProgress(val completedCount: Int, val currentFraction: Float)
+internal data class WordTimedHighlightProgress(val completedCount: Int, val currentFraction: Float)
 
-internal fun calculateWordByWordHighlightProgress(
+internal fun calculateWordTimedHighlightProgress(
+	words: List<PlayerLyricWordUi>,
+	playbackPositionMs: Long,
+): WordTimedHighlightProgress = calculateWordTimedHighlightProgressByTimes(
+	wordTimes = words.map { word -> WordTiming(word.timeMs, word.endTimeMs) },
+	playbackPositionMs = playbackPositionMs.toFloat(),
+)
+
+private fun calculateWordTimedHighlightProgressForLayouts(
+    words: List<TimedWordLayout>,
     playbackPositionMs: Float,
-    lineStartTimeMs: Long,
-    lineEndTimeMs: Long,
-    graphemeCount: Int,
-): WordByWordHighlightProgress {
-    if (graphemeCount <= 0 || playbackPositionMs.isNaN()) {
-        return WordByWordHighlightProgress(completedCount = 0, currentFraction = 0f)
-    }
-    if (playbackPositionMs <= lineStartTimeMs.toDouble()) {
-        return WordByWordHighlightProgress(completedCount = 0, currentFraction = 0f)
-    }
-    if (playbackPositionMs >= lineEndTimeMs.toDouble()) {
-        return WordByWordHighlightProgress(completedCount = graphemeCount, currentFraction = 0f)
-    }
+): WordTimedHighlightProgress = calculateWordTimedHighlightProgressByTimes(
+	wordTimes = words.map { word -> WordTiming(word.timeMs, word.endTimeMs) },
+	playbackPositionMs = playbackPositionMs,
+)
 
-    val durationMs = lineEndTimeMs.toDouble() - lineStartTimeMs.toDouble()
-    if (durationMs <= 0.0) {
-        return WordByWordHighlightProgress(completedCount = 0, currentFraction = 0f)
-    }
-    val exactGraphemeCount =
-        ((playbackPositionMs.toDouble() - lineStartTimeMs.toDouble()) / durationMs) * graphemeCount
-    val completedCount = floor(exactGraphemeCount).toInt().coerceIn(0, graphemeCount)
-    val currentFraction =
-        if (completedCount == graphemeCount) {
-            0f
-        } else {
-            (exactGraphemeCount - completedCount).toFloat().coerceIn(0f, 1f)
-        }
-    return WordByWordHighlightProgress(
-        completedCount = completedCount,
-        currentFraction = currentFraction,
-    )
+private fun calculateWordTimedHighlightProgressByTimes(
+	wordTimes: List<WordTiming>,
+	playbackPositionMs: Float,
+): WordTimedHighlightProgress {
+	if (wordTimes.isEmpty() || playbackPositionMs.isNaN()) {
+		return WordTimedHighlightProgress(completedCount = 0, currentFraction = 0f)
+	}
+	var completedCount = 0
+	for (word in wordTimes) {
+		if (playbackPositionMs < word.timeMs) {
+			return WordTimedHighlightProgress(completedCount, 0f)
+		}
+		val endTimeMs = word.endTimeMs
+		if (endTimeMs == null || endTimeMs <= word.timeMs) {
+			return WordTimedHighlightProgress(completedCount, 0f)
+		}
+		if (playbackPositionMs >= endTimeMs) {
+			completedCount += 1
+			continue
+		}
+		val fraction =
+			((playbackPositionMs - word.timeMs).toDouble() / (endTimeMs - word.timeMs))
+				.toFloat()
+				.coerceIn(0f, 1f)
+		return WordTimedHighlightProgress(completedCount, fraction)
+	}
+	return WordTimedHighlightProgress(completedCount, 0f)
 }
 
-private class WordByWordLyricDrawCache(private val highlightEndOffsets: List<Int>) {
+private data class WordTiming(val timeMs: Long, val endTimeMs: Long?)
+
+private data class TimedWordLayout(val timeMs: Long, val endTimeMs: Long?, val endOffset: Int)
+
+private class WordByWordLyricDrawCache(private val words: List<TimedWordLayout>) {
     private val completedPath = Path()
-    private var graphemePaths: List<GraphemeHighlightPath> = emptyList()
+    private var wordPaths: List<WordHighlightPath> = emptyList()
     private var completedPathCount = -1
 
     fun updateLayout(layoutResult: TextLayoutResult) {
         var startOffset = 0
-        graphemePaths =
-            highlightEndOffsets.map { endOffset ->
-                val path = layoutResult.getPathForRange(startOffset, endOffset)
+        wordPaths =
+            words.map { word ->
+                val path = layoutResult.getPathForRange(startOffset, word.endOffset)
                 val direction = layoutResult.getBidiRunDirection(startOffset)
-                startOffset = endOffset
-                GraphemeHighlightPath(
+                startOffset = word.endOffset
+                WordHighlightPath(
                     path = path,
                     bounds = path.getBounds(),
                     isRightToLeft = direction == ResolvedTextDirection.Rtl,
@@ -137,8 +146,12 @@ private class WordByWordLyricDrawCache(private val highlightEndOffsets: List<Int
         completedPathCount = -1
     }
 
-    fun drawHighlight(drawScope: ContentDrawScope, progress: WordByWordHighlightProgress) = with(drawScope) {
-        val completedCount = progress.completedCount.coerceIn(0, graphemePaths.size)
+    fun drawHighlight(drawScope: ContentDrawScope, progress: WordTimedHighlightProgress) = with(drawScope) {
+        val completedCount = progress.completedCount.coerceIn(0, wordPaths.size)
+        if (completedCount >= wordPaths.size && wordPaths.isNotEmpty()) {
+            drawScope.drawContent()
+            return@with
+        }
         if (completedCount > 0) {
             ensureCompletedPath(completedCount)
             clipPath(completedPath) {
@@ -146,19 +159,19 @@ private class WordByWordLyricDrawCache(private val highlightEndOffsets: List<Int
             }
         }
 
-        val currentGrapheme = graphemePaths.getOrNull(completedCount) ?: return@with
+        val currentWord = wordPaths.getOrNull(completedCount) ?: return@with
         val fraction = progress.currentFraction.coerceIn(0f, 1f)
-        val bounds = currentGrapheme.bounds
+        val bounds = currentWord.bounds
         if (fraction <= 0f || bounds.width <= 0f || bounds.height <= 0f) return@with
         val revealWidth = bounds.width * fraction
         val revealLeft =
-            if (currentGrapheme.isRightToLeft) {
+            if (currentWord.isRightToLeft) {
                 bounds.right - revealWidth
             } else {
                 bounds.left
             }
         val revealRight =
-            if (currentGrapheme.isRightToLeft) {
+            if (currentWord.isRightToLeft) {
                 bounds.right
             } else {
                 bounds.left + revealWidth
@@ -169,7 +182,7 @@ private class WordByWordLyricDrawCache(private val highlightEndOffsets: List<Int
             right = revealRight,
             bottom = bounds.bottom,
         ) {
-            clipPath(currentGrapheme.path) {
+            clipPath(currentWord.path) {
                 drawScope.drawContent()
             }
         }
@@ -179,10 +192,10 @@ private class WordByWordLyricDrawCache(private val highlightEndOffsets: List<Int
         if (completedPathCount == completedCount) return
         completedPath.reset()
         repeat(completedCount) { index ->
-            completedPath.addPath(graphemePaths[index].path)
+            completedPath.addPath(wordPaths[index].path)
         }
         completedPathCount = completedCount
     }
 }
 
-private data class GraphemeHighlightPath(val path: Path, val bounds: Rect, val isRightToLeft: Boolean)
+private data class WordHighlightPath(val path: Path, val bounds: Rect, val isRightToLeft: Boolean)

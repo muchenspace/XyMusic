@@ -60,6 +60,13 @@ let pollFailures = 0;
 let completedEmitted = false;
 let actionGeneration = 0;
 const sourceOptions: Array<{ value: TagSource; label: string }> = [{ value: "qmusic", label: "QQ 音乐" }, { value: "netease", label: "网易云" }, { value: "kugou", label: "酷狗" }];
+const visibleSourceOptions = computed(() => verbatim.value
+  ? sourceOptions.filter((source) => source.value === "qmusic")
+  : sourceOptions);
+
+watch(verbatim, (value) => {
+  if (value) sources.value = ["qmusic"];
+});
 
 watch(open, (value) => {
   actionGeneration += 1;
@@ -209,7 +216,7 @@ async function retry() {
 <template>
   <BaseDialog v-model="open" :title="`批量刮削 ${submittedCount || tracks.length} 首曲目`" description="匹配、歌词、封面和字段应用全部由后端执行，关闭窗口不会中止任务。" width="xl">
     <template v-if="!job">
-      <p class="ui-label">来源优先级（按显示顺序）</p><div class="flex flex-wrap gap-2"><label v-for="source in sourceOptions" :key="source.value" class="flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm"><input v-model="sources" type="checkbox" :value="source.value" />{{ source.label }}</label></div>
+      <p class="ui-label">来源优先级（按显示顺序）</p><div class="flex flex-wrap gap-2"><label v-for="source in visibleSourceOptions" :key="source.value" class="flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm"><input v-model="sources" type="checkbox" :value="source.value" />{{ source.label }}</label></div>
       <div class="mt-5 grid gap-4 sm:grid-cols-3"><div><label class="ui-label">匹配模式</label><select v-model="matchMode" class="ui-select"><option value="strict">严格匹配</option><option value="simple">宽松匹配</option></select></div><div><label class="ui-label">歌词类型</label><select v-model="verbatim" data-testid="batch-verbatim" class="ui-select"><option :value="false">普通歌词</option><option :value="true">逐字歌词</option></select></div><div><label class="ui-label">任务原因</label><input v-model="reason" class="ui-input" /></div></div>
       <p class="ui-label mt-5">仅刮削缺失以下字段的曲目</p><div class="grid grid-cols-2 gap-2 sm:grid-cols-3"><label v-for="item in [{k:'artist',l:'主要艺术家'},{k:'album',l:'专辑'},{k:'year',l:'发行年份'},{k:'genre',l:'流派'},{k:'lyrics',l:'歌词'},{k:'cover',l:'封面'}]" :key="item.k" class="flex items-center gap-2 rounded-lg border border-[var(--border)] p-2 text-sm"><input v-model="missingFields" type="checkbox" :value="item.k" />无{{ item.l }}</label></div><p class="mt-2 text-xs text-[var(--muted)]">不选择时刮削全部选中曲目；选择多项时满足任一条件即可。</p>
       <p class="ui-label mt-5">应用字段</p><div class="grid grid-cols-2 gap-2 sm:grid-cols-4"><label v-for="item in [{k:'title',l:'标题'},{k:'artist',l:'艺术家'},{k:'album',l:'专辑'},{k:'year',l:'年份'},{k:'genre',l:'流派'},{k:'lyrics',l:'歌词'},{k:'cover',l:'专辑封面'}]" :key="item.k" class="flex items-center gap-2 rounded-lg border border-[var(--border)] p-2 text-sm"><input v-model="fields[item.k as keyof typeof fields]" type="checkbox" />{{ item.l }}</label></div>

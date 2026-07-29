@@ -2,6 +2,7 @@ package com.xymusic.app.app.navigation
 
 import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
@@ -268,6 +269,9 @@ private fun PlayerScreenRoute(
     onToggleFavorite: () -> Unit,
     onAddToPlaylist: (String) -> Unit,
 ) {
+    LaunchedEffect(Unit) {
+        playerViewModel.refreshLyrics()
+    }
     PlayerScreen(
         uiState = uiState,
         onBack = onBack,

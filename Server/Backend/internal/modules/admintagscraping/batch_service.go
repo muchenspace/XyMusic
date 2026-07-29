@@ -585,6 +585,9 @@ func validateCreateBatch(input CreateBatchInput) error {
 	if len(input.Options.Sources) < 1 || len(input.Options.Sources) > 5 || !uniqueSources(input.Options.Sources) {
 		return apperror.Validation("Batch scraping sources are invalid")
 	}
+	if input.Options.Verbatim && !onlyQQMusicSource(input.Options.Sources) {
+		return unsupportedVerbatimSourceError()
+	}
 	if input.Options.MatchMode != MatchStrict && input.Options.MatchMode != MatchSimple {
 		return apperror.Validation("Batch match mode is invalid")
 	}
@@ -595,6 +598,15 @@ func validateCreateBatch(input CreateBatchInput) error {
 		return apperror.Validation("Batch reason is invalid")
 	}
 	return nil
+}
+
+func onlyQQMusicSource(sources []Source) bool {
+	for _, source := range sources {
+		if source != SourceQMusic {
+			return false
+		}
+	}
+	return len(sources) > 0
 }
 
 func presentBatch(job BatchJobRecord, items []BatchItemRecord, partial bool) BatchJobDTO {

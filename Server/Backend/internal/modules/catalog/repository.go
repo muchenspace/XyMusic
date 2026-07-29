@@ -21,7 +21,7 @@ type Store interface {
 	RandomTracks(ctx context.Context, userID string, anchor float64, atOrAfter bool, limit int) ([]TrackRecord, error)
 	FindTracks(ctx context.Context, userID string, trackIDs []string) ([]TrackRecord, error)
 	FindTrack(ctx context.Context, userID, trackID string) (TrackRecord, error)
-	ListLyrics(ctx context.Context, query ListLyricsQuery) ([]LyricRecord, int, error)
+	FindLyric(ctx context.Context, trackID string) (*LyricRecord, error)
 	ListArtists(ctx context.Context, query ListArtistsQuery) ([]ArtistRecord, error)
 	FindArtist(ctx context.Context, artistID string) (ArtistRecord, error)
 	ListAlbums(ctx context.Context, query ListAlbumsQuery) ([]AlbumRecord, error)
@@ -114,48 +114,30 @@ func (r *Repository) FindTrack(ctx context.Context, userID, trackID string) (Tra
 	return rows[0], nil
 }
 
-func (r *Repository) ListLyrics(ctx context.Context, query ListLyricsQuery) ([]LyricRecord, int, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT id, track_id, language, format::text, content, is_default, updated_at
+func (r *Repository) FindLyric(ctx context.Context, trackID string) (*LyricRecord, error) {
+	var item LyricRecord
+	err := r.pool.QueryRow(ctx, `
+		SELECT id, track_id, language, format::text, timing::text, content, updated_at
 		FROM lyrics
 		WHERE track_id = $1 AND content IS NOT NULL
 		ORDER BY is_default DESC, language ASC, id ASC
-		LIMIT $2 OFFSET $3
-	`, query.TrackID, query.Limit, query.Offset)
+		LIMIT 1
+	`, trackID).Scan(
+		&item.ID,
+		&item.TrackID,
+		&item.Language,
+		&item.Format,
+		&item.Timing,
+		&item.Content,
+		&item.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
-		return nil, 0, fmt.Errorf("query track lyrics: %w", err)
+		return nil, fmt.Errorf("query track lyric: %w", err)
 	}
-	result := make([]LyricRecord, 0)
-	for rows.Next() {
-		var item LyricRecord
-		if err := rows.Scan(
-			&item.ID,
-			&item.TrackID,
-			&item.Language,
-			&item.Format,
-			&item.Content,
-			&item.IsDefault,
-			&item.UpdatedAt,
-		); err != nil {
-			rows.Close()
-			return nil, 0, fmt.Errorf("scan track lyric: %w", err)
-		}
-		result = append(result, item)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, 0, fmt.Errorf("iterate track lyrics: %w", err)
-	}
-	rows.Close()
-	var total int
-	if err := r.pool.QueryRow(ctx, `
-		SELECT count(*)::int
-		FROM lyrics
-		WHERE track_id = $1 AND content IS NOT NULL
-	`, query.TrackID).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count track lyrics: %w", err)
-	}
-	return result, total, nil
+	return &item, nil
 }
 
 func (r *Repository) ListArtists(ctx context.Context, input ListArtistsQuery) ([]ArtistRecord, error) {

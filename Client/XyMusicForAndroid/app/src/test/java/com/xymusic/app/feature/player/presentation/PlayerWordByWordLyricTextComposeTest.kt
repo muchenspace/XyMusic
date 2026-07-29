@@ -44,10 +44,13 @@ class PlayerWordByWordLyricTextComposeTest {
                 SideEffect { compositionCount++ }
                 WordByWordLyricText(
                     text = text,
-                    highlightEndOffsets = listOf(1, 2, 3, 4),
+                    words = listOf(
+                        PlayerLyricWordUi(1_000, "逐"),
+                        PlayerLyricWordUi(1_500, "字"),
+                        PlayerLyricWordUi(2_000, "歌"),
+                        PlayerLyricWordUi(2_500, "词"),
+                    ),
                     playbackPosition = playbackPosition,
-                    lineStartTimeMs = 1_000,
-                    lineEndTimeMs = 3_000,
                     baseColor = Color.Gray,
                     highlightColor = Color.White,
                     style = TextStyle(fontSize = 24.sp, lineHeight = 32.sp),
@@ -77,10 +80,10 @@ class PlayerWordByWordLyricTextComposeTest {
             XyMusicTheme(dynamicColor = false) {
                 WordByWordLyricText(
                     text = text,
-                    highlightEndOffsets = (1..text.length).toList(),
+                    words = text.mapIndexed { index, character ->
+                        PlayerLyricWordUi(1_000L + index * 100, character.toString())
+                    },
                     playbackPosition = remember { mutableFloatStateOf(2_000f) },
-                    lineStartTimeMs = 1_000,
-                    lineEndTimeMs = 3_000,
                     modifier = Modifier.width(64.dp),
                     baseColor = Color.Gray,
                     highlightColor = Color.White,
@@ -93,4 +96,5 @@ class PlayerWordByWordLyricTextComposeTest {
         val bounds = composeRule.onNodeWithText(text).fetchSemanticsNode().boundsInRoot
         assertThat(bounds.height).isGreaterThan(bounds.width)
     }
+
 }

@@ -4,7 +4,7 @@ import com.xymusic.app.core.model.media.Lyrics
 import kotlinx.coroutines.flow.Flow
 
 interface LyricsSource {
-    fun observe(trackId: String): Flow<List<Lyrics>>
+    fun observe(trackId: String): Flow<Lyrics?>
 
     suspend fun refresh(trackId: String)
 }

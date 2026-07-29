@@ -139,6 +139,7 @@ type LyricRecord struct {
 	ID        string
 	Language  string
 	Format    string
+	Timing    string
 	Content   *string
 	IsDefault bool
 	Version   int

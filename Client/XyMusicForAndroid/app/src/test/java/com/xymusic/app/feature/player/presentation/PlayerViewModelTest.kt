@@ -9,13 +9,11 @@ import com.xymusic.app.core.model.media.Artist
 import com.xymusic.app.core.model.media.ArtistReference
 import com.xymusic.app.core.model.media.Lyrics
 import com.xymusic.app.core.model.media.LyricsFormat
+import com.xymusic.app.core.model.media.LyricsTiming
 import com.xymusic.app.core.model.media.Track
 import com.xymusic.app.core.model.media.TrackDetail
 import com.xymusic.app.core.paging.asPagedStream
 import com.xymusic.app.domain.paging.PagedStream
-import com.xymusic.app.domain.settings.AppSettings
-import com.xymusic.app.domain.settings.AppSettingsRepository
-import com.xymusic.app.domain.settings.AppSettingsUseCases
 import com.xymusic.app.feature.catalog.domain.CatalogRepository
 import com.xymusic.app.feature.catalog.domain.CatalogResult
 import com.xymusic.app.feature.catalog.domain.model.AlbumQuery
@@ -69,7 +67,6 @@ class PlayerViewModelTest {
                 PlayerUseCases(player),
                 lyricsSource(catalog),
                 PlaybackQueueUseCases(EmptyPlaybackQueueStore),
-                AppSettingsUseCases(FakeAppSettingsRepository()),
                 mainDispatcherRule.dispatcher,
             )
         backgroundScope.launch { viewModel.uiState.collect() }
@@ -85,6 +82,61 @@ class PlayerViewModelTest {
     }
 
     @Test
+    fun explicitWordTimingIsPublishedWithParsedWordSegments() = runTest {
+        val item = queueItem("track-word")
+        val player =
+            FakePlayerRepository(
+                PlayerState(queue = listOf(item), currentQueueItemId = item.queueItemId),
+            )
+        val viewModel =
+            PlayerViewModel(
+                PlayerUseCases(player),
+                lyricsSource(RefreshingCatalogRepository(wordLyrics = true)),
+                PlaybackQueueUseCases(EmptyPlaybackQueueStore),
+                mainDispatcherRule.dispatcher,
+            )
+        backgroundScope.launch { viewModel.uiState.collect() }
+
+        advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.lyricsTiming).isEqualTo(LyricsTiming.WORD)
+        assertThat(viewModel.uiState.value.lyrics.first().words)
+            .containsExactly(
+                PlayerLyricWordUi(0, "First ", endTimeMs = 500),
+                PlayerLyricWordUi(500, "line"),
+            ).inOrder()
+    }
+
+    @Test
+    fun explicitRefreshReloadsLyricsForTheCurrentTrack() = runTest {
+        val item = queueItem("track-refresh")
+        val player =
+            FakePlayerRepository(
+                PlayerState(queue = listOf(item), currentQueueItemId = item.queueItemId),
+            )
+        val catalog = RefreshingCatalogRepository()
+        val viewModel =
+            PlayerViewModel(
+                PlayerUseCases(player),
+                lyricsSource(catalog),
+                PlaybackQueueUseCases(EmptyPlaybackQueueStore),
+                mainDispatcherRule.dispatcher,
+            )
+        backgroundScope.launch { viewModel.uiState.collect() }
+        advanceUntilIdle()
+        assertThat(viewModel.uiState.value.lyricsTiming).isEqualTo(LyricsTiming.LINE)
+
+        catalog.wordLyrics = true
+        viewModel.refreshLyrics()
+        advanceUntilIdle()
+
+        assertThat(catalog.refreshedTrackIds).containsExactly("track-refresh", "track-refresh").inOrder()
+        assertThat(viewModel.uiState.value.lyricsTiming).isEqualTo(LyricsTiming.WORD)
+        assertThat(viewModel.uiState.value.lyrics).isNotEmpty()
+        assertThat(viewModel.uiState.value.lyrics.all { line -> line.words.isNotEmpty() }).isTrue()
+    }
+
+    @Test
     fun cachedLyricsArePublishedWhileRefreshIsStillRunning() = runTest {
         val item = queueItem("track-1")
         val player =
@@ -97,7 +149,6 @@ class PlayerViewModelTest {
                 PlayerUseCases(player),
                 lyricsSource(catalog),
                 PlaybackQueueUseCases(EmptyPlaybackQueueStore),
-                AppSettingsUseCases(FakeAppSettingsRepository()),
                 mainDispatcherRule.dispatcher,
             )
         backgroundScope.launch { viewModel.uiState.collect() }
@@ -125,7 +176,6 @@ class PlayerViewModelTest {
                 PlayerUseCases(player),
                 lyricsSource(catalog),
                 PlaybackQueueUseCases(EmptyPlaybackQueueStore),
-                AppSettingsUseCases(FakeAppSettingsRepository()),
                 mainDispatcherRule.dispatcher,
             )
         backgroundScope.launch { viewModel.uiState.collect() }
@@ -140,36 +190,6 @@ class PlayerViewModelTest {
     }
 
     @Test
-    fun wordByWordLyricsSettingIsPublishedWithoutReparsingLyrics() = runTest {
-        val item = queueItem("track-1")
-        val player =
-            FakePlayerRepository(
-                PlayerState(queue = listOf(item), currentQueueItemId = item.queueItemId),
-            )
-        val settingsRepository = FakeAppSettingsRepository()
-        val viewModel =
-            PlayerViewModel(
-                PlayerUseCases(player),
-                lyricsSource(RefreshingCatalogRepository()),
-                PlaybackQueueUseCases(EmptyPlaybackQueueStore),
-                AppSettingsUseCases(settingsRepository),
-                mainDispatcherRule.dispatcher,
-            )
-        backgroundScope.launch { viewModel.uiState.collect() }
-        advanceUntilIdle()
-        val parsedLyrics = viewModel.uiState.value.lyrics
-        assertThat(viewModel.uiState.value.wordByWordLyricsEnabled).isTrue()
-
-        settingsRepository.mutate { settings ->
-            settings.copy(wordByWordLyricsEnabled = false)
-        }
-        advanceUntilIdle()
-
-        assertThat(viewModel.uiState.value.wordByWordLyricsEnabled).isFalse()
-        assertThat(viewModel.uiState.value.lyrics).isSameInstanceAs(parsedLyrics)
-    }
-
-    @Test
     fun playbackSpeedIsForwardedToPlayerRepository() = runTest {
         val player = FakePlayerRepository(PlayerState())
         val viewModel =
@@ -177,7 +197,6 @@ class PlayerViewModelTest {
                 PlayerUseCases(player),
                 lyricsSource(RefreshingCatalogRepository()),
                 PlaybackQueueUseCases(EmptyPlaybackQueueStore),
-                AppSettingsUseCases(FakeAppSettingsRepository()),
                 mainDispatcherRule.dispatcher,
             )
 
@@ -195,7 +214,6 @@ class PlayerViewModelTest {
                 PlayerUseCases(player),
                 lyricsSource(RefreshingCatalogRepository()),
                 PlaybackQueueUseCases(EmptyPlaybackQueueStore),
-                AppSettingsUseCases(FakeAppSettingsRepository()),
                 mainDispatcherRule.dispatcher,
             )
         backgroundScope.launch { viewModel.uiState.collect() }
@@ -230,7 +248,6 @@ class PlayerViewModelTest {
                 PlayerUseCases(player),
                 lyricsSource(RefreshingCatalogRepository()),
                 PlaybackQueueUseCases(EmptyPlaybackQueueStore),
-                AppSettingsUseCases(FakeAppSettingsRepository()),
                 mainDispatcherRule.dispatcher,
             )
         backgroundScope.launch { firstViewModel.uiState.collect() }
@@ -247,7 +264,6 @@ class PlayerViewModelTest {
                 PlayerUseCases(player),
                 lyricsSource(RefreshingCatalogRepository()),
                 PlaybackQueueUseCases(EmptyPlaybackQueueStore),
-                AppSettingsUseCases(FakeAppSettingsRepository()),
                 mainDispatcherRule.dispatcher,
             )
         backgroundScope.launch { recreatedViewModel.uiState.collect() }
@@ -273,7 +289,6 @@ class PlayerViewModelTest {
                 PlayerUseCases(player),
                 lyricsSource(RefreshingCatalogRepository()),
                 PlaybackQueueUseCases(EmptyPlaybackQueueStore),
-                AppSettingsUseCases(FakeAppSettingsRepository()),
                 mainDispatcherRule.dispatcher,
             )
 
@@ -320,7 +335,6 @@ class PlayerViewModelTest {
                 PlayerUseCases(player),
                 lyricsSource(RefreshingCatalogRepository()),
                 PlaybackQueueUseCases(EmptyPlaybackQueueStore),
-                AppSettingsUseCases(FakeAppSettingsRepository()),
                 mainDispatcherRule.dispatcher,
             )
 
@@ -341,7 +355,6 @@ class PlayerViewModelTest {
                 PlayerUseCases(player),
                 lyricsSource(RefreshingCatalogRepository()),
                 PlaybackQueueUseCases(EmptyPlaybackQueueStore),
-                AppSettingsUseCases(FakeAppSettingsRepository()),
                 mainDispatcherRule.dispatcher,
             )
 
@@ -369,28 +382,11 @@ class PlayerViewModelTest {
 }
 
 private fun lyricsSource(repository: CatalogRepository): LyricsSource = object : LyricsSource {
-    override fun observe(trackId: String): Flow<List<Lyrics>> =
-        repository.observeTrack(trackId).map { detail -> detail?.lyrics.orEmpty() }
+    override fun observe(trackId: String): Flow<Lyrics?> =
+        repository.observeTrack(trackId).map { detail -> detail?.lyrics?.singleOrNull() }
 
     override suspend fun refresh(trackId: String) {
         repository.refreshTrack(trackId)
-    }
-}
-
-private class FakeAppSettingsRepository(initialSettings: AppSettings = AppSettings()) : AppSettingsRepository {
-    private val mutableSettings = MutableStateFlow(initialSettings)
-    override val settings: Flow<AppSettings> = mutableSettings
-
-    override suspend fun update(settings: AppSettings) {
-        mutableSettings.value = settings
-    }
-
-    override suspend fun mutate(transform: (AppSettings) -> AppSettings) {
-        mutableSettings.value = transform(mutableSettings.value)
-    }
-
-    override suspend fun reset() {
-        mutableSettings.value = AppSettings()
     }
 }
 
@@ -412,7 +408,9 @@ private object EmptyPlaybackQueueStore : PlaybackQueueStore {
     override suspend fun clear(ownerUserId: String): PlayerResult<Unit> = PlayerResult.Success(Unit)
 }
 
-private class RefreshingCatalogRepository : CatalogRepository {
+private class RefreshingCatalogRepository(
+    var wordLyrics: Boolean = false,
+) : CatalogRepository {
     private val details = mutableMapOf<String, MutableStateFlow<TrackDetail?>>()
     val refreshedTrackIds = mutableListOf<String>()
 
@@ -435,15 +433,19 @@ private class RefreshingCatalogRepository : CatalogRepository {
                     discNumber = 1,
                     publishedAtEpochMillis = 1,
                 ),
-                lyrics =
-                listOf(
+                lyrics = listOf(
                     Lyrics(
                         id = "lyrics-1",
                         trackId = trackId,
                         language = "und",
                         format = LyricsFormat.LRC,
-                        content = "[00:00.00]First line\n[00:10.00]Second line",
-                        isDefault = true,
+                        timing = if (wordLyrics) LyricsTiming.WORD else LyricsTiming.LINE,
+                        content =
+                        if (wordLyrics) {
+                            "[00:00.00]<00:00.00>First <00:00.50>line\n[00:10.00]<00:10.00>Second <00:10.50>line"
+                        } else {
+                            "[00:00.00]First line\n[00:10.00]Second line"
+                        },
                         trackVersion = 1,
                         updatedAtEpochMillis = 1,
                     ),
@@ -497,8 +499,8 @@ private class BlockingRefreshCatalogRepository(trackId: String) : CatalogReposit
                         trackId = trackId,
                         language = "und",
                         format = LyricsFormat.PLAIN,
+                        timing = LyricsTiming.LINE,
                         content = "Cached line",
-                        isDefault = true,
                         trackVersion = 1,
                         updatedAtEpochMillis = 1,
                     ),

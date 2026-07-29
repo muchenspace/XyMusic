@@ -267,7 +267,7 @@ func TestLegacyAndGoPublicSmokeParity(t *testing.T) {
 		{http.MethodPost, "/api/v1/admin/tracks/" + adminUserID + "/archive", []byte(`{"expectedVersion":1}`)},
 		{http.MethodPost, "/api/v1/admin/tracks/" + adminUserID + "/restore", []byte(`{"expectedVersion":1}`)},
 		{http.MethodDelete, "/api/v1/admin/tracks/" + adminUserID, []byte(`{"expectedVersion":1}`)},
-		{http.MethodPut, "/api/v1/admin/tracks/" + adminUserID + "/lyrics", []byte(`{"expectedVersion":1,"language":"zh","format":"LRC","content":"","isDefault":true}`)},
+		{http.MethodPut, "/api/v1/admin/tracks/" + adminUserID + "/lyrics", []byte(`{"expectedVersion":1,"language":"zh","format":"LRC","timing":"LINE","content":"","isDefault":true}`)},
 		{http.MethodPatch, "/api/v1/admin/users/" + adminUserID + "/status", []byte(`{"expectedVersion":1,"status":"SUSPENDED","reason":"parity"}`)},
 	}
 	for _, mutation := range adminMutationRequests {

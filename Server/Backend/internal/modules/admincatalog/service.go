@@ -13,6 +13,7 @@ import (
 	"xymusic/server/internal/modules/catalog"
 	"xymusic/server/internal/shared/apperror"
 	"xymusic/server/internal/shared/audiostatus"
+	sharedlyrics "xymusic/server/internal/shared/lyrics"
 	"xymusic/server/internal/shared/pagination"
 	"xymusic/server/internal/shared/tagwriteback"
 )
@@ -259,8 +260,18 @@ func (service *Service) Track(ctx context.Context, id string, input PageInput) (
 	}
 	lyrics := make([]LyricDTO, 0, len(record.Lyrics))
 	for _, lyric := range record.Lyrics {
+		content := ""
+		if lyric.Content != nil {
+			content = *lyric.Content
+		}
+		if !sharedlyrics.ValidTiming(lyric.Timing) {
+			return TrackDetailDTO{}, apperror.Internal("Stored lyrics timing is invalid", nil)
+		}
+		if err := sharedlyrics.ValidateDocument(lyric.Format, sharedlyrics.Timing(lyric.Timing), content); err != nil {
+			return TrackDetailDTO{}, apperror.Internal("Stored lyrics violate the timing contract", err)
+		}
 		lyrics = append(lyrics, LyricDTO{
-			ID: lyric.ID, Language: lyric.Language, Format: lyric.Format, Content: lyric.Content,
+			ID: lyric.ID, Language: lyric.Language, Format: lyric.Format, Timing: lyric.Timing, Content: lyric.Content,
 			IsDefault: lyric.IsDefault, Version: lyric.Version, UpdatedAt: formatTimestamp(lyric.UpdatedAt),
 		})
 	}

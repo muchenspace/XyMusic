@@ -3,6 +3,8 @@ package admintagscraping
 import (
 	"encoding/json"
 	"time"
+
+	"xymusic/server/internal/shared/lyrics"
 )
 
 type Source string
@@ -56,6 +58,11 @@ type Candidate struct {
 	Score       *float64 `json:"score,omitempty"`
 }
 
+type LyricResult struct {
+	Content string
+	Timing  lyrics.Timing
+}
+
 type ApplyFields struct {
 	Title     bool `json:"title"`
 	Artist    bool `json:"artist"`
@@ -83,9 +90,10 @@ type MetadataCredit struct {
 }
 
 type MetadataLyrics struct {
-	Content  string `json:"content"`
-	Format   string `json:"format"`
-	Language string `json:"language"`
+	Content  string        `json:"content"`
+	Format   string        `json:"format"`
+	Language string        `json:"language"`
+	Timing   lyrics.Timing `json:"timing"`
 }
 
 type MetadataSnapshot struct {

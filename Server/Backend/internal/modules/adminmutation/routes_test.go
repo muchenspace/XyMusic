@@ -221,13 +221,13 @@ func TestAdminMutationRoutesExecuteReplayAndRejectPayloadConflicts(t *testing.T)
 		{
 			name: "upsert lyrics", method: http.MethodPut, path: "/api/v1/admin/tracks/" + trackID + "/lyrics",
 			scope: "admin.track.lyrics:" + trackID + ":zh-CN", status: http.StatusOK,
-			initialBody:      `{"expectedVersion":2,"language":"zh-CN","format":"LRC","content":"[00:00]Line","isDefault":true,"unknown":"first"}`,
-			replayBody:       `{"expectedVersion":2,"language":"zh-CN","format":"LRC","content":"[00:00]Line","isDefault":true,"unknown":"second","another":true}`,
-			conflictBody:     `{"expectedVersion":2,"language":"zh-CN","format":"LRC","content":"[00:01]Different","isDefault":true,"unknown":"second"}`,
+			initialBody:      `{"expectedVersion":2,"language":"zh-CN","format":"LRC","timing":"WORD","content":"[00:00]<00:00>Line","isDefault":true,"unknown":"first"}`,
+			replayBody:       `{"expectedVersion":2,"language":"zh-CN","format":"LRC","timing":"WORD","content":"[00:00]<00:00>Line","isDefault":true,"unknown":"second","another":true}`,
+			conflictBody:     `{"expectedVersion":2,"language":"zh-CN","format":"LRC","timing":"WORD","content":"[00:01]<00:01>Different","isDefault":true,"unknown":"second"}`,
 			responseContains: `"language":"zh-CN"`,
 			assertCall: func(t *testing.T, call mutationCall) {
 				input := call.input.(LyricsInput)
-				if call.operation != "upsertLyrics" || call.id != trackID || input.ExpectedVersion != 2 || input.Language != "zh-CN" || input.Format != "LRC" || !input.Content.Set || input.Content.Value != "[00:00]Line" || !input.IsDefault.Set || !input.IsDefault.Value {
+				if call.operation != "upsertLyrics" || call.id != trackID || input.ExpectedVersion != 2 || input.Language != "zh-CN" || input.Format != "LRC" || input.Timing != "WORD" || !input.Content.Set || input.Content.Value != "[00:00]<00:00>Line" || !input.IsDefault.Set || !input.IsDefault.Value {
 					t.Fatalf("call=%+v input=%+v", call, input)
 				}
 			},
@@ -313,7 +313,7 @@ func TestMutationSchemaValidationPrecedesAuthentication(t *testing.T) {
 	engine := gin.New()
 	routes.Register(engine)
 	id := "00000000-0000-4000-8000-000000000001"
-	requests := []struct{ method, path, body string }{{http.MethodPost, "/api/v1/admin/artists", `{}`}, {http.MethodPatch, "/api/v1/admin/artists/" + id, `{"expectedVersion":1}`}, {http.MethodPost, "/api/v1/admin/albums", `{"title":"Album","artistCredits":[]}`}, {http.MethodPost, "/api/v1/admin/tracks", `{"title":"Track","artistCredits":[],"discNumber":1}`}, {http.MethodPost, "/api/v1/admin/tracks/" + id + "/restore", `{}`}, {http.MethodPost, "/api/v1/admin/tracks/batch/restore", `{"items":[{"trackId":"not-a-uuid","expectedVersion":1}]}`}, {http.MethodPost, "/api/v1/admin/tracks/batch/delete-permanently", `{"items":[{"trackId":"` + id + `","expectedVersion":1},{"trackId":"` + strings.ToUpper(id) + `","expectedVersion":1}]}`}, {http.MethodPut, "/api/v1/admin/tracks/" + id + "/lyrics", `{"expectedVersion":1,"language":"zh","format":"LRC","content":""}`}, {http.MethodPatch, "/api/v1/admin/users/" + id + "/status", `{"expectedVersion":1,"status":"DELETED","reason":"x"}`}}
+	requests := []struct{ method, path, body string }{{http.MethodPost, "/api/v1/admin/artists", `{}`}, {http.MethodPatch, "/api/v1/admin/artists/" + id, `{"expectedVersion":1}`}, {http.MethodPost, "/api/v1/admin/albums", `{"title":"Album","artistCredits":[]}`}, {http.MethodPost, "/api/v1/admin/tracks", `{"title":"Track","artistCredits":[],"discNumber":1}`}, {http.MethodPost, "/api/v1/admin/tracks/" + id + "/restore", `{}`}, {http.MethodPost, "/api/v1/admin/tracks/batch/restore", `{"items":[{"trackId":"not-a-uuid","expectedVersion":1}]}`}, {http.MethodPost, "/api/v1/admin/tracks/batch/delete-permanently", `{"items":[{"trackId":"` + id + `","expectedVersion":1},{"trackId":"` + strings.ToUpper(id) + `","expectedVersion":1}]}`}, {http.MethodPut, "/api/v1/admin/tracks/" + id + "/lyrics", `{"expectedVersion":1,"language":"zh","format":"LRC","content":"[00:01.00]line","isDefault":true}`}, {http.MethodPatch, "/api/v1/admin/users/" + id + "/status", `{"expectedVersion":1,"status":"DELETED","reason":"x"}`}}
 	for _, item := range requests {
 		request := httptest.NewRequest(item.method, item.path, bytes.NewBufferString(item.body))
 		request.Header.Set("Content-Type", "application/json")
@@ -456,7 +456,7 @@ func (stub *mutationAPIStub) PermanentDeleteBatch(_ context.Context, id string) 
 }
 func (stub *mutationAPIStub) UpsertLyrics(_ context.Context, actor, trace, id string, input LyricsInput) (LyricDTO, error) {
 	stub.append("upsertLyrics", actor, trace, id, 0, input)
-	return LyricDTO{ID: "lyric-1", TrackID: id, Language: input.Language, Format: input.Format, Content: input.Content.Value, IsDefault: input.IsDefault.Value, TrackVersion: input.ExpectedVersion + 1}, nil
+	return LyricDTO{ID: "lyric-1", TrackID: id, Language: input.Language, Format: input.Format, Timing: input.Timing, Content: input.Content.Value, IsDefault: input.IsDefault.Value, TrackVersion: input.ExpectedVersion + 1}, nil
 }
 func (stub *mutationAPIStub) UpdateUserStatus(_ context.Context, actor, trace, id string, input UserStatusInput) (UserStatusDTO, error) {
 	stub.append("updateUserStatus", actor, trace, id, 0, input)

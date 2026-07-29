@@ -1027,10 +1027,10 @@ func catalogSnapshot(ctx context.Context, database queryer, trackID string) (Met
 	var lyrics *MetadataLyrics
 	var lyric MetadataLyrics
 	err = database.QueryRow(ctx, `
-		select content, format::text, language from lyrics
+		select content, format::text, language, timing::text from lyrics
 		where track_id = $1 and content is not null
 		order by is_default desc, created_at, id limit 1`, trackID).Scan(
-		&lyric.Content, &lyric.Format, &lyric.Language)
+		&lyric.Content, &lyric.Format, &lyric.Language, &lyric.Timing)
 	if err == nil {
 		lyrics = &lyric
 	} else if !errors.Is(err, pgx.ErrNoRows) {
@@ -1230,7 +1230,8 @@ func projectLyrics(
 	if previous != nil && (next == nil || next.Language != previous.Language) {
 		if _, err := tx.Exec(ctx, `
 			delete from lyrics where track_id = $1 and language = $2 and format = $3::lyrics_format
-				and content = $4 and asset_id is null`, trackID, previous.Language, previous.Format, previous.Content); err != nil {
+				and timing = $4::lyrics_timing and content = $5 and asset_id is null`,
+			trackID, previous.Language, previous.Format, previous.Timing, previous.Content); err != nil {
 			return fmt.Errorf("remove previous projected lyrics: %w", err)
 		}
 	}
@@ -1240,12 +1241,12 @@ func projectLyrics(
 			return fmt.Errorf("clear projected default lyrics: %w", err)
 		}
 		if _, err := tx.Exec(ctx, `
-			insert into lyrics (track_id, format, language, origin, content, is_default)
-			values ($1, $2::lyrics_format, $3, $4::lyrics_origin, $5, true)
+			insert into lyrics (track_id, format, timing, language, origin, content, is_default)
+			values ($1, $2::lyrics_format, $3::lyrics_timing, $4, $5::lyrics_origin, $6, true)
 			on conflict (track_id, language) do update set
-				format = excluded.format, content = excluded.content, origin = excluded.origin,
+				format = excluded.format, timing = excluded.timing, content = excluded.content, origin = excluded.origin,
 				asset_id = null, is_default = true, version = lyrics.version + 1, updated_at = now()`,
-			trackID, next.Format, next.Language, origin, next.Content); err != nil {
+			trackID, next.Format, next.Timing, next.Language, origin, next.Content); err != nil {
 			return fmt.Errorf("upsert projected lyrics: %w", err)
 		}
 		return nil

@@ -93,15 +93,9 @@ type LyricRecord struct {
 	TrackID   string
 	Language  string
 	Format    string
+	Timing    string
 	Content   string
-	IsDefault bool
 	UpdatedAt time.Time
-}
-
-type ListLyricsQuery struct {
-	TrackID string
-	Limit   int
-	Offset  int
 }
 
 type TrackCursor struct {

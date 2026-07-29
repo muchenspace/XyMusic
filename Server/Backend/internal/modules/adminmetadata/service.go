@@ -400,7 +400,8 @@ func presentRevision(record RevisionRecord) (RevisionSummaryDTO, error) {
 	var lyrics *RevisionLyricsDTO
 	if effective.Lyrics != nil {
 		lyrics = &RevisionLyricsDTO{
-			Format: effective.Lyrics.Format, Language: effective.Lyrics.Language, HasContent: true,
+			Format: effective.Lyrics.Format, Language: effective.Lyrics.Language,
+			Timing: string(effective.Lyrics.Timing), HasContent: true,
 		}
 	}
 	return RevisionSummaryDTO{

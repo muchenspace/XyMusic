@@ -22,7 +22,7 @@ class DatabaseMigrationTest {
         )
 
     @Test
-    fun migrationOneToThreeAddsAndRepairsDurableQueueMetadata() {
+    fun migrationOneToSevenAddsAndRepairsDurableQueueMetadata() {
         helper.createDatabase(TEST_DATABASE, 1).close()
         helper
             .runMigrationsAndValidate(
@@ -34,11 +34,12 @@ class DatabaseMigrationTest {
                 DatabaseMigrations.MIGRATION_3_4,
                 DatabaseMigrations.MIGRATION_4_5,
                 DatabaseMigrations.MIGRATION_5_6,
+                DatabaseMigrations.MIGRATION_6_7,
             ).close()
     }
 
     @Test
-    fun migrationTwoToThreeBackfillsQueueMetadataFromCatalog() {
+    fun migrationTwoToSevenBackfillsQueueMetadataFromCatalog() {
         helper.createDatabase(TEST_DATABASE, 2).apply {
             execSQL(
                 """
@@ -91,6 +92,7 @@ class DatabaseMigrationTest {
                 DatabaseMigrations.MIGRATION_3_4,
                 DatabaseMigrations.MIGRATION_4_5,
                 DatabaseMigrations.MIGRATION_5_6,
+                DatabaseMigrations.MIGRATION_6_7,
             ).use { database ->
                 database
                     .query(
@@ -133,6 +135,7 @@ class DatabaseMigrationTest {
                 true,
                 DatabaseMigrations.MIGRATION_4_5,
                 DatabaseMigrations.MIGRATION_5_6,
+                DatabaseMigrations.MIGRATION_6_7,
             ).use { database ->
                 database.query("SELECT COUNT(*) FROM offline_tracks").use { cursor ->
                     assertThat(cursor.moveToFirst()).isTrue()
@@ -199,6 +202,7 @@ class DatabaseMigrationTest {
                 XyMusicDatabase.VERSION,
                 true,
                 DatabaseMigrations.MIGRATION_5_6,
+                DatabaseMigrations.MIGRATION_6_7,
             ).use { database ->
                 assertCount(database, "playlists", "id = 'playlist'", 0)
                 assertCount(database, "playlist_entries", "playlist_id = 'playlist'", 0)
@@ -215,6 +219,42 @@ class DatabaseMigrationTest {
                     "id = 'favorite-operation'",
                     1,
                 )
+            }
+    }
+
+    @Test
+    fun migrationSixToSevenClearsLyricsWithoutAuthoritativeServerTiming() {
+        helper.createDatabase(TEST_DATABASE, 6).apply {
+            execSQL(
+                """
+                INSERT INTO tracks(
+                    id, album_id, title, duration_ms, track_number, disc_number,
+                    published_at_epoch_ms, cached_at_epoch_ms
+                ) VALUES ('track-timing', NULL, 'Track', 1000, NULL, 1, 1, 1)
+                """.trimIndent(),
+            )
+            execSQL(
+                """
+                INSERT INTO lyrics(
+                    id, track_id, language, format, content, is_default,
+                    track_version, updated_at_epoch_ms
+                ) VALUES ('lyrics-timing', 'track-timing', 'und', 'LRC', '[00:00]Line', 1, 1, 1)
+                """.trimIndent(),
+            )
+            close()
+        }
+
+        helper
+            .runMigrationsAndValidate(
+                TEST_DATABASE,
+                XyMusicDatabase.VERSION,
+                true,
+                DatabaseMigrations.MIGRATION_6_7,
+            ).use { database ->
+                database.query("SELECT COUNT(*) FROM lyrics").use { cursor ->
+                    assertThat(cursor.moveToFirst()).isTrue()
+                    assertThat(cursor.getInt(0)).isEqualTo(0)
+                }
             }
     }
 

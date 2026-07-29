@@ -350,7 +350,7 @@ func (stub *scrapingAPIStub) CandidateDetails(_ context.Context, candidate Candi
 	stub.candidateDetailsVerbatim = verbatim
 	return CandidateDetailsDTO{
 		Candidate: candidate,
-		Lyrics:    &MetadataLyrics{Content: "[00:01.00]line", Format: "LRC", Language: "und"},
+		Lyrics:    &MetadataLyrics{Content: "[00:01.00]line", Format: "LRC", Language: "und", Timing: "LINE"},
 	}, nil
 }
 func (stub *scrapingAPIStub) SearchArtists(context.Context, ArtistSearchInput) ([]ArtistCandidate, error) {

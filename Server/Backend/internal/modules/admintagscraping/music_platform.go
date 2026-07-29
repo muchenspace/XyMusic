@@ -14,27 +14,25 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/lyrics"
 )
 
 const (
-	platformUserAgent       = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36"
-	defaultUpstreamTimeout  = 12 * time.Second
-	maximumArtworkBytes     = int64(20 * 1024 * 1024)
-	maximumJSONBytes        = int64(2 * 1024 * 1024)
-	maximumTextBytes        = int64(2 * 1024 * 1024)
-	maximumRequestAttempts  = 3
-	maximumRedirects        = 5
-	neteaseLinuxForwardKey  = "rFgB&h#%2?^eDg:Q"
-	neteaseEAPIKey          = "e82ckenh8dichen8"
-	kugouSignatureSalt      = "NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt"
-	kugouLyricSignatureSalt = "LnT6xpN3khm36zseQzvmgTZ3waWdRSA"
+	platformUserAgent      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36"
+	defaultUpstreamTimeout = 12 * time.Second
+	maximumArtworkBytes    = int64(20 * 1024 * 1024)
+	maximumJSONBytes       = int64(2 * 1024 * 1024)
+	maximumTextBytes       = int64(2 * 1024 * 1024)
+	maximumRequestAttempts = 3
+	maximumRedirects       = 5
+	neteaseLinuxForwardKey = "rFgB&h#%2?^eDg:Q"
+	kugouSignatureSalt     = "NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt"
 )
 
 var allowedArtworkHosts = []string{"music.126.net", "y.qq.com", "kugou.com"}
@@ -88,23 +86,24 @@ func (platform *ProductionMusicPlatform) Search(ctx context.Context, source Sour
 	return result, nil
 }
 
-func (platform *ProductionMusicPlatform) Lyric(ctx context.Context, source Source, candidate Candidate, verbatim bool) (string, error) {
+func (platform *ProductionMusicPlatform) Lyric(ctx context.Context, source Source, candidate Candidate, verbatim bool) (LyricResult, error) {
 	var result string
 	var err error
 	switch source {
 	case SourceNetease:
-		result, err = platform.lyricNetease(ctx, candidate.ID, verbatim)
+		result, err = platform.lyricNetease(ctx, candidate.ID)
 	case SourceQMusic:
 		result, err = platform.lyricQQ(ctx, candidate, verbatim)
 	case SourceKugou:
-		result, err = platform.lyricKugou(ctx, candidate, verbatim)
+		result, err = platform.lyricKugou(ctx, candidate)
 	default:
-		return "", apperror.Validation("The music platform source is invalid")
+		return LyricResult{}, apperror.Validation("The music platform source is invalid")
 	}
 	if err != nil {
-		return "", normalizeUpstreamError(err, ctx)
+		return LyricResult{}, normalizeUpstreamError(err, ctx)
 	}
-	return result, nil
+	timing := lyrics.DetectTiming("LRC", result)
+	return LyricResult{Content: result, Timing: timing}, nil
 }
 
 func (platform *ProductionMusicPlatform) AcoustID(
@@ -268,46 +267,10 @@ func (platform *ProductionMusicPlatform) searchNetease(ctx context.Context, quer
 	return result, nil
 }
 
-func (platform *ProductionMusicPlatform) lyricNetease(ctx context.Context, id string, verbatim bool) (string, error) {
-	if verbatim {
-		return platform.lyricNeteaseVerbatim(ctx, id)
-	}
+func (platform *ProductionMusicPlatform) lyricNetease(ctx context.Context, id string) (string, error) {
 	data, err := platform.neteaseForward(ctx, "https://music.163.com/api/song/lyric?lv=-1&kv=-1&tv=-1", map[string]any{"id": id})
 	if err != nil {
 		return "", err
-	}
-	return cleanScrapedText(mapValue(data["lrc"])["lyric"]), nil
-}
-
-func (platform *ProductionMusicPlatform) lyricNeteaseVerbatim(ctx context.Context, id string) (string, error) {
-	params := map[string]any{"id": numberOrString(id), "lv": "-1", "tv": "-1", "rv": "-1", "yv": "-1"}
-	payload, err := encryptNeteaseEAPIParams("/api/song/lyric/v1", params, []byte(neteaseEAPIKey))
-	if err != nil {
-		return "", err
-	}
-	body := []byte(url.Values{"params": {strings.ToUpper(hex.EncodeToString(payload))}}.Encode())
-	response, err := platform.requestBytes(ctx, "https://interface.music.163.com/eapi/song/lyric/v1", requestOptions{
-		Method:  http.MethodPost,
-		Headers: map[string]string{"Content-Type": "application/x-www-form-urlencoded", "Referer": "https://music.163.com/"},
-		Body:    body,
-	}, maximumJSONBytes)
-	if err != nil {
-		return "", err
-	}
-	decrypted, err := decryptNeteaseEAPIResponse(response.Bytes, []byte(neteaseEAPIKey))
-	if err != nil {
-		return "", err
-	}
-	var data map[string]any
-	if err := json.Unmarshal(decrypted, &data); err != nil {
-		return "", fmt.Errorf("decode Netease lyric response: %w", err)
-	}
-	if lyric := cleanScrapedText(mapValue(data["yrc"])["lyric"]); lyric != "" {
-		document, parseErr := parseYRC(lyric)
-		if parseErr != nil {
-			return "", parseErr
-		}
-		return renderEnhancedLRC(document), nil
 	}
 	return cleanScrapedText(mapValue(data["lrc"])["lyric"]), nil
 }
@@ -474,104 +437,9 @@ func (platform *ProductionMusicPlatform) searchKugou(ctx context.Context, query 
 	return result, nil
 }
 
-func (platform *ProductionMusicPlatform) lyricKugou(ctx context.Context, candidate Candidate, verbatim bool) (string, error) {
-	if !verbatim {
-		response, err := platform.requestBytes(ctx, "https://m.kugou.com/app/i/krc.php?cmd=100&timelength=999999&hash="+url.QueryEscape(candidate.ID), requestOptions{}, maximumTextBytes)
-		return string(response.Bytes), err
-	}
-	if candidate.LyricID == "" || candidate.DurationMS <= 0 {
-		return "", errors.New("Kugou candidate is missing lyric lookup metadata")
-	}
-	keyword := strings.TrimSpace(strings.Join([]string{strings.ReplaceAll(candidate.Artist, ",", "、"), candidate.Name}, " - "))
-	parameters := url.Values{
-		"album_audio_id": {candidate.LyricID}, "duration": {strconv.Itoa(candidate.DurationMS)}, "hash": {candidate.ID},
-		"keyword": {keyword}, "lrctxt": {"1"}, "man": {"no"},
-	}
-	parameters = signKugouLyricParameters(parameters, "")
-	data, err := platform.requestJSON(ctx, "https://lyrics.kugou.com/v1/search?"+parameters.Encode(), requestOptions{Headers: kugouLyricHeaders()})
-	if err != nil {
-		return "", err
-	}
-	candidates := sliceValue(data["candidates"])
-	if len(candidates) == 0 {
-		return "", nil
-	}
-	lyric := mapValue(candidates[0])
-	lyricID := stringValue(lyric["id"])
-	accessKey := stringValue(lyric["accesskey"])
-	if lyricID == "" || accessKey == "" {
-		return "", errors.New("Kugou lyric candidate is incomplete")
-	}
-	downloadParameters := url.Values{
-		"accesskey": {accessKey}, "charset": {"utf8"}, "client": {"mobi"}, "fmt": {"krc"},
-		"id": {lyricID}, "ver": {"1"},
-	}
-	downloadParameters = signKugouLyricParameters(downloadParameters, "")
-	download, err := platform.requestJSON(ctx, "https://lyrics.kugou.com/download?"+downloadParameters.Encode(), requestOptions{Headers: kugouLyricHeaders()})
-	if err != nil {
-		return "", err
-	}
-	encoded := stringValue(download["content"])
-	if encoded == "" {
-		return "", nil
-	}
-	decoded, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return "", fmt.Errorf("decode Kugou lyric content: %w", err)
-	}
-	if numberValue(download["contenttype"]) == 2 {
-		return string(decoded), nil
-	}
-	decrypted, err := decryptKRCBytes(decoded)
-	if err != nil {
-		return "", err
-	}
-	document, err := parseKRC(string(decrypted))
-	if err != nil {
-		return "", err
-	}
-	return renderEnhancedLRC(document), nil
-}
-
-func signKugouLyricParameters(parameters url.Values, body string) url.Values {
-	result := make(url.Values, len(parameters)+3)
-	for key, values := range parameters {
-		result[key] = append([]string(nil), values...)
-	}
-	result.Set("appid", "3116")
-	result.Set("clientver", "11070")
-	keys := make([]string, 0, len(result))
-	for key := range result {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	var signed strings.Builder
-	signed.WriteString(kugouLyricSignatureSalt)
-	for _, key := range keys {
-		signed.WriteString(key)
-		signed.WriteByte('=')
-		signed.WriteString(result.Get(key))
-	}
-	signed.WriteString(body)
-	signed.WriteString(kugouLyricSignatureSalt)
-	digest := md5.Sum([]byte(signed.String()))
-	result.Set("signature", hex.EncodeToString(digest[:]))
-	return result
-}
-
-func kugouLyricHeaders() map[string]string {
-	clientTime := strconv.FormatInt(time.Now().UnixMilli(), 10)
-	mid := md5.Sum([]byte(clientTime))
-	return map[string]string{
-		"Accept-Encoding": "gzip, deflate",
-		"Connection":      "Keep-Alive",
-		"KG-CLIENTTIMEMS": clientTime,
-		"KG-RC":           "1",
-		"KG-Rec":          "1",
-		"Referer":         "https://www.kugou.com/",
-		"User-Agent":      "Android14-1070-11070-201-0-Lyric-wifi",
-		"mid":             hex.EncodeToString(mid[:]),
-	}
+func (platform *ProductionMusicPlatform) lyricKugou(ctx context.Context, candidate Candidate) (string, error) {
+	response, err := platform.requestBytes(ctx, "https://m.kugou.com/app/i/krc.php?cmd=100&timelength=999999&hash="+url.QueryEscape(candidate.ID), requestOptions{}, maximumTextBytes)
+	return string(response.Bytes), err
 }
 
 type requestOptions struct {

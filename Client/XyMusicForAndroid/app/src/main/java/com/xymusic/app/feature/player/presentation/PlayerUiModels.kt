@@ -7,18 +7,22 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import com.xymusic.app.core.model.media.LyricsTiming
 import com.xymusic.app.feature.player.domain.model.PlayerState
 import com.xymusic.app.feature.player.domain.model.RepeatMode
 
 @Immutable
-data class PlayerLyricLineUi(val timeMs: Long?, val text: String, val highlightEndOffsets: List<Int> = emptyList())
+data class PlayerLyricWordUi(
+    val timeMs: Long,
+    val text: String,
+    val endTimeMs: Long? = null,
+)
 
 @Immutable
-data class PlayerLyricProgressUi(
-    val lineIndex: Int,
-    val highlightedTextEndIndex: Int,
-    val lineEndTimeMs: Long,
-    val lineProgress: Float,
+data class PlayerLyricLineUi(
+    val timeMs: Long?,
+    val text: String,
+    val words: List<PlayerLyricWordUi> = emptyList(),
 )
 
 @Immutable
@@ -27,7 +31,7 @@ data class PlayerUiState(
     val lyrics: List<PlayerLyricLineUi> = emptyList(),
     val lyricsLanguage: String? = null,
     val synchronizedLyrics: Boolean = false,
-    val wordByWordLyricsEnabled: Boolean = true,
+    val lyricsTiming: LyricsTiming = LyricsTiming.LINE,
     val sleepTimerRemainingMs: Long? = null,
 )
 

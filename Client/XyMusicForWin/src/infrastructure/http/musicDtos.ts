@@ -1,4 +1,4 @@
-import type { PlaylistVisibility } from "../../domain/music";
+import type { LyricTiming, PlaylistVisibility } from "../../domain/music";
 
 export interface ArtworkDto { url: string; cacheKey: string }
 export interface ArtistRefDto { id: string; name: string }
@@ -19,18 +19,14 @@ export interface LyricDto {
   trackId: string;
   language: string;
   format: string;
+  timing: LyricTiming;
   content: string;
-  isDefault: boolean;
   trackVersion: number;
   updatedAt: string;
 }
 
 export interface TrackDetailDto extends TrackDto {
-  lyrics: LyricDto[];
-  lyricPage: number;
-  lyricPageSize: number;
-  lyricTotal: number;
-  lyricTotalPages: number;
+  lyric: LyricDto | null;
 }
 
 export interface AlbumDto {

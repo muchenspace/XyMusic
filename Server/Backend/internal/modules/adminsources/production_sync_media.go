@@ -14,6 +14,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"xymusic/server/internal/modules/adminmetadata"
+	sharedlyrics "xymusic/server/internal/shared/lyrics"
 )
 
 func readSidecarLyrics(audioPath string) ([]scannedLyric, error) {
@@ -91,6 +92,7 @@ func readSidecarLyrics(audioPath string) ([]scannedLyric, error) {
 		seen[candidate.language] = struct{}{}
 		result = append(result, scannedLyric{
 			Content: value, Format: candidate.format, Language: candidate.language,
+			Timing: sharedlyrics.DetectTiming(candidate.format, value),
 			Origin: "EXTERNAL", IsDefault: len(result) == 0,
 		})
 	}
@@ -108,6 +110,7 @@ func mergeLyrics(sidecars []scannedLyric, embedded *adminmetadata.MetadataLyrics
 		if _, exists := languages[language]; !exists {
 			result = append(result, scannedLyric{
 				Content: embedded.Content, Format: embedded.Format, Language: language,
+				Timing: embedded.Timing,
 				Origin: "SCAN", IsDefault: len(result) == 0,
 			})
 		}

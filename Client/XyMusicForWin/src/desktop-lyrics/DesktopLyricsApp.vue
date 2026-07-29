@@ -21,6 +21,9 @@ import {
   createDesktopLyricsLockAction,
 } from "./protocol";
 import { buildDesktopLyricsFrame } from "./timeline";
+import { shouldReanchorLyricPlaybackClock } from "../domain/lyricsTimeline";
+import { resolveLyricWordProgress } from "../domain/lyricsTimeline";
+import type { LyricWord } from "../domain/music";
 
 const props = defineProps<{
   bridge?: DesktopLyricsBridge;
@@ -36,7 +39,6 @@ const bridge = props.bridge ?? createDesktopLyricsBridge();
 const unlisteners: DesktopLyricsUnlisten[] = [];
 let disposed = false;
 let animationFrame = 0;
-let previousAnimationTime = 0;
 let stateRevision = -1;
 
 const locked = computed(() => Boolean(state.value?.locked || optimisticLocked.value));
@@ -59,18 +61,29 @@ const frame = computed(() => {
 });
 const currentLine = computed(() => frame.value?.current ?? null);
 const nextLine = computed(() => frame.value?.next ?? null);
-const currentLineProgress = computed(() => {
-  const current = currentLine.value;
-  if (!current?.started) return 0;
-  return state.value?.wordLyricsEnabled ? current.progress : 1;
-});
 const emptyMessage = computed(() => {
   if (!state.value?.track) return "等待播放";
   return state.value.lyrics?.lines.length ? "等待歌词" : "暂无歌词";
 });
 
+function desktopWordProgress(word: LyricWord, playbackSeconds: number): number {
+  return resolveLyricWordProgress(word, playbackSeconds);
+}
+
+function clearProtocolState(): void {
+  state.value = null;
+  clock.value = null;
+  stateRevision = -1;
+  optimisticLocked.value = false;
+  optimisticFontScale.value = null;
+  reanchorAnimation();
+}
+
 function applyState(payload: DesktopLyricsStatePayload): void {
-  if (payload.version !== DESKTOP_LYRICS_PROTOCOL_VERSION) return;
+  if (payload.version !== DESKTOP_LYRICS_PROTOCOL_VERSION) {
+    clearProtocolState();
+    return;
+  }
   const incomingRevision = Number.isFinite(payload.revision) ? payload.revision! : 0;
   // 主窗口 F5 刷新后 revision 会以时间戳重新计数，远大于歌词窗口保留的旧 revision。
   // 此时差值会非常大（远超正常递增），认定为主窗口重启，接受新快照以同步最新曲目。
@@ -79,7 +92,12 @@ function applyState(payload: DesktopLyricsStatePayload): void {
   stateRevision = incomingRevision;
   state.value = payload;
   const stateClock = clockFromState(payload);
-  if (!clock.value || clock.value.trackId !== stateClock.trackId || stateClock.anchoredAtMs >= clock.value.anchoredAtMs) {
+  if (
+    !clock.value ||
+    clock.value.trackId !== stateClock.trackId ||
+    (stateClock.anchoredAtMs >= clock.value.anchoredAtMs &&
+      shouldReanchorLyricPlaybackClock(clock.value, stateClock))
+  ) {
     clock.value = stateClock;
   }
   optimisticLocked.value = false;
@@ -88,16 +106,25 @@ function applyState(payload: DesktopLyricsStatePayload): void {
 }
 
 function applyClock(payload: DesktopLyricsClockPayload): void {
-  if (payload.version !== DESKTOP_LYRICS_PROTOCOL_VERSION) return;
+  if (payload.version !== DESKTOP_LYRICS_PROTOCOL_VERSION) {
+    clearProtocolState();
+    return;
+  }
   const expectedTrackId = state.value?.track?.id ?? state.value?.lyrics?.trackId ?? null;
   if (payload.trackId !== expectedTrackId) return;
-  clock.value = payload;
+  if (
+    !clock.value ||
+    clock.value.trackId !== payload.trackId ||
+    (payload.anchoredAtMs >= clock.value.anchoredAtMs &&
+      shouldReanchorLyricPlaybackClock(clock.value, payload))
+  ) {
+    clock.value = payload;
+  }
   reanchorAnimation();
 }
 
 function reanchorAnimation(): void {
   nowMs.value = Date.now();
-  previousAnimationTime = 0;
 }
 
 function sendAction(action: DesktopLyricsActionPayload): void {
@@ -135,17 +162,10 @@ function requestClose(): void {
   sendAction(createDesktopLyricsAction("close"));
 }
 
-function progressStyle(progress: number): Record<string, string> {
-  return { "--desktop-lyric-progress": `${Math.round(clamp(progress, 0, 1) * 10_000) / 100}%` };
-}
-
-function updateAnimationFrame(timestamp: number): void {
+function updateAnimationFrame(): void {
   animationFrame = 0;
   if (!isPlaying.value) return;
-  if (!previousAnimationTime || timestamp - previousAnimationTime >= FRAME_INTERVAL_MS) {
-    previousAnimationTime = timestamp;
-    nowMs.value = Date.now();
-  }
+  nowMs.value = Date.now();
   animationFrame = window.requestAnimationFrame(updateAnimationFrame);
 }
 
@@ -186,7 +206,6 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
-const FRAME_INTERVAL_MS = 1_000 / 30;
 // 主窗口重启后 revision 以 Date.now() 初始化，与歌词窗口保留的旧 revision 差值远超此阈值。
 // 正常递增的 revision 差值不会接近此值，因此超过阈值即认定为主窗口重启，必须接受新快照。
 const REVISION_RESTART_THRESHOLD = 1_000_000_000;
@@ -242,11 +261,17 @@ const REVISION_RESTART_THRESHOLD = 1_000_000_000;
           data-tauri-drag-region
         >
           <p class="desktop-lyric-primary" data-tauri-drag-region>
-            <span
-              class="desktop-lyric-fill"
-              :style="progressStyle(currentLineProgress)"
-              data-tauri-drag-region
-            ><span class="desktop-lyric-base" data-tauri-drag-region>{{ currentLine.line.text }}</span><span class="desktop-lyric-progress" data-tauri-drag-region aria-hidden="true">{{ currentLine.line.text }}</span></span>
+            <span v-if="state?.lyrics?.timing === 'WORD'" class="desktop-lyric-words">
+              <span
+                v-for="(word, wordIndex) in currentLine.line.words"
+                :key="`${word.time}-${wordIndex}`"
+                class="desktop-lyric-word"
+                :class="{ 'is-sung': desktopWordProgress(word, frame?.playbackSeconds ?? 0) > 0, 'is-current': desktopWordProgress(word, frame?.playbackSeconds ?? 0) > 0 && desktopWordProgress(word, frame?.playbackSeconds ?? 0) < 1 }"
+                :style="{ '--desktop-lyric-word-progress': `${desktopWordProgress(word, frame?.playbackSeconds ?? 0) * 100}%` }"
+                data-tauri-drag-region
+              >{{ word.text }}</span>
+            </span>
+            <span v-else data-tauri-drag-region>{{ currentLine.line.text }}</span>
           </p>
           <p
             v-if="state?.showTranslation && currentLine.line.translation"

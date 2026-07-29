@@ -47,12 +47,15 @@ export interface HomeFeed { featured?: Album; playlists: Playlist[]; tracks: Tra
 export type SearchScope = "tracks" | "artists" | "albums";
 export interface SearchCursors { tracks: string | null; artists: string | null; albums: string | null }
 export interface SearchResults { tracks: Track[]; artists: Artist[]; albums: Album[]; nextCursors?: SearchCursors }
-export interface LyricLine { time: number | null; text: string; translation?: string }
+export type LyricTiming = "LINE" | "WORD";
+export interface LyricWord { time: number; endTime?: number; text: string }
+export interface LyricLine { time: number | null; text: string; words?: LyricWord[]; translation?: string }
 export interface Lyrics {
   trackId: string;
   lines: LyricLine[];
   source: string;
   synchronized: boolean;
+  timing: LyricTiming;
   translationSource?: string;
 }
 export interface PlaybackGrant { url: string; expiresAt: string; selectedQuality: string }
