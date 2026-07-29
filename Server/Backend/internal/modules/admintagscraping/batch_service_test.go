@@ -577,6 +577,31 @@ func TestBatchWorkerLogsCompletionFailure(t *testing.T) {
 	assertBatchLog(t, entry, "warn", "tag_scraping.batch.complete_failed", batchItemLogFields(claim, completeErr))
 }
 
+func TestBatchWorkerRecoversProcessorPanicAndReleasesChannels(t *testing.T) {
+	logger := newBatchLogRecorder()
+	store := &batchFaultStore{storeStub: &storeStub{}}
+	processor := &batchProcessorStub{metadata: metadataFixture(1), panicOnSearch: true}
+	service, err := NewBatchService(BatchServiceDependencies{
+		Store: store, Processor: processor, Logger: logger, WorkerID: "worker-panic",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim := splitCancellationClaim()
+	claim.Job.Options.Sources = []Source{SourceQMusic}
+	service.processItem(context.Background(), claim)
+
+	entry := waitForBatchLog(t, logger)
+	assertBatchLog(t, entry, "error", "tag_scraping.batch.processor_panic", map[string]any{
+		"jobId": claim.Job.ID, "itemId": claim.Item.ID, "attemptId": claim.AttemptID,
+		"workerId": "worker-panic",
+	})
+	status := service.channelStatus(claim.Job.ID, claim.Job.Options)
+	if status[SourceQMusic].Actual != 0 || status[SourceQMusic].Waiting != 0 {
+		t.Fatalf("channel lease leaked after panic: %#v", status[SourceQMusic])
+	}
+}
+
 func TestBatchWorkerLogsReleaseFailure(t *testing.T) {
 	releaseErr := errors.New("release database unavailable")
 	logger := newBatchLogRecorder()
@@ -661,6 +686,7 @@ type batchProcessorStub struct {
 	metadataTrackIDs []string
 	matches          []Candidate
 	searchErr        error
+	panicOnSearch    bool
 	searchCalls      int
 	applyResult      ApplyResult
 	applyErr         error
@@ -913,6 +939,9 @@ func (stub *batchProcessorStub) TrackMetadata(_ context.Context, trackID string)
 }
 func (stub *batchProcessorStub) Search(context.Context, SearchInput) ([]Candidate, error) {
 	stub.searchCalls++
+	if stub.panicOnSearch {
+		panic("search processor panic")
+	}
 	return stub.matches, stub.searchErr
 }
 func (stub *batchProcessorStub) Apply(_ context.Context, _, _, _ string, input ApplyInput) (ApplyResult, error) {

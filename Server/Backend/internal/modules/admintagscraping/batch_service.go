@@ -288,6 +288,9 @@ func (service *BatchService) Job(ctx context.Context, jobID string, updatedAfter
 	result := presentBatch(job, items, updatedAfter != nil && !isTerminalJobStatus(job.Status))
 	result.ChannelStatus = service.channelStatus(job.ID, job.Options)
 	result.Concurrency = service.concurrencyStatus(job)
+	if isTerminalJobStatus(job.Status) {
+		service.deleteChannelGates(job.ID)
+	}
 	return result, nil
 }
 
@@ -297,7 +300,11 @@ func (service *BatchService) Cancel(ctx context.Context, jobID string) (BatchJob
 	}
 	service.cancelJob(jobID)
 	service.signal()
-	return service.Job(ctx, jobID, nil)
+	result, err := service.Job(ctx, jobID, nil)
+	if err == nil && isTerminalJobStatus(result.Status) {
+		service.deleteChannelGates(jobID)
+	}
+	return result, err
 }
 
 func (service *BatchService) Retry(ctx context.Context, jobID string) (BatchJobDTO, error) {

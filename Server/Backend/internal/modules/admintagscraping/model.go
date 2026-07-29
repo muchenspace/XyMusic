@@ -235,6 +235,7 @@ const (
 	StageDownloadCover    ItemStage = "DOWNLOAD_COVER"
 	StageApplyCover       ItemStage = "APPLY_COVER"
 	StageRetryWaiting     ItemStage = "RETRY_WAITING"
+	StageRecoveryFailed   ItemStage = "RECOVERY_FAILED"
 	StageCancelling       ItemStage = "CANCELLING"
 	StageCancelled        ItemStage = "CANCELLED"
 )

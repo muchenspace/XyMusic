@@ -26,6 +26,24 @@ func TestMigrationsCanBeRead(t *testing.T) {
 	}
 }
 
+func TestReviewedTagScrapingMigrationHashRemainsCompatible(t *testing.T) {
+	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied := make([]AppliedMigration, 0, 31)
+	for _, migration := range migrations[:30] {
+		applied = append(applied, AppliedMigration{CreatedAt: migration.CreatedAt, Hash: migration.Hash})
+	}
+	applied = append(applied, AppliedMigration{
+		CreatedAt: migrations[30].CreatedAt,
+		Hash:      "c3e35920280ffc708af6b90234524cfa7ff091d9ad6c25619849935b4abe5c5a",
+	})
+	if err := AssertCompatible(migrations, applied); err != nil {
+		t.Fatal("reviewed 0030 compatibility hash was rejected")
+	}
+}
+
 func TestMediaVariantReuseMigrationAddsReuseMetadata(t *testing.T) {
 	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
 	if err != nil {
