@@ -36,6 +36,7 @@ type Options struct {
 	ProbeTimeout     time.Duration
 	TranscodeTimeout time.Duration
 	TemporaryRoot    string
+	ProfileVersion   string
 }
 
 type Worker struct {
@@ -53,6 +54,7 @@ type Worker struct {
 	probeTimeout     time.Duration
 	transcodeTimeout time.Duration
 	temporaryRoot    string
+	profileVersion   string
 
 	lifecycle context.Context
 	stop      context.CancelCauseFunc
@@ -102,8 +104,12 @@ func New(options Options) (*Worker, error) {
 	if options.TranscodeTimeout == 0 {
 		options.TranscodeTimeout = defaultTranscodeTimeout
 	}
+	if strings.TrimSpace(options.ProfileVersion) == "" {
+		options.ProfileVersion = "v1"
+	}
 	if options.Lease <= 0 || options.Heartbeat <= 0 || options.Heartbeat >= options.Lease ||
-		options.CancellationPoll <= 0 || options.ProbeTimeout <= 0 || options.TranscodeTimeout <= 0 {
+		options.CancellationPoll <= 0 || options.ProbeTimeout <= 0 || options.TranscodeTimeout <= 0 ||
+		len(options.ProfileVersion) > 100 {
 		return nil, errors.New("media worker timing configuration is invalid")
 	}
 	lifecycle, stop := context.WithCancelCause(context.Background())
@@ -113,7 +119,8 @@ func New(options Options) (*Worker, error) {
 		workerID: options.WorkerID, runner: options.Runner, logger: options.Logger, clock: options.Clock,
 		lease: options.Lease, heartbeat: options.Heartbeat, cancellationPoll: options.CancellationPoll,
 		probeTimeout: options.ProbeTimeout, transcodeTimeout: options.TranscodeTimeout,
-		temporaryRoot: options.TemporaryRoot, lifecycle: lifecycle, stop: stop,
+		temporaryRoot: options.TemporaryRoot, profileVersion: strings.TrimSpace(options.ProfileVersion),
+		lifecycle: lifecycle, stop: stop,
 	}, nil
 }
 
@@ -354,6 +361,28 @@ func (worker *Worker) process(ctx context.Context, job MediaJob) (processErr err
 	}
 	outputDurationMS := segment.EndMS - segment.StartMS
 	profiles := AudioVariantProfiles(audio.CodecName)
+	sourceChecksum := ""
+	if source.ChecksumSHA256 != nil {
+		sourceChecksum = *source.ChecksumSHA256
+	}
+	reused := make(map[string]GeneratedVariant, len(profiles))
+	if reuseStore, ok := worker.store.(VariantReuseStore); ok && sourceChecksum != "" {
+		variants, reuseErr := reuseStore.FindReusableVariants(
+			ctx, job.TrackID, sourceChecksum, worker.profileVersion, profiles,
+		)
+		if reuseErr != nil {
+			return contextError(ctx, reuseErr)
+		}
+		variants, reuseErr = verifyReusableVariants(ctx, worker.storage, variants)
+		if reuseErr != nil {
+			return contextError(ctx, reuseErr)
+		}
+		for _, variant := range variants {
+			variant.Reused = true
+			reused[variant.Profile.Quality] = variant
+			generated = append(generated, variant)
+		}
+	}
 	type plannedVariant struct {
 		Profile AudioVariantProfile
 		Path    string
@@ -368,6 +397,9 @@ func (worker *Worker) process(ctx context.Context, job MediaJob) (processErr err
 	}
 	arguments = append(arguments, "-i", inputPath)
 	for _, profile := range profiles {
+		if _, exists := reused[profile.Quality]; exists {
+			continue
+		}
 		outputPath := filepath.Join(
 			directory, strings.ToLower(profile.Quality)+"."+profile.Extension,
 		)
@@ -376,10 +408,12 @@ func (worker *Worker) process(ctx context.Context, job MediaJob) (processErr err
 		arguments = append(arguments, profile.FFmpegArgs...)
 		arguments = append(arguments, outputPath)
 	}
-	if _, err := worker.runProcess(
-		ctx, worker.ffmpegPath, arguments, worker.transcodeTimeout, "FFMPEG",
-	); err != nil {
-		return err
+	if len(planned) > 0 {
+		if _, err := worker.runProcess(
+			ctx, worker.ffmpegPath, arguments, worker.transcodeTimeout, "FFMPEG",
+		); err != nil {
+			return err
+		}
 	}
 	for _, output := range planned {
 		if err := contextCause(ctx); err != nil {
@@ -400,6 +434,7 @@ func (worker *Worker) process(ctx context.Context, job MediaJob) (processErr err
 		generated = append(generated, GeneratedVariant{
 			Profile: output.Profile, ObjectKey: objectKey,
 			ChecksumSHA256: checksum, SizeBytes: sizeBytes,
+			SourceChecksumSHA256: sourceChecksum, ProfileVersion: worker.profileVersion,
 		})
 	}
 	completedAt := worker.clock.Now()
@@ -421,6 +456,29 @@ func (worker *Worker) process(ctx context.Context, job MediaJob) (processErr err
 		})
 	}
 	return nil
+}
+
+func verifyReusableVariants(
+	ctx context.Context,
+	verifier ObjectStorage,
+	variants []GeneratedVariant,
+) ([]GeneratedVariant, error) {
+	verified := make([]GeneratedVariant, 0, len(variants))
+	for _, variant := range variants {
+		if variant.SizeBytes <= 0 || strings.TrimSpace(variant.ChecksumSHA256) == "" {
+			continue
+		}
+		sizeBytes, checksum, exists, err := verifier.StatObject(ctx, variant.ObjectKey)
+		if err != nil {
+			return nil, fmt.Errorf("verify reusable media variant object: %w", err)
+		}
+		if !exists || sizeBytes != variant.SizeBytes || checksum == "" ||
+			!strings.EqualFold(checksum, variant.ChecksumSHA256) {
+			continue
+		}
+		verified = append(verified, variant)
+	}
+	return verified, nil
 }
 
 func (worker *Worker) runCleanupNext(ctx context.Context) (bool, error) {

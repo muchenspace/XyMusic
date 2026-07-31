@@ -127,6 +127,39 @@ func (store *PostgresStore) FindReadySourceAsset(ctx context.Context, assetID st
 	return &asset, nil
 }
 
+func (store *PostgresStore) FindReusableVariants(
+	ctx context.Context,
+	trackID, sourceChecksum, profileVersion string,
+	profiles []AudioVariantProfile,
+) ([]GeneratedVariant, error) {
+	result := make([]GeneratedVariant, 0, len(profiles))
+	for _, profile := range profiles {
+		var objectKey, checksum string
+		var sizeBytes int64
+		err := store.database.QueryRow(ctx, `SELECT asset.object_key,asset.size_bytes,asset.checksum_sha256
+			FROM track_variants variant
+			JOIN media_assets asset ON asset.id=variant.asset_id
+			WHERE variant.track_id=$1 AND variant.quality=$2 AND variant.status='READY'
+			AND asset.status='READY' AND asset.checksum_sha256 IS NOT NULL
+			AND variant.source_checksum_sha256=$3 AND variant.profile_version=$4`,
+			trackID, profile.Quality, sourceChecksum, profileVersion).Scan(
+			&objectKey, &sizeBytes, &checksum,
+		)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("find reusable media variant: %w", err)
+		}
+		result = append(result, GeneratedVariant{
+			Profile: profile, ObjectKey: objectKey, ChecksumSHA256: checksum,
+			SizeBytes: sizeBytes, SourceChecksumSHA256: sourceChecksum,
+			ProfileVersion: profileVersion,
+		})
+	}
+	return result, nil
+}
+
 func (store *PostgresStore) CommitMediaJob(
 	ctx context.Context,
 	input CommitMediaJob,
@@ -167,34 +200,60 @@ func (store *PostgresStore) CommitMediaJob(
 	if mediaGeneration != input.Job.Generation || trackStatus == "ARCHIVED" {
 		return nil, newInterruptedError("JOB_SUPERSEDED", "a newer media generation owns this track")
 	}
-	rows, err := transaction.Query(ctx, `SELECT asset_id FROM track_variants WHERE track_id=$1`, input.Job.TrackID)
-	if err != nil {
-		return nil, fmt.Errorf("list replaced media variants: %w", err)
-	}
-	previousAssetIDs := make([]string, 0, len(input.Generated))
-	for rows.Next() {
-		var assetID string
-		if err := rows.Scan(&assetID); err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("scan replaced media variant: %w", err)
+	newQualities := make([]string, 0, len(input.Generated))
+	for _, output := range input.Generated {
+		if !output.Reused {
+			newQualities = append(newQualities, output.Profile.Quality)
 		}
-		previousAssetIDs = append(previousAssetIDs, assetID)
 	}
-	if err := rows.Err(); err != nil {
+	previousAssetIDs := make([]string, 0, len(newQualities))
+	if len(newQualities) > 0 {
+		rows, err := transaction.Query(ctx, `SELECT asset_id FROM track_variants
+			WHERE track_id=$1 AND quality=ANY($2::text[])`, input.Job.TrackID, newQualities)
+		if err != nil {
+			return nil, fmt.Errorf("list replaced media variants: %w", err)
+		}
+		for rows.Next() {
+			var assetID string
+			if err := rows.Scan(&assetID); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan replaced media variant: %w", err)
+			}
+			previousAssetIDs = append(previousAssetIDs, assetID)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("iterate replaced media variants: %w", err)
+		}
 		rows.Close()
-		return nil, fmt.Errorf("iterate replaced media variants: %w", err)
 	}
-	rows.Close()
 	hasLossless := slices.ContainsFunc(input.Generated, func(output GeneratedVariant) bool {
 		return output.Profile.Quality == "LOSSLESS"
 	})
 	if !hasLossless {
-		if _, err := transaction.Exec(ctx, `DELETE FROM track_variants
-			WHERE track_id=$1 AND quality='LOSSLESS'`, input.Job.TrackID); err != nil {
+		rows, err := transaction.Query(ctx, `DELETE FROM track_variants
+			WHERE track_id=$1 AND quality='LOSSLESS' RETURNING asset_id`, input.Job.TrackID)
+		if err != nil {
 			return nil, fmt.Errorf("remove obsolete lossless variant: %w", err)
 		}
+		for rows.Next() {
+			var assetID string
+			if err := rows.Scan(&assetID); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan obsolete lossless variant: %w", err)
+			}
+			previousAssetIDs = append(previousAssetIDs, assetID)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("iterate obsolete lossless variants: %w", err)
+		}
+		rows.Close()
 	}
 	for _, output := range input.Generated {
+		if output.Reused {
+			continue
+		}
 		var assetID string
 		err := transaction.QueryRow(ctx, `INSERT INTO media_assets(
 			object_key,kind,mime_type,size_bytes,checksum_sha256,status
@@ -206,14 +265,16 @@ func (store *PostgresStore) CommitMediaJob(
 		}
 		bitrate := EstimatedBitrate(output.SizeBytes, input.DurationMS)
 		_, err = transaction.Exec(ctx, `INSERT INTO track_variants(
-			track_id,asset_id,quality,mime_type,codec,container,bitrate,sample_rate,status
-		) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'READY')
+			track_id,asset_id,quality,mime_type,codec,container,bitrate,sample_rate,
+			source_checksum_sha256,profile_version,status
+		) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'READY')
 		ON CONFLICT(track_id,quality) DO UPDATE SET
 			asset_id=excluded.asset_id,mime_type=excluded.mime_type,codec=excluded.codec,
 			container=excluded.container,bitrate=excluded.bitrate,sample_rate=excluded.sample_rate,
-			status='READY',updated_at=$9`, input.Job.TrackID, assetID, output.Profile.Quality,
+			source_checksum_sha256=excluded.source_checksum_sha256,profile_version=excluded.profile_version,
+			status='READY',updated_at=$11`, input.Job.TrackID, assetID, output.Profile.Quality,
 			output.Profile.MIMEType, output.Profile.Codec, output.Profile.Container, bitrate,
-			input.SampleRate, input.CompletedAt)
+			input.SampleRate, output.SourceChecksumSHA256, output.ProfileVersion, input.CompletedAt)
 		if err != nil {
 			return nil, fmt.Errorf("upsert media track variant: %w", err)
 		}

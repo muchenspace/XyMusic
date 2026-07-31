@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -162,6 +163,28 @@ func (storage *MinIOObjectStorage) UploadFile(
 		return 0, fmt.Errorf("uploaded media worker object %q failed validation", objectKey)
 	}
 	return uploaded.Size, nil
+}
+
+func (storage *MinIOObjectStorage) StatObject(
+	ctx context.Context, objectKey string,
+) (sizeBytes int64, checksumSHA256 string, exists bool, err error) {
+	info, err := storage.client.StatObject(ctx, storage.bucket, objectKey, minio.StatObjectOptions{})
+	if err != nil {
+		response := minio.ToErrorResponse(err)
+		if response.StatusCode == http.StatusNotFound || response.Code == "NoSuchKey" ||
+			response.Code == "NoSuchObject" || response.Code == "NotFound" {
+			return 0, "", false, nil
+		}
+		return 0, "", false, fmt.Errorf("inspect media worker object %q: %w", objectKey, err)
+	}
+	checksum := info.UserMetadata["sha256"]
+	if checksum == "" {
+		checksum = info.UserMetadata["Sha256"]
+	}
+	if checksum == "" {
+		checksum = info.Metadata.Get("X-Amz-Meta-Sha256")
+	}
+	return info.Size, strings.ToLower(strings.TrimSpace(checksum)), true, nil
 }
 
 func (storage *MinIOObjectStorage) Delete(ctx context.Context, objectKey string) error {

@@ -288,7 +288,7 @@ func TestProductionMediaWorkerLifecycle(t *testing.T) {
 	worker, err := New(Options{
 		Store: store, Storage: storage, FFmpegPath: cfg.Media.FFmpegPath,
 		FFprobePath: cfg.Media.FFprobePath, WorkerID: "media-worker-integration-" + suffix,
-		Runner: runner,
+		Runner: runner, ProfileVersion: cfg.Media.ProfileVersion,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -324,7 +324,8 @@ func TestProductionMediaWorkerLifecycle(t *testing.T) {
 	if trackStatus != "READY" || durationMS != 1_000 || publishedAt == nil || sourceStatus != "READY" {
 		t.Fatalf("track status=%s duration=%d published=%v source=%s", trackStatus, durationMS, publishedAt, sourceStatus)
 	}
-	rows, err := pool.Query(ctx, `SELECT variant.quality,asset.object_key,asset.size_bytes,asset.checksum_sha256
+	rows, err := pool.Query(ctx, `SELECT variant.quality,asset.object_key,asset.size_bytes,asset.checksum_sha256,
+		variant.source_checksum_sha256,variant.profile_version
 		FROM track_variants variant JOIN media_assets asset ON asset.id=variant.asset_id
 		WHERE variant.track_id=$1 ORDER BY variant.quality`, trackID)
 	if err != nil {
@@ -333,11 +334,15 @@ func TestProductionMediaWorkerLifecycle(t *testing.T) {
 	variantKeys := make([]string, 0, 4)
 	qualities := make([]string, 0, 4)
 	for rows.Next() {
-		var quality, key, checksum string
+		var quality, key, checksum, variantSourceChecksum, profileVersion string
 		var size int64
-		if err := rows.Scan(&quality, &key, &size, &checksum); err != nil {
+		if err := rows.Scan(&quality, &key, &size, &checksum, &variantSourceChecksum, &profileVersion); err != nil {
 			rows.Close()
 			t.Fatal(err)
+		}
+		if variantSourceChecksum != sourceChecksum || profileVersion != cfg.Media.ProfileVersion {
+			rows.Close()
+			t.Fatalf("variant %s fingerprint=%s profile=%s", quality, variantSourceChecksum, profileVersion)
 		}
 		qualities = append(qualities, quality)
 		variantKeys = append(variantKeys, key)

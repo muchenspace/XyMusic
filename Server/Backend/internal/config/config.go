@@ -87,9 +87,10 @@ type Storage struct {
 }
 
 type Media struct {
-	Mode        string
-	FFmpegPath  string
-	FFprobePath string
+	Mode           string
+	FFmpegPath     string
+	FFprobePath    string
+	ProfileVersion string
 }
 
 type Scraping struct {
@@ -284,6 +285,13 @@ func Parse(env map[string]string) (Config, error) {
 	if err := validatePath(ffprobePath, "FFPROBE_PATH"); err != nil {
 		return Config{}, err
 	}
+	mediaProfileVersion := strings.TrimSpace(value(env, "MEDIA_VARIANT_PROFILE_VERSION", "v1"))
+	if mediaProfileVersion == "" {
+		return Config{}, errors.New("MEDIA_VARIANT_PROFILE_VERSION must not be empty")
+	}
+	if len(mediaProfileVersion) > 100 {
+		return Config{}, errors.New("MEDIA_VARIANT_PROFILE_VERSION is too long")
+	}
 
 	localMode := value(env, "LOCAL_MUSIC_SOURCE_MODE", "READ_ONLY")
 	if localMode != "READ_ONLY" && localMode != "READ_WRITE" {
@@ -340,7 +348,7 @@ func Parse(env map[string]string) (Config, error) {
 			SignedURLTTLSeconds: signedURLTTL,
 			MaxUploadBytes:      maxUploadBytes,
 		},
-		Media:    Media{Mode: mediaMode, FFmpegPath: ffmpegPath, FFprobePath: ffprobePath},
+		Media:    Media{Mode: mediaMode, FFmpegPath: ffmpegPath, FFprobePath: ffprobePath, ProfileVersion: mediaProfileVersion},
 		Scraping: Scraping{FPcalcPath: fpcalcPath, AcoustIDClient: acoustIDClient},
 		LocalLibrary: LocalLibrary{
 			Name:                value(env, "LOCAL_MUSIC_SOURCE_NAME", "Music"),

@@ -41,6 +41,9 @@ func TestDevelopmentDefaultsAreCompatible(t *testing.T) {
 	if cfg.Media.Mode != "ADVANCED" || cfg.Media.FFmpegPath != "ffmpeg" || cfg.Media.FFprobePath != "ffprobe" {
 		t.Fatalf("expected PATH-based media defaults: %#v", cfg.Media)
 	}
+	if cfg.Media.ProfileVersion != "v1" {
+		t.Fatalf("unexpected media profile version: %#v", cfg.Media)
+	}
 }
 
 func TestHTTPListenersSupportSeparateAddressFamiliesAndLegacyFallback(t *testing.T) {

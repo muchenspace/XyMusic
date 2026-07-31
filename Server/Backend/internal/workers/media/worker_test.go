@@ -64,6 +64,46 @@ func TestWorkerProcessesLosslessSegmentAndCommitsFencedVariants(t *testing.T) {
 	}
 }
 
+func TestWorkerReusesVerifiedReadyVariantsBeforeRunningFFmpeg(t *testing.T) {
+	attemptID := "attempt"
+	source := []byte("source")
+	digest := sha256.Sum256(source)
+	checksum := hex.EncodeToString(digest[:])
+	profiles := AudioVariantProfiles("aac")
+	store := &workerStoreStub{
+		job:    &MediaJob{ID: "job", SourceAssetID: "asset", TrackID: "track", Generation: 1, AttemptID: &attemptID},
+		source: &SourceAsset{ID: "asset", ObjectKey: "source", SizeBytes: int64(len(source)), ChecksumSHA256: &checksum},
+	}
+	storage := &workerStorageStub{source: source, objectStats: map[string]objectStat{}}
+	for _, profile := range profiles {
+		key := "media/variants/track/old/" + strings.ToLower(profile.Quality) + "." + profile.Extension
+		store.reusable = append(store.reusable, GeneratedVariant{
+			Profile: profile, ObjectKey: key, ChecksumSHA256: "variant-" + profile.Quality,
+			SizeBytes: 42, SourceChecksumSHA256: checksum, ProfileVersion: "v1",
+		})
+		storage.objectStats[key] = objectStat{sizeBytes: 42, checksum: "variant-" + profile.Quality, exists: true}
+	}
+	runner := &workerRunnerStub{
+		probe: `{"streams":[{"codec_type":"audio","codec_name":"aac"}],"format":{"duration":"1"}}`,
+	}
+	worker := newTestWorker(t, store, storage, runner, Options{})
+	worked, err := worker.RunNext(context.Background())
+	if err != nil || !worked {
+		t.Fatalf("worked=%v error=%v", worked, err)
+	}
+	if store.reuseCalls != 1 || store.commit == nil || len(store.commit.Generated) != len(profiles) {
+		t.Fatalf("reuse calls/commit = %d/%#v", store.reuseCalls, store.commit)
+	}
+	for _, output := range store.commit.Generated {
+		if !output.Reused || output.SourceChecksumSHA256 != checksum || output.ProfileVersion != "v1" {
+			t.Fatalf("reused output = %#v", output)
+		}
+	}
+	if len(storage.uploaded) != 0 || runner.ffmpegArguments != nil {
+		t.Fatalf("reused variants still ran ffmpeg or uploaded: uploads=%#v ffmpeg=%#v", storage.uploaded, runner.ffmpegArguments)
+	}
+}
+
 func TestWorkerQueuesEveryUploadedObjectWhenCommitIsSuperseded(t *testing.T) {
 	attemptID := "attempt"
 	source := []byte("source")
@@ -274,6 +314,8 @@ type workerStoreStub struct {
 	failed            error
 	scheduled         []string
 	enqueued          []cleanupEnqueue
+	reusable          []GeneratedVariant
+	reuseCalls        int
 	cleanupReferenced bool
 	cleanupCompleted  bool
 	cleanupFailed     error
@@ -305,6 +347,15 @@ func (store *workerStoreStub) MediaJobControl(context.Context, string, string, s
 
 func (store *workerStoreStub) FindReadySourceAsset(context.Context, string) (*SourceAsset, error) {
 	return store.source, nil
+}
+
+func (store *workerStoreStub) FindReusableVariants(
+	_ context.Context, _, _, _ string, _ []AudioVariantProfile,
+) ([]GeneratedVariant, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.reuseCalls++
+	return append([]GeneratedVariant(nil), store.reusable...), nil
 }
 
 func (store *workerStoreStub) CommitMediaJob(_ context.Context, input CommitMediaJob) ([]string, error) {
@@ -368,6 +419,14 @@ type workerStorageStub struct {
 	deleteErr   error
 	uploadErrAt int
 	uploadCalls int
+	objectStats map[string]objectStat
+}
+
+type objectStat struct {
+	sizeBytes int64
+	checksum  string
+	exists    bool
+	err       error
 }
 
 func (storage *workerStorageStub) DownloadToFile(_ context.Context, _ string, path string, _ int64) (DownloadedObject, error) {
@@ -396,6 +455,11 @@ func (storage *workerStorageStub) UploadFile(_ context.Context, key, path, _, ch
 	storage.uploaded = append(storage.uploaded, key)
 	storage.mu.Unlock()
 	return int64(len(value)), nil
+}
+
+func (storage *workerStorageStub) StatObject(_ context.Context, key string) (int64, string, bool, error) {
+	stat := storage.objectStats[key]
+	return stat.sizeBytes, stat.checksum, stat.exists, stat.err
 }
 
 func (storage *workerStorageStub) Delete(_ context.Context, key string) error {
