@@ -12,16 +12,33 @@ func TestLegacyMigrationsCanBeRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(migrations) != 29 {
-		t.Fatalf("expected 29 migrations, got %d", len(migrations))
+	if len(migrations) != 30 {
+		t.Fatalf("expected 30 migrations, got %d", len(migrations))
 	}
 	if migrations[0].Tag != "0000_initial" || migrations[25].Tag != "0025_track_permanent_delete_batches" ||
 		migrations[26].Tag != "0026_remove_writeback_backup_references" ||
-		migrations[27].Tag != "0027_artist_artwork_scraping_jobs" || migrations[28].Tag != "0028_lyrics_timing" {
-		t.Fatalf("unexpected migration boundaries: %s - %s - %s - %s - %s", migrations[0].Tag, migrations[25].Tag, migrations[26].Tag, migrations[27].Tag, migrations[28].Tag)
+		migrations[27].Tag != "0027_artist_artwork_scraping_jobs" || migrations[28].Tag != "0028_lyrics_timing" ||
+		migrations[29].Tag != "0029_media_variant_reuse" {
+		t.Fatalf("unexpected migration boundaries: %s - %s - %s - %s - %s - %s", migrations[0].Tag, migrations[25].Tag, migrations[26].Tag, migrations[27].Tag, migrations[28].Tag, migrations[29].Tag)
 	}
 	if len(migrations[0].SQL) < 2 || len(migrations[0].Hash) != 64 {
 		t.Fatalf("migration parsing is incompatible: %#v", migrations[0])
+	}
+}
+
+func TestMediaVariantReuseMigrationAddsFutureReuseMetadata(t *testing.T) {
+	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToUpper(strings.Join(migrations[29].SQL, "\n"))
+	for _, expected := range []string{
+		"ALTER TABLE TRACK_VARIANTS", "SOURCE_CHECKSUM_SHA256", "PROFILE_VERSION",
+		"TRACK_VARIANTS_REUSE_INDEX", "WHERE STATUS = 'READY'",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("media variant reuse migration does not contain %q: %s", expected, sql)
+		}
 	}
 }
 
