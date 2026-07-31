@@ -22,7 +22,6 @@ export class AvatarUploader {
       body: JSON.stringify({ fileName: file.name, contentType: file.type, sizeBytes: file.size, checksumSha256 }),
     });
     const uploadHeaders = new Headers(upload.requiredHeaders);
-    uploadHeaders.delete("content-length");
     const uploaded = await uploadFile(
       upload.uploadUrl,
       { method: upload.method, headers: uploadHeaders, body: file },

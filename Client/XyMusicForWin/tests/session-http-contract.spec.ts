@@ -101,7 +101,7 @@ describe("desktop authentication API contract", () => {
     expect(credentials.value?.refreshToken).toBe("renewed-refresh");
   });
 
-  it("reserves, uploads, and completes an avatar without forwarding forbidden headers", async () => {
+  it("reserves, uploads, and completes an avatar with its required signed headers", async () => {
     const credentials = new MemoryCredentialStore();
     const api = new ApiClient({ credentialStore: credentials as SessionCredentialStore });
     await api.setSession(storedSession());
@@ -143,7 +143,7 @@ describe("desktop authentication API contract", () => {
     });
     expect(upload.url).toBe("https://music.example.com/api/v1/oss/c3RvcmFnZS5leGFtcGxl/upload?X-Amz-Signature=avatar");
     expect(upload.init.method).toBe("PUT");
-    expect(new Headers(upload.init.headers).get("Content-Length")).toBeNull();
+    expect(new Headers(upload.init.headers).get("Content-Length")).toBe("3");
     expect(new Headers(upload.init.headers).get("X-Upload-Token")).toBe("token");
     expect(complete.url).toBe("https://music.example.com/api/v1/users/me/avatar/uploads/upload%2F1/complete");
     expect(JSON.parse(String(complete.init.body))).toEqual({ observedEtag: "etag-1" });
