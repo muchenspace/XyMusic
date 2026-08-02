@@ -18,6 +18,7 @@ import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.ui.theme.XyMusicTheme
 import com.xymusic.app.ui.theme.resolveDarkTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlin.math.roundToLong
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -27,23 +28,29 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
+        // Resolve the Hilt ViewModel before Compose starts its first composition.
+        // Its dependencies remain lazy, while graph creation no longer competes with the first frame.
+        val viewModel = appViewModel
         if (BuildConfig.DEBUG) {
             @Suppress("DEPRECATION")
             val refreshRate = windowManager.defaultDisplay.refreshRate.coerceAtLeast(1f)
             frameJankMonitor =
                 FrameJankMonitor(
-                    slowFrameThresholdNanos = (NANOS_PER_SECOND / refreshRate * SLOW_FRAME_COUNT).toLong(),
+                    window = window,
+                    frameBudgetNanos = (NANOS_PER_SECOND / refreshRate).roundToLong(),
                 ) { durationNanos ->
                     Log.w("XyMusicJank", "slowFrameNs=$durationNanos refreshRate=$refreshRate")
                 }
         }
         splashScreen.setKeepOnScreenCondition {
-            appViewModel.uiState.value.sessionState == AppSessionState.Loading
+            viewModel.uiState.value.sessionState == AppSessionState.Loading
         }
         enableEdgeToEdge()
         setContent {
-            val uiState by appViewModel.uiState.collectAsStateWithLifecycle()
+            val uiState by viewModel.uiState.collectAsStateWithLifecycle()
             ReportDrawnWhen { uiState.sessionState != AppSessionState.Loading }
+            // Compose the loading branch behind the system splash so that Material3 and the
+            // application tree are initialized before the first interactive frame is exposed.
             val systemDarkTheme = isSystemInDarkTheme()
             val darkTheme = uiState.themePreference.resolveDarkTheme(systemDarkTheme)
             XyMusicTheme(
@@ -53,9 +60,9 @@ class MainActivity : ComponentActivity() {
             ) {
                 XyMusicApp(
                     uiState = uiState,
-                    effects = appViewModel.effects,
-                    onDynamicColorChanged = appViewModel::setDynamicColorEnabled,
-                    onServerEndpointChanged = appViewModel::setServerEndpoint,
+                    effects = viewModel.effects,
+                    onDynamicColorChanged = viewModel::setDynamicColorEnabled,
+                    onServerEndpointChanged = viewModel::setServerEndpoint,
                 )
             }
         }
@@ -73,6 +80,5 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val NANOS_PER_SECOND = 1_000_000_000f
-        const val SLOW_FRAME_COUNT = 2f
     }
 }

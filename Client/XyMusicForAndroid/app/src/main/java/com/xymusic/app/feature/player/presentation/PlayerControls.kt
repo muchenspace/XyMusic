@@ -21,6 +21,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,7 +48,13 @@ internal fun PlaybackControls(
     compact: Boolean = false,
     playbackPosition: State<Float>? = null,
 ) {
-    val availability = rememberPlaybackControlAvailability(uiState.player)
+    val interactionPosition =
+        if (playbackPosition != null) {
+            rememberPlaybackInteractionPositionState(playbackPosition)
+        } else {
+            null
+        }
+    val availability = rememberPlaybackControlAvailability(uiState.player, interactionPosition)
     val horizontalPadding = if (compact) 22.dp else 28.dp
     val skipSize = if (compact) 54.dp else 64.dp
     val playSize = if (compact) 64.dp else 76.dp
@@ -65,6 +73,7 @@ internal fun PlaybackControls(
             onPositionChangeFinished = onPositionChangeFinished,
             compact = compact,
             playbackPosition = playbackPosition,
+            interactionPosition = interactionPosition,
         )
         Spacer(modifier = Modifier.height(if (compact) 2.dp else 6.dp))
         Row(
@@ -133,21 +142,35 @@ internal fun PlaybackControls(
 }
 
 @Composable
-internal fun rememberPlaybackControlAvailability(player: PlayerState): PlaybackControlAvailability {
-    val currentIndex =
-        remember(player.queue, player.currentQueueItemId) {
-            player.queue.indexOfFirst { it.queueItemId == player.currentQueueItemId }
+internal fun rememberPlaybackControlAvailability(
+    player: PlayerState,
+    playbackPosition: State<Float>? = null,
+): PlaybackControlAvailability {
+    val availability =
+        remember(
+            player.queue,
+            player.currentQueueItemId,
+            player.positionMs.takeIf { playbackPosition == null },
+            player.shuffleEnabled,
+            player.repeatMode,
+            playbackPosition,
+        ) {
+            derivedStateOf {
+                val currentIndex = player.queue.indexOfFirst { it.queueItemId == player.currentQueueItemId }
+                val hasMultipleItems = player.queue.size > 1
+                val timelineCanWrap = player.shuffleEnabled || player.repeatMode != RepeatMode.OFF
+                val positionMs = playbackPosition?.value?.toLong() ?: player.positionMs
+                PlaybackControlAvailability(
+                    canPrevious =
+                    positionMs > 3_000L ||
+                        (hasMultipleItems && (currentIndex > 0 || timelineCanWrap)),
+                    canNext =
+                    hasMultipleItems &&
+                        (currentIndex in 0 until player.queue.lastIndex || timelineCanWrap),
+                )
+            }
         }
-    val hasMultipleItems = player.queue.size > 1
-    val timelineCanWrap = player.shuffleEnabled || player.repeatMode != RepeatMode.OFF
-    return PlaybackControlAvailability(
-        canPrevious =
-        player.positionMs > 3_000L ||
-            (hasMultipleItems && (currentIndex > 0 || timelineCanWrap)),
-        canNext =
-        hasMultipleItems &&
-            (currentIndex in 0 until player.queue.lastIndex || timelineCanWrap),
-    )
+    return availability.value
 }
 
 internal data class PlaybackControlAvailability(val canPrevious: Boolean, val canNext: Boolean)
@@ -160,32 +183,72 @@ private fun PlaybackTimeline(
     onPositionChangeFinished: () -> Unit,
     compact: Boolean,
     playbackPosition: State<Float>?,
+    interactionPosition: State<Float>?,
 ) {
     val duration = player.durationMs.coerceAtLeast(0)
-    val displayPosition =
-        (playbackPosition ?: rememberPlaybackPositionState(player)).value
-    val sliderValue = draggedPosition ?: displayPosition
-    val elapsedSecond = sliderValue.toLong().coerceAtLeast(0) / 1_000L
-    val remainingMs = (duration - sliderValue.toLong()).coerceAtLeast(0L)
-    val remainingSecond = remainingMs / 1_000L
-    val elapsedText = remember(elapsedSecond) { formatPlaybackTime(elapsedSecond * 1_000L) }
-    val remainingText =
-        remember(remainingSecond, duration) {
-            if (duration > 0L) "-${formatPlaybackTime(remainingSecond * 1_000L)}" else "0:00"
-        }
+    val visualPosition = playbackPosition ?: rememberPlaybackPositionSnapshotState(player)
+    val compositionPosition = interactionPosition ?: visualPosition
 
+    PlaybackTimelineSlider(
+        durationMs = duration,
+        visualPosition = visualPosition,
+        interactionPosition = compositionPosition,
+        draggedPosition = draggedPosition,
+        onPositionChange = onPositionChange,
+        onPositionChangeFinished = onPositionChangeFinished,
+        compact = compact,
+    )
+    PlaybackTimeLabels(
+        durationMs = duration,
+        positionState = compositionPosition,
+        draggedPosition = draggedPosition,
+    )
+}
+
+@Composable
+private fun PlaybackTimelineSlider(
+    durationMs: Long,
+    visualPosition: State<Float>,
+    interactionPosition: State<Float>,
+    draggedPosition: Float?,
+    onPositionChange: (Float) -> Unit,
+    onPositionChangeFinished: () -> Unit,
+    compact: Boolean,
+) {
+    val sliderValue = draggedPosition ?: interactionPosition.value
     XySlider(
-        value = sliderValue.coerceIn(0f, duration.coerceAtLeast(1).toFloat()),
+        value = sliderValue.coerceIn(0f, durationMs.coerceAtLeast(1).toFloat()),
         onValueChange = onPositionChange,
         onValueChangeFinished = onPositionChangeFinished,
-        valueRange = 0f..duration.coerceAtLeast(1).toFloat(),
-        enabled = duration > 0,
+        valueRange = 0f..durationMs.coerceAtLeast(1).toFloat(),
+        enabled = durationMs > 0,
         compact = compact,
         thumbSize = if (compact) 7f else 8f,
         trackHeight = 3f,
         activeColor = PlayerPrimaryContent,
         inactiveColor = PlayerSubtleContent,
+        visualValue = draggedPosition?.let { null } ?: visualPosition,
     )
+}
+
+@Composable
+private fun PlaybackTimeLabels(durationMs: Long, positionState: State<Float>, draggedPosition: Float?) {
+    val elapsedSecond by remember(positionState, draggedPosition) {
+        derivedStateOf {
+            (draggedPosition ?: positionState.value).toLong().coerceAtLeast(0L) / 1_000L
+        }
+    }
+    val remainingSecond by remember(positionState, draggedPosition, durationMs) {
+        derivedStateOf {
+            (durationMs - (draggedPosition ?: positionState.value).toLong()).coerceAtLeast(0L) / 1_000L
+        }
+    }
+    val elapsedText = remember(elapsedSecond) { formatPlaybackTime(elapsedSecond * 1_000L) }
+    val remainingText =
+        remember(remainingSecond, durationMs) {
+            if (durationMs > 0L) "-${formatPlaybackTime(remainingSecond * 1_000L)}" else "0:00"
+        }
+
     Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp)) {
         Text(
             text = elapsedText,
@@ -212,3 +275,11 @@ internal fun formatPlaybackTime(durationMs: Long): String {
         String.format(Locale.getDefault(), "%d:%02d", minutes, seconds)
     }
 }
+
+internal fun playbackInteractionPositionMs(positionMs: Float): Float {
+    if (!positionMs.isFinite() || positionMs <= 0f) return 0f
+    return (positionMs.toLong() / PLAYBACK_POSITION_INTERACTION_QUANTUM_MS) *
+        PLAYBACK_POSITION_INTERACTION_QUANTUM_MS.toFloat()
+}
+
+private const val PLAYBACK_POSITION_INTERACTION_QUANTUM_MS = 1_000L

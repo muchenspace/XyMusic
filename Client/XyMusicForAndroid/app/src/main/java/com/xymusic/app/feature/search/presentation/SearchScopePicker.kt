@@ -1,7 +1,6 @@
 package com.xymusic.app.feature.search.presentation
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -59,9 +58,6 @@ internal fun SearchScopePicker(selectedScope: SearchScope, onScopeSelected: (Sea
             Surface(
                 modifier =
                 Modifier
-                    .animateContentSize(
-                        animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
-                    )
                     .testTag(SearchTestTags.scope(scope))
                     .clickable(role = Role.Tab) { onScopeSelected(scope) },
                 shape = CircleShape,

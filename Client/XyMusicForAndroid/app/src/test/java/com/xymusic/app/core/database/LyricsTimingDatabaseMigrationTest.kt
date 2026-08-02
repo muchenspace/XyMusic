@@ -19,11 +19,7 @@ class LyricsTimingDatabaseMigrationTest {
     val helper =
         MigrationTestHelper(
             instrumentation = InstrumentationRegistry.getInstrumentation(),
-            file =
-                InstrumentationRegistry
-                    .getInstrumentation()
-                    .targetContext
-                    .getDatabasePath(TEST_DATABASE),
+            file = InstrumentationRegistry.getInstrumentation().targetContext.getDatabasePath(TEST_DATABASE),
             driver = AndroidSQLiteDriver(),
             databaseClass = XyMusicDatabase::class,
         )

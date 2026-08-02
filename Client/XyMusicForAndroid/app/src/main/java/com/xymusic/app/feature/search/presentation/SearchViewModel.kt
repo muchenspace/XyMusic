@@ -277,7 +277,11 @@ constructor(
             )
         }
 
-        if (shouldRecordHistory) recordHistory(request)
+        if (shouldRecordHistory) {
+            viewModelScope.launch {
+                recordHistory(request)
+            }
+        }
 
         if (request.scope == SearchScope.ALL) {
             val refreshFailed =

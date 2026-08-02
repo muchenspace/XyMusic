@@ -12,6 +12,7 @@ import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.session.SessionIdentityProvider
 import com.xymusic.app.core.session.SessionMutationCoordinator
+import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaUri
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
 import com.xymusic.app.feature.player.domain.PlayerResult
 import java.io.IOException

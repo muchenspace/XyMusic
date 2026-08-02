@@ -1,4 +1,4 @@
-package com.xymusic.app.feature.player.data.media
+package com.xymusic.app.feature.player.adapter.media3
 
 object PlaybackMediaMetadata {
     const val EXTRA_TRACK_ID = "com.xymusic.app.player.TRACK_ID"

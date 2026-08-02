@@ -1,9 +1,6 @@
 package com.xymusic.app.feature.settings.presentation
 
 import android.app.Application
-import android.graphics.Bitmap
-import android.graphics.Color
-import android.net.Uri
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import com.xymusic.app.R
@@ -11,12 +8,16 @@ import com.xymusic.app.domain.error.DomainError
 import com.xymusic.app.domain.settings.AppSettings
 import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.domain.settings.AppSettingsUseCases
-import com.xymusic.app.domain.settings.ThemePreference
 import com.xymusic.app.feature.auth.domain.AuthRepository
 import com.xymusic.app.feature.auth.domain.AuthResult
 import com.xymusic.app.feature.auth.domain.AuthUseCases
 import com.xymusic.app.feature.auth.domain.model.LoginCommand
 import com.xymusic.app.feature.auth.domain.model.RegisterCommand
+import com.xymusic.app.feature.settings.domain.AvatarImageException
+import com.xymusic.app.feature.settings.domain.AvatarImageNormalizer
+import com.xymusic.app.feature.settings.domain.AvatarImageSource
+import com.xymusic.app.feature.settings.domain.AvatarImageTooLargeException
+import com.xymusic.app.feature.settings.domain.InvalidAvatarImageException
 import com.xymusic.app.feature.settings.domain.ProfileRepository
 import com.xymusic.app.feature.settings.domain.ProfileUseCases
 import com.xymusic.app.feature.settings.domain.SettingsResult
@@ -27,11 +28,9 @@ import com.xymusic.app.feature.settings.domain.model.UserRole
 import com.xymusic.app.feature.settings.domain.model.UserStatus
 import com.xymusic.app.support.MainDispatcherRule
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
@@ -55,11 +54,11 @@ class SettingsViewModelTest {
         val viewModel =
             viewModel(
                 repository = repository,
-                normalizer = normalizer(byteArrayOf(0x01, 0x02, 0x03)),
+                normalizer = normalizer(InvalidAvatarImageException()),
             )
 
         viewModel.effects.test {
-            viewModel.uploadAvatar(TEST_URI)
+            viewModel.uploadAvatar(TEST_SOURCE)
             advanceUntilIdle()
 
             assertThat(awaitItem()).isEqualTo(
@@ -75,11 +74,11 @@ class SettingsViewModelTest {
         val viewModel =
             viewModel(
                 repository = repository,
-                normalizer = normalizer(png(), maxOutputBytes = 32),
+                normalizer = normalizer(AvatarImageTooLargeException()),
             )
 
         viewModel.effects.test {
-            viewModel.uploadAvatar(TEST_URI)
+            viewModel.uploadAvatar(TEST_SOURCE)
             advanceUntilIdle()
 
             assertThat(awaitItem()).isEqualTo(
@@ -95,10 +94,10 @@ class SettingsViewModelTest {
             FakeProfileRepository().apply {
                 uploadResult = SettingsResult.Failure(DomainError.Network("offline"))
             }
-        val viewModel = viewModel(repository, normalizer(png()))
+        val viewModel = viewModel(repository, normalizer())
 
         viewModel.effects.test {
-            viewModel.uploadAvatar(TEST_URI)
+            viewModel.uploadAvatar(TEST_SOURCE)
             advanceUntilIdle()
 
             assertThat(awaitItem()).isEqualTo(
@@ -115,7 +114,7 @@ class SettingsViewModelTest {
             FakeProfileRepository().apply {
                 refreshFailure = IllegalStateException("database implementation detail")
             }
-        val viewModel = viewModel(repository, normalizer(png()))
+        val viewModel = viewModel(repository, normalizer())
 
         viewModel.uiState.test {
             awaitItem()
@@ -140,7 +139,7 @@ class SettingsViewModelTest {
         val viewModel =
             viewModel(
                 repository = FakeProfileRepository(),
-                normalizer = normalizer(png()),
+                normalizer = normalizer(),
                 authRepository = authRepository,
             )
         advanceUntilIdle()
@@ -173,24 +172,17 @@ class SettingsViewModelTest {
         avatarImageNormalizer = normalizer,
     )
 
-    private fun normalizer(content: ByteArray, maxOutputBytes: Int = AvatarUploadCommand.MAX_BYTES) =
-        AvatarImageNormalizer(
-            openInputStream = { ByteArrayInputStream(content) },
-            maxOutputBytes = maxOutputBytes,
-        )
-
-    private fun png(): ByteArray {
-        val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
-        bitmap.eraseColor(Color.rgb(30, 90, 180))
-        return try {
-            ByteArrayOutputStream().use { output ->
-                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
-                output.toByteArray()
+    private fun normalizer(failure: AvatarImageException? = null): AvatarImageNormalizer =
+        object : AvatarImageNormalizer {
+            override fun normalize(source: AvatarImageSource): AvatarUploadCommand {
+                failure?.let { throw it }
+                return AvatarUploadCommand(
+                    fileName = "avatar.jpg",
+                    contentType = "image/jpeg",
+                    content = byteArrayOf(1),
+                )
             }
-        } finally {
-            bitmap.recycle()
         }
-    }
 
     private class FakeProfileRepository : ProfileRepository {
         private val currentProfile = profile()
@@ -246,7 +238,7 @@ class SettingsViewModelTest {
     }
 
     private companion object {
-        val TEST_URI: Uri = Uri.parse("content://test/avatar")
+        val TEST_SOURCE = AvatarImageSource { ByteArrayInputStream(byteArrayOf(1)) }
 
         fun profile() = UserProfile(
             id = "user-1",

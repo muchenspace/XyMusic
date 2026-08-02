@@ -1,38 +1,57 @@
 package com.xymusic.app.core.performance
 
-import android.view.Choreographer
+import android.os.Handler
+import android.os.HandlerThread
+import android.view.FrameMetrics
+import android.view.Window
 
 class FrameJankMonitor(
-    private val slowFrameThresholdNanos: Long,
+    private val window: Window,
+    private val frameBudgetNanos: Long,
     private val onSlowFrame: (durationNanos: Long) -> Unit,
-) : Choreographer.FrameCallback {
+) : Window.OnFrameMetricsAvailableListener {
     init {
-        require(slowFrameThresholdNanos > 0) { "Slow frame threshold must be positive" }
+        require(frameBudgetNanos > 0) { "Frame budget must be positive" }
     }
 
+    @Volatile
     private var running = false
-    private var previousFrameNanos = 0L
+    private var callbackThread: HandlerThread? = null
+    private var callbackHandler: Handler? = null
 
+    @Synchronized
     fun start() {
         if (running) return
+
+        val thread = HandlerThread("XyMusicFrameMetrics").also { it.start() }
+        val handler = Handler(thread.looper)
+        callbackThread = thread
+        callbackHandler = handler
         running = true
-        previousFrameNanos = 0L
-        Choreographer.getInstance().postFrameCallback(this)
+        window.addOnFrameMetricsAvailableListener(this, handler)
     }
 
+    @Synchronized
     fun stop() {
+        if (!running) return
         running = false
-        previousFrameNanos = 0L
-        Choreographer.getInstance().removeFrameCallback(this)
+        window.removeOnFrameMetricsAvailableListener(this)
+        callbackHandler?.removeCallbacksAndMessages(null)
+        callbackThread?.quitSafely()
+        callbackHandler = null
+        callbackThread = null
     }
 
-    override fun doFrame(frameTimeNanos: Long) {
+    override fun onFrameMetricsAvailable(
+        window: Window,
+        frameMetrics: FrameMetrics,
+        dropCountSinceLastInvocation: Int,
+    ) {
         if (!running) return
-        if (previousFrameNanos != 0L) {
-            val duration = frameTimeNanos - previousFrameNanos
-            if (duration >= slowFrameThresholdNanos) onSlowFrame(duration)
-        }
-        previousFrameNanos = frameTimeNanos
-        Choreographer.getInstance().postFrameCallback(this)
+        val duration = frameMetrics.getMetric(FrameMetrics.TOTAL_DURATION)
+        if (isFrameOverBudget(duration, frameBudgetNanos)) onSlowFrame(duration)
     }
 }
+
+internal fun isFrameOverBudget(frameDurationNanos: Long, frameBudgetNanos: Long): Boolean =
+    frameDurationNanos > frameBudgetNanos

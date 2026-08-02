@@ -1,6 +1,5 @@
 package com.xymusic.app.feature.settings.presentation
 
-import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xymusic.app.R
@@ -13,6 +12,10 @@ import com.xymusic.app.domain.settings.StreamingQuality
 import com.xymusic.app.domain.settings.ThemePreference
 import com.xymusic.app.feature.auth.domain.AuthResult
 import com.xymusic.app.feature.auth.domain.AuthUseCases
+import com.xymusic.app.feature.settings.domain.AvatarImageNormalizer
+import com.xymusic.app.feature.settings.domain.AvatarImageSource
+import com.xymusic.app.feature.settings.domain.AvatarImageTooLargeException
+import com.xymusic.app.feature.settings.domain.InvalidAvatarImageException
 import com.xymusic.app.feature.settings.domain.ProfileUseCases
 import com.xymusic.app.feature.settings.domain.SettingsResult
 import com.xymusic.app.feature.settings.domain.model.ProfileValueChange
@@ -111,13 +114,13 @@ constructor(
         }
     }
 
-    fun uploadAvatar(uri: Uri) {
+    fun uploadAvatar(source: AvatarImageSource) {
         if (isSaving.value) return
         viewModelScope.launch {
             isSaving.value = true
             val messageRes =
                 try {
-                    val command = withContext(ioDispatcher) { avatarImageNormalizer.normalize(uri) }
+                    val command = withContext(ioDispatcher) { avatarImageNormalizer.normalize(source) }
                     val result =
                         runCatchingPreservingCancellation {
                             profileUseCases.uploadAvatar(command)

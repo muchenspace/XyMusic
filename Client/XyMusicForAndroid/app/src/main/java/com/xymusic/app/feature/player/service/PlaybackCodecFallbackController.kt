@@ -7,8 +7,8 @@ import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlaybackException
-import com.xymusic.app.feature.player.data.media.PlaybackMediaMetadata
-import com.xymusic.app.feature.player.data.media.PlaybackMediaUri
+import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaMetadata
+import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaUri
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
 import java.util.UUID
 

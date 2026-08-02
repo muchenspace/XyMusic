@@ -21,7 +21,6 @@ import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.TreeSet
 import javax.inject.Inject
-import javax.inject.Qualifier
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -34,10 +33,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
-
-@Qualifier
-@Retention(AnnotationRetention.BINARY)
-annotation class PlaybackDataSourceFactory
 
 @Singleton
 @UnstableApi

@@ -13,18 +13,10 @@ import com.xymusic.app.feature.player.domain.model.PlayerState
 import com.xymusic.app.feature.player.domain.model.RepeatMode
 
 @Immutable
-data class PlayerLyricWordUi(
-    val timeMs: Long,
-    val text: String,
-    val endTimeMs: Long? = null,
-)
+data class PlayerLyricWordUi(val timeMs: Long, val text: String, val endTimeMs: Long? = null)
 
 @Immutable
-data class PlayerLyricLineUi(
-    val timeMs: Long?,
-    val text: String,
-    val words: List<PlayerLyricWordUi> = emptyList(),
-)
+data class PlayerLyricLineUi(val timeMs: Long?, val text: String, val words: List<PlayerLyricWordUi> = emptyList())
 
 @Immutable
 data class PlayerUiState(
@@ -35,6 +27,34 @@ data class PlayerUiState(
     val lyricsTiming: LyricsTiming = LyricsTiming.LINE,
     val sleepTimerRemainingMs: Long? = null,
 )
+
+/**
+ * Keeps high-frequency playback samples in the frame clock instead of making the player tree recompose.
+ * Structural player changes still produce a new state through the normal equality check.
+ */
+internal fun PlayerUiState.withoutPlaybackPosition(): PlayerUiState = copy(
+    player = player.withoutPlaybackPosition(),
+)
+
+internal fun PlayerState.withoutPlaybackPosition(): PlayerState = copy(
+    positionMs = 0L,
+    positionAnchorElapsedRealtimeMs = null,
+    bufferedPositionMs = 0L,
+    positionDiscontinuitySequence = 0L,
+)
+
+internal fun PlayerState.isStructurallyEqualTo(other: PlayerState): Boolean =
+    connectionState == other.connectionState &&
+        playbackState == other.playbackState &&
+        queue == other.queue &&
+        currentQueueItemId == other.currentQueueItemId &&
+        isPlaying == other.isPlaying &&
+        durationMs == other.durationMs &&
+        repeatMode == other.repeatMode &&
+        shuffleEnabled == other.shuffleEnabled &&
+        playbackSpeed == other.playbackSpeed &&
+        sleepTimerRemainingMs == other.sleepTimerRemainingMs &&
+        failure == other.failure
 
 /**
  * Keeps the queue collection stable across position-only player updates.

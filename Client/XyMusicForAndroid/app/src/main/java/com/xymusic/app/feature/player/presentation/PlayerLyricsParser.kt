@@ -96,21 +96,21 @@ private fun parseWordContent(lineContent: String): ParsedWordContent {
         return ParsedWordContent(stripEnhancedTimestamps(lineContent), emptyList())
     }
 
-	val words =
-		matches.mapIndexedNotNull { index, match ->
-			val segmentStart = match.range.last + 1
-			val segmentEnd = matches.getOrNull(index + 1)?.range?.first ?: lineContent.length
-			val text = lineContent.substring(segmentStart, segmentEnd)
-			if (text.isEmpty()) {
-				null
-			} else {
-				PlayerLyricWordUi(
-					timeMs = wordTimes[index]!!,
-					text = text,
-					endTimeMs = wordTimes.getOrNull(index + 1),
-				)
-			}
-		}
+    val words =
+        matches.mapIndexedNotNull { index, match ->
+            val segmentStart = match.range.last + 1
+            val segmentEnd = matches.getOrNull(index + 1)?.range?.first ?: lineContent.length
+            val text = lineContent.substring(segmentStart, segmentEnd)
+            if (text.isEmpty()) {
+                null
+            } else {
+                PlayerLyricWordUi(
+                    timeMs = wordTimes[index]!!,
+                    text = text,
+                    endTimeMs = wordTimes.getOrNull(index + 1),
+                )
+            }
+        }
     val text = words.joinToString(separator = "", transform = PlayerLyricWordUi::text)
     return if (words.isEmpty() || text.isBlank()) {
         ParsedWordContent(stripEnhancedTimestamps(lineContent), emptyList())
@@ -121,12 +121,11 @@ private fun parseWordContent(lineContent: String): ParsedWordContent {
 
 private fun stripEnhancedTimestamps(content: String): String = ENHANCED_LRC_TIMESTAMP_REGEX.replace(content, "").trim()
 
-private fun MatchResult.toTimeMs(): Long? =
-    timestampToTimeMs(
-        minutes = groupValues[1],
-        seconds = groupValues[2],
-        fraction = groupValues[3],
-    )
+private fun MatchResult.toTimeMs(): Long? = timestampToTimeMs(
+    minutes = groupValues[1],
+    seconds = groupValues[2],
+    fraction = groupValues[3],
+)
 
 private fun timestampToTimeMs(minutes: String, seconds: String, fraction: String): Long? {
     val minuteValue = minutes.toLongOrNull() ?: return null

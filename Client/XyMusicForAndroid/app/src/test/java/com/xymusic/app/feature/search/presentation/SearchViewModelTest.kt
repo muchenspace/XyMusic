@@ -16,12 +16,14 @@ import com.xymusic.app.feature.search.domain.model.SearchOverview
 import com.xymusic.app.feature.search.domain.model.SearchQuery
 import com.xymusic.app.feature.search.domain.model.SearchScope
 import com.xymusic.app.support.MainDispatcherRule
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
 import org.junit.Test
@@ -64,6 +66,42 @@ class SearchViewModelTest {
     }
 
     @Test
+    fun explicitOverviewRefreshStartsWithoutWaitingForHistoryWrite() = runTest {
+        val repository = FakeSearchRepository().apply { blockRecord = true }
+        val viewModel = SearchViewModel(SearchUseCases(repository), SavedStateHandle())
+
+        viewModel.onQueryChanged("First Track")
+        viewModel.submit()
+        runCurrent()
+
+        assertThat(repository.refreshOverviewCalls).isEqualTo(1)
+
+        repository.allowRecord.complete(Unit)
+        advanceUntilIdle()
+        assertThat(repository.recordCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun aBlockedHistoryWriteDoesNotBlockTheNextExplicitSearch() = runTest {
+        val repository = FakeSearchRepository().apply { blockRecord = true }
+        val viewModel = SearchViewModel(SearchUseCases(repository), SavedStateHandle())
+
+        viewModel.onQueryChanged("First Track")
+        viewModel.submit()
+        runCurrent()
+
+        viewModel.onQueryChanged("Second Track")
+        viewModel.submit()
+        runCurrent()
+
+        assertThat(viewModel.uiState.value.activeQuery).isEqualTo("Second Track")
+
+        repository.allowRecord.complete(Unit)
+        advanceUntilIdle()
+        assertThat(repository.recordCalls).isEqualTo(2)
+    }
+
+    @Test
     fun overlyLongInputIsRejectedBeforeSearch() = runTest {
         val repository = FakeSearchRepository()
         val viewModel = SearchViewModel(SearchUseCases(repository), SavedStateHandle())
@@ -83,6 +121,8 @@ private class FakeSearchRepository : SearchRepository {
     var recordCalls = 0
     var lastRecordedQuery: SearchQuery? = null
     var lastRecordedScope: SearchScope? = null
+    var blockRecord = false
+    val allowRecord = CompletableDeferred<Unit>()
 
     override fun observeOverview(query: SearchQuery): Flow<SearchOverview?> = flowOf(
         SearchOverview(query, emptyList(), emptyList(), emptyList()),
@@ -106,6 +146,7 @@ private class FakeSearchRepository : SearchRepository {
         recordCalls += 1
         lastRecordedQuery = query
         lastRecordedScope = scope
+        if (blockRecord) allowRecord.await()
         return SearchResult.Success(Unit)
     }
 

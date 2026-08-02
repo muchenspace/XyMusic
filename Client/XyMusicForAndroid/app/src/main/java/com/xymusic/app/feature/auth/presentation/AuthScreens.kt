@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -49,6 +50,9 @@ internal object AuthTestTags {
     const val Submit = "auth_submit"
     const val EntryBrand = "auth_entry_brand"
     const val EntryActions = "auth_entry_actions"
+    const val EntrySignIn = "auth_entry_sign_in"
+    const val EntryRegister = "auth_entry_register"
+    const val SwitchToRegister = "auth_switch_to_register"
     const val FormBrand = "auth_form_brand"
     const val FormFields = "auth_form_fields"
 }
@@ -62,6 +66,7 @@ fun AuthEntryScreen(
     onEditServer: () -> Unit = {},
 ) {
     val colorScheme = MaterialTheme.colorScheme
+    val brandPainter = LocalAuthBrandPainter.current ?: painterResource(R.drawable.xymusic_compact)
     BoxWithConstraints(
         modifier =
         modifier
@@ -92,6 +97,7 @@ fun AuthEntryScreen(
             ) {
                 AuthEntryBrand(
                     compact = compactLandscape,
+                    brandPainter = brandPainter,
                     modifier =
                     Modifier
                         .weight(1f)
@@ -126,7 +132,7 @@ fun AuthEntryScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Spacer(modifier = Modifier.height(60.dp))
-                    AuthEntryBrand(compact = false)
+                    AuthEntryBrand(compact = false, brandPainter = brandPainter)
                     Spacer(modifier = Modifier.weight(1f))
                     AuthEntryActions(
                         onSignIn = onSignIn,
@@ -142,7 +148,7 @@ fun AuthEntryScreen(
 }
 
 @Composable
-private fun AuthEntryBrand(compact: Boolean, modifier: Modifier = Modifier) {
+private fun AuthEntryBrand(compact: Boolean, brandPainter: Painter, modifier: Modifier = Modifier) {
     val colorScheme = MaterialTheme.colorScheme
     Column(
         modifier = modifier,
@@ -157,7 +163,7 @@ private fun AuthEntryBrand(compact: Boolean, modifier: Modifier = Modifier) {
             contentAlignment = Alignment.Center,
         ) {
             Image(
-                painter = painterResource(R.drawable.xymusic),
+                painter = brandPainter,
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
@@ -204,7 +210,8 @@ private fun AuthEntryActions(
             modifier =
             Modifier
                 .fillMaxWidth()
-                .height(52.dp),
+                .height(52.dp)
+                .testTag(AuthTestTags.EntrySignIn),
             colors =
             ButtonDefaults.buttonColors(
                 containerColor = colorScheme.surfaceContainerHighest,
@@ -229,7 +236,8 @@ private fun AuthEntryActions(
             modifier =
             Modifier
                 .fillMaxWidth()
-                .height(52.dp),
+                .height(52.dp)
+                .testTag(AuthTestTags.EntryRegister),
             colors =
             ButtonDefaults.outlinedButtonColors(
                 contentColor = colorScheme.primary,

@@ -1,14 +1,5 @@
 package com.xymusic.app.feature.search.presentation
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedContentTransitionScope
-import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -51,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -61,7 +53,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.PagingData
 import androidx.paging.compose.collectAsLazyPagingItems
 import com.xymusic.app.R
-import com.xymusic.app.app.playback.CatalogPlaybackViewModel
 import com.xymusic.app.core.ui.layout.isWideLandscape
 import com.xymusic.app.core.ui.media.CatalogAlbumRow
 import com.xymusic.app.core.ui.media.CatalogAlbumUi
@@ -71,11 +62,8 @@ import com.xymusic.app.core.ui.media.CatalogPagedList
 import com.xymusic.app.core.ui.media.CatalogTrackRow
 import com.xymusic.app.core.ui.media.CatalogTrackUi
 import com.xymusic.app.feature.search.domain.model.SearchScope
-import com.xymusic.app.ui.theme.XyMotion
 import com.xymusic.app.ui.theme.spacing
 import kotlinx.coroutines.flow.Flow
-
-private const val SEARCH_SCOPE_SLIDE_OFFSET_DIVISOR = 24
 
 internal object SearchTestTags {
     const val Input = "search_input"
@@ -88,6 +76,8 @@ internal object SearchTestTags {
     fun historyItem(item: SearchHistoryUi): String = "search_history_${item.scope}_${item.query.hashCode()}"
 
     fun scope(scope: SearchScope): String = "search_scope_${scope.name}"
+
+    fun resultList(scope: SearchScope): String = "search_result_list_${scope.name}"
 }
 
 private enum class SearchResultMode {
@@ -107,26 +97,6 @@ private fun SearchUiState.toResultMode(): SearchResultMode = if (isIdle) {
         SearchScope.ARTISTS -> SearchResultMode.Artists
         SearchScope.ALBUMS -> SearchResultMode.Albums
     }
-}
-
-private fun AnimatedContentTransitionScope<SearchResultMode>.searchResultTransition(): ContentTransform {
-    if (initialState == SearchResultMode.Idle || targetState == SearchResultMode.Idle) {
-        return fadeIn(tween(XyMotion.Quick, easing = XyMotion.NavigationEasing)).togetherWith(
-            fadeOut(tween(XyMotion.Quick, easing = XyMotion.NavigationEasing)),
-        )
-    }
-    val slideDirection = if (targetState.ordinal > initialState.ordinal) 1 else -1
-    return (
-        slideInHorizontally(
-            animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
-            initialOffsetX = { fullWidth -> fullWidth / SEARCH_SCOPE_SLIDE_OFFSET_DIVISOR * slideDirection },
-        ) + fadeIn(tween(XyMotion.Quick, easing = XyMotion.NavigationEasing))
-        ).togetherWith(
-        slideOutHorizontally(
-            animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
-            targetOffsetX = { fullWidth -> -(fullWidth / SEARCH_SCOPE_SLIDE_OFFSET_DIVISOR) * slideDirection },
-        ) + fadeOut(tween(XyMotion.Quick, easing = XyMotion.NavigationEasing)),
-    )
 }
 
 @Composable
@@ -230,6 +200,7 @@ private fun SearchQueryField(
     onClearQuery: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val keyboardController = LocalSoftwareKeyboardController.current
     TextField(
         value = uiState.input,
         onValueChange = onQueryChanged,
@@ -272,7 +243,12 @@ private fun SearchQueryField(
             null -> null
         },
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-        keyboardActions = KeyboardActions(onSearch = { onSubmit() }),
+        keyboardActions = KeyboardActions(
+            onSearch = {
+                keyboardController?.hide()
+                onSubmit()
+            },
+        ),
         singleLine = true,
         shape = RoundedCornerShape(11.dp),
         colors =
@@ -293,10 +269,10 @@ fun SearchScreen(
     onTrackMore: (String) -> Unit,
     onAlbumClick: (String) -> Unit,
     onArtistClick: (String) -> Unit,
+    onTrackPlay: (List<CatalogTrackUi>, CatalogTrackUi) -> Unit,
     modifier: Modifier = Modifier,
     onBack: (() -> Unit)? = null,
     viewModel: SearchViewModel = hiltViewModel(),
-    playbackViewModel: CatalogPlaybackViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -335,7 +311,7 @@ fun SearchScreen(
         },
         onTrackPlay = { tracks, track ->
             viewModel.recordOpenedResult()
-            playbackViewModel.playQueue(tracks = tracks, startTrack = track)
+            onTrackPlay(tracks, track)
         },
         onTrackMore = onTrackMore,
         modifier = modifier,
@@ -425,13 +401,8 @@ fun SearchContent(
                         } else {
                             Modifier.fillMaxSize()
                         }
-                    AnimatedContent(
-                        targetState = uiState.toResultMode(),
-                        modifier = resultModifier,
-                        transitionSpec = { searchResultTransition() },
-                        label = "search-result-content",
-                    ) { resultMode ->
-                        when (resultMode) {
+                    Box(modifier = resultModifier) {
+                        when (uiState.toResultMode()) {
                             SearchResultMode.Idle ->
                                 SearchIdleContent(
                                     history = uiState.history,
@@ -473,7 +444,10 @@ fun SearchContent(
                                             onMoreClick = { onTrackMore(track.id) },
                                         )
                                     },
-                                    modifier = Modifier.fillMaxSize(),
+                                    modifier =
+                                    Modifier
+                                        .fillMaxSize()
+                                        .testTag(SearchTestTags.resultList(SearchScope.TRACKS)),
                                 )
                             }
 
@@ -491,7 +465,10 @@ fun SearchContent(
                                             onClick = { onArtistClick(artist.id) },
                                         )
                                     },
-                                    modifier = Modifier.fillMaxSize(),
+                                    modifier =
+                                    Modifier
+                                        .fillMaxSize()
+                                        .testTag(SearchTestTags.resultList(SearchScope.ARTISTS)),
                                 )
                             }
 
@@ -509,7 +486,10 @@ fun SearchContent(
                                             onClick = { onAlbumClick(album.id) },
                                         )
                                     },
-                                    modifier = Modifier.fillMaxSize(),
+                                    modifier =
+                                    Modifier
+                                        .fillMaxSize()
+                                        .testTag(SearchTestTags.resultList(SearchScope.ALBUMS)),
                                 )
                             }
                         }

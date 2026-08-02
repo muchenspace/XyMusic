@@ -8,8 +8,6 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 
@@ -71,30 +69,25 @@ object XyMotion {
     const val SharedElementMiniBarKey = "mini-bar"
 }
 
-// Navigation transition specs.
-fun AnimatedContentTransitionScope<*>.slideFadeInto() = slideInVertically(
-    animationSpec = tween(XyMotion.Standard, easing = XyMotion.NavigationEasing),
-    initialOffsetY = { it / 24 },
-) + fadeIn(tween(XyMotion.Standard, easing = XyMotion.NavigationEasing))
+// Route transitions stay alpha-only so navigation never remeasures the active page per frame.
+fun AnimatedContentTransitionScope<*>.fadeInto() = fadeIn(
+    animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
+)
 
-fun AnimatedContentTransitionScope<*>.slideFadeOutOf() = slideOutVertically(
-    animationSpec = tween(XyMotion.Standard, easing = XyMotion.NavigationEasing),
-    targetOffsetY = { -it / 24 },
-) + fadeOut(tween(XyMotion.Standard, easing = XyMotion.NavigationEasing))
+fun AnimatedContentTransitionScope<*>.fadeOutOf() = fadeOut(
+    animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
+)
 
-fun AnimatedContentTransitionScope<*>.slideFadeBackInto() = slideInVertically(
-    animationSpec = tween(XyMotion.Standard, easing = XyMotion.NavigationEasing),
-    initialOffsetY = { -it / 24 },
-) + fadeIn(tween(XyMotion.Standard, easing = XyMotion.NavigationEasing))
+fun AnimatedContentTransitionScope<*>.fadeBackInto() = fadeIn(
+    animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
+)
 
-fun AnimatedContentTransitionScope<*>.slideFadeBackOutOf() = slideOutVertically(
-    animationSpec = tween(XyMotion.Standard, easing = XyMotion.NavigationEasing),
-    targetOffsetY = { it / 24 },
-) + fadeOut(tween(XyMotion.Standard, easing = XyMotion.NavigationEasing))
+fun AnimatedContentTransitionScope<*>.fadeBackOutOf() = fadeOut(
+    animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
+)
 
-fun AnimatedContentTransitionScope<*>.playerSlideInto() = slideInVertically(
+fun AnimatedContentTransitionScope<*>.playerFadeInto() = fadeIn(
     animationSpec = tween(XyMotion.Emphasized, easing = XyMotion.NavigationEasing),
-    initialOffsetY = { it },
 )
 
 fun AnimatedContentTransitionScope<*>.playerReturnInto() = fadeIn(

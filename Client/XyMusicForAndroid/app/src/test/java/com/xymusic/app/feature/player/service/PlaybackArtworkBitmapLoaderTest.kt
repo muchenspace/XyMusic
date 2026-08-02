@@ -16,7 +16,7 @@ import coil3.request.allowHardware
 import com.google.common.truth.Truth.assertThat
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
-import com.xymusic.app.feature.player.data.media.PlaybackMediaMetadata
+import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaMetadata
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit

@@ -92,6 +92,8 @@ internal object PlayerTestTags {
     const val Previous = "player_previous"
     const val Favorite = "player_favorite"
     const val ContentPager = "player_content_pager"
+    const val LyricsList = "player_lyrics_list"
+    fun lyricLine(index: Int): String = "player_lyric_$index"
     const val TopBar = "player_top_bar"
     const val LandscapeArtworkPane = "player_landscape_artwork_pane"
     const val LandscapeArtwork = "player_landscape_artwork"

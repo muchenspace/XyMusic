@@ -1,5 +1,6 @@
 package com.xymusic.app.feature.player.presentation
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -29,8 +30,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -58,7 +57,8 @@ fun PlayerMiniBar(
 ) {
     val current = uiState.player.currentItem ?: return
     val colorScheme = MaterialTheme.colorScheme
-    val displayedPlaybackPosition = playbackPosition ?: rememberPlaybackPositionState(uiState.player)
+    val displayedPlaybackPosition =
+        playbackPosition ?: rememberPlaybackPositionSnapshotState(uiState.player)
     val metrics = playerMiniBarMetrics(compact)
     val artistLine =
         remember(current.queueItemId, current.artistNames) {
@@ -128,7 +128,7 @@ private fun PlayerMiniBarContent(
             url = artworkUrl,
             cacheKey = artworkCacheKey,
             contentDescription = null,
-            fallbackImageRes = R.drawable.xymusic,
+            fallbackImageRes = R.drawable.xymusic_compact,
             modifier =
             Modifier
                 .size(metrics.artworkSize)
@@ -241,22 +241,22 @@ private fun MiniBarTopDivider(modifier: Modifier = Modifier) {
 
 @Composable
 private fun MiniBarProgress(positionMs: State<Float>, durationMs: Long, modifier: Modifier = Modifier) {
-    Box(
+    val trackColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+    val progressColor = MaterialTheme.colorScheme.primary
+    Canvas(
         modifier =
         modifier
             .fillMaxWidth()
             .height(2.dp)
-            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+            .background(trackColor),
     ) {
-        Box(
-            modifier =
-            Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    transformOrigin = TransformOrigin(0f, 0.5f)
-                    scaleX = normalizedPlaybackProgress(positionMs = positionMs.value, durationMs = durationMs)
-                }.background(MaterialTheme.colorScheme.primary),
-        )
+        val progress = normalizedPlaybackProgress(positionMs = positionMs.value, durationMs = durationMs)
+        if (progress > 0f) {
+            drawRect(
+                color = progressColor,
+                size = size.copy(width = size.width * progress),
+            )
+        }
     }
 }
 

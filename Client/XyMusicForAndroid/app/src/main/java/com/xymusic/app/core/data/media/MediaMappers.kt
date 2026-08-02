@@ -234,19 +234,18 @@ internal fun TrackSummaryReadModel.toDomain(): Track = track.toDomain(album, cre
 
 internal fun TrackDetailReadModel.toDomain(): TrackDetail = TrackDetail(
     track = track.toDomain(album, credits, artists),
-    lyrics =
-    lyrics.map { lyric ->
-            Lyrics(
-                id = lyric.id,
-                trackId = lyric.trackId,
-                language = lyric.language,
-                format = LyricsFormat.valueOf(lyric.format.name),
-                timing = LyricsTiming.valueOf(lyric.timing.name),
-                content = lyric.content,
-                trackVersion = lyric.trackVersion,
-                updatedAtEpochMillis = lyric.updatedAtEpochMs,
-            )
-        },
+    lyrics = lyrics.map { lyric ->
+        Lyrics(
+            id = lyric.id,
+            trackId = lyric.trackId,
+            language = lyric.language,
+            format = LyricsFormat.valueOf(lyric.format.name),
+            timing = LyricsTiming.valueOf(lyric.timing.name),
+            content = lyric.content,
+            trackVersion = lyric.trackVersion,
+            updatedAtEpochMillis = lyric.updatedAtEpochMs,
+        )
+    },
 )
 
 private fun TrackEntity.toDomain(

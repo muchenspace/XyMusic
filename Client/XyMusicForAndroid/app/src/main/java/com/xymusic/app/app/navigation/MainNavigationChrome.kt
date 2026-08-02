@@ -28,21 +28,31 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xymusic.app.feature.player.presentation.PlayerMiniBar
-import com.xymusic.app.feature.player.presentation.PlayerViewModel
-import com.xymusic.app.feature.player.presentation.rememberPlaybackPositionState
+import com.xymusic.app.feature.player.presentation.PlayerUiState
 import com.xymusic.app.ui.theme.spacing
 
 internal val MainNavigationBarHeight = 56.5.dp
 internal val MainNavigationRailWidth = 72.dp
+
+internal object MainNavigationTestTags {
+    const val Home = "main_navigation_home"
+    const val Mine = "main_navigation_mine"
+
+    fun forDestination(destination: MainDestination): String = when (destination) {
+        MainDestination.Home -> Home
+        MainDestination.Mine -> Mine
+    }
+}
 
 private val MainNavigationBarDividerHeight = 0.5.dp
 
@@ -54,20 +64,21 @@ private val PRIMARY_DESTINATIONS =
 
 @Composable
 internal fun PlayerMiniBarRoute(
-    playerViewModel: PlayerViewModel,
+    uiState: PlayerUiState,
+    playbackPosition: State<Float>,
     onOpenPlayer: () -> Unit,
+    onTogglePlayback: () -> Unit,
+    onNext: () -> Unit,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
 ) {
-    val uiState by playerViewModel.uiState.collectAsStateWithLifecycle()
     if (uiState.player.currentItem == null) return
-    val playbackPosition = rememberPlaybackPositionState(uiState.player)
     PlayerMiniBar(
         uiState = uiState,
         playbackPosition = playbackPosition,
         onOpenPlayer = onOpenPlayer,
-        onTogglePlayback = playerViewModel::togglePlayback,
-        onNext = playerViewModel::skipToNext,
+        onTogglePlayback = onTogglePlayback,
+        onNext = onNext,
         compact = compact,
         modifier = modifier,
     )
@@ -119,7 +130,10 @@ internal fun GlassNavigationBar(
                         )
                     },
                     label = label,
-                    modifier = Modifier.weight(1f),
+                    modifier =
+                    Modifier
+                        .weight(1f)
+                        .testTag(MainNavigationTestTags.forDestination(destination)),
                 )
             }
         }
@@ -207,7 +221,10 @@ internal fun MainNavigationRail(
                         )
                     },
                     label = { Text(label) },
-                    modifier = Modifier.padding(vertical = MaterialTheme.spacing.extraSmall),
+                    modifier =
+                    Modifier
+                        .padding(vertical = MaterialTheme.spacing.extraSmall)
+                        .testTag(MainNavigationTestTags.forDestination(destination)),
                 )
             }
             Spacer(modifier = Modifier.weight(1f))

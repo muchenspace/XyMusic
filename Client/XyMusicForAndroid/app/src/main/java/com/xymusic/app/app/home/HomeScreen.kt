@@ -43,7 +43,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xymusic.app.R
-import com.xymusic.app.app.playback.CatalogPlaybackViewModel
 import com.xymusic.app.core.ui.component.EmptyState
 import com.xymusic.app.core.ui.component.ErrorState
 import com.xymusic.app.core.ui.component.LoadingState
@@ -76,10 +75,10 @@ fun HomeScreen(
     onTrackMore: (String) -> Unit,
     onSearchClick: () -> Unit,
     onAlbumClick: (String) -> Unit,
+    onTrackPlay: (List<CatalogTrackUi>, CatalogTrackUi) -> Unit,
     modifier: Modifier = Modifier,
     onProfileClick: () -> Unit = {},
     viewModel: CatalogViewModel = hiltViewModel(),
-    playbackViewModel: CatalogPlaybackViewModel = hiltViewModel(),
     profileViewModel: HomeProfileViewModel = hiltViewModel(),
 ) {
     val randomUiState by viewModel.randomUiState.collectAsStateWithLifecycle()
@@ -95,10 +94,7 @@ fun HomeScreen(
         onProfileClick = onProfileClick,
         onAlbumClick = onAlbumClick,
         onRecommendedTrackPlay = { track ->
-            playbackViewModel.playQueue(
-                tracks = recommendationQueue,
-                startTrack = track,
-            )
+            onTrackPlay(recommendationQueue, track)
         },
         onTrackMore = onTrackMore,
         onRetryFeatured = viewModel::retryRandomAlbums,
@@ -233,7 +229,11 @@ private fun PortraitDiscoverContent(
                         contentPadding = PaddingValues(horizontal = 20.dp),
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
-                        items(featuredAlbums, key = CatalogAlbumUi::id) { album ->
+                        items(
+                            items = featuredAlbums,
+                            key = CatalogAlbumUi::id,
+                            contentType = { "featured-album" },
+                        ) { album ->
                             CatalogAlbumShelfCard(
                                 album = album,
                                 onClick = { actions.onAlbumClick(album.id) },
@@ -345,7 +345,11 @@ private fun LandscapeDiscoverContent(
                             contentPadding = PaddingValues(horizontal = 8.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            items(featuredAlbums, key = CatalogAlbumUi::id) { album ->
+                            items(
+                                items = featuredAlbums,
+                                key = CatalogAlbumUi::id,
+                                contentType = { "featured-album" },
+                            ) { album ->
                                 CatalogAlbumShelfCard(
                                     album = album,
                                     onClick = { actions.onAlbumClick(album.id) },
@@ -385,7 +389,11 @@ private fun LandscapeDiscoverContent(
             }
             when {
                 recommendedTracks.isNotEmpty() ->
-                    items(recommendedTracks, key = CatalogTrackUi::id) { track ->
+                    items(
+                        items = recommendedTracks,
+                        key = CatalogTrackUi::id,
+                        contentType = { "recommended-track" },
+                    ) { track ->
                         CatalogTrackRow(
                             track = track,
                             onClick = { actions.onTrackPlay(track) },

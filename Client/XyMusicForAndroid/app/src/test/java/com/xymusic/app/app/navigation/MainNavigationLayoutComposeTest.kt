@@ -36,12 +36,12 @@ import com.xymusic.app.feature.playlist.presentation.PlaylistRouteArgs
 import com.xymusic.app.testing.ComposeTestApplication
 import com.xymusic.app.ui.theme.XyMotion
 import com.xymusic.app.ui.theme.XyMusicTheme
+import com.xymusic.app.ui.theme.fadeBackInto
+import com.xymusic.app.ui.theme.fadeBackOutOf
+import com.xymusic.app.ui.theme.fadeInto
+import com.xymusic.app.ui.theme.fadeOutOf
+import com.xymusic.app.ui.theme.playerFadeInto
 import com.xymusic.app.ui.theme.playerReturnInto
-import com.xymusic.app.ui.theme.playerSlideInto
-import com.xymusic.app.ui.theme.slideFadeBackInto
-import com.xymusic.app.ui.theme.slideFadeBackOutOf
-import com.xymusic.app.ui.theme.slideFadeInto
-import com.xymusic.app.ui.theme.slideFadeOutOf
 import kotlin.math.roundToInt
 import org.junit.Rule
 import org.junit.Test
@@ -69,7 +69,7 @@ class MainNavigationLayoutComposeTest {
             durationMillis = XyMotion.Emphasized,
             target = FixtureTarget.Player,
             initialChrome = PhoneHomeWithMiniChrome,
-            inFlightChrome = PhoneHomeWithMiniChrome,
+            inFlightChrome = PhoneHomeWithoutMiniChrome,
             finalChrome = HiddenChrome,
         )
     }
@@ -112,7 +112,7 @@ class MainNavigationLayoutComposeTest {
 
     @Test
     @Config(qualifiers = PHONE_QUALIFIERS)
-    fun playerReturnAnimatesPrimaryContentInsetsWithChrome() {
+    fun playerReturnUpdatesPrimaryContentInsetsWithoutPerFrameRemeasure() {
         val config =
             MainNavigationLayoutConfig(
                 useNavigationRail = false,
@@ -188,7 +188,7 @@ class MainNavigationLayoutComposeTest {
         composeRule.waitForIdle()
 
         assertThat(contentHeights.first()).isGreaterThan(contentHeights.last())
-        assertThat(contentHeights.distinct().size).isGreaterThan(2)
+        assertThat(contentHeights.distinct().size).isAtMost(2)
         contentHeights.zipWithNext().forEach { (previous, next) ->
             assertThat(next).isAtMost(previous)
         }
@@ -278,7 +278,7 @@ class MainNavigationLayoutComposeTest {
             durationMillis = XyMotion.Emphasized,
             target = FixtureTarget.Player,
             initialChrome = RailHomeWithMiniChrome,
-            inFlightChrome = RailHomeWithMiniChrome,
+            inFlightChrome = RailHomeWithoutMiniChrome,
             finalChrome = HiddenChrome,
         )
     }
@@ -544,30 +544,30 @@ private fun FixtureNavHost(
             .testTag(NAVIGATION_HOST_TAG),
         enterTransition = {
             if (targetState.destination.route == PlayerDestination.NowPlaying.route) {
-                playerSlideInto()
+                playerFadeInto()
             } else {
-                slideFadeInto()
+                fadeInto()
             }
         },
         exitTransition = {
             if (targetState.destination.route == PlayerDestination.NowPlaying.route) {
                 ExitTransition.None
             } else {
-                slideFadeOutOf()
+                fadeOutOf()
             }
         },
         popEnterTransition = {
             when {
-                targetState.destination.route == PlayerDestination.NowPlaying.route -> playerSlideInto()
+                targetState.destination.route == PlayerDestination.NowPlaying.route -> playerFadeInto()
                 initialState.destination.route == PlayerDestination.NowPlaying.route -> playerReturnInto()
-                else -> slideFadeBackInto()
+                else -> fadeBackInto()
             }
         },
         popExitTransition = {
             if (initialState.destination.route == PlayerDestination.NowPlaying.route) {
                 ExitTransition.KeepUntilTransitionsFinished
             } else {
-                slideFadeBackOutOf()
+                fadeBackOutOf()
             }
         },
     ) {
@@ -674,3 +674,4 @@ private val PhoneHomeWithMiniChrome =
 private val PlaylistWithMiniChrome = ChromeExpectation(miniPlayer = true)
 private val RailHomeWithMiniChrome =
     ChromeExpectation(navigationRail = true, miniPlayer = true)
+private val RailHomeWithoutMiniChrome = ChromeExpectation(navigationRail = true)

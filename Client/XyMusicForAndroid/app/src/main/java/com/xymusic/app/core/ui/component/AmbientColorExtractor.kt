@@ -5,6 +5,7 @@ import android.content.res.Resources
 import android.util.LruCache
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
@@ -34,14 +35,18 @@ fun rememberArtworkAmbientColor(artworkUrl: String?, cacheKey: String?): Color? 
                     null
                 } else {
                     val artworkIdentity = stableArtworkCacheKey(cacheKey) ?: artworkUrl
-                    artworkAmbientColorCache[artworkIdentity]?.let(::Color)
-                        ?: extractArtworkAmbientColor(
-                            artworkUrl = artworkUrl,
-                            cacheKey = cacheKey,
-                            artworkIdentity = artworkIdentity,
-                            context = context,
-                            resources = resources,
-                        )
+                    cachedArtworkAmbientColor(artworkIdentity)
+                        ?: run {
+                            // Let the first player frame use the fallback background while artwork loads.
+                            withFrameNanos { }
+                            extractArtworkAmbientColor(
+                                artworkUrl = artworkUrl,
+                                cacheKey = cacheKey,
+                                artworkIdentity = artworkIdentity,
+                                context = context,
+                                resources = resources,
+                            )
+                        }
                 }
         }
     return state.value
@@ -81,13 +86,23 @@ private suspend fun extractArtworkAmbientColor(
                     ?: palette.vibrantSwatch
                     ?: palette.dominantSwatch
             swatch?.rgb
-                ?.also { artworkAmbientColorCache.put(artworkIdentity, it) }
+                ?.also { color -> cacheArtworkAmbientColor(artworkIdentity, color) }
                 ?.let(::Color)
         }
     }
 }.getOrNull()
 
 private val artworkAmbientColorCache = LruCache<String, Int>(64)
+
+private fun cachedArtworkAmbientColor(key: String): Color? = synchronized(artworkAmbientColorCache) {
+    artworkAmbientColorCache[key]?.let(::Color)
+}
+
+private fun cacheArtworkAmbientColor(key: String, color: Int) {
+    synchronized(artworkAmbientColorCache) {
+        artworkAmbientColorCache.put(key, color)
+    }
+}
 
 private fun ImageRequest.Builder.applyAmbientArtworkCacheKey(cacheKey: String?): ImageRequest.Builder = apply {
     stableArtworkCacheKey(cacheKey)?.let { stableKey ->

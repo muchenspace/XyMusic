@@ -1,4 +1,4 @@
-package com.xymusic.app.feature.player.data.media
+package com.xymusic.app.feature.player.adapter.media3
 
 import android.net.Uri
 import java.util.UUID

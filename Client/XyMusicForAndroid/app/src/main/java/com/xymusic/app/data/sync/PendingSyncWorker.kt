@@ -9,7 +9,9 @@ import com.xymusic.app.core.database.entity.PendingSyncOperationEntity
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.session.SessionMutationCoordinator
+import com.xymusic.app.core.sync.PendingExecutionOutcome
 import com.xymusic.app.core.sync.PendingSyncScheduler
+import com.xymusic.app.domain.server.ServerConfigRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import java.time.Clock
@@ -26,6 +28,7 @@ constructor(
     private val pendingDao: PendingSyncOperationDao,
     private val executor: PendingSyncOperationExecutor,
     private val sessionProvider: AppSessionProvider,
+    private val serverConfigRepository: ServerConfigRepository,
     private val sessionMutationCoordinator: SessionMutationCoordinator,
     private val pendingSyncScheduler: PendingSyncScheduler,
     private val clock: Clock,
@@ -48,6 +51,7 @@ constructor(
         ?.takeIf { runCatching { UUID.fromString(it) }.isSuccess }
 
     private suspend fun drainOperations(ownerUserId: String, leaseOwner: String): Result {
+        serverConfigRepository.load()
         sessionProvider.restoreSession()
         repeat(MAX_OPERATIONS_PER_RUN) {
             processNextOperation(ownerUserId, leaseOwner)?.let { return it }

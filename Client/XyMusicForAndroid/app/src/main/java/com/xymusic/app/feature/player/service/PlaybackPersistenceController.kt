@@ -4,8 +4,8 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
-import com.xymusic.app.feature.player.data.media.PlaybackMediaMetadata
-import com.xymusic.app.feature.player.data.media.PlaybackMediaUri
+import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaMetadata
+import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaUri
 import com.xymusic.app.feature.player.domain.PlaybackCheckpoint
 import com.xymusic.app.feature.player.domain.PlaybackEventSink
 import com.xymusic.app.feature.player.domain.PlaybackEventType

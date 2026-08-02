@@ -19,6 +19,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.XyMusic"
         android:usesCleartextTraffic="true">
+        <profileable
+            android:shell="true"
+            tools:targetApi="q" />
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"

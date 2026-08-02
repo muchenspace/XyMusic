@@ -53,13 +53,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xymusic.app.R
 import com.xymusic.app.core.ui.layout.isWideLandscape
 import com.xymusic.app.core.ui.media.PlaylistEditorDialog
-import com.xymusic.app.core.ui.media.labelRes
 import com.xymusic.app.feature.playlist.domain.model.PlaylistSummary
 import com.xymusic.app.ui.theme.spacing
 
 internal object LibraryTestTags {
     const val LandscapeNavigation = "library_landscape_navigation"
     const val LandscapeContent = "library_landscape_content"
+    const val FavoritesList = "library_favorites_list"
+    const val PlaylistsList = "library_playlists_list"
 
     fun tab(tab: LibraryTab): String = "library_tab_${tab.name}"
 }
@@ -110,7 +111,7 @@ fun LibraryScreen(
         PlaylistEditorDialog(
             onDismiss = { showCreateDialog = false },
             onSubmit = { name, description, visibility ->
-                viewModel.createPlaylist(name, description, visibility)
+                viewModel.createPlaylist(name, description, visibility.toPlaylistVisibility())
                 showCreateDialog = false
             },
         )
@@ -121,10 +122,10 @@ fun LibraryScreen(
             submitLabel = stringResource(R.string.common_confirm),
             initialName = playlist.name,
             initialDescription = playlist.description.orEmpty(),
-            initialVisibility = playlist.visibility,
+            initialVisibility = playlist.visibility.toPlaylistEditorOption(),
             onDismiss = { editingPlaylist = null },
             onSubmit = { name, description, visibility ->
-                viewModel.updatePlaylist(playlist, name, description, visibility)
+                viewModel.updatePlaylist(playlist, name, description, visibility.toPlaylistVisibility())
                 editingPlaylist = null
             },
         )
@@ -244,7 +245,7 @@ fun LibraryScreen(
                                     refreshFailed = uiState.refreshFailed,
                                     onRetry = viewModel::refresh,
                                     listState = favoriteListState,
-                                    modifier = Modifier.weight(1f),
+                                    modifier = Modifier.weight(1f).testTag(LibraryTestTags.FavoritesList),
                                 )
 
                             LibraryTab.Playlists ->
@@ -259,7 +260,7 @@ fun LibraryScreen(
                                     onRetry = viewModel::refresh,
                                     listState = playlistListState,
                                     wideLandscape = wideLandscape,
-                                    modifier = Modifier.weight(1f),
+                                    modifier = Modifier.weight(1f).testTag(LibraryTestTags.PlaylistsList),
                                 )
 
                             LibraryTab.History ->

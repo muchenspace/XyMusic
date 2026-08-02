@@ -14,6 +14,7 @@ import com.xymusic.app.feature.player.domain.PlayerEvent
 import com.xymusic.app.feature.player.domain.PlayerResult
 import com.xymusic.app.feature.player.domain.PlayerUseCases
 import com.xymusic.app.feature.player.domain.model.PlayerFailure
+import com.xymusic.app.feature.player.domain.model.PlayerState
 import com.xymusic.app.feature.player.domain.model.RepeatMode
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -93,25 +94,44 @@ constructor(
                     } ?: ParsedPlayerLyrics.Empty
                 }
             }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = ParsedPlayerLyrics.Empty,
+            )
 
-    val uiState =
+    private val structuralPlayerState =
+        playerUseCases.state
+            .distinctUntilChanged { previous, current ->
+                previous.isStructurallyEqualTo(current)
+            }.map(PlayerState::withoutPlaybackPosition)
+
+    /**
+     * State consumed by the composed player tree. It is built from the
+     * position-free player projection, so position samples never rebuild the
+     * lyrics/UI state pipeline or compare the complete PlayerUiState.
+     */
+    val structuralUiState =
         combine(
-            playerUseCases.state,
+            structuralPlayerState,
             parsedLyrics,
         ) { player, lyrics ->
-            PlayerUiState(
-                player = player,
-                lyrics = lyrics.lines,
-                lyricsLanguage = lyrics.language,
-                synchronizedLyrics = lyrics.synchronized,
-                lyricsTiming = lyrics.timing,
-                sleepTimerRemainingMs = player.sleepTimerRemainingMs,
+            buildPlayerUiState(player, lyrics)
+        }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = buildPlayerUiState(
+                    playerUseCases.state.value.withoutPlaybackPosition(),
+                    parsedLyrics.value,
+                ),
             )
-        }.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = PlayerUiState(),
-        )
+
+    /** Backward-compatible public state alias without high-frequency playback samples. */
+    val uiState = structuralUiState
+
+    /** The source for the single frame-clock playback position projection. */
+    val playbackState = playerUseCases.state
 
     init {
         viewModelScope.launch {
@@ -144,7 +164,7 @@ constructor(
 
     fun togglePlayback() {
         execute {
-            if (uiState.value.player.isPlaying) playerUseCases.pause() else playerUseCases.play()
+            if (playerUseCases.state.value.isPlaying) playerUseCases.pause() else playerUseCases.play()
         }
     }
 
@@ -161,7 +181,7 @@ constructor(
     }
 
     fun cyclePlaybackMode() {
-        val nextMode = uiState.value.player.nextPlaybackMode()
+        val nextMode = playerUseCases.state.value.nextPlaybackMode()
         execute { setPlaybackMode(nextMode) }
     }
 
@@ -187,7 +207,7 @@ constructor(
     }
 
     fun moveQueueItem(queueItemId: String, direction: Int) {
-        val queue = uiState.value.player.queue
+        val queue = playerUseCases.state.value.queue
         val currentIndex = queue.indexOfFirst { it.queueItemId == queueItemId }
         val targetIndex = currentIndex + direction
         if (currentIndex < 0 || targetIndex !in queue.indices) return
@@ -199,7 +219,7 @@ constructor(
     }
 
     fun refreshLyrics() {
-        val trackId = uiState.value.player.currentItem?.trackId ?: return
+        val trackId = playerUseCases.state.value.currentItem?.trackId ?: return
         viewModelScope.launch {
             runCatchingPreservingCancellation {
                 lyricsSource.refresh(trackId)
@@ -233,6 +253,15 @@ constructor(
         }
     }
 }
+
+private fun buildPlayerUiState(player: PlayerState, lyrics: ParsedPlayerLyrics): PlayerUiState = PlayerUiState(
+    player = player,
+    lyrics = lyrics.lines,
+    lyricsLanguage = lyrics.language,
+    synchronizedLyrics = lyrics.synchronized,
+    lyricsTiming = lyrics.timing,
+    sleepTimerRemainingMs = player.sleepTimerRemainingMs,
+)
 
 private fun PlayerFailure.messageRes(): Int = when (this) {
     PlayerFailure.ConnectionUnavailable -> R.string.player_connection_unavailable

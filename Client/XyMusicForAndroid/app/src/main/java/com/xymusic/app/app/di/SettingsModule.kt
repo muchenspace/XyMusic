@@ -1,8 +1,10 @@
 package com.xymusic.app.app.di
 
 import com.xymusic.app.domain.settings.AppSettingsRepository
+import com.xymusic.app.feature.settings.data.AndroidAvatarImageNormalizer
 import com.xymusic.app.feature.settings.data.DataStoreAppSettingsRepository
 import com.xymusic.app.feature.settings.data.DefaultProfileRepository
+import com.xymusic.app.feature.settings.domain.AvatarImageNormalizer
 import com.xymusic.app.feature.settings.domain.ProfileRepository
 import dagger.Binds
 import dagger.Module
@@ -13,6 +15,10 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class SettingsModule {
+    @Binds
+    @Singleton
+    abstract fun bindAvatarImageNormalizer(implementation: AndroidAvatarImageNormalizer): AvatarImageNormalizer
+
     @Binds
     @Singleton
     abstract fun bindProfileRepository(implementation: DefaultProfileRepository): ProfileRepository

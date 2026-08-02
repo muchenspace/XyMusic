@@ -10,6 +10,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +37,7 @@ fun XySlider(
     trackHeight: Float = 4f,
     activeColor: Color = Color.Unspecified,
     inactiveColor: Color = Color.Unspecified,
+    visualValue: State<Float>? = null,
 ) {
     val resolvedActive = if (activeColor == Color.Unspecified) MaterialTheme.colorScheme.primary else activeColor
     val resolvedInactive =
@@ -47,12 +49,6 @@ fun XySlider(
             inactiveColor
         }
     val range = valueRange.endInclusive - valueRange.start
-    val fraction =
-        if (range > 0f) {
-            ((value - valueRange.start) / range).coerceIn(0f, 1f)
-        } else {
-            0f
-        }
     val interactionSource = remember(compact) { MutableInteractionSource() }
     Slider(
         value = value.coerceIn(valueRange.start, valueRange.endInclusive),
@@ -99,6 +95,13 @@ fun XySlider(
                         cornerRadius = CornerRadius(cornerRadius, cornerRadius),
                         style = Fill,
                     )
+                    val renderedValue = visualValue?.value ?: value
+                    val fraction =
+                        if (range > 0f) {
+                            ((renderedValue - valueRange.start) / range).coerceIn(0f, 1f)
+                        } else {
+                            0f
+                        }
                     val progressWidth = trackWidth * fraction
                     if (progressWidth > 0f) {
                         drawRoundRect(

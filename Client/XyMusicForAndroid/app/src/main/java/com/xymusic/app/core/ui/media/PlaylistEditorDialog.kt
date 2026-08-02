@@ -42,19 +42,24 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.xymusic.app.R
 import com.xymusic.app.core.ui.layout.isCompactLandscape
-import com.xymusic.app.feature.playlist.domain.model.PlaylistVisibility
 import com.xymusic.app.ui.theme.spacing
+
+internal enum class PlaylistVisibilityOption {
+    PRIVATE,
+    UNLISTED,
+    PUBLIC,
+}
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 internal fun PlaylistEditorDialog(
     onDismiss: () -> Unit,
-    onSubmit: (String, String?, PlaylistVisibility) -> Unit,
+    onSubmit: (String, String?, PlaylistVisibilityOption) -> Unit,
     title: String = stringResource(R.string.playlist_create),
     submitLabel: String = stringResource(R.string.playlist_create),
     initialName: String = "",
     initialDescription: String = "",
-    initialVisibility: PlaylistVisibility = PlaylistVisibility.PRIVATE,
+    initialVisibility: PlaylistVisibilityOption = PlaylistVisibilityOption.PRIVATE,
 ) {
     var name by remember(initialName) { mutableStateOf(initialName) }
     var description by remember(initialDescription) { mutableStateOf(initialDescription) }
@@ -123,8 +128,8 @@ private fun CompactPlaylistEditorDialog(
     onNameChange: (String) -> Unit,
     description: String,
     onDescriptionChange: (String) -> Unit,
-    visibility: PlaylistVisibility,
-    onVisibilityChange: (PlaylistVisibility) -> Unit,
+    visibility: PlaylistVisibilityOption,
+    onVisibilityChange: (PlaylistVisibilityOption) -> Unit,
     onDismiss: () -> Unit,
     onSubmit: () -> Unit,
 ) {
@@ -195,8 +200,8 @@ private fun PlaylistEditorForm(
     onNameChange: (String) -> Unit,
     description: String,
     onDescriptionChange: (String) -> Unit,
-    visibility: PlaylistVisibility,
-    onVisibilityChange: (PlaylistVisibility) -> Unit,
+    visibility: PlaylistVisibilityOption,
+    onVisibilityChange: (PlaylistVisibilityOption) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(MaterialTheme.spacing.medium)) {
         OutlinedTextField(
@@ -215,7 +220,7 @@ private fun PlaylistEditorForm(
             maxLines = 4,
         )
         Column(modifier = Modifier.selectableGroup()) {
-            PlaylistVisibility.entries.forEach { option ->
+            PlaylistVisibilityOption.entries.forEach { option ->
                 Row(
                     modifier =
                     Modifier
@@ -235,8 +240,8 @@ private fun PlaylistEditorForm(
     }
 }
 
-internal fun PlaylistVisibility.labelRes(): Int = when (this) {
-    PlaylistVisibility.PRIVATE -> R.string.playlist_visibility_private
-    PlaylistVisibility.UNLISTED -> R.string.playlist_visibility_unlisted
-    PlaylistVisibility.PUBLIC -> R.string.playlist_visibility_public
+private fun PlaylistVisibilityOption.labelRes(): Int = when (this) {
+    PlaylistVisibilityOption.PRIVATE -> R.string.playlist_visibility_private
+    PlaylistVisibilityOption.UNLISTED -> R.string.playlist_visibility_unlisted
+    PlaylistVisibilityOption.PUBLIC -> R.string.playlist_visibility_public
 }

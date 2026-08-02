@@ -1,6 +1,6 @@
 package com.xymusic.app.feature.player.service
 
-internal const val MAX_SLEEP_TIMER_DURATION_MS = 24L * 60L * 60L * 1_000L
+import com.xymusic.app.feature.player.adapter.media3.MAX_SLEEP_TIMER_DURATION_MS
 
 internal data class PlaybackSleepTimerState(val deadlineElapsedRealtimeMs: Long? = null) {
     fun start(durationMs: Long, nowElapsedRealtimeMs: Long): PlaybackSleepTimerState {

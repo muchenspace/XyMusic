@@ -186,7 +186,30 @@ class PlayerViewModelTest {
         advanceUntilIdle()
 
         assertThat(viewModel.uiState.value.lyrics).isSameInstanceAs(parsedLyrics)
-        assertThat(viewModel.uiState.value.player.positionMs).isEqualTo(15_000)
+        assertThat(player.state.value.positionMs).isEqualTo(15_000)
+    }
+
+    @Test
+    fun structuralUiStateDoesNotEmitForPositionOnlySamples() = runTest {
+        val player = FakePlayerRepository(PlayerState(positionMs = 1_000))
+        val viewModel =
+            PlayerViewModel(
+                PlayerUseCases(player),
+                lyricsSource(RefreshingCatalogRepository()),
+                PlaybackQueueUseCases(EmptyPlaybackQueueStore),
+                mainDispatcherRule.dispatcher,
+            )
+        val emissions = mutableListOf<PlayerUiState>()
+        backgroundScope.launch {
+            viewModel.structuralUiState.collect { emissions += it }
+        }
+
+        advanceUntilIdle()
+        emissions.clear()
+        player.updatePosition(2_000)
+        advanceUntilIdle()
+
+        assertThat(emissions).isEmpty()
     }
 
     @Test
@@ -408,9 +431,7 @@ private object EmptyPlaybackQueueStore : PlaybackQueueStore {
     override suspend fun clear(ownerUserId: String): PlayerResult<Unit> = PlayerResult.Success(Unit)
 }
 
-private class RefreshingCatalogRepository(
-    var wordLyrics: Boolean = false,
-) : CatalogRepository {
+private class RefreshingCatalogRepository(var wordLyrics: Boolean = false) : CatalogRepository {
     private val details = mutableMapOf<String, MutableStateFlow<TrackDetail?>>()
     val refreshedTrackIds = mutableListOf<String>()
 

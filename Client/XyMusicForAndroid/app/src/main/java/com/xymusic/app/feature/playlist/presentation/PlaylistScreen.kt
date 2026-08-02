@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -118,10 +119,10 @@ fun PlaylistScreen(
             submitLabel = stringResource(R.string.common_confirm),
             initialName = detail.name,
             initialDescription = detail.description.orEmpty(),
-            initialVisibility = detail.visibility,
+            initialVisibility = detail.visibility.toPlaylistEditorOption(),
             onDismiss = { showEditDialog = false },
             onSubmit = { name, description, visibility ->
-                onUpdate(name, description, visibility)
+                onUpdate(name, description, visibility.toPlaylistVisibility())
                 showEditDialog = false
             },
         )
@@ -204,7 +205,7 @@ fun PlaylistScreen(
                         else -> {
                             LazyColumn(
                                 state = listState,
-                                modifier = Modifier.fillMaxSize(),
+                                modifier = Modifier.fillMaxSize().testTag(PlaylistDetailTestTags.TracksList),
                                 contentPadding = PaddingValues(bottom = MaterialTheme.spacing.extraLarge),
                             ) {
                                 if (uiState.isRefreshing || uiState.isMutating) {
@@ -248,6 +249,7 @@ fun PlaylistScreen(
                                     itemsIndexed(
                                         reorderState.entries,
                                         key = { _, item -> item.entryId },
+                                        contentType = { _, _ -> "playlist-track" },
                                     ) { index, entry ->
                                         PlaylistTrackRow(
                                             entry = entry,

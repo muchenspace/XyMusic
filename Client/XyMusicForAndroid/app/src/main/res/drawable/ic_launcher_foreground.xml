@@ -9,5 +9,5 @@
         android:filter="true"
         android:gravity="fill"
         android:mipMap="true"
-        android:src="@drawable/xymusic" />
+        android:src="@drawable/xymusic_mark_monochrome" />
 </inset>

@@ -2,10 +2,8 @@ package com.xymusic.app.app.navigation
 
 import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.State
 import androidx.compose.ui.Modifier
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -13,24 +11,25 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.xymusic.app.app.home.HomeScreen
 import com.xymusic.app.app.mine.MineScreen
+import com.xymusic.app.core.ui.media.CatalogTrackUi
 import com.xymusic.app.domain.server.ServerEndpoint
 import com.xymusic.app.feature.catalog.presentation.AlbumDetailRoute
 import com.xymusic.app.feature.catalog.presentation.ArtistDetailRoute
 import com.xymusic.app.feature.library.presentation.LibraryScreen
 import com.xymusic.app.feature.library.presentation.LibraryTab
 import com.xymusic.app.feature.player.presentation.PlayerScreen
+import com.xymusic.app.feature.player.presentation.PlayerUiState
 import com.xymusic.app.feature.player.presentation.PlayerViewModel
-import com.xymusic.app.feature.player.presentation.rememberPlaybackPositionState
 import com.xymusic.app.feature.playlist.presentation.PlaylistRoute
 import com.xymusic.app.feature.playlist.presentation.PlaylistRouteArgs
 import com.xymusic.app.feature.search.presentation.SearchScreen
 import com.xymusic.app.feature.settings.presentation.SettingsScreen
+import com.xymusic.app.ui.theme.fadeBackInto
+import com.xymusic.app.ui.theme.fadeBackOutOf
+import com.xymusic.app.ui.theme.fadeInto
+import com.xymusic.app.ui.theme.fadeOutOf
+import com.xymusic.app.ui.theme.playerFadeInto
 import com.xymusic.app.ui.theme.playerReturnInto
-import com.xymusic.app.ui.theme.playerSlideInto
-import com.xymusic.app.ui.theme.slideFadeBackInto
-import com.xymusic.app.ui.theme.slideFadeBackOutOf
-import com.xymusic.app.ui.theme.slideFadeInto
-import com.xymusic.app.ui.theme.slideFadeOutOf
 
 private const val LIBRARY_TAB_ARGUMENT = "libraryTab"
 private val LIBRARY_ROUTE =
@@ -40,6 +39,9 @@ private val LIBRARY_ROUTE =
 internal fun MainNavHost(
     navController: NavHostController,
     playerViewModel: PlayerViewModel,
+    onTrackPlay: (List<CatalogTrackUi>, CatalogTrackUi) -> Unit,
+    playerUiState: PlayerUiState,
+    playbackPosition: State<Float>,
     playerIsFavorite: Boolean,
     onTrackMore: (String) -> Unit,
     onTogglePlayerFavorite: () -> Unit,
@@ -57,30 +59,30 @@ internal fun MainNavHost(
         modifier = modifier,
         enterTransition = {
             if (targetState.destination.route == PlayerDestination.NowPlaying.route) {
-                playerSlideInto()
+                playerFadeInto()
             } else {
-                slideFadeInto()
+                fadeInto()
             }
         },
         exitTransition = {
             if (targetState.destination.route == PlayerDestination.NowPlaying.route) {
                 ExitTransition.None
             } else {
-                slideFadeOutOf()
+                fadeOutOf()
             }
         },
         popEnterTransition = {
             when {
-                targetState.destination.route == PlayerDestination.NowPlaying.route -> playerSlideInto()
+                targetState.destination.route == PlayerDestination.NowPlaying.route -> playerFadeInto()
                 initialState.destination.route == PlayerDestination.NowPlaying.route -> playerReturnInto()
-                else -> slideFadeBackInto()
+                else -> fadeBackInto()
             }
         },
         popExitTransition = {
             if (initialState.destination.route == PlayerDestination.NowPlaying.route) {
                 ExitTransition.KeepUntilTransitionsFinished
             } else {
-                slideFadeBackOutOf()
+                fadeBackOutOf()
             }
         },
     ) {
@@ -92,6 +94,7 @@ internal fun MainNavHost(
             ) {
                 HomeScreen(
                     onTrackMore = onTrackMore,
+                    onTrackPlay = onTrackPlay,
                     onAlbumClick = { albumId ->
                         navController.navigate(CatalogDestination.AlbumDetail.createRoute(albumId))
                     },
@@ -114,6 +117,7 @@ internal fun MainNavHost(
             ) {
                 SearchScreen(
                     onTrackMore = onTrackMore,
+                    onTrackPlay = onTrackPlay,
                     onAlbumClick = { navController.navigate(CatalogDestination.AlbumDetail.createRoute(it)) },
                     onArtistClick = { navController.navigate(CatalogDestination.ArtistDetail.createRoute(it)) },
                     onBack = navController::navigateUp,
@@ -191,7 +195,9 @@ internal fun MainNavHost(
                 chromeInsets = chromeInsets,
             ) {
                 PlayerScreenRoute(
+                    uiState = playerUiState,
                     playerViewModel = playerViewModel,
+                    playbackPosition = playbackPosition,
                     onBack = navController::navigateUp,
                     isFavorite = playerIsFavorite,
                     onToggleFavorite = onTogglePlayerFavorite,
@@ -231,6 +237,7 @@ internal fun MainNavHost(
                     onBack = navController::navigateUp,
                     onTrackMore = onTrackMore,
                     onArtistClick = { navController.navigate(CatalogDestination.ArtistDetail.createRoute(it)) },
+                    onTrackPlay = onTrackPlay,
                 )
             }
         }
@@ -250,6 +257,7 @@ internal fun MainNavHost(
                     onBack = navController::navigateUp,
                     onTrackMore = onTrackMore,
                     onAlbumClick = { navController.navigate(CatalogDestination.AlbumDetail.createRoute(it)) },
+                    onTrackPlay = onTrackPlay,
                 )
             }
         }
@@ -258,17 +266,14 @@ internal fun MainNavHost(
 
 @Composable
 private fun PlayerScreenRoute(
+    uiState: PlayerUiState,
     playerViewModel: PlayerViewModel,
+    playbackPosition: State<Float>,
     onBack: () -> Unit,
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
     onAddToPlaylist: (String) -> Unit,
 ) {
-    val uiState by playerViewModel.uiState.collectAsStateWithLifecycle()
-    val playbackPosition = rememberPlaybackPositionState(uiState.player)
-    LaunchedEffect(Unit) {
-        playerViewModel.refreshLyrics()
-    }
     PlayerScreen(
         uiState = uiState,
         onBack = onBack,

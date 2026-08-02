@@ -4,13 +4,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -45,6 +38,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -57,8 +51,8 @@ import com.xymusic.app.core.ui.layout.isCompactLandscape
 import com.xymusic.app.core.ui.layout.isWideLandscape
 import com.xymusic.app.core.ui.server.ServerEndpointDialog
 import com.xymusic.app.domain.server.ServerEndpoint
+import com.xymusic.app.feature.settings.domain.AvatarImageSource
 import com.xymusic.app.feature.settings.domain.model.UserProfile
-import com.xymusic.app.ui.theme.XyMotion
 
 private data class SettingsDialogState(
     val editProfile: Boolean,
@@ -97,6 +91,7 @@ fun SettingsScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val resources = LocalResources.current
+    val contentResolver = LocalContext.current.contentResolver
     var selectedPage by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
     var editProfile by remember { mutableStateOf(false) }
     var confirmReset by remember { mutableStateOf(false) }
@@ -105,7 +100,9 @@ fun SettingsScreen(
     var editServer by remember { mutableStateOf(false) }
     val avatarPicker =
         rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-            uri?.let(viewModel::uploadAvatar)
+            uri?.let { selectedUri ->
+                viewModel.uploadAvatar(AvatarImageSource { contentResolver.openInputStream(selectedUri) })
+            }
         }
 
     LaunchedEffect(viewModel, snackbarHostState, resources) {
@@ -295,21 +292,14 @@ private fun NarrowSettingsContent(
     actions: SettingsActions,
     modifier: Modifier = Modifier,
 ) {
-    AnimatedContent(
-        targetState = selectedPage,
-        modifier = modifier,
-        transitionSpec = {
-            settingsPageTransition(forward = targetState != null)
-        },
-        label = "settings_page",
-    ) { page ->
-        if (page == null) {
+    Box(modifier = modifier) {
+        if (selectedPage == null) {
             SettingsRootContent(
                 onPageSelected = onPageSelected,
             )
         } else {
             SettingsPageContent(
-                page = page,
+                page = selectedPage,
                 uiState = uiState,
                 dynamicColorEnabled = dynamicColorEnabled,
                 onDynamicColorChanged = onDynamicColorChanged,
@@ -320,18 +310,6 @@ private fun NarrowSettingsContent(
         }
     }
 }
-
-private fun settingsPageTransition(forward: Boolean) = (
-    slideInHorizontally(
-        animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
-        initialOffsetX = { width -> if (forward) width / 12 else -width / 12 },
-    ) + fadeIn(tween(XyMotion.Quick, easing = XyMotion.NavigationEasing))
-    ) togetherWith (
-    slideOutHorizontally(
-        animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
-        targetOffsetX = { width -> if (forward) -width / 16 else width / 16 },
-    ) + fadeOut(tween(XyMotion.Quick, easing = XyMotion.NavigationEasing))
-    )
 
 @Composable
 private fun SettingsLandscapeContent(

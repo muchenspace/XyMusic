@@ -9,6 +9,7 @@ import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.xymusic.app.feature.player.adapter.media3.PlaybackServiceContract
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.CopyOnWriteArraySet
 import javax.inject.Inject
@@ -57,7 +58,10 @@ constructor(@ApplicationContext private val context: Context) {
             ?.takeIf { it.isConnected }
             ?.let { return@withLock it }
         takeController()?.release()
-        val token = SessionToken(context, ComponentName(context, PLAYBACK_SERVICE_CLASS))
+        val token = SessionToken(
+            context,
+            ComponentName(context, PlaybackServiceContract.SERVICE_CLASS_NAME),
+        )
         MediaController
             .Builder(context, token)
             .setListener(controllerListener)
@@ -104,10 +108,6 @@ constructor(@ApplicationContext private val context: Context) {
 
     private fun takeController(): MediaController? = synchronized(controllerLock) {
         controller.also { controller = null }
-    }
-
-    private companion object {
-        const val PLAYBACK_SERVICE_CLASS = "com.xymusic.app.feature.player.service.PlaybackService"
     }
 
     interface Listener {

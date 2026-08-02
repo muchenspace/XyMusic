@@ -5,37 +5,97 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.withFrameNanos
 import com.xymusic.app.feature.player.domain.model.PlayerState
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 @Composable
-internal fun rememberPlaybackPositionState(player: PlayerState): State<Float> {
+internal fun rememberPlaybackPositionSnapshotState(player: PlayerState): State<Float> {
     val displayedPosition = remember { mutableFloatStateOf(player.positionMs.toFloat()) }
-    val latestPlayer by rememberUpdatedState(player)
+    LaunchedEffect(player.currentQueueItemId, player.positionDiscontinuitySequence, player.positionMs) {
+        displayedPosition.floatValue = player.positionMs.toFloat()
+    }
+    return displayedPosition
+}
 
-    LaunchedEffect(
-        player.currentQueueItemId,
-        player.positionDiscontinuitySequence,
-        player.isPlaying,
-    ) {
+/**
+ * Projects the frame-rate position into the coarse value used by composition
+ * state such as slider semantics and elapsed-time labels.
+ */
+@Composable
+internal fun rememberPlaybackInteractionPositionState(playbackPosition: State<Float>): State<Float> =
+    remember(playbackPosition) {
+        derivedStateOf { playbackInteractionPositionMs(playbackPosition.value) }
+    }
+
+/**
+ * Creates the single playback clock used by the navigation tree.
+ *
+ * The flow collector only updates the latest player sample. A frame ticker is
+ * launched while playback is active, so paused screens do not keep a frame
+ * coroutine alive and multiple consumers do not create independent tickers.
+ */
+@Composable
+internal fun rememberPlaybackPositionState(playerFlow: Flow<PlayerState>): State<Float> {
+    val clock = remember(playerFlow) { PlaybackPositionClock() }
+    LaunchedEffect(playerFlow, clock) {
+        var ticker: Job? = null
+        try {
+            playerFlow.collect { player ->
+                clock.update(player)
+                if (player.isPlaying) {
+                    if (ticker?.isActive != true) {
+                        ticker = launch { clock.runWhilePlaying() }
+                    }
+                } else {
+                    ticker?.cancel()
+                    ticker = null
+                    clock.syncToLatestPlayer()
+                }
+            }
+        } finally {
+            ticker?.cancel()
+        }
+    }
+    return clock.position
+}
+
+private class PlaybackPositionClock {
+    val position = mutableFloatStateOf(0f)
+    private val latestPlayer = AtomicReference(PlayerState())
+
+    fun update(player: PlayerState) {
+        latestPlayer.set(player)
+    }
+
+    fun syncToLatestPlayer() {
+        position.floatValue = latestPlayer.get().positionMs.toFloat()
+    }
+
+    suspend fun runWhilePlaying() {
+        val coroutineContext = currentCoroutineContext()
         var previousSample: PlaybackPositionClockSample? = null
         var lastAnchorElapsedRealtimeMs: Long? = null
         var lastPositionMs = Long.MIN_VALUE
         var correction: PlaybackPositionCorrection? = null
-        while (isActive) {
-            val currentPlayer = latestPlayer
-            if (!currentPlayer.isPlaying) {
-                displayedPosition.floatValue = currentPlayer.positionMs.toFloat()
-                return@LaunchedEffect
-            }
+        while (coroutineContext.isActive) {
+            val currentPlayer = latestPlayer.get()
+            if (!currentPlayer.isPlaying) return
+            val currentSample = PlaybackPositionClockSample.from(currentPlayer)
             val hasNewPlayerSample =
                 previousSample == null ||
+                    previousSample != currentSample ||
                     lastAnchorElapsedRealtimeMs != currentPlayer.positionAnchorElapsedRealtimeMs ||
                     lastPositionMs != currentPlayer.positionMs
             if (hasNewPlayerSample) {
@@ -45,7 +105,7 @@ internal fun rememberPlaybackPositionState(player: PlayerState): State<Float> {
                     shouldSnapPlaybackPosition(
                         previousSample = previousSample,
                         player = currentPlayer,
-                        displayedPositionMs = displayedPosition.floatValue,
+                        displayedPositionMs = position.floatValue,
                         nowElapsedRealtimeMs = nowElapsedRealtimeMs,
                     )
                 correction =
@@ -53,32 +113,32 @@ internal fun rememberPlaybackPositionState(player: PlayerState): State<Float> {
                         null
                     } else {
                         playbackPositionCorrection(
-                            displayedPositionMs = displayedPosition.floatValue,
+                            displayedPositionMs = position.floatValue,
                             targetPositionMs = targetPosition,
                             startElapsedRealtimeMs = nowElapsedRealtimeMs,
                         )
                     }
-                if (shouldSnap) displayedPosition.floatValue = targetPosition
-                previousSample = PlaybackPositionClockSample.from(currentPlayer)
+                if (shouldSnap) position.floatValue = targetPosition
+                previousSample = currentSample
                 lastAnchorElapsedRealtimeMs = currentPlayer.positionAnchorElapsedRealtimeMs
                 lastPositionMs = currentPlayer.positionMs
             }
             withFrameNanos {
-                val framePlayer = latestPlayer
+                val framePlayer = latestPlayer.get()
                 val frameElapsedRealtimeMs = SystemClock.elapsedRealtime()
                 val basePosition = anchoredPlaybackPositionMs(framePlayer, frameElapsedRealtimeMs)
                 val correctedPosition =
                     basePosition + (correction?.remainingOffset(frameElapsedRealtimeMs) ?: 0f)
-                displayedPosition.floatValue =
-                    monotonicPlaybackPosition(
-                        previousPositionMs = displayedPosition.floatValue,
+                position.floatValue =
+                    renderedPlaybackPosition(
+                        previousPositionMs = position.floatValue,
                         candidatePositionMs =
                         correctedPosition.clampPlaybackPosition(durationMs = framePlayer.durationMs),
+                        correctionOffsetMs = correction?.offsetMs,
                     )
             }
         }
     }
-    return displayedPosition
 }
 
 internal fun normalizedPlaybackProgress(positionMs: Float, durationMs: Long): Float = if (durationMs > 0L) {
@@ -129,6 +189,20 @@ internal fun shouldSnapPlaybackPosition(
 
 internal fun monotonicPlaybackPosition(previousPositionMs: Float, candidatePositionMs: Float): Float =
     maxOf(previousPositionMs, candidatePositionMs)
+
+/**
+ * Keeps ordinary samples monotonic while allowing a deliberate backward
+ * correction to converge to the player's seek target.
+ */
+internal fun renderedPlaybackPosition(
+    previousPositionMs: Float,
+    candidatePositionMs: Float,
+    correctionOffsetMs: Float?,
+): Float = if (correctionOffsetMs != null && correctionOffsetMs > 0f) {
+    candidatePositionMs
+} else {
+    monotonicPlaybackPosition(previousPositionMs, candidatePositionMs)
+}
 
 internal fun playbackLyricIndex(lines: List<PlayerLyricLineUi>, positionMs: Long): Int {
     var low = 0

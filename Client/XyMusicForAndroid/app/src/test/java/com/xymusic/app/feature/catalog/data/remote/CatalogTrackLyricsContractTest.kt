@@ -81,10 +81,7 @@ class CatalogTrackLyricsContractTest {
         lyric = lyric,
     )
 
-    private fun lyric(
-        trackId: String = TRACK_ID,
-        timing: String = "LINE",
-    ) = LyricsResourceDto(
+    private fun lyric(trackId: String = TRACK_ID, timing: String = "LINE") = LyricsResourceDto(
         id = "lyric-1",
         trackId = trackId,
         language = "zh-CN",
@@ -95,9 +92,7 @@ class CatalogTrackLyricsContractTest {
         updatedAt = TIMESTAMP,
     )
 
-    private class FakeCatalogApi(
-        private val trackHandler: suspend (String) -> Response<TrackDetailDto>,
-    ) : CatalogApi {
+    private class FakeCatalogApi(private val trackHandler: suspend (String) -> Response<TrackDetailDto>) : CatalogApi {
         override suspend fun tracks(
             cursor: String?,
             limit: Int,

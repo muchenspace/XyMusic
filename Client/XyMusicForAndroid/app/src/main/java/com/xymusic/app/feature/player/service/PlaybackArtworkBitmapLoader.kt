@@ -23,7 +23,7 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import com.xymusic.app.R
-import com.xymusic.app.feature.player.data.media.PlaybackMediaMetadata
+import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaMetadata
 import java.util.concurrent.Executor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -180,7 +180,7 @@ private data class FailedArtworkRequest(val identity: String, val retryAtElapsed
 private fun createPlaybackArtworkFallbackBitmap(context: Context): Bitmap {
     val bitmap = createBitmap(FALLBACK_ARTWORK_SIZE_PX, FALLBACK_ARTWORK_SIZE_PX)
     val canvas = Canvas(bitmap)
-    ContextCompat.getDrawable(context, R.drawable.xymusic)?.let { icon ->
+    ContextCompat.getDrawable(context, R.drawable.xymusic_compact)?.let { icon ->
         icon.setBounds(0, 0, FALLBACK_ARTWORK_SIZE_PX, FALLBACK_ARTWORK_SIZE_PX)
         icon.draw(canvas)
     }
