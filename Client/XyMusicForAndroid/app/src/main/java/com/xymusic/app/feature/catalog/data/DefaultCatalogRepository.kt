@@ -194,7 +194,9 @@ constructor(
 
     private companion object {
         const val PAGE_SIZE = 20
-        const val INITIAL_LOAD_SIZE = 40
+
+        // Keep detail pages from writing a second page before the first frame is ready.
+        const val INITIAL_LOAD_SIZE = PAGE_SIZE
         const val PREFETCH_DISTANCE = 6
     }
 }

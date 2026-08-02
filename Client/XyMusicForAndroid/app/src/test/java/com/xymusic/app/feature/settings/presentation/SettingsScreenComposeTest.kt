@@ -26,6 +26,8 @@ import com.xymusic.app.feature.auth.domain.AuthResult
 import com.xymusic.app.feature.auth.domain.AuthUseCases
 import com.xymusic.app.feature.auth.domain.model.LoginCommand
 import com.xymusic.app.feature.auth.domain.model.RegisterCommand
+import com.xymusic.app.feature.settings.domain.AvatarImageNormalizer
+import com.xymusic.app.feature.settings.domain.AvatarImageSource
 import com.xymusic.app.feature.settings.domain.ProfileRepository
 import com.xymusic.app.feature.settings.domain.ProfileUseCases
 import com.xymusic.app.feature.settings.domain.SettingsResult
@@ -35,7 +37,6 @@ import com.xymusic.app.feature.settings.domain.model.UserProfile
 import com.xymusic.app.feature.settings.domain.model.UserRole
 import com.xymusic.app.feature.settings.domain.model.UserStatus
 import com.xymusic.app.testing.ComposeTestApplication
-import com.xymusic.app.ui.theme.XyMotion
 import com.xymusic.app.ui.theme.XyMusicTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -82,22 +83,11 @@ class SettingsScreenComposeTest {
     }
 
     @Test
-    fun narrowPageSelectionRetainsRootUntilTransitionCompletes() {
+    fun narrowPageSelectionReplacesRootImmediately() {
         composeRule.setSettingsContent()
 
         composeRule.waitForIdle()
-        composeRule.mainClock.autoAdvance = false
         composeRule.onNodeWithText(context.getString(R.string.settings_appearance)).performClick()
-        composeRule.mainClock.advanceTimeByFrame()
-        composeRule.waitForIdle()
-        composeRule.mainClock.advanceTimeByFrame()
-        composeRule.waitForIdle()
-
-        composeRule.onNodeWithTag(SettingsTestTags.Root).assertExists()
-        composeRule.onNodeWithText(context.getString(R.string.settings_theme)).assertExists()
-
-        composeRule.mainClock.advanceTimeBy(XyMotion.Quick + SETTINGS_TRANSITION_SETTLE_MILLIS)
-        composeRule.mainClock.autoAdvance = true
         composeRule.waitForIdle()
 
         composeRule.onNodeWithTag(SettingsTestTags.Root).assertDoesNotExist()
@@ -251,7 +241,14 @@ class SettingsScreenComposeTest {
                 appSettingsUseCases = AppSettingsUseCases(settingsRepository),
                 authUseCases = AuthUseCases(SuccessAuthRepository()),
                 ioDispatcher = Dispatchers.Unconfined,
-                avatarImageNormalizer = AvatarImageNormalizer(context.applicationContext),
+                avatarImageNormalizer =
+                object : AvatarImageNormalizer {
+                    override fun normalize(source: AvatarImageSource): AvatarUploadCommand = AvatarUploadCommand(
+                        fileName = "avatar.jpg",
+                        contentType = "image/jpeg",
+                        content = byteArrayOf(1),
+                    )
+                },
             )
         setContent {
             XyMusicTheme(darkTheme = false) {
@@ -296,8 +293,6 @@ private class FakeProfileRepository(initialProfile: UserProfile) : ProfileReposi
 
     override suspend fun logoutAllSessions(): SettingsResult<Unit> = SettingsResult.Success(Unit)
 }
-
-private const val SETTINGS_TRANSITION_SETTLE_MILLIS = 100L
 
 private class InMemoryAppSettingsRepository(initialSettings: AppSettings = AppSettings()) : AppSettingsRepository {
     private val settingsFlow = MutableStateFlow(initialSettings)

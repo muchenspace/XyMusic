@@ -31,10 +31,10 @@ import com.xymusic.app.feature.auth.presentation.AuthViewModel
 import com.xymusic.app.feature.auth.presentation.RegisterScreen
 import com.xymusic.app.feature.auth.presentation.SignInScreen
 import com.xymusic.app.feature.auth.presentation.resolve
-import com.xymusic.app.ui.theme.slideFadeBackInto
-import com.xymusic.app.ui.theme.slideFadeBackOutOf
-import com.xymusic.app.ui.theme.slideFadeInto
-import com.xymusic.app.ui.theme.slideFadeOutOf
+import com.xymusic.app.ui.theme.fadeBackInto
+import com.xymusic.app.ui.theme.fadeBackOutOf
+import com.xymusic.app.ui.theme.fadeInto
+import com.xymusic.app.ui.theme.fadeOutOf
 
 @Composable
 fun AuthNavigation(
@@ -80,10 +80,10 @@ fun AuthNavigation(
             navController = navController,
             startDestination = AuthDestination.Graph.route,
             modifier = Modifier.padding(contentPadding),
-            enterTransition = { slideFadeInto() },
-            exitTransition = { slideFadeOutOf() },
-            popEnterTransition = { slideFadeBackInto() },
-            popExitTransition = { slideFadeBackOutOf() },
+            enterTransition = { fadeInto() },
+            exitTransition = { fadeOutOf() },
+            popEnterTransition = { fadeBackInto() },
+            popExitTransition = { fadeBackOutOf() },
         ) {
             navigation(
                 startDestination = AuthDestination.Entry.route,

@@ -203,6 +203,7 @@ private fun LazyListScope.browseCategorySection(
     items(
         count = (categories.size + columns - 1) / columns,
         key = { row -> "browse-row-$row" },
+        contentType = { "browse-category-row" },
     ) { row ->
         BrowseCategoryRow(
             categories = categories,

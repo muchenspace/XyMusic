@@ -2,15 +2,19 @@ package com.xymusic.app.feature.auth.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.xymusic.app.core.common.DefaultDispatcher
 import com.xymusic.app.domain.error.DomainError
 import com.xymusic.app.domain.error.DomainErrorReason
 import com.xymusic.app.feature.auth.domain.AuthResult
 import com.xymusic.app.feature.auth.domain.AuthUseCases
 import com.xymusic.app.feature.auth.domain.model.LoginCommand
 import com.xymusic.app.feature.auth.domain.model.RegisterCommand
+import dagger.Lazy
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.concurrent.CancellationException
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -19,11 +23,17 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @HiltViewModel
 class AuthViewModel
 @Inject
-constructor(private val useCases: AuthUseCases) : ViewModel() {
+constructor(
+    private val useCases: Lazy<AuthUseCases>,
+    @DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher = Dispatchers.Default,
+) : ViewModel() {
+    constructor(useCases: AuthUseCases) : this(ValueLazy(useCases), Dispatchers.Unconfined)
+
     private val mutableUiState = MutableStateFlow(AuthUiState())
     val uiState: StateFlow<AuthUiState> = mutableUiState.asStateFlow()
 
@@ -40,7 +50,7 @@ constructor(private val useCases: AuthUseCases) : ViewModel() {
         if (!beginSubmission(errors)) return
 
         launchSubmission {
-            when (val result = useCases.register(command)) {
+            when (val result = withContext(defaultDispatcher) { useCases.get().register(command) }) {
                 is AuthResult.Success ->
                     mutableEffects.emit(
                         AuthEffect.NavigateToSignIn(AuthMessage.AccountCreated),
@@ -56,7 +66,7 @@ constructor(private val useCases: AuthUseCases) : ViewModel() {
         if (!beginSubmission(errors)) return
 
         launchSubmission {
-            when (val result = useCases.login(command)) {
+            when (val result = withContext(defaultDispatcher) { useCases.get().login(command) }) {
                 is AuthResult.Success -> Unit
                 is AuthResult.Failure -> handleFailure(result.error)
             }
@@ -66,7 +76,7 @@ constructor(private val useCases: AuthUseCases) : ViewModel() {
     fun logout() {
         if (!beginSubmission(emptyMap())) return
         launchSubmission {
-            when (val result = useCases.logout()) {
+            when (val result = withContext(defaultDispatcher) { useCases.get().logout() }) {
                 is AuthResult.Success -> Unit
                 is AuthResult.Failure -> handleFailure(result.error)
             }
@@ -201,4 +211,8 @@ constructor(private val useCases: AuthUseCases) : ViewModel() {
         const val MIN_PASSWORD_LENGTH = 8
         const val MAX_PASSWORD_LENGTH = 128
     }
+}
+
+private class ValueLazy<T>(private val value: T) : Lazy<T> {
+    override fun get(): T = value
 }

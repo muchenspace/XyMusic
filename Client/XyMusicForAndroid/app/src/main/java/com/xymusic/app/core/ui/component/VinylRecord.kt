@@ -65,7 +65,7 @@ fun VinylRecord(artworkUrl: String?, cacheKey: String?, isPlaying: Boolean, modi
             contentAlignment = Alignment.Center,
         ) {
             Image(
-                painter = painterResource(R.drawable.xymusic),
+                painter = painterResource(R.drawable.xymusic_compact),
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,

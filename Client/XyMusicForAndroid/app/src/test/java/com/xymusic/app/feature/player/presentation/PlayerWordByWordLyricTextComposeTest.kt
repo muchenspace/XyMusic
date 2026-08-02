@@ -96,5 +96,4 @@ class PlayerWordByWordLyricTextComposeTest {
         val bounds = composeRule.onNodeWithText(text).fetchSemanticsNode().boundsInRoot
         assertThat(bounds.height).isGreaterThan(bounds.width)
     }
-
 }

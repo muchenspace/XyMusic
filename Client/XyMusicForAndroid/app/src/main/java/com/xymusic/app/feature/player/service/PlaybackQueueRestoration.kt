@@ -5,8 +5,8 @@ import android.os.Bundle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
-import com.xymusic.app.feature.player.data.media.PlaybackMediaMetadata
-import com.xymusic.app.feature.player.data.media.PlaybackMediaUri
+import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaMetadata
+import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaUri
 import com.xymusic.app.feature.player.domain.StoredPlaybackQueueItem
 import java.util.UUID
 

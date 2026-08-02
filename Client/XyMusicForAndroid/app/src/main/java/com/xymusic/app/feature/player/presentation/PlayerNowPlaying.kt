@@ -110,7 +110,7 @@ internal fun PlayerArtwork(item: PlayerQueueItem, modifier: Modifier = Modifier)
         url = item.artworkUrl,
         cacheKey = item.artworkCacheKey,
         contentDescription = item.title,
-        fallbackImageRes = R.drawable.xymusic,
+        fallbackImageRes = R.drawable.xymusic_compact,
         modifier =
         modifier
             .aspectRatio(1f),

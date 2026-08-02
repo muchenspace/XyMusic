@@ -1,16 +1,18 @@
-package com.xymusic.app.feature.settings.presentation
+package com.xymusic.app.feature.settings.data
 
-import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.net.Uri
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.scale
+import com.xymusic.app.feature.settings.domain.AvatarImageException
+import com.xymusic.app.feature.settings.domain.AvatarImageNormalizer
+import com.xymusic.app.feature.settings.domain.AvatarImageSource
+import com.xymusic.app.feature.settings.domain.AvatarImageTooLargeException
+import com.xymusic.app.feature.settings.domain.InvalidAvatarImageException
 import com.xymusic.app.feature.settings.domain.model.AvatarUploadCommand
-import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.util.concurrent.CancellationException
@@ -18,21 +20,19 @@ import javax.inject.Inject
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-class AvatarImageNormalizer internal constructor(
-    private val openInputStream: (Uri) -> InputStream?,
-    private val maxOutputBytes: Int = AvatarUploadCommand.MAX_BYTES,
-) {
+class AndroidAvatarImageNormalizer @Inject constructor() : AvatarImageNormalizer {
+    private val normalizer = AvatarImageNormalizerCore()
+
+    override fun normalize(source: AvatarImageSource): AvatarUploadCommand = normalizer.normalize(source)
+}
+
+internal class AvatarImageNormalizerCore(private val maxOutputBytes: Int = AvatarUploadCommand.MAX_BYTES) {
     init {
         require(maxOutputBytes in 1..AvatarUploadCommand.MAX_BYTES)
     }
 
-    @Inject
-    constructor(
-        @ApplicationContext context: Context,
-    ) : this(context.contentResolver::openInputStream)
-
-    fun normalize(uri: Uri): AvatarUploadCommand = try {
-        normalizeImage(uri)
+    fun normalize(source: AvatarImageSource): AvatarUploadCommand = try {
+        normalizeImage(source)
     } catch (error: CancellationException) {
         throw error
     } catch (error: AvatarImageException) {
@@ -43,9 +43,9 @@ class AvatarImageNormalizer internal constructor(
         throw InvalidAvatarImageException(error)
     }
 
-    private fun normalizeImage(uri: Uri): AvatarUploadCommand {
-        val bounds = readBounds(uri)
-        val decoded = decode(uri, bounds)
+    private fun normalizeImage(source: AvatarImageSource): AvatarUploadCommand {
+        val bounds = readBounds(source)
+        val decoded = decode(source, bounds)
         var scaled: Bitmap? = null
         var jpegBitmap: Bitmap? = null
         try {
@@ -66,23 +66,23 @@ class AvatarImageNormalizer internal constructor(
         }
     }
 
-    private fun readBounds(uri: Uri): ImageBounds {
+    private fun readBounds(source: AvatarImageSource): ImageBounds {
         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        open(uri).use { input -> BitmapFactory.decodeStream(input, null, options) }
+        open(source).use { input -> BitmapFactory.decodeStream(input, null, options) }
         if (options.outWidth <= 0 || options.outHeight <= 0) {
             throw InvalidAvatarImageException()
         }
         return ImageBounds(options.outWidth, options.outHeight)
     }
 
-    private fun decode(uri: Uri, bounds: ImageBounds): Bitmap {
+    private fun decode(source: AvatarImageSource, bounds: ImageBounds): Bitmap {
         val options =
             BitmapFactory.Options().apply {
                 inPreferredConfig = Bitmap.Config.ARGB_8888
                 inSampleSize = sampleSize(bounds)
             }
         return try {
-            open(uri).use { input ->
+            open(source).use { input ->
                 BitmapFactory.decodeStream(input, null, options)
                     ?: throw InvalidAvatarImageException()
             }
@@ -91,8 +91,8 @@ class AvatarImageNormalizer internal constructor(
         }
     }
 
-    private fun open(uri: Uri): InputStream = try {
-        openInputStream(uri) ?: throw InvalidAvatarImageException()
+    private fun open(source: AvatarImageSource): InputStream = try {
+        source.openInputStream() ?: throw InvalidAvatarImageException()
     } catch (error: CancellationException) {
         throw error
     } catch (error: AvatarImageException) {
@@ -150,11 +150,3 @@ class AvatarImageNormalizer internal constructor(
         val JPEG_QUALITIES = intArrayOf(90, 80, 70, 60, 50)
     }
 }
-
-sealed class AvatarImageException(message: String, cause: Throwable? = null) : Exception(message, cause)
-
-class InvalidAvatarImageException(cause: Throwable? = null) :
-    AvatarImageException("The selected file is not a supported image", cause)
-
-class AvatarImageTooLargeException(cause: Throwable? = null) :
-    AvatarImageException("The normalized avatar exceeds the upload limit", cause)

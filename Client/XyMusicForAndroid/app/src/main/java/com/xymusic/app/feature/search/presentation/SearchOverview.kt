@@ -76,20 +76,47 @@ internal fun SearchOverview(
         )
         return
     }
+    MobileSearchOverview(
+        tracks = tracks,
+        artists = artists,
+        albums = albums,
+        refreshFailed = uiState.overviewRefreshFailed,
+        actions =
+        SearchOverviewActions(
+            onRetry = onRetry,
+            onScopeSelected = onScopeSelected,
+            onAlbumClick = onAlbumClick,
+            onArtistClick = onArtistClick,
+            onTrackPlay = onTrackPlay,
+            onTrackMore = onTrackMore,
+        ),
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun MobileSearchOverview(
+    tracks: List<CatalogTrackUi>,
+    artists: List<com.xymusic.app.core.ui.media.CatalogArtistUi>,
+    albums: List<com.xymusic.app.core.ui.media.CatalogAlbumUi>,
+    refreshFailed: Boolean,
+    actions: SearchOverviewActions,
+    modifier: Modifier = Modifier,
+) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 32.dp),
     ) {
-        if (uiState.overviewRefreshFailed) {
+        if (refreshFailed) {
             item(key = "overview-refresh-failed") {
-                CachedCatalogBanner(onRetry = onRetry)
+                CachedCatalogBanner(onRetry = actions.onRetry)
             }
         }
         if (tracks.isNotEmpty()) {
             item(key = "overview-tracks-header") {
                 SearchSectionHeader(
                     title = stringResource(R.string.search_overview_tracks),
-                    onViewAll = { onScopeSelected(SearchScope.TRACKS) },
+                    onViewAll = { actions.onScopeSelected(SearchScope.TRACKS) },
                 )
             }
             items(
@@ -100,9 +127,9 @@ internal fun SearchOverview(
                 val track = tracks[index]
                 CatalogTrackRow(
                     track = track,
-                    onClick = { onTrackPlay(tracks, track) },
-                    onPlayClick = { onTrackPlay(tracks, track) },
-                    onMoreClick = { onTrackMore(track.id) },
+                    onClick = { actions.onTrackPlay(tracks, track) },
+                    onPlayClick = { actions.onTrackPlay(tracks, track) },
+                    onMoreClick = { actions.onTrackMore(track.id) },
                 )
             }
         }
@@ -110,7 +137,7 @@ internal fun SearchOverview(
             item(key = "overview-artists-header") {
                 SearchSectionHeader(
                     title = stringResource(R.string.catalog_artists),
-                    onViewAll = { onScopeSelected(SearchScope.ARTISTS) },
+                    onViewAll = { actions.onScopeSelected(SearchScope.ARTISTS) },
                 )
             }
             item(key = "overview-artists-row") {
@@ -118,10 +145,14 @@ internal fun SearchOverview(
                     contentPadding = PaddingValues(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    items(artists.take(8), key = { it.id }) { artist ->
+                    items(
+                        items = artists.take(8),
+                        key = { it.id },
+                        contentType = { "artist" },
+                    ) { artist ->
                         CatalogArtistShelfCard(
                             artist = artist,
-                            onClick = { onArtistClick(artist.id) },
+                            onClick = { actions.onArtistClick(artist.id) },
                         )
                     }
                 }
@@ -131,7 +162,7 @@ internal fun SearchOverview(
             item(key = "overview-albums-header") {
                 SearchSectionHeader(
                     title = stringResource(R.string.catalog_albums),
-                    onViewAll = { onScopeSelected(SearchScope.ALBUMS) },
+                    onViewAll = { actions.onScopeSelected(SearchScope.ALBUMS) },
                 )
             }
             item(key = "overview-albums-row") {
@@ -139,10 +170,14 @@ internal fun SearchOverview(
                     contentPadding = PaddingValues(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    items(albums.take(8), key = { it.id }) { album ->
+                    items(
+                        items = albums.take(8),
+                        key = { it.id },
+                        contentType = { "album" },
+                    ) { album ->
                         CatalogAlbumShelfCard(
                             album = album,
-                            onClick = { onAlbumClick(album.id) },
+                            onClick = { actions.onAlbumClick(album.id) },
                         )
                     }
                 }
@@ -245,7 +280,11 @@ private fun LandscapeSearchOverview(
                         contentPadding = PaddingValues(horizontal = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        items(artists.take(8), key = { it.id }) { artist ->
+                        items(
+                            items = artists.take(8),
+                            key = { it.id },
+                            contentType = { "artist" },
+                        ) { artist ->
                             CatalogArtistShelfCard(
                                 artist = artist,
                                 onClick = { actions.onArtistClick(artist.id) },
@@ -267,7 +306,11 @@ private fun LandscapeSearchOverview(
                         contentPadding = PaddingValues(horizontal = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        items(albums.take(8), key = { it.id }) { album ->
+                        items(
+                            items = albums.take(8),
+                            key = { it.id },
+                            contentType = { "album" },
+                        ) { album ->
                             CatalogAlbumShelfCard(
                                 album = album,
                                 onClick = { actions.onAlbumClick(album.id) },

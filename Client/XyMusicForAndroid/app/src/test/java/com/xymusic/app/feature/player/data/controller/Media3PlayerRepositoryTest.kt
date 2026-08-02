@@ -1,13 +1,13 @@
 package com.xymusic.app.feature.player.data.controller
 
 import com.google.common.truth.Truth.assertThat
+import com.xymusic.app.feature.player.adapter.media3.PlaybackSessionCommands
 import com.xymusic.app.feature.player.domain.PlayerEvent
 import com.xymusic.app.feature.player.domain.model.PlaybackState
 import com.xymusic.app.feature.player.domain.model.PlayerConnectionState
 import com.xymusic.app.feature.player.domain.model.PlayerFailure
 import com.xymusic.app.feature.player.domain.model.PlayerQueueItem
 import com.xymusic.app.feature.player.domain.model.PlayerState
-import com.xymusic.app.feature.player.service.PlaybackSessionCommands
 import org.junit.Test
 
 class Media3PlayerRepositoryTest {

@@ -86,7 +86,8 @@ fun PlayerScreen(
     var showSpeedDialog by rememberSaveable { mutableStateOf(false) }
     var showSleepTimerDialog by rememberSaveable { mutableStateOf(false) }
     val current = uiState.player.currentItem
-    val displayedPlaybackPosition = playbackPosition ?: rememberPlaybackPositionState(uiState.player)
+    val displayedPlaybackPosition =
+        playbackPosition ?: rememberPlaybackPositionSnapshotState(uiState.player)
     val queueUiState = remember(uiState.player.queue) { PlayerQueueUiState(uiState.player.queue) }
     var draggedPosition by remember(current?.queueItemId) { mutableStateOf<Float?>(null) }
     val colorScheme = MaterialTheme.colorScheme
@@ -305,7 +306,6 @@ fun PlayerScreen(
                             .windowInsetsPadding(WindowInsets.safeDrawing)
                             .testTag(PlayerTestTags.ContentPager),
                         key = { page -> LandscapePlayerPage.entries[page] },
-                        beyondViewportPageCount = 1,
                     ) { page ->
                         when (LandscapePlayerPage.entries[page]) {
                             LandscapePlayerPage.NowPlaying ->
@@ -364,7 +364,6 @@ fun PlayerScreen(
                                         .weight(1f)
                                         .testTag(PlayerTestTags.ContentPager),
                                     key = { page -> PlayerContentTab.entries[page] },
-                                    beyondViewportPageCount = 1,
                                 ) { page ->
                                     val tab = PlayerContentTab.entries[page]
                                     when (tab) {

@@ -11,8 +11,10 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import com.xymusic.app.core.common.DefaultDispatcher
-import com.xymusic.app.feature.player.data.media.PlaybackMediaMetadata
-import com.xymusic.app.feature.player.data.media.PlaybackMediaUri
+import com.xymusic.app.feature.player.adapter.media3.MAX_SLEEP_TIMER_DURATION_MS
+import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaMetadata
+import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaUri
+import com.xymusic.app.feature.player.adapter.media3.PlaybackSessionCommands
 import com.xymusic.app.feature.player.domain.PlayerEvent
 import com.xymusic.app.feature.player.domain.PlayerRepository
 import com.xymusic.app.feature.player.domain.PlayerResult
@@ -22,8 +24,6 @@ import com.xymusic.app.feature.player.domain.model.PlayerFailure
 import com.xymusic.app.feature.player.domain.model.PlayerQueueItem
 import com.xymusic.app.feature.player.domain.model.PlayerState
 import com.xymusic.app.feature.player.domain.model.RepeatMode
-import com.xymusic.app.feature.player.service.MAX_SLEEP_TIMER_DURATION_MS
-import com.xymusic.app.feature.player.service.PlaybackSessionCommands
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton

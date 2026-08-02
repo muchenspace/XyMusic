@@ -19,6 +19,7 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.xymusic.app.app.playback.CatalogPlaybackViewModel
 import com.xymusic.app.app.trackactions.TrackActionsSheet
 import com.xymusic.app.app.trackactions.TrackActionsUiEffect
 import com.xymusic.app.app.trackactions.TrackActionsUiState
@@ -27,6 +28,7 @@ import com.xymusic.app.core.ui.layout.isCompactLandscape
 import com.xymusic.app.domain.server.ServerEndpoint
 import com.xymusic.app.feature.player.presentation.PlayerUiEffect
 import com.xymusic.app.feature.player.presentation.PlayerViewModel
+import com.xymusic.app.feature.player.presentation.rememberPlaybackPositionState
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -50,15 +52,14 @@ fun MainNavigation(
     }
     val resources = LocalResources.current
     val playerViewModel: PlayerViewModel = hiltViewModel()
+    val catalogPlaybackViewModel: CatalogPlaybackViewModel = hiltViewModel()
     val trackActionsViewModel: TrackActionsViewModel = hiltViewModel()
+    val playerUiState by playerViewModel.structuralUiState.collectAsStateWithLifecycle()
+    val playbackPosition = rememberPlaybackPositionState(playerViewModel.playbackState)
     val visibleEntries by navController.visibleEntries.collectAsStateWithLifecycle()
     val trackActionsUiState by trackActionsViewModel.uiState.collectAsStateWithLifecycle()
     val playerIsFavorite = trackActionsUiState.playerIsFavorite
-    val hasPlayerItem by
-        playerViewModel.uiState
-            .map { state -> state.player.currentItem != null }
-            .distinctUntilChanged()
-            .collectAsStateWithLifecycle(initialValue = playerViewModel.uiState.value.player.currentItem != null)
+    val hasPlayerItem = playerUiState.player.currentItem != null
 
     PlayerEffectSnackbar(playerViewModel.effects, snackbarHostState)
     LaunchedEffect(trackActionsViewModel, snackbarHostState, resources) {
@@ -71,7 +72,7 @@ fun MainNavigation(
         }
     }
     LaunchedEffect(playerViewModel, trackActionsViewModel) {
-        playerViewModel.uiState
+        playerViewModel.structuralUiState
             .map { state -> state.player.currentItem?.trackId }
             .distinctUntilChanged()
             .collect { trackId -> trackActionsViewModel.setPlayerTrack(trackId) }
@@ -116,12 +117,15 @@ fun MainNavigation(
             },
             miniPlayer = { miniPlayerModifier ->
                 PlayerMiniBarRoute(
-                    playerViewModel = playerViewModel,
+                    uiState = playerUiState,
+                    playbackPosition = playbackPosition,
                     onOpenPlayer = {
                         navController.navigate(PlayerDestination.NowPlaying.route) {
                             launchSingleTop = true
                         }
                     },
+                    onTogglePlayback = playerViewModel::togglePlayback,
+                    onNext = playerViewModel::skipToNext,
                     compact = layoutConfig.compactPlayerBar,
                     modifier = miniPlayerModifier,
                 )
@@ -130,6 +134,11 @@ fun MainNavigation(
             MainNavHost(
                 navController = navController,
                 playerViewModel = playerViewModel,
+                onTrackPlay = { tracks, track ->
+                    catalogPlaybackViewModel.playQueue(tracks = tracks, startTrack = track)
+                },
+                playerUiState = playerUiState,
+                playbackPosition = playbackPosition,
                 playerIsFavorite = playerIsFavorite,
                 onTrackMore = trackActionsViewModel::open,
                 onTogglePlayerFavorite = trackActionsViewModel::togglePlayerFavorite,

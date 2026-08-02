@@ -48,6 +48,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.xymusic.app.R
+import com.xymusic.app.app.playlist.toPlaylistVisibility
 import com.xymusic.app.core.ui.component.MediaArtwork
 import com.xymusic.app.core.ui.layout.isCompactLandscape
 import com.xymusic.app.core.ui.media.PlaylistEditorDialog
@@ -121,7 +122,7 @@ fun TrackActionsSheet(
             onDismiss = { showCreateDialog = false },
             onSubmit = { name, description, visibility ->
                 showCreateDialog = false
-                onCreatePlaylistAndAdd(name, description, visibility)
+                onCreatePlaylistAndAdd(name, description, visibility.toPlaylistVisibility())
             },
         )
     }
@@ -149,7 +150,11 @@ private fun PortraitTrackActionsContent(uiState: TrackActionsUiState, actions: T
             EmptyPlaylistsAction()
         } else {
             LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
-                items(uiState.playlists, key = PlaylistSummary::id) { playlist ->
+                items(
+                    items = uiState.playlists,
+                    key = PlaylistSummary::id,
+                    contentType = { "playlist" },
+                ) { playlist ->
                     PlaylistAction(
                         playlist = playlist,
                         enabled = !uiState.isMutating,

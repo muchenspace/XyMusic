@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xymusic.app.R
+import com.xymusic.app.app.playlist.toPlaylistVisibility
 import com.xymusic.app.core.ui.component.MediaArtwork
 import com.xymusic.app.core.ui.layout.isWideLandscape
 import com.xymusic.app.core.ui.media.PlaylistEditorDialog
@@ -85,6 +86,7 @@ internal object MineTestTags {
     const val History = "mine_history"
     const val Downloads = "mine_downloads"
     const val CreatePlaylist = "mine_create_playlist"
+    const val PlaylistsRow = "mine_playlists_row"
     const val LandscapeAccountPane = "mine_landscape_account_pane"
     const val LandscapePlaylistPane = "mine_landscape_playlist_pane"
 
@@ -130,7 +132,7 @@ fun MineScreen(
         PlaylistEditorDialog(
             onDismiss = { showCreatePlaylist = false },
             onSubmit = { name, description, visibility ->
-                mineViewModel.createPlaylist(name, description, visibility)
+                mineViewModel.createPlaylist(name, description, visibility.toPlaylistVisibility())
                 showCreatePlaylist = false
             },
         )
@@ -239,10 +241,15 @@ private fun PortraitMineContent(
         } else {
             item(key = "playlist-row") {
                 LazyRow(
+                    modifier = Modifier.testTag(MineTestTags.PlaylistsRow),
                     contentPadding = PaddingValues(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    items(libraryUiState.playlists, key = PlaylistSummary::id) { playlist ->
+                    items(
+                        items = libraryUiState.playlists,
+                        key = PlaylistSummary::id,
+                        contentType = { "playlist" },
+                    ) { playlist ->
                         PlaylistTile(
                             playlist = playlist,
                             onClick = { onPlaylistClick(playlist.id) },
@@ -326,7 +333,11 @@ private fun LandscapeMineContent(
                     EmptyPlaylists(onCreatePlaylist)
                 }
             } else {
-                gridItems(libraryUiState.playlists, key = PlaylistSummary::id) { playlist ->
+                gridItems(
+                    items = libraryUiState.playlists,
+                    key = PlaylistSummary::id,
+                    contentType = { "playlist" },
+                ) { playlist ->
                     PlaylistTile(
                         playlist = playlist,
                         onClick = { onPlaylistClick(playlist.id) },

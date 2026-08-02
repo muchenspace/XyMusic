@@ -19,6 +19,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -98,7 +99,11 @@ fun SignInScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
             )
-            TextButton(onClick = onRegister, enabled = !uiState.isSubmitting) {
+            TextButton(
+                onClick = onRegister,
+                enabled = !uiState.isSubmitting,
+                modifier = Modifier.testTag(AuthTestTags.SwitchToRegister),
+            ) {
                 Text(stringResource(R.string.auth_create_account))
             }
         }

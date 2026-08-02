@@ -35,4 +35,41 @@ class PlayerLyricsFollowTest {
             ),
         ).isEqualTo(LyricFollowScrollMode.Animate)
     }
+
+    @Test
+    fun interruptedTransitionKeepsTheCurrentVisualPosition() {
+        assertThat(
+            lyricTransitionStartPosition(
+                activeLinePosition = 19.35f,
+            ),
+        ).isEqualTo(19.35f)
+    }
+
+    @Test
+    fun seekBaselineWaitsForTheTargetInsteadOfSettlingOnAnIntermediateLine() {
+        assertThat(
+            lyricSeekBaselineIndex(sourceIndex = 4, targetIndex = 20, currentIndex = 19),
+        ).isNull()
+        assertThat(
+            lyricSeekBaselineIndex(sourceIndex = 4, targetIndex = 20, currentIndex = 20),
+        ).isEqualTo(20)
+        assertThat(
+            lyricSeekBaselineIndex(sourceIndex = 4, targetIndex = 20, currentIndex = 21),
+        ).isEqualTo(20)
+        assertThat(
+            lyricSeekBaselineIndex(sourceIndex = 20, targetIndex = 4, currentIndex = 5),
+        ).isNull()
+        assertThat(
+            lyricSeekBaselineIndex(sourceIndex = 20, targetIndex = 4, currentIndex = 3),
+        ).isEqualTo(4)
+    }
+
+    @Test
+    fun missingLyricLayoutIsNotConsideredASettledBaseline() {
+        assertThat(lyricLayoutDeltaHasSettled(previousDelta = null, currentDelta = null)).isFalse()
+        assertThat(lyricLayoutDeltaHasSettled(previousDelta = null, currentDelta = 0f)).isFalse()
+        assertThat(lyricLayoutDeltaHasSettled(previousDelta = 10f, currentDelta = null)).isFalse()
+        assertThat(lyricLayoutDeltaHasSettled(previousDelta = 10f, currentDelta = 10.4f)).isTrue()
+        assertThat(lyricLayoutDeltaHasSettled(previousDelta = 10f, currentDelta = 10.6f)).isFalse()
+    }
 }

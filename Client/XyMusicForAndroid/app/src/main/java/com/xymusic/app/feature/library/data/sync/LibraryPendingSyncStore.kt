@@ -1,4 +1,4 @@
-package com.xymusic.app.data.sync
+package com.xymusic.app.feature.library.data.sync
 
 import androidx.room.withTransaction
 import com.xymusic.app.core.data.media.CatalogLocalDataSource
@@ -8,12 +8,16 @@ import com.xymusic.app.core.database.entity.FavoriteEntity
 import com.xymusic.app.core.database.entity.HistoryEntity
 import com.xymusic.app.core.database.entity.PendingSyncOperationEntity
 import com.xymusic.app.core.database.model.SyncOperationType
+import com.xymusic.app.core.sync.PendingSyncOperationStore
 import com.xymusic.app.feature.library.data.remote.FavoriteItemDto
 import com.xymusic.app.feature.library.data.remote.HistoryItemDto
 import java.time.Clock
 import java.time.Instant
+import javax.inject.Inject
 
-internal class LibraryPendingSyncStore(
+class LibraryPendingSyncStore
+@Inject
+constructor(
     private val database: XyMusicDatabase,
     private val libraryDao: LibraryDao,
     private val catalogLocal: CatalogLocalDataSource,

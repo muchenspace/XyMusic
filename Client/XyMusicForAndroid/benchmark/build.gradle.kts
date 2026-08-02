@@ -14,6 +14,7 @@ android {
         minSdk = 28
         targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunnerArguments["androidx.benchmark.compilation.enabled"] = "false"
     }
 
     targetProjectPath = ":app"
@@ -33,6 +34,15 @@ kotlin {
 
 baselineProfile {
     useConnectedDevices = true
+}
+
+// UTP creates transient .lck files inside the results directory while the
+// connected benchmark task is running. Gradle state tracking tries to hash
+// those files after UTP closes, which fails on Gradle 8.13.
+tasks.matching { task ->
+    task.name.startsWith("connected") && task.name.endsWith("AndroidTest")
+}.configureEach {
+    doNotTrackState("UTP writes transient lock files into the connected-test results directory")
 }
 
 dependencies {

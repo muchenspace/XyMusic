@@ -536,6 +536,7 @@ internal fun <T : Any> CatalogPagedList(
                 this.items(
                     count = items.itemCount,
                     key = { index -> items.peek(index)?.let(itemKey) ?: "catalog-loading-$index" },
+                    contentType = { _ -> CATALOG_ITEM_CONTENT_TYPE },
                 ) { index ->
                     val item = items[index]
                     if (item != null) {
@@ -589,6 +590,8 @@ internal fun <T : Any> CatalogPagedList(
         }
     }
 }
+
+private const val CATALOG_ITEM_CONTENT_TYPE = "catalog-item"
 
 @Composable
 internal fun formatDuration(durationMs: Long): String {

@@ -1,6 +1,5 @@
 package com.xymusic.app.feature.catalog.presentation
 
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -62,6 +61,8 @@ import kotlinx.coroutines.flow.Flow
 
 internal object CatalogDetailTestTags {
     const val AlbumLandscapeInfo = "catalog-album-landscape-info"
+    const val AlbumTracksList = "catalog-album-tracks-list"
+    const val ArtistTracksList = "catalog-artist-tracks-list"
     const val ArtistLandscapeInfo = "catalog-artist-landscape-info"
     const val LandscapeContent = "catalog-landscape-content"
 
@@ -206,27 +207,21 @@ internal fun ArtistLandscapeCollection(
     onTrackMore: (String) -> Unit,
     onTrackPlay: ((List<CatalogTrackUi>, CatalogTrackUi) -> Unit)?,
 ) {
-    AnimatedContent(
-        targetState = selectedTab,
-        transitionSpec = { artistDetailTabContentTransition() },
-        label = "artist-landscape-collection",
-    ) { tab ->
-        when (tab) {
-            ArtistDetailTab.Albums ->
-                ArtistLandscapeAlbums(
-                    albums = albums.collectAsLazyPagingItems(),
-                    compactLandscape = compactLandscape,
-                    onAlbumClick = onAlbumClick,
-                )
+    when (selectedTab) {
+        ArtistDetailTab.Albums ->
+            ArtistLandscapeAlbums(
+                albums = albums.collectAsLazyPagingItems(),
+                compactLandscape = compactLandscape,
+                onAlbumClick = onAlbumClick,
+            )
 
-            ArtistDetailTab.Tracks ->
-                ArtistLandscapeTracks(
-                    tracks = tracks.collectAsLazyPagingItems(),
-                    compactLandscape = compactLandscape,
-                    onTrackMore = onTrackMore,
-                    onTrackPlay = onTrackPlay,
-                )
-        }
+        ArtistDetailTab.Tracks ->
+            ArtistLandscapeTracks(
+                tracks = tracks.collectAsLazyPagingItems(),
+                compactLandscape = compactLandscape,
+                onTrackMore = onTrackMore,
+                onTrackPlay = onTrackPlay,
+            )
     }
 }
 

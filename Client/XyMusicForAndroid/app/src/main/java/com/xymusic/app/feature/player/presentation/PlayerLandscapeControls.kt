@@ -14,6 +14,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -30,9 +31,16 @@ internal fun LandscapeTransportControls(
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     modifier: Modifier = Modifier,
+    playbackPosition: State<Float>? = null,
     compact: Boolean = false,
 ) {
-    val availability = rememberPlaybackControlAvailability(player)
+    val interactionPosition =
+        if (playbackPosition != null) {
+            rememberPlaybackInteractionPositionState(playbackPosition)
+        } else {
+            null
+        }
+    val availability = rememberPlaybackControlAvailability(player, interactionPosition)
     val controlHeight = if (compact) 52.dp else 60.dp
     val playButtonSize = if (compact) 52.dp else 60.dp
     val secondaryIconSize = if (compact) 28.dp else 30.dp

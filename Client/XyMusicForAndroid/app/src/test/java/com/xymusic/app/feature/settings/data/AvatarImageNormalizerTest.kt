@@ -1,4 +1,4 @@
-package com.xymusic.app.feature.settings.presentation
+package com.xymusic.app.feature.settings.data
 
 import android.app.Application
 import android.graphics.Bitmap
@@ -6,8 +6,10 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.net.Uri
 import com.google.common.truth.Truth.assertThat
+import com.xymusic.app.feature.settings.domain.AvatarImageSource
+import com.xymusic.app.feature.settings.domain.AvatarImageTooLargeException
+import com.xymusic.app.feature.settings.domain.InvalidAvatarImageException
 import com.xymusic.app.feature.settings.domain.model.AvatarUploadCommand
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -25,9 +27,9 @@ class AvatarImageNormalizerTest {
     @Test
     fun largeSystemImageIsScaledAndConvertedToBoundedJpeg() {
         val source = png(width = 2_048, height = 1_024)
-        val normalizer = normalizer(source)
+        val normalizer = normalizer()
 
-        val command = normalizer.normalize(TEST_URI)
+        val command = normalizer.normalize(sourceInput(source))
 
         assertThat(command.fileName).isEqualTo("avatar.jpg")
         assertThat(command.contentType).isEqualTo("image/jpeg")
@@ -44,10 +46,10 @@ class AvatarImageNormalizerTest {
 
     @Test
     fun sourceLargerThanUploadLimitIsNormalizedInsteadOfRejected() {
-        val png = png(width = 320, height = 240)
-        val source = png + ByteArray(AvatarUploadCommand.MAX_BYTES + 1 - png.size)
+        val image = png(width = 320, height = 240)
+        val source = image + ByteArray(AvatarUploadCommand.MAX_BYTES + 1 - image.size)
 
-        val command = normalizer(source).normalize(TEST_URI)
+        val command = normalizer().normalize(sourceInput(source))
 
         assertThat(source.size).isGreaterThan(AvatarUploadCommand.MAX_BYTES)
         assertThat(command.content.size).isAtMost(AvatarUploadCommand.MAX_BYTES)
@@ -55,10 +57,8 @@ class AvatarImageNormalizerTest {
 
     @Test
     fun corruptImageFailsExplicitly() {
-        val normalizer = normalizer(byteArrayOf(0x13, 0x37, 0x42))
-
         assertThrows(InvalidAvatarImageException::class.java) {
-            normalizer.normalize(TEST_URI)
+            normalizer().normalize(sourceInput(byteArrayOf(0x13, 0x37, 0x42)))
         }
     }
 
@@ -67,27 +67,23 @@ class AvatarImageNormalizerTest {
         val svg = "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>".encodeToByteArray()
 
         assertThrows(InvalidAvatarImageException::class.java) {
-            normalizer(svg).normalize(TEST_URI)
+            normalizer().normalize(sourceInput(svg))
         }
     }
 
     @Test
     fun jpegThatCannotFitConfiguredLimitReportsTooLarge() {
         val source = png(width = 64, height = 64)
-        val normalizer =
-            AvatarImageNormalizer(
-                openInputStream = { ByteArrayInputStream(source) },
-                maxOutputBytes = 32,
-            )
+        val normalizer = AvatarImageNormalizerCore(maxOutputBytes = 32)
 
         assertThrows(AvatarImageTooLargeException::class.java) {
-            normalizer.normalize(TEST_URI)
+            normalizer.normalize(sourceInput(source))
         }
     }
 
-    private fun normalizer(content: ByteArray) = AvatarImageNormalizer(
-        openInputStream = { ByteArrayInputStream(content) },
-    )
+    private fun normalizer() = AvatarImageNormalizerCore()
+
+    private fun sourceInput(content: ByteArray) = AvatarImageSource { ByteArrayInputStream(content) }
 
     private fun png(width: Int, height: Int): ByteArray {
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -106,9 +102,5 @@ class AvatarImageNormalizerTest {
         } finally {
             bitmap.recycle()
         }
-    }
-
-    private companion object {
-        val TEST_URI: Uri = Uri.parse("content://test/avatar")
     }
 }

@@ -4,29 +4,16 @@ import android.app.Application
 import android.os.StrictMode
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
-import com.xymusic.app.core.session.AppSessionProvider
-import com.xymusic.app.domain.server.ServerConfigRepository
+import dagger.Lazy
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 
 @HiltAndroidApp
 class XyMusicApplication :
     Application(),
     Configuration.Provider {
     @Inject
-    lateinit var workerFactory: HiltWorkerFactory
-
-    @Inject
-    lateinit var sessionProvider: AppSessionProvider
-
-    @Inject
-    lateinit var serverConfigRepository: ServerConfigRepository
-
-    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    lateinit var workerFactory: Lazy<HiltWorkerFactory>
 
     override fun onCreate() {
         super.onCreate()
@@ -40,16 +27,12 @@ class XyMusicApplication :
                     .build(),
             )
         }
-        applicationScope.launch {
-            serverConfigRepository.load()
-            sessionProvider.restoreSession()
-        }
     }
 
     override val workManagerConfiguration: Configuration
         get() =
             Configuration
                 .Builder()
-                .setWorkerFactory(workerFactory)
+                .setWorkerFactory(workerFactory.get())
                 .build()
 }

@@ -13,12 +13,18 @@ import com.xymusic.app.core.database.model.SyncTargetType
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.session.SessionMutationCoordinator
+import com.xymusic.app.core.sync.PendingExecutionOutcome
+import com.xymusic.app.core.sync.PendingSyncOperationStore
+import com.xymusic.app.core.sync.PendingSyncOwnerGuard
+import com.xymusic.app.core.sync.PendingSyncPayloadCodec
 import com.xymusic.app.feature.library.data.remote.FavoriteItemDto
 import com.xymusic.app.feature.library.data.remote.HistoryItemDto
 import com.xymusic.app.feature.library.data.remote.LibraryProtocolException
 import com.xymusic.app.feature.library.data.remote.LibraryRemoteDataSource
 import com.xymusic.app.feature.library.data.remote.RecordPlaybackRequestDto
 import com.xymusic.app.feature.library.data.sync.FavoritePendingPayload
+import com.xymusic.app.feature.library.data.sync.LibraryPendingSyncHandler
+import com.xymusic.app.feature.library.data.sync.LibraryPendingSyncStore
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -150,17 +156,27 @@ class PendingSyncOperationExecutorTest {
         libraryRemote: LibraryRemoteDataSource = ProtocolFailingLibraryRemote,
         sessionProvider: AppSessionProvider = SignedInSessionProvider,
         json: Json = Json,
-    ) = PendingSyncOperationExecutor(
-        database = database,
-        libraryDao = database.libraryDao(),
-        pendingDao = database.pendingSyncOperationDao(),
-        catalogLocal = RoomCatalogLocalDataSource(database.catalogDao()),
-        libraryRemote = libraryRemote,
-        sessionProvider = sessionProvider,
-        sessionMutationCoordinator = SessionMutationCoordinator(),
-        json = json,
-        clock = Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
-    )
+    ): PendingSyncOperationExecutor {
+        val clock = Clock.fixed(Instant.EPOCH, ZoneOffset.UTC)
+        val mutationCoordinator = SessionMutationCoordinator()
+        val ownerGuard = PendingSyncOwnerGuard(sessionProvider, mutationCoordinator)
+        val libraryStore =
+            LibraryPendingSyncStore(
+                database = database,
+                libraryDao = database.libraryDao(),
+                catalogLocal = RoomCatalogLocalDataSource(database.catalogDao()),
+                operationStore = PendingSyncOperationStore(database.pendingSyncOperationDao()),
+                clock = clock,
+            )
+        val libraryHandler =
+            LibraryPendingSyncHandler(
+                libraryRemote = libraryRemote,
+                ownerGuard = ownerGuard,
+                payloadCodec = PendingSyncPayloadCodec(json),
+                libraryStore = libraryStore,
+            )
+        return PendingSyncOperationExecutor(ownerGuard, setOf(libraryHandler))
+    }
 
     private fun pendingOperation(
         operationType: SyncOperationType,

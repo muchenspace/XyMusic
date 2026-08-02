@@ -237,10 +237,11 @@ internal fun SettingsToggleItem(
 internal fun SettingsActionItem(
     icon: ImageVector,
     title: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     summary: String? = null,
     titleColor: Color = MaterialTheme.colorScheme.onSurface,
     iconTint: Color = MaterialTheme.colorScheme.onSurface,
-    onClick: () -> Unit,
     position: SettingsRowPosition = SettingsRowPosition.Single,
     showChevron: Boolean = true,
 ) {
@@ -252,6 +253,7 @@ internal fun SettingsActionItem(
         iconTint = iconTint,
         position = position,
         onClick = onClick,
+        modifier = modifier,
         trailing =
         if (showChevron) {
             {
@@ -343,11 +345,11 @@ private fun SettingsRow(
     role: Role = Role.Button,
     trailing: (@Composable () -> Unit)? = null,
 ) {
-    SettingsRowContainer(position = position, modifier = modifier) {
+    SettingsRowContainer(position = position) {
         Column {
             Row(
                 modifier =
-                Modifier
+                modifier
                     .fillMaxWidth()
                     .heightIn(min = if (summary == null) 50.dp else 62.dp)
                     .clickable(enabled = enabled, role = role, onClick = onClick)

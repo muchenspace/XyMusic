@@ -54,7 +54,6 @@ import com.xymusic.app.core.ui.media.CachedCatalogBanner
 import com.xymusic.app.core.ui.media.CatalogPagedList
 import com.xymusic.app.core.ui.media.CatalogTrackRow
 import com.xymusic.app.core.ui.media.CatalogTrackUi
-import com.xymusic.app.core.ui.media.labelRes
 import com.xymusic.app.feature.playlist.domain.model.PlaylistSummary
 import com.xymusic.app.ui.theme.spacing
 import kotlinx.coroutines.flow.Flow
@@ -154,6 +153,7 @@ internal fun Playlists(
         items(
             count = (playlists.size + columns - 1) / columns,
             key = { row -> "playlist-row-$row" },
+            contentType = { "playlist-grid-row" },
         ) { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 repeat(columns) { column ->
@@ -223,7 +223,7 @@ internal fun PlaylistRow(
                     stringResource(
                         R.string.playlist_summary_line,
                         playlist.trackCount,
-                        stringResource(playlist.visibility.labelRes()),
+                        stringResource(playlist.visibility.libraryLabelRes()),
                     ),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -325,7 +325,11 @@ internal fun DownloadedTracks(
         ),
         verticalArrangement = Arrangement.spacedBy(MaterialTheme.spacing.extraSmall),
     ) {
-        items(tracks, key = CatalogTrackUi::id) { track ->
+        items(
+            items = tracks,
+            key = CatalogTrackUi::id,
+            contentType = { "library-track" },
+        ) { track ->
             CatalogTrackRow(
                 track = track,
                 onClick = { onPlay(tracks, track, 0L) },

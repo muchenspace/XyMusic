@@ -1,7 +1,9 @@
-package com.xymusic.app.feature.player.service
+package com.xymusic.app.feature.player.adapter.media3
 
 import android.os.Bundle
 import androidx.media3.session.SessionCommand
+
+internal const val MAX_SLEEP_TIMER_DURATION_MS = 24L * 60L * 60L * 1_000L
 
 internal object PlaybackSessionCommands {
     const val ARG_SLEEP_TIMER_DURATION_MS = "sleep_timer_duration_ms"

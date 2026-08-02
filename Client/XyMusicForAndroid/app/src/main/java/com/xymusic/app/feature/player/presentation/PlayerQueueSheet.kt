@@ -300,7 +300,7 @@ private fun QueueItem(
                 url = item.artworkUrl,
                 cacheKey = item.artworkCacheKey,
                 contentDescription = null,
-                fallbackImageRes = R.drawable.xymusic,
+                fallbackImageRes = R.drawable.xymusic_compact,
                 modifier = Modifier.size(44.dp).clip(RoundedCornerShape(7.dp)),
             )
             if (isCurrent) {

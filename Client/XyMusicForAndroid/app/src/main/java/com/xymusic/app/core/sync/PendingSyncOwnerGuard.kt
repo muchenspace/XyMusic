@@ -1,10 +1,13 @@
-package com.xymusic.app.data.sync
+package com.xymusic.app.core.sync
 
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.session.SessionMutationCoordinator
+import javax.inject.Inject
 
-internal class PendingSyncOwnerGuard(
+class PendingSyncOwnerGuard
+@Inject
+constructor(
     private val sessionProvider: AppSessionProvider,
     private val sessionMutationCoordinator: SessionMutationCoordinator,
 ) {
@@ -19,4 +22,4 @@ internal class PendingSyncOwnerGuard(
     }
 }
 
-internal object PendingSyncOwnerChangedException : IllegalStateException()
+object PendingSyncOwnerChangedException : IllegalStateException()

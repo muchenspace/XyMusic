@@ -16,7 +16,9 @@ import com.xymusic.app.MainActivity
 import com.xymusic.app.R
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState
-import com.xymusic.app.feature.player.data.media.PlaybackDataSourceFactory
+import com.xymusic.app.domain.server.ServerConfigRepository
+import com.xymusic.app.feature.player.adapter.media3.PlaybackDataSourceFactory
+import com.xymusic.app.feature.player.adapter.media3.PlaybackSessionCommands
 import com.xymusic.app.feature.player.domain.PlaybackEventSink
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
 import com.xymusic.app.feature.player.domain.PlaybackQueueStore
@@ -49,6 +51,9 @@ class PlaybackService : MediaSessionService() {
 
     @Inject
     lateinit var sessionProvider: AppSessionProvider
+
+    @Inject
+    lateinit var serverConfigRepository: ServerConfigRepository
 
     @Inject
     lateinit var clock: Clock
@@ -112,6 +117,7 @@ class PlaybackService : MediaSessionService() {
         )
 
         serviceScope.launch {
+            serverConfigRepository.load()
             sessionProvider.restoreSession()
             sessionProvider.sessionState.collectLatest { state ->
                 handleSessionState(state)

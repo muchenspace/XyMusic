@@ -130,6 +130,7 @@ internal fun LibraryOverview(
             items(
                 count = (playlists.size + 1) / 2,
                 key = { row -> "playlist-row-$row" },
+                contentType = { "playlist-overview-row" },
             ) { row ->
                 val firstIndex = row * 2
                 Row(
@@ -227,7 +228,11 @@ private fun LandscapeLibraryOverview(
                 )
             }
         } else {
-            gridItems(playlists, key = PlaylistSummary::id) { playlist ->
+            gridItems(
+                items = playlists,
+                key = PlaylistSummary::id,
+                contentType = { "playlist" },
+            ) { playlist ->
                 LibraryPlaylistTile(
                     playlist = playlist,
                     onClick = { onPlaylistClick(playlist.id) },

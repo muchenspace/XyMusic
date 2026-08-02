@@ -1,7 +1,7 @@
 package com.xymusic.app.feature.player.service
 
 import com.google.common.truth.Truth.assertThat
-import com.xymusic.app.feature.player.data.media.PlaybackMediaMetadata
+import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaMetadata
 import com.xymusic.app.feature.player.domain.StoredPlaybackQueueItem
 import org.junit.Test
 import org.junit.runner.RunWith

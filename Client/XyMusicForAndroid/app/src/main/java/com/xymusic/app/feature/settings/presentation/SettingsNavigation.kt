@@ -81,6 +81,7 @@ internal fun SettingsRootContent(onPageSelected: (SettingsPage) -> Unit, modifie
                         else -> SettingsRowPosition.Middle
                     },
                     onClick = { onPageSelected(page) },
+                    modifier = Modifier.testTag(SettingsTestTags.page(page)),
                 )
             }
         }
@@ -105,7 +106,11 @@ internal fun SettingsLandscapeNavigation(
         ),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        items(SettingsPage.entries, key = SettingsPage::name) { page ->
+        items(
+            items = SettingsPage.entries,
+            key = SettingsPage::name,
+            contentType = { "settings-page" },
+        ) { page ->
             NavigationDrawerItem(
                 label = {
                     Text(

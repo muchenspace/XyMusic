@@ -76,55 +76,58 @@ class PlayerLyricsParserTest {
 
     @Test
     fun lineLyricsRejectCompleteWordTimedContent() {
-		val failure =
-			runCatching {
-				parsePlayerLyrics(
-					content = "[00:01.00]<00:01.00>first <00:01.50>line",
-					format = LyricsFormat.LRC,
-					timing = LyricsTiming.LINE,
-					language = null,
-				)
-			}.exceptionOrNull()
+        val failure =
+            runCatching {
+                parsePlayerLyrics(
+                    content = "[00:01.00]<00:01.00>first <00:01.50>line",
+                    format = LyricsFormat.LRC,
+                    timing = LyricsTiming.LINE,
+                    language = null,
+                )
+            }.exceptionOrNull()
 
-		assertThat(failure).isInstanceOf(IllegalArgumentException::class.java)
-	}
+        assertThat(failure).isInstanceOf(IllegalArgumentException::class.java)
+    }
 
-	@Test
-	fun mixedLineLyricsIgnoreEmbeddedWordTimes() {
-		val parsed = parsePlayerLyrics(
-			content = "[00:01.00]<00:01.00>first <00:01.50>line\n[00:03.00]second line",
-			format = LyricsFormat.LRC,
-			timing = LyricsTiming.LINE,
-			language = null,
-		)
+    @Test
+    fun mixedLineLyricsIgnoreEmbeddedWordTimes() {
+        val parsed = parsePlayerLyrics(
+            content = "[00:01.00]<00:01.00>first <00:01.50>line\n[00:03.00]second line",
+            format = LyricsFormat.LRC,
+            timing = LyricsTiming.LINE,
+            language = null,
+        )
 
-		assertThat(parsed.timing).isEqualTo(LyricsTiming.LINE)
-		assertThat(parsed.lines.map(PlayerLyricLineUi::text)).containsExactly("first line", "second line").inOrder()
-		assertThat(parsed.lines.all { line -> line.words.isEmpty() }).isTrue()
-	}
+        assertThat(parsed.timing).isEqualTo(LyricsTiming.LINE)
+        assertThat(parsed.lines.map(PlayerLyricLineUi::text)).containsExactly("first line", "second line").inOrder()
+        assertThat(parsed.lines.all { line -> line.words.isEmpty() }).isTrue()
+    }
 
-	@Test
-	fun wordLyricsRejectPrefixTextAndInvalidWordTimestamp() {
-		for (content in listOf(
-			"[00:01.00]prefix<00:01.00>word",
-			"[00:01.00]<00:60.00>word",
-		)) {
-			val failure = runCatching {
-				parsePlayerLyrics(content, LyricsFormat.LRC, LyricsTiming.WORD, null)
-			}.exceptionOrNull()
-			assertThat(failure).isInstanceOf(IllegalArgumentException::class.java)
-		}
+    @Test
+    fun wordLyricsRejectPrefixTextAndInvalidWordTimestamp() {
+        val invalidContents =
+            listOf(
+                "[00:01.00]prefix<00:01.00>word",
+                "[00:01.00]<00:60.00>word",
+            )
+
+        invalidContents.forEach { content ->
+            val failure =
+                runCatching {
+                    parsePlayerLyrics(content, LyricsFormat.LRC, LyricsTiming.WORD, null)
+                }.exceptionOrNull()
+            assertThat(failure).isInstanceOf(IllegalArgumentException::class.java)
+        }
     }
 
     @Test
     fun wordLyricsRejectInvalidMarkerAfterAValidWordTimestamp() {
-        for (
-            content in
-                listOf(
-                    "[00:01.00]<00:01.00>valid<00:60.00>invalid",
-                    "[00:01.00]<00:01.00>valid<bad>invalid",
-                )
-        ) {
+        val invalidContents = listOf(
+            "[00:01.00]<00:01.00>valid<00:60.00>invalid",
+            "[00:01.00]<00:01.00>valid<bad>invalid",
+        )
+
+        invalidContents.forEach { content ->
             val failure =
                 runCatching {
                     parsePlayerLyrics(content, LyricsFormat.LRC, LyricsTiming.WORD, null)
@@ -138,11 +141,11 @@ class PlayerLyricsParserTest {
     fun lrcExpandsMultipleLineTimestampsInTimeOrder() {
         val parsed = parsePlayerLyrics(
             content =
-                """
+            """
                 [ar:Artist]
                 [00:10.50][00:20:5][Verse] Later
                 [00:01] First
-                """.trimIndent(),
+            """.trimIndent(),
             format = LyricsFormat.LRC,
             timing = LyricsTiming.LINE,
             language = "und",
@@ -160,12 +163,12 @@ class PlayerLyricsParserTest {
     fun malformedAndOutOfRangeTimestampsAreIgnored() {
         val parsed = parsePlayerLyrics(
             content =
-                """
+            """
                 [00:60.00]Invalid seconds
                 [00:01.0000]Invalid fraction
                 [not-time]Metadata
                 [999:59.999]Valid upper bound
-                """.trimIndent(),
+            """.trimIndent(),
             format = LyricsFormat.LRC,
             timing = LyricsTiming.LINE,
             language = null,

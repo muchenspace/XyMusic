@@ -35,7 +35,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.xymusic.app.R
 import com.xymusic.app.core.ui.component.MediaArtwork
-import com.xymusic.app.core.ui.media.labelRes
 
 @Composable
 internal fun PlaylistHeader(

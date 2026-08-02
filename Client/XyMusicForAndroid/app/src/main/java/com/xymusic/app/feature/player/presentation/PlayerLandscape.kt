@@ -66,6 +66,7 @@ internal fun LandscapeNowPlayingContent(
                     Spacer(modifier = Modifier.height(sectionSpacing))
                     LandscapeTransportControls(
                         player = uiState.player,
+                        playbackPosition = playbackPosition,
                         onTogglePlayback = onTogglePlayback,
                         onPrevious = onPrevious,
                         onNext = onNext,

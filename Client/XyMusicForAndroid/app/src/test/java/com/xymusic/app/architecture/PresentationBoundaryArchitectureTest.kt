@@ -27,6 +27,29 @@ class PresentationBoundaryArchitectureTest {
     }
 
     @Test
+    fun presentationDoesNotImportApplicationCompositionRoot() {
+        val violations = presentationSourceFiles().flatMap { sourceFile ->
+            importsOf(sourceFile)
+                .filter { importPath -> importPath.startsWith("com.xymusic.app.app.") }
+                .map { importPath -> "${relativePath(sourceFile)}: $importPath" }
+        }
+
+        assertNoViolations("Feature presentation must not import app composition internals", violations)
+    }
+
+    @Test
+    fun presentationDoesNotImportFeatureInfrastructure() {
+        val violations =
+            presentationSourceFiles().flatMap { sourceFile ->
+                importsOf(sourceFile)
+                    .filter { importPath -> featureLayerOf(importPath) in forbiddenFeatureLayers }
+                    .map { importPath -> "${relativePath(sourceFile)}: $importPath" }
+            }
+
+        assertNoViolations("feature presentation must not import feature data/service", violations)
+    }
+
+    @Test
     fun presentationDoesNotImportOutputPorts() {
         val violations =
             presentationSourceFiles().flatMap { sourceFile ->
@@ -98,6 +121,13 @@ class PresentationBoundaryArchitectureTest {
             .takeIf(String::isNotBlank)
     }
 
+    private fun featureLayerOf(importPath: String): String? = importPath
+        .removePrefix(FEATURE_PACKAGE_PREFIX)
+        .takeIf { it != importPath }
+        ?.substringAfter('.', missingDelimiterValue = "")
+        ?.substringBefore('.', missingDelimiterValue = "")
+        ?.takeIf(String::isNotBlank)
+
     private fun sourceText(sourceFile: Path): String = String(Files.readAllBytes(sourceFile), StandardCharsets.UTF_8)
 
     private fun relativePath(path: Path): String = projectRoot.relativize(path).toString().replace('\\', '/')
@@ -110,6 +140,8 @@ class PresentationBoundaryArchitectureTest {
 
     private companion object {
         private const val FEATURE_PACKAGE_PREFIX = "com.xymusic.app.feature."
+
+        private val forbiddenFeatureLayers = setOf("data", "service")
 
         private val forbiddenInfrastructurePrefixes =
             listOf(

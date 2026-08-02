@@ -13,6 +13,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.tooling.preview.Preview
 import com.xymusic.app.R
 import com.xymusic.app.app.navigation.AuthNavigation
@@ -51,7 +53,12 @@ fun XyMusicApp(
         if (failedAttemptId != null) snackbarHostState.showSnackbar(switchFailureMessage)
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    Box(
+        modifier =
+        modifier
+            .fillMaxSize()
+            .semantics { testTagsAsResourceId = true },
+    ) {
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background,
@@ -59,16 +66,20 @@ fun XyMusicApp(
             val serverEndpoint = uiState.serverEndpoint
             when {
                 uiState.serverSwitchState is ServerSwitchState.Switching -> LoadingState()
-                uiState.sessionState == AppSessionState.Loading -> LoadingState()
-                serverEndpoint == null -> ServerSetupScreen(onSave = onServerEndpointChanged)
-                uiState.sessionState == AppSessionState.SignedOut ->
-                    AuthNavigation(
+                uiState.sessionState == AppSessionState.Loading && serverEndpoint == null -> LoadingState()
+                serverEndpoint == null -> ServerSetupContent(onSave = onServerEndpointChanged)
+                // MainActivity keeps the system splash up while the session is loading. Compose
+                // the eventual auth destination behind it so the first visible auth frame is
+                // not also the first composition of the form tree.
+                uiState.sessionState == AppSessionState.Loading ||
+                    uiState.sessionState == AppSessionState.SignedOut ->
+                    AuthContent(
                         snackbarHostState = snackbarHostState,
                         serverEndpoint = serverEndpoint,
                         onServerEndpointChanged = onServerEndpointChanged,
                     )
                 uiState.sessionState is AppSessionState.SignedIn ->
-                    MainNavigation(
+                    MainContent(
                         snackbarHostState = snackbarHostState,
                         dynamicColorEnabled = uiState.dynamicColorEnabled,
                         onDynamicColorChanged = onDynamicColorChanged,
@@ -84,6 +95,42 @@ fun XyMusicApp(
             )
         }
     }
+}
+
+// Keep the root state switch shallow so cold-start verification only loads the selected app branch.
+@Composable
+private fun ServerSetupContent(onSave: (ServerEndpoint) -> Unit) {
+    ServerSetupScreen(onSave = onSave)
+}
+
+@Composable
+private fun AuthContent(
+    snackbarHostState: SnackbarHostState,
+    serverEndpoint: ServerEndpoint,
+    onServerEndpointChanged: (ServerEndpoint) -> Unit,
+) {
+    AuthNavigation(
+        snackbarHostState = snackbarHostState,
+        serverEndpoint = serverEndpoint,
+        onServerEndpointChanged = onServerEndpointChanged,
+    )
+}
+
+@Composable
+private fun MainContent(
+    snackbarHostState: SnackbarHostState,
+    dynamicColorEnabled: Boolean,
+    onDynamicColorChanged: (Boolean) -> Unit,
+    serverEndpoint: ServerEndpoint,
+    onServerEndpointChanged: (ServerEndpoint) -> Unit,
+) {
+    MainNavigation(
+        snackbarHostState = snackbarHostState,
+        dynamicColorEnabled = dynamicColorEnabled,
+        onDynamicColorChanged = onDynamicColorChanged,
+        serverEndpoint = serverEndpoint,
+        onServerEndpointChanged = onServerEndpointChanged,
+    )
 }
 
 @Preview(showBackground = true)

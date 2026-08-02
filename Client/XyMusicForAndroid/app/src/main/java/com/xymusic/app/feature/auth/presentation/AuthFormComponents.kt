@@ -2,6 +2,7 @@ package com.xymusic.app.feature.auth.presentation
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -30,19 +32,22 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -57,6 +62,8 @@ import com.xymusic.app.core.ui.layout.isCompactLandscape
 import com.xymusic.app.core.ui.layout.isWideLandscape
 import com.xymusic.app.ui.theme.spacing
 
+internal val LocalAuthBrandPainter = staticCompositionLocalOf<Painter?> { null }
+
 @Composable
 internal fun AuthFormScaffold(
     title: String,
@@ -66,6 +73,7 @@ internal fun AuthFormScaffold(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colorScheme = MaterialTheme.colorScheme
+    val brandPainter = LocalAuthBrandPainter.current ?: painterResource(R.drawable.xymusic_compact)
     BoxWithConstraints(
         modifier =
         modifier
@@ -116,6 +124,7 @@ internal fun AuthFormScaffold(
                     title = title,
                     description = description,
                     compact = compactLandscape,
+                    brandPainter = brandPainter,
                     modifier =
                     Modifier
                         .weight(1f)
@@ -176,13 +185,12 @@ internal fun AuthFormScaffold(
                 ) {
                     Spacer(modifier = Modifier.height(if (onBack == null) 40.dp else 8.dp))
                     Image(
-                        painter = painterResource(R.drawable.xymusic),
+                        painter = brandPainter,
                         contentDescription = null,
                         modifier =
                         Modifier
                             .size(72.dp)
                             .clip(MaterialTheme.shapes.large),
-                        contentScale = ContentScale.Fit,
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
@@ -214,7 +222,13 @@ internal fun AuthFormScaffold(
 }
 
 @Composable
-private fun AuthLandscapeBrand(title: String, description: String?, compact: Boolean, modifier: Modifier = Modifier) {
+private fun AuthLandscapeBrand(
+    title: String,
+    description: String?,
+    compact: Boolean,
+    brandPainter: Painter,
+    modifier: Modifier = Modifier,
+) {
     val colorScheme = MaterialTheme.colorScheme
     Column(
         modifier = modifier.padding(vertical = if (compact) 4.dp else MaterialTheme.spacing.medium),
@@ -222,13 +236,12 @@ private fun AuthLandscapeBrand(title: String, description: String?, compact: Boo
         horizontalAlignment = Alignment.Start,
     ) {
         Image(
-            painter = painterResource(R.drawable.xymusic),
+            painter = brandPainter,
             contentDescription = null,
             modifier =
             Modifier
                 .size(if (compact) 48.dp else 72.dp)
                 .clip(MaterialTheme.shapes.large),
-            contentScale = ContentScale.Fit,
         )
         Spacer(modifier = Modifier.height(if (compact) 4.dp else MaterialTheme.spacing.small))
         Text(
@@ -266,7 +279,9 @@ internal fun AuthTextField(
     keyboardActions: KeyboardActions = KeyboardActions.Default,
     leadingIcon: @Composable (() -> Unit)? = null,
 ) {
-    OutlinedTextField(
+    val interactionSource = remember { MutableInteractionSource() }
+    val colorScheme = MaterialTheme.colorScheme
+    BasicTextField(
         value = value,
         onValueChange = onValueChange,
         modifier =
@@ -274,30 +289,27 @@ internal fun AuthTextField(
             .fillMaxWidth()
             .testTag(testTag),
         enabled = enabled,
-        label = { Text(stringResource(field.labelRes())) },
-        isError = error != null,
-        supportingText =
-        error?.let {
-            { Text(authFieldErrorText(it)) }
-        },
+        textStyle =
+        LocalTextStyle.current.copy(
+            color = if (enabled) colorScheme.onSurface else colorScheme.onSurfaceVariant,
+        ),
+        cursorBrush = SolidColor(colorScheme.primary),
         keyboardOptions = keyboardOptions,
         keyboardActions = keyboardActions,
         singleLine = true,
-        leadingIcon = leadingIcon,
-        shape = MaterialTheme.shapes.medium,
-        colors =
-        OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-            cursorColor = MaterialTheme.colorScheme.primary,
-            focusedLabelColor = MaterialTheme.colorScheme.primary,
-            unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            errorBorderColor = MaterialTheme.colorScheme.error,
-            errorLabelColor = MaterialTheme.colorScheme.error,
-            focusedTextColor = MaterialTheme.colorScheme.onSurface,
-            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-            disabledTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        ),
+        interactionSource = interactionSource,
+        decorationBox = { innerTextField ->
+            AuthTextFieldDecoration(
+                value = value,
+                enabled = enabled,
+                isError = error != null,
+                interactionSource = interactionSource,
+                label = { Text(stringResource(field.labelRes())) },
+                supportingText = error?.let { { Text(authFieldErrorText(it)) } },
+                leadingIcon = leadingIcon,
+                innerTextField = innerTextField,
+            )
+        },
     )
 }
 
@@ -314,7 +326,15 @@ internal fun PasswordField(
     leadingIcon: @Composable (() -> Unit)? = null,
 ) {
     var passwordVisible by rememberSaveable { mutableStateOf(false) }
-    OutlinedTextField(
+    val interactionSource = remember { MutableInteractionSource() }
+    val colorScheme = MaterialTheme.colorScheme
+    val visualTransformation =
+        if (passwordVisible) {
+            VisualTransformation.None
+        } else {
+            PasswordVisualTransformation()
+        }
+    BasicTextField(
         value = value,
         onValueChange = onValueChange,
         modifier =
@@ -322,12 +342,11 @@ internal fun PasswordField(
             .fillMaxWidth()
             .testTag(testTag),
         enabled = enabled,
-        label = { Text(stringResource(field.labelRes())) },
-        isError = error != null,
-        supportingText =
-        error?.let {
-            { Text(authFieldErrorText(it)) }
-        },
+        textStyle =
+        LocalTextStyle.current.copy(
+            color = if (enabled) colorScheme.onSurface else colorScheme.onSurfaceVariant,
+        ),
+        cursorBrush = SolidColor(colorScheme.primary),
         keyboardOptions =
         KeyboardOptions(
             keyboardType = KeyboardType.Password,
@@ -335,50 +354,96 @@ internal fun PasswordField(
         ),
         keyboardActions = KeyboardActions(onDone = { onDone() }),
         singleLine = true,
-        visualTransformation =
-        if (passwordVisible) {
-            VisualTransformation.None
-        } else {
-            PasswordVisualTransformation()
-        },
-        leadingIcon = leadingIcon,
-        trailingIcon = {
-            IconButton(
-                onClick = { passwordVisible = !passwordVisible },
+        visualTransformation = visualTransformation,
+        interactionSource = interactionSource,
+        decorationBox = { innerTextField ->
+            AuthTextFieldDecoration(
+                value = value,
                 enabled = enabled,
-            ) {
-                Icon(
-                    imageVector =
-                    if (passwordVisible) {
-                        Icons.Default.VisibilityOff
-                    } else {
-                        Icons.Default.Visibility
-                    },
-                    contentDescription =
-                    stringResource(
-                        if (passwordVisible) {
-                            R.string.auth_hide_password
-                        } else {
-                            R.string.auth_show_password
-                        },
-                    ),
-                )
-            }
+                isError = error != null,
+                interactionSource = interactionSource,
+                visualTransformation = visualTransformation,
+                label = { Text(stringResource(field.labelRes())) },
+                supportingText = error?.let { { Text(authFieldErrorText(it)) } },
+                leadingIcon = leadingIcon,
+                trailingIcon = {
+                    IconButton(
+                        onClick = { passwordVisible = !passwordVisible },
+                        enabled = enabled,
+                    ) {
+                        Icon(
+                            imageVector =
+                            if (passwordVisible) {
+                                Icons.Default.VisibilityOff
+                            } else {
+                                Icons.Default.Visibility
+                            },
+                            contentDescription =
+                            stringResource(
+                                if (passwordVisible) {
+                                    R.string.auth_hide_password
+                                } else {
+                                    R.string.auth_show_password
+                                },
+                            ),
+                        )
+                    }
+                },
+                innerTextField = innerTextField,
+            )
         },
-        shape = MaterialTheme.shapes.medium,
-        colors =
+    )
+}
+
+@Composable
+private fun AuthTextFieldDecoration(
+    value: String,
+    enabled: Boolean,
+    isError: Boolean,
+    interactionSource: MutableInteractionSource,
+    innerTextField: @Composable () -> Unit,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+    label: @Composable (() -> Unit)? = null,
+    supportingText: @Composable (() -> Unit)? = null,
+    leadingIcon: @Composable (() -> Unit)? = null,
+    trailingIcon: @Composable (() -> Unit)? = null,
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    val colors =
         OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-            cursorColor = MaterialTheme.colorScheme.primary,
-            focusedLabelColor = MaterialTheme.colorScheme.primary,
-            unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            errorBorderColor = MaterialTheme.colorScheme.error,
-            errorLabelColor = MaterialTheme.colorScheme.error,
-            focusedTextColor = MaterialTheme.colorScheme.onSurface,
-            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-            disabledTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        ),
+            focusedBorderColor = colorScheme.primary,
+            unfocusedBorderColor = colorScheme.outline,
+            cursorColor = colorScheme.primary,
+            focusedLabelColor = colorScheme.primary,
+            unfocusedLabelColor = colorScheme.onSurfaceVariant,
+            errorBorderColor = colorScheme.error,
+            errorLabelColor = colorScheme.error,
+            focusedTextColor = colorScheme.onSurface,
+            unfocusedTextColor = colorScheme.onSurface,
+            disabledTextColor = colorScheme.onSurfaceVariant,
+        )
+    OutlinedTextFieldDefaults.DecorationBox(
+        value = value,
+        innerTextField = innerTextField,
+        enabled = enabled,
+        singleLine = true,
+        visualTransformation = visualTransformation,
+        interactionSource = interactionSource,
+        isError = isError,
+        label = label,
+        supportingText = supportingText,
+        leadingIcon = leadingIcon,
+        trailingIcon = trailingIcon,
+        colors = colors,
+        container = {
+            OutlinedTextFieldDefaults.Container(
+                enabled = enabled,
+                isError = isError,
+                interactionSource = interactionSource,
+                colors = colors,
+                shape = MaterialTheme.shapes.medium,
+            )
+        },
     )
 }
 

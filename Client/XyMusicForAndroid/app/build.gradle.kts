@@ -63,6 +63,7 @@ android {
 
     sourceSets {
         getByName("debug").assets.srcDir("$projectDir/schemas")
+        getByName("release").assets.srcDir("$projectDir/schemas")
         getByName("androidTest").assets.srcDir("$projectDir/schemas")
     }
 
@@ -77,6 +78,7 @@ android {
                 "NewerVersionAvailable",
                 "ObsoleteSdkInt",
                 "OldTargetApi",
+                "Typos",
                 "UnusedResources",
             )
     }
@@ -171,6 +173,7 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.hilt.testing)
     androidTestImplementation(libs.androidx.room.testing)
+    androidTestImplementation(libs.okhttp.mockwebserver)
     androidTestImplementation(libs.truth)
     kspAndroidTest(libs.hilt.compiler)
 

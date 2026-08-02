@@ -36,6 +36,7 @@ import com.xymusic.app.ui.theme.spacing
 internal object PlaylistDetailTestTags {
     const val LandscapeHeader = "playlist-landscape-header"
     const val LandscapeTracks = "playlist-landscape-tracks"
+    const val TracksList = "playlist-tracks-list"
 
     fun track(entryId: String): String = "playlist-landscape-track-$entryId"
 }
@@ -159,7 +160,11 @@ internal fun PlaylistLandscapeScreen(
                                 )
                             }
                         } else {
-                            itemsIndexed(reorderState.entries, key = { _, item -> item.entryId }) { index, entry ->
+                            itemsIndexed(
+                                items = reorderState.entries,
+                                key = { _, item -> item.entryId },
+                                contentType = { _, _ -> "playlist-track" },
+                            ) { index, entry ->
                                 PlaylistTrackRow(
                                     entry = entry,
                                     index = index,

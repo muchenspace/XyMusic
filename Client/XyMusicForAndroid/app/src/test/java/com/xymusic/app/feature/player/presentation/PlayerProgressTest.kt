@@ -6,6 +6,61 @@ import org.junit.Test
 
 class PlayerProgressTest {
     @Test
+    fun structuralPlayerProjectionIgnoresPositionOnlySamples() {
+        val state =
+            PlayerUiState(
+                player =
+                PlayerState(
+                    currentQueueItemId = "queue-1",
+                    isPlaying = true,
+                    positionMs = 1_000,
+                    positionAnchorElapsedRealtimeMs = 10_000,
+                    bufferedPositionMs = 2_000,
+                ),
+            )
+        val positionOnlyUpdate =
+            state.copy(
+                player =
+                state.player.copy(
+                    positionMs = 1_250,
+                    positionAnchorElapsedRealtimeMs = 10_250,
+                    bufferedPositionMs = 2_500,
+                ),
+            )
+
+        assertThat(positionOnlyUpdate.withoutPlaybackPosition())
+            .isEqualTo(state.withoutPlaybackPosition())
+        assertThat(state.player.isStructurallyEqualTo(positionOnlyUpdate.player)).isTrue()
+    }
+
+    @Test
+    fun structuralPlayerProjectionIgnoresPositionDiscontinuities() {
+        val state =
+            PlayerState(
+                currentQueueItemId = "queue-1",
+                isPlaying = true,
+                positionDiscontinuitySequence = 4,
+                positionMs = 1_000,
+            )
+        val seekState = state.copy(
+            positionDiscontinuitySequence = 5,
+            positionMs = 24_000,
+        )
+
+        assertThat(state.isStructurallyEqualTo(seekState)).isTrue()
+        assertThat(seekState.withoutPlaybackPosition().positionDiscontinuitySequence).isEqualTo(0L)
+    }
+
+    @Test
+    fun structuralPlayerEqualityIncludesPlaybackStateChanges() {
+        val state = PlayerState(currentQueueItemId = "queue-1", isPlaying = true)
+
+        assertThat(state.isStructurallyEqualTo(state.copy(isPlaying = false))).isFalse()
+        assertThat(state.isStructurallyEqualTo(state.copy(durationMs = 120_000))).isFalse()
+        assertThat(state.isStructurallyEqualTo(state.copy(positionMs = 500))).isTrue()
+    }
+
+    @Test
     fun normalizedProgressHandlesBoundsAndMissingDuration() {
         assertThat(normalizedPlaybackProgress(positionMs = 50f, durationMs = 100L))
             .isEqualTo(0.5f)
@@ -15,6 +70,13 @@ class PlayerProgressTest {
             .isEqualTo(1f)
         assertThat(normalizedPlaybackProgress(positionMs = 50f, durationMs = 0L))
             .isEqualTo(0f)
+    }
+
+    @Test
+    fun interactionPositionIsQuantizedToSeconds() {
+        assertThat(playbackInteractionPositionMs(12_999.9f)).isEqualTo(12_000f)
+        assertThat(playbackInteractionPositionMs(13_000f)).isEqualTo(13_000f)
+        assertThat(playbackInteractionPositionMs(-1f)).isEqualTo(0f)
     }
 
     @Test
@@ -131,5 +193,23 @@ class PlayerProgressTest {
             .isEqualTo(1_040f)
         assertThat(monotonicPlaybackPosition(previousPositionMs = 1_040f, candidatePositionMs = 1_060f))
             .isEqualTo(1_060f)
+    }
+
+    @Test
+    fun backwardCorrectionsConvergeToTheSeekTarget() {
+        assertThat(
+            renderedPlaybackPosition(
+                previousPositionMs = 1_040f,
+                candidatePositionMs = 1_020f,
+                correctionOffsetMs = 20f,
+            ),
+        ).isEqualTo(1_020f)
+        assertThat(
+            renderedPlaybackPosition(
+                previousPositionMs = 1_040f,
+                candidatePositionMs = 1_020f,
+                correctionOffsetMs = -20f,
+            ),
+        ).isEqualTo(1_040f)
     }
 }

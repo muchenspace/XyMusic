@@ -1,11 +1,14 @@
-package com.xymusic.app.data.sync
+package com.xymusic.app.core.sync
 
 import com.xymusic.app.core.database.dao.PendingSyncOperationDao
 import com.xymusic.app.core.database.entity.PendingSyncOperationEntity
 import com.xymusic.app.core.database.model.SyncOperationStatus
 import com.xymusic.app.core.database.model.SyncOperationType
+import javax.inject.Inject
 
-internal class PendingSyncOperationStore(private val pendingDao: PendingSyncOperationDao) {
+class PendingSyncOperationStore
+@Inject
+constructor(private val pendingDao: PendingSyncOperationDao) {
     suspend fun hasLaterOperation(current: PendingSyncOperationEntity, operationType: SyncOperationType): Boolean =
         laterOperations(current).any { it.operationType == operationType }
 

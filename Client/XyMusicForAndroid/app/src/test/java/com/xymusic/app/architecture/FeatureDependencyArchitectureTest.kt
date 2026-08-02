@@ -48,6 +48,27 @@ class FeatureDependencyArchitectureTest {
     }
 
     @Test
+    fun crossFeatureImportsOnlyUseDomainContracts() {
+        val violations =
+            featureImports()
+                .filter { dependency ->
+                    dependency.sourceFeature != dependency.targetFeature &&
+                        featureLayer(dependency.importPath) != "domain"
+                }.map { dependency ->
+                    "${relativePath(dependency.sourceFile)}: " +
+                        "${dependency.sourceFeature} -> ${dependency.targetFeature} " +
+                        "(${dependency.importPath})"
+                }.sorted()
+
+        assertNoViolations(
+            message =
+            "Cross-feature dependencies may only target domain contracts. " +
+                "Use app composition callbacks for UI and infrastructure integration.",
+            violations = violations,
+        )
+    }
+
+    @Test
     fun sharedMediaLayersDoNotDependOnCatalogInternals() {
         val allMainSources = mainSourceRoots.flatMap(::kotlinSourceFiles)
         val sourcesByLayer =
@@ -149,6 +170,13 @@ class FeatureDependencyArchitectureTest {
             .substringBefore('.')
             .takeIf(String::isNotBlank)
     }
+
+    private fun featureLayer(packageOrImport: String): String? = packageOrImport
+        .removePrefix(FEATURE_PACKAGE_PREFIX)
+        .takeIf { it != packageOrImport }
+        ?.substringAfter('.', missingDelimiterValue = "")
+        ?.substringBefore('.', missingDelimiterValue = "")
+        ?.takeIf(String::isNotBlank)
 
     private fun sourceText(sourceFile: Path): String = String(Files.readAllBytes(sourceFile), StandardCharsets.UTF_8)
 
