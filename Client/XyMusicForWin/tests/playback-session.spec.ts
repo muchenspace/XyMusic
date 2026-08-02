@@ -41,6 +41,84 @@ describe("playback session", () => {
     harness.session.dispose();
   });
 
+  it("refreshes an expired grant before resuming and preserves the playback position", async () => {
+    const harness = createHarness();
+    const started = harness.session.startQueue([track("one")], 0);
+    await started?.playback;
+
+    harness.audio.setPlaybackPosition(42);
+    await harness.session.toggle();
+    harness.grants.getForResume.mockResolvedValueOnce({
+      grant: { url: "https://example.test/one-refreshed.mp3", expiresAt: "", selectedQuality: "AUTO" },
+      refreshed: true,
+    });
+
+    await harness.session.toggle();
+
+    expect(harness.grants.getForResume).toHaveBeenCalledWith("one", "AUTO", expect.any(AbortSignal));
+    expect(harness.audio.load).toHaveBeenNthCalledWith(2, "https://example.test/one-refreshed.mp3", expect.any(AbortSignal));
+    expect(harness.audio.seek).toHaveBeenLastCalledWith(42);
+    expect(harness.audio.play).toHaveBeenCalledTimes(2);
+    expect(harness.session.state()).toMatchObject({ currentTime: 42, isPlaying: true, loading: false });
+
+    harness.session.dispose();
+  });
+
+  it("invalidates the grant and reloads after a resume play failure", async () => {
+    const harness = createHarness();
+    const started = harness.session.startQueue([track("one")], 0);
+    await started?.playback;
+
+    harness.audio.setPlaybackPosition(42);
+    await harness.session.toggle();
+    harness.grants.getForResume.mockResolvedValueOnce({
+      grant: { url: "https://example.test/one.mp3", expiresAt: "", selectedQuality: "AUTO" },
+      refreshed: false,
+    });
+    harness.grants.get.mockResolvedValueOnce({
+      url: "https://example.test/one-recovered.mp3",
+      expiresAt: "",
+      selectedQuality: "AUTO",
+    });
+    harness.audio.play.mockRejectedValueOnce(new Error("expired media URL"));
+
+    await harness.session.toggle();
+
+    expect(harness.grants.invalidate).toHaveBeenCalledWith("one", "AUTO");
+    expect(harness.audio.load).toHaveBeenNthCalledWith(2, "https://example.test/one-recovered.mp3", expect.any(AbortSignal));
+    expect(harness.audio.seek).toHaveBeenLastCalledWith(42);
+    expect(harness.audio.play).toHaveBeenCalledTimes(3);
+    expect(harness.session.state()).toMatchObject({ currentTime: 42, isPlaying: true, loading: false, error: "" });
+
+    harness.session.dispose();
+  });
+
+  it("recovers an active track after a media error without auto-playing a paused track", async () => {
+    const harness = createHarness();
+    const started = harness.session.startQueue([track("one")], 0);
+    await started?.playback;
+    harness.audio.setPlaybackPosition(42);
+    harness.grants.get.mockResolvedValueOnce({
+      url: "https://example.test/one-recovered.mp3",
+      expiresAt: "",
+      selectedQuality: "AUTO",
+    });
+
+    harness.audio.emitError("expired media URL");
+    await vi.waitFor(() => expect(harness.session.state()).toMatchObject({ currentTime: 42, isPlaying: true, loading: false }));
+
+    expect(harness.audio.load).toHaveBeenNthCalledWith(2, "https://example.test/one-recovered.mp3", expect.any(AbortSignal));
+    expect(harness.audio.play).toHaveBeenCalledTimes(2);
+
+    await harness.session.toggle();
+    const playCallsBeforePausedError = harness.audio.play.mock.calls.length;
+    harness.audio.emitError("ignored while paused");
+    await Promise.resolve();
+
+    expect(harness.audio.play).toHaveBeenCalledTimes(playCallsBeforePausedError);
+    harness.session.dispose();
+  });
+
   it("owns immutable snapshots for seeded, started, and appended queues", async () => {
     const harness = createHarness();
     const seeded = [track("seed")];
@@ -276,9 +354,14 @@ function createHarness(options: {
   };
   const grants = {
     get: vi.fn(async (trackId: string) => ({ url: `https://example.test/${trackId}.mp3`, expiresAt: "", selectedQuality: "AUTO" })),
+    getForResume: vi.fn(async (trackId: string) => ({
+      grant: { url: `https://example.test/${trackId}.mp3`, expiresAt: "", selectedQuality: "AUTO" },
+      refreshed: false,
+    })),
     invalidate: vi.fn(),
     clear: vi.fn(),
-  } as unknown as PlaybackGrantCache;
+  };
+  const grantCache = grants as unknown as PlaybackGrantCache;
   const desktop = {
     connect: vi.fn(),
     setTrack: vi.fn(),
@@ -291,7 +374,7 @@ function createHarness(options: {
   const session = new PlaybackSession(
     audio,
     { record: vi.fn(async () => undefined) } as unknown as PlaybackUseCases,
-    grants,
+    grantCache,
     persistence,
     preferences,
     desktop,
@@ -302,7 +385,7 @@ function createHarness(options: {
     lifecycle,
     { next: () => `session-${++identifier}` } as SessionIdGenerator,
   );
-  return { session, audio, lifecycle, preferences, persistence, desktop, desktopWindow };
+  return { session, audio, lifecycle, preferences, persistence, grants, desktop, desktopWindow };
 }
 
 class FakeAudioPlayer implements AudioPlayer {
@@ -351,6 +434,10 @@ class FakeAudioPlayer implements AudioPlayer {
 
   setLoadResult(result: Promise<void>): void {
     this.loadResult = result;
+  }
+
+  emitError(message: string): void {
+    for (const listener of this.errorListeners) listener(message);
   }
 
   private emitUpdate(): void {

@@ -74,6 +74,7 @@ export class PlaybackSession implements PlaybackSessionPort {
   private miniModeOperation = 0;
   private miniModeRequestActive = false;
   private disposed = false;
+  private mediaErrorRecovery: Promise<void> | null = null;
 
   constructor(
     private readonly audio: AudioPlayer,
@@ -254,17 +255,50 @@ export class PlaybackSession implements PlaybackSessionPort {
       await this.playQueueIndex(this.stateValue.currentIndex, null);
       return;
     }
-    const request = this.loadRequest;
+    const request = ++this.loadRequest;
+    this.loadController?.abort();
+    const controller = new AbortController();
+    this.loadController = controller;
     const sessionId = this.playbackSessionId;
+    const resumePosition = this.audio.snapshot().currentTime;
+    this.updateState({ loading: true, error: "" });
     try {
+      const resolution = await this.playbackGrants.getForResume(
+        track.id,
+        this.stateValue.quality,
+        controller.signal,
+      );
+      if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
+      if (resolution.refreshed) {
+        await this.audio.load(resolution.grant.url, controller.signal);
+        if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
+        this.restoreResumePosition(track, resumePosition);
+      }
       await this.audio.play();
       if (request !== this.loadRequest || this.currentTrack !== track || this.playbackSessionId !== sessionId) return;
-      this.updateState({ error: "" });
-      this.playbackSessionStarted = true;
-      void this.recordPlayback(track, sessionId, this.audio.snapshot().currentTime, "STARTED");
+      this.markPlaybackStarted(track, sessionId);
     } catch (cause) {
-      if (request === this.loadRequest && this.currentTrack === track && this.playbackSessionId === sessionId) {
-        this.updateState({ error: errorMessage(cause, "播放失败") });
+      if (this.mediaErrorRecovery) {
+        await this.mediaErrorRecovery;
+        return;
+      }
+      if (request === this.loadRequest && !controller.signal.aborted && !isAbortError(cause) && this.currentTrack === track) {
+        try {
+          await this.reloadAndPlayCurrentTrack(track, sessionId, resumePosition, controller, request);
+          return;
+        } catch (retryCause) {
+          if (request !== this.loadRequest || controller.signal.aborted || isAbortError(retryCause)) return;
+          const message = errorMessage(retryCause, "播放失败");
+          this.lastNativeStatus = "stopped";
+          this.updateState({ error: message, isPlaying: false });
+          this.desktopPlayback.setPlayback("stopped", this.stateValue.currentTime, this.stateValue.duration);
+          this.diagnostics.error("playback", `${track.title}: ${message}`);
+        }
+      }
+    } finally {
+      if (this.loadController === controller) {
+        this.loadController = null;
+        this.updateState({ loading: false });
       }
     }
   }
@@ -609,10 +643,78 @@ export class PlaybackSession implements PlaybackSessionPort {
 
   private handleAudioError(message: string): void {
     if (this.disposed) return;
+    const wasPlaying = this.stateValue.isPlaying;
     this.lastNativeStatus = "stopped";
     this.updateState({ error: message, isPlaying: false });
     this.desktopPlayback.setPlayback("stopped", this.stateValue.currentTime, this.stateValue.duration);
     this.diagnostics.error("playback", message);
+    const track = this.currentTrack;
+    if (!wasPlaying || !track || this.stateValue.loading || this.mediaErrorRecovery) return;
+    const recovery = this.retryCurrentTrackAfterMediaError(track).finally(() => {
+      if (this.mediaErrorRecovery === recovery) this.mediaErrorRecovery = null;
+    });
+    this.mediaErrorRecovery = recovery;
+    void recovery;
+  }
+
+  private restoreResumePosition(track: ReadonlyTrack, position: number): void {
+    const playableDuration = this.audio.snapshot().duration || this.stateValue.duration || track.duration;
+    const resumePosition = normalizeResumePosition(position, playableDuration);
+    if (resumePosition > 0) this.audio.seek(resumePosition);
+    this.updateState({
+      currentTime: resumePosition,
+      duration: playableDuration,
+      progress: playableDuration > 0 ? resumePosition / playableDuration * 100 : 0,
+    });
+  }
+
+  private markPlaybackStarted(track: ReadonlyTrack, sessionId: string): void {
+    const shouldRecordStart = !this.playbackSessionStarted;
+    this.updateState({ error: "" });
+    this.playbackSessionStarted = true;
+    if (shouldRecordStart) void this.recordPlayback(track, sessionId, this.audio.snapshot().currentTime, "STARTED");
+  }
+
+  private async reloadAndPlayCurrentTrack(
+    track: ReadonlyTrack,
+    sessionId: string,
+    position: number,
+    controller: AbortController,
+    request: number,
+  ): Promise<void> {
+    this.playbackGrants.invalidate(track.id, this.stateValue.quality);
+    await this.loadTrackWithRetry(track, controller, request);
+    if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
+    this.restoreResumePosition(track, position);
+    await this.audio.play();
+    if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track || this.playbackSessionId !== sessionId) return;
+    this.markPlaybackStarted(track, sessionId);
+  }
+
+  private async retryCurrentTrackAfterMediaError(track: ReadonlyTrack): Promise<void> {
+    const request = ++this.loadRequest;
+    this.loadController?.abort();
+    const controller = new AbortController();
+    this.loadController = controller;
+    const sessionId = this.playbackSessionId;
+    const position = this.audio.snapshot().currentTime;
+    this.updateState({ loading: true, error: "" });
+    try {
+      await this.reloadAndPlayCurrentTrack(track, sessionId, position, controller, request);
+    } catch (cause) {
+      if (request === this.loadRequest && !controller.signal.aborted && !isAbortError(cause) && this.currentTrack === track) {
+        const message = errorMessage(cause, "播放失败");
+        this.lastNativeStatus = "stopped";
+        this.updateState({ error: message, isPlaying: false });
+        this.desktopPlayback.setPlayback("stopped", this.stateValue.currentTime, this.stateValue.duration);
+        this.diagnostics.error("playback", `${track.title}: ${message}`);
+      }
+    } finally {
+      if (this.loadController === controller) {
+        this.loadController = null;
+        this.updateState({ loading: false });
+      }
+    }
   }
 
   private async playQueueIndex(index: number, terminalEvent: PlaybackTerminalEvent | null = "PAUSED"): Promise<void> {
