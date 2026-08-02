@@ -119,10 +119,7 @@ describe("desktop authentication API contract", () => {
       })));
     vi.stubGlobal("fetch", fetchMock);
 
-    const avatar = new File([new Uint8Array([1, 2, 3])], "avatar.png", { type: "image/png" });
-    Object.defineProperty(avatar, "arrayBuffer", {
-      value: async () => new Uint8Array([1, 2, 3]).buffer,
-    });
+    const avatar = { name: "avatar.png", mediaType: "image/png", bytes: new Uint8Array([1, 2, 3]) };
 
     await expect(new HttpSessionRepository(api).uploadAvatar(avatar))
       .resolves.toMatchObject({
@@ -143,6 +140,7 @@ describe("desktop authentication API contract", () => {
     });
     expect(upload.url).toBe("https://music.example.com/api/v1/oss/c3RvcmFnZS5leGFtcGxl/upload?X-Amz-Signature=avatar");
     expect(upload.init.method).toBe("PUT");
+    expect(upload.init.body).toBe(avatar.bytes);
     expect(new Headers(upload.init.headers).get("Content-Length")).toBe("3");
     expect(new Headers(upload.init.headers).get("X-Upload-Token")).toBe("token");
     expect(complete.url).toBe("https://music.example.com/api/v1/users/me/avatar/uploads/upload%2F1/complete");
@@ -164,8 +162,7 @@ describe("desktop authentication API contract", () => {
       }))
       .mockResolvedValueOnce(new Response(null, { status: 200, headers: { "Content-Length": "65537" } }));
     vi.stubGlobal("fetch", fetchMock);
-    const avatar = new File([new Uint8Array([1])], "avatar.png", { type: "image/png" });
-    Object.defineProperty(avatar, "arrayBuffer", { value: async () => new Uint8Array([1]).buffer });
+    const avatar = { name: "avatar.png", mediaType: "image/png", bytes: new Uint8Array([1]) };
 
     await expect(new HttpSessionRepository(api).uploadAvatar(avatar))
       .rejects.toMatchObject({ code: "UPLOAD_RESPONSE_TOO_LARGE" });

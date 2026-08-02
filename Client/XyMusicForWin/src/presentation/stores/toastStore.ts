@@ -1,4 +1,4 @@
-import { ref } from "vue";
+import { onScopeDispose, ref } from "vue";
 import { defineStore } from "pinia";
 
 export type ToastTone = "success" | "error" | "warning" | "info";
@@ -29,6 +29,8 @@ export const useToastStore = defineStore("toast", () => {
     timers.clear();
     messages.value = [];
   }
+
+  onScopeDispose(clear);
 
   return { messages, show, dismiss, clear };
 });

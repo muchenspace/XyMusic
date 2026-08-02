@@ -1,14 +1,19 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, provide, ref, type Ref, watch } from "vue";
 import { Languages, Minus, Plus, RotateCcw } from "@lucide/vue";
 import type { LyricLine, Track } from "../../domain/music";
-import { resolveLyricPlaybackPosition, resolveLyricWordProgress } from "../../domain/lyricsTimeline";
-import { useApplicationServices } from "../services";
+import {
+  resolveLyricPlaybackPosition,
+  resolveLyricPlaybackRenderPlan,
+} from "../../domain/lyricsTimeline";
 import { useSmoothLyricsPlaybackPosition } from "../composables/useSmoothLyricsPlaybackPosition";
 import { useLyricsStore } from "../stores/lyricsStore";
 import { usePlayerStore } from "../stores/playerStore";
+import { useDesktopWindowStore } from "../stores/desktopWindowStore";
+import LyricsLineContent from "./LyricsLineContent.vue";
 import LyricsPlayerControls from "./LyricsPlayerControls.vue";
 import ArtworkImage from "./ui/ArtworkImage.vue";
+import { lyricsPlaybackPositionKey } from "./lyricsPlaybackPosition";
 
 const player = usePlayerStore();
 const props = withDefaults(defineProps<{ fullscreen?: boolean }>(), { fullscreen: false });
@@ -18,33 +23,50 @@ const displayedPlaybackTime = useSmoothLyricsPlaybackPosition({
   currentTime: () => player.currentTime,
   isPlaying: () => player.isPlaying,
   isActive: () => player.lyricsOpen,
+  renderPlan: (positionSeconds) => {
+    const plan = resolveLyricPlaybackRenderPlan(
+      lyricsStore.lyrics,
+      positionSeconds + lyricsStore.offset,
+    );
+    return {
+      ...plan,
+      nextChangeAtSeconds: plan.nextChangeAtSeconds === null
+        ? null
+        : plan.nextChangeAtSeconds - lyricsStore.offset,
+    };
+  },
+  renderPlanDependencies: () => [lyricsStore.lyrics, lyricsStore.offset],
 });
-const desktopWindow = useApplicationServices().desktopWindow;
+provide(lyricsPlaybackPositionKey, displayedPlaybackTime);
+const windowControls = useDesktopWindowStore();
 const viewElement = ref<HTMLElement | null>(null);
 const lyricsScrollElement = ref<HTMLElement | null>(null);
-const lineElements = ref<HTMLElement[]>([]);
+const lineElements = ref<Array<HTMLElement | undefined>>([]);
+const lineActiveStates: Ref<boolean>[] = [];
 const lyricsMenuElement = ref<HTMLElement | null>(null);
 const lyricsMenu = ref({ open: false, x: 0, y: 0 });
 const activeIndex = ref(-1);
-const activeWordIndex = ref(-1);
-const activeWordProgresses = computed(() => {
-  const line = lyricsStore.lyrics?.lines[activeIndex.value];
-  if (!line?.words?.length) return [];
-  const playbackTime = displayedPlaybackTime.value + lyricsStore.offset;
-  return line.words.map((word) => resolveLyricWordProgress(word, playbackTime));
-});
 const draggingLyrics = ref(false);
 let previouslyFocused: HTMLElement | null = null;
 let lyricsMenuReturnFocus: HTMLElement | null = null;
 let autoFollowPaused = false;
 let autoFollowTimer = 0;
+let lastAutoFollowLineIndex: number | null = null;
+let lastAutoFollowAt = Number.NEGATIVE_INFINITY;
+let rapidAutoFollowTimer = 0;
+let pendingRapidAutoFollowIndex: number | null = null;
 let scrollPointerId: number | null = null;
 let scrollPointerStartY = 0;
 let scrollPointerStartTop = 0;
 let scrollPointerMoved = false;
 let scrollPointerCaptured = false;
+let manualScrollFrame: number | null = null;
+let pendingManualScrollTop: number | null = null;
+let manualScrollListenersAttached = false;
 let suppressLyricClick = false;
 let suppressClickTimer = 0;
+let activeLineIndex = -1;
+let activeLyrics = lyricsStore.lyrics;
 const focusableSelector = [
   "button:not([disabled])",
   "input:not([disabled])",
@@ -56,14 +78,63 @@ const focusableSelector = [
 
 function toggleMaximizeWindow(): void {
   if (props.fullscreen) return;
-  void desktopWindow.toggleMaximize().catch(() => undefined);
+  void windowControls.toggleMaximize().catch(() => undefined);
 }
 
 function updateActivePosition(): void {
+  const lyrics = lyricsStore.lyrics;
+  if (lyrics !== activeLyrics) {
+    lineElements.value = [];
+    lineActiveStates.length = 0;
+    activeLineIndex = -1;
+    activeLyrics = lyrics;
+  }
   const playbackTime = displayedPlaybackTime.value + lyricsStore.offset;
-  const position = resolveLyricPlaybackPosition(lyricsStore.lyrics, playbackTime);
-  activeIndex.value = position.lineIndex;
-  activeWordIndex.value = position.wordIndex;
+  const nextActiveLineIndex = resolveLyricPlaybackPosition(lyrics, playbackTime).lineIndex;
+  if (nextActiveLineIndex === activeLineIndex) {
+    if (activeIndex.value !== nextActiveLineIndex) activeIndex.value = nextActiveLineIndex;
+    return;
+  }
+
+  const previousActiveLineIndex = activeLineIndex;
+  activeLineIndex = nextActiveLineIndex;
+  setLineActive(previousActiveLineIndex, false);
+  setLineActive(nextActiveLineIndex, true);
+  setLineElementActivity(lineElements.value[previousActiveLineIndex], false);
+  setLineElementActivity(lineElements.value[nextActiveLineIndex], true);
+  activeIndex.value = nextActiveLineIndex;
+}
+
+function activeStateForLine(index: number): Readonly<Ref<boolean>> {
+  let activeState = lineActiveStates[index];
+  if (!activeState) {
+    activeState = ref(false);
+    lineActiveStates[index] = activeState;
+  }
+  return activeState;
+}
+
+function setLineElement(index: number, element: unknown): void {
+  const lineElement = element instanceof HTMLElement ? element : undefined;
+  lineElements.value[index] = lineElement;
+  if (lineElement) setLineElementActivity(lineElement, index === activeLineIndex);
+}
+
+function setLineActive(index: number, active: boolean): void {
+  if (index < 0) return;
+  let activeState = lineActiveStates[index];
+  if (!activeState) {
+    activeState = ref(false);
+    lineActiveStates[index] = activeState;
+  }
+  activeState.value = active;
+}
+
+function setLineElementActivity(element: HTMLElement | undefined, active: boolean): void {
+  if (!element) return;
+  element.classList.toggle("active", active);
+  if (active) element.setAttribute("aria-current", "true");
+  else element.removeAttribute("aria-current");
 }
 
 watch(
@@ -76,12 +147,62 @@ watch(
   { immediate: true },
 );
 
-async function scrollToActiveLine(index = activeIndex.value): Promise<void> {
+async function scrollToActiveLine(index = activeIndex.value, forceInstant = false): Promise<void> {
   if (!player.lyricsOpen || autoFollowPaused || index < 0) return;
   await nextTick();
-  if (!player.lyricsOpen || autoFollowPaused) return;
+  if (!player.lyricsOpen || autoFollowPaused || index !== activeIndex.value) return;
   const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-  lineElements.value[index]?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
+  const previousIndex = lastAutoFollowLineIndex;
+  const previousTime = previousIndex === null ? null : lyricsStore.lyrics?.lines[previousIndex]?.time ?? null;
+  const nextTime = lyricsStore.lyrics?.lines[index]?.time ?? null;
+  const adjacentTime = index > 0 ? lyricsStore.lyrics?.lines[index - 1]?.time ?? null : null;
+  const rapidTransition = previousIndex !== null
+    && previousIndex !== index
+    && previousTime !== null
+    && nextTime !== null
+    && Math.abs(nextTime - previousTime) < RAPID_AUTO_FOLLOW_LINE_INTERVAL_SECONDS;
+  // A throttled render can advance over several dense lyric lines at once.
+  // The adjacent timestamps retain that density signal after the last rendered
+  // active line is no longer close to the new one.
+  const rapidLineGroup = rapidTransition
+    || (adjacentTime !== null
+      && nextTime !== null
+      && Math.abs(nextTime - adjacentTime) < RAPID_AUTO_FOLLOW_LINE_INTERVAL_SECONDS);
+  const useInstantPositioning = forceInstant || rapidLineGroup;
+  if (rapidLineGroup && !forceInstant) {
+    const elapsed = Date.now() - lastAutoFollowAt;
+    if (elapsed < RAPID_AUTO_FOLLOW_MIN_INTERVAL_MS) {
+      // Dense timestamps can change several times per frame budget; scroll the
+      // newest active line once instead of forcing layout for each transition.
+      queueRapidAutoFollow(index, RAPID_AUTO_FOLLOW_MIN_INTERVAL_MS - elapsed);
+      return;
+    }
+  }
+  cancelRapidAutoFollow();
+  lineElements.value[index]?.scrollIntoView({
+    behavior: reducedMotion || useInstantPositioning ? "auto" : "smooth",
+    block: "center",
+  });
+  lastAutoFollowLineIndex = index;
+  lastAutoFollowAt = Date.now();
+}
+
+function queueRapidAutoFollow(index: number, delay: number): void {
+  pendingRapidAutoFollowIndex = index;
+  if (rapidAutoFollowTimer) return;
+  rapidAutoFollowTimer = window.setTimeout(() => {
+    rapidAutoFollowTimer = 0;
+    const pendingIndex = pendingRapidAutoFollowIndex;
+    pendingRapidAutoFollowIndex = null;
+    if (pendingIndex === null || pendingIndex !== activeIndex.value) return;
+    void scrollToActiveLine(pendingIndex, true);
+  }, Math.max(1, Math.ceil(delay)));
+}
+
+function cancelRapidAutoFollow(): void {
+  if (rapidAutoFollowTimer) window.clearTimeout(rapidAutoFollowTimer);
+  rapidAutoFollowTimer = 0;
+  pendingRapidAutoFollowIndex = null;
 }
 
 watch([activeIndex, () => player.lyricsOpen], ([index, open]) => {
@@ -95,6 +216,7 @@ watch(() => player.lyricsOpen, async (open) => {
     await nextTick();
     viewElement.value?.focus();
   } else {
+    lyricsStore.flushPreferences();
     closeLyricsMenu(false);
     resetAutoFollow();
     previouslyFocused?.focus();
@@ -191,6 +313,7 @@ function closeLyricsMenuOnResize(): void {
 function pauseAutoFollow(): void {
   autoFollowPaused = true;
   window.clearTimeout(autoFollowTimer);
+  cancelRapidAutoFollow();
   autoFollowTimer = window.setTimeout(() => {
     autoFollowTimer = 0;
     autoFollowPaused = false;
@@ -211,9 +334,21 @@ function handleLyricsWheel(event: WheelEvent): void {
 function resetAutoFollow(): void {
   window.clearTimeout(autoFollowTimer);
   window.clearTimeout(suppressClickTimer);
+  cancelRapidAutoFollow();
+  cancelPendingManualScrollFrame();
+  detachManualScrollListeners();
+  if (scrollPointerCaptured && scrollPointerId !== null) {
+    try {
+      lyricsScrollElement.value?.releasePointerCapture?.(scrollPointerId);
+    } catch {
+      // The element can lose capture when the lyrics view is closed mid-drag.
+    }
+  }
   autoFollowTimer = 0;
   suppressClickTimer = 0;
   autoFollowPaused = false;
+  lastAutoFollowLineIndex = null;
+  lastAutoFollowAt = Number.NEGATIVE_INFINITY;
   scrollPointerId = null;
   scrollPointerMoved = false;
   scrollPointerCaptured = false;
@@ -223,12 +358,13 @@ function resetAutoFollow(): void {
 
 function beginManualScroll(event: PointerEvent): void {
   const scroll = lyricsScrollElement.value;
-  if (event.button !== 0 || !scroll) return;
+  if (event.button !== 0 || !scroll || scrollPointerId !== null) return;
   scrollPointerId = event.pointerId;
   scrollPointerStartY = event.clientY;
   scrollPointerStartTop = scroll.scrollTop;
   scrollPointerMoved = false;
   scrollPointerCaptured = false;
+  attachManualScrollListeners();
 }
 
 function trackManualScroll(event: PointerEvent): void {
@@ -244,7 +380,7 @@ function trackManualScroll(event: PointerEvent): void {
     }
   }
   draggingLyrics.value = true;
-  scroll.scrollTop = scrollPointerStartTop - delta;
+  scheduleManualScroll(scrollPointerStartTop - delta);
   pauseAutoFollow();
   event.preventDefault();
 }
@@ -252,6 +388,7 @@ function trackManualScroll(event: PointerEvent): void {
 function endManualScroll(event: PointerEvent): void {
   if (scrollPointerId !== event.pointerId) return;
   if (scrollPointerCaptured) lyricsScrollElement.value?.releasePointerCapture?.(event.pointerId);
+  cancelPendingManualScrollFrame();
   if (scrollPointerMoved) {
     pauseAutoFollow();
     suppressLyricClick = true;
@@ -265,22 +402,53 @@ function endManualScroll(event: PointerEvent): void {
   scrollPointerMoved = false;
   scrollPointerCaptured = false;
   draggingLyrics.value = false;
+  detachManualScrollListeners();
+}
+
+function attachManualScrollListeners(): void {
+  if (manualScrollListenersAttached) return;
+  manualScrollListenersAttached = true;
+  window.addEventListener("pointermove", trackManualScroll);
+  window.addEventListener("pointerup", endManualScroll);
+  window.addEventListener("pointercancel", endManualScroll);
+}
+
+function detachManualScrollListeners(): void {
+  if (!manualScrollListenersAttached) return;
+  manualScrollListenersAttached = false;
+  window.removeEventListener("pointermove", trackManualScroll);
+  window.removeEventListener("pointerup", endManualScroll);
+  window.removeEventListener("pointercancel", endManualScroll);
+}
+
+function scheduleManualScroll(scrollTop: number): void {
+  pendingManualScrollTop = scrollTop;
+  if (manualScrollFrame !== null) return;
+  manualScrollFrame = window.requestAnimationFrame(() => {
+    manualScrollFrame = null;
+    const nextScrollTop = pendingManualScrollTop;
+    pendingManualScrollTop = null;
+    const scroll = lyricsScrollElement.value;
+    if (!scroll || scrollPointerId === null || !scrollPointerMoved || nextScrollTop === null) return;
+    scroll.scrollTop = nextScrollTop;
+  });
+}
+
+function cancelPendingManualScrollFrame(): void {
+  if (manualScrollFrame !== null) window.cancelAnimationFrame(manualScrollFrame);
+  manualScrollFrame = null;
+  pendingManualScrollTop = null;
 }
 
 onMounted(() => {
   window.addEventListener("keydown", closeOnEscape);
   window.addEventListener("pointerdown", closeLyricsMenuFromOutside);
-  window.addEventListener("pointermove", trackManualScroll);
-  window.addEventListener("pointerup", endManualScroll);
-  window.addEventListener("pointercancel", endManualScroll);
   window.addEventListener("resize", closeLyricsMenuOnResize);
 });
 onBeforeUnmount(() => {
+  lyricsStore.flushPreferences();
   window.removeEventListener("keydown", closeOnEscape);
   window.removeEventListener("pointerdown", closeLyricsMenuFromOutside);
-  window.removeEventListener("pointermove", trackManualScroll);
-  window.removeEventListener("pointerup", endManualScroll);
-  window.removeEventListener("pointercancel", endManualScroll);
   window.removeEventListener("resize", closeLyricsMenuOnResize);
   resetAutoFollow();
   previouslyFocused?.focus();
@@ -288,6 +456,8 @@ onBeforeUnmount(() => {
 
 const AUTO_FOLLOW_RESUME_MS = 4_000;
 const DRAG_THRESHOLD_PX = 4;
+const RAPID_AUTO_FOLLOW_LINE_INTERVAL_SECONDS = 0.25;
+const RAPID_AUTO_FOLLOW_MIN_INTERVAL_MS = 160;
 </script>
 
 <template>
@@ -324,27 +494,21 @@ const DRAG_THRESHOLD_PX = 4;
           <button
             v-for="(line, index) in lyricsStore.lyrics.lines"
             :key="`${lyricsStore.lyrics.trackId}-${line.time ?? 'plain'}-${index}`"
-            v-memo="[line, lyricsStore.showTranslation, lyricsStore.lyrics.timing, index === activeIndex, index === activeIndex ? activeWordIndex : -1, index === activeIndex ? displayedPlaybackTime : 0]"
-            ref="lineElements"
+            v-memo="[line, lyricsStore.showTranslation, lyricsStore.lyrics.timing, lyricsStore.offset]"
+            :ref="(element) => setLineElement(index, element)"
             type="button"
             class="lyric-line"
-            :class="{ active: index === activeIndex }"
             :disabled="line.time === null"
-            :aria-current="index === activeIndex ? 'true' : undefined"
             :aria-label="line.time === null ? line.text : `${line.text}，跳转到${formatTime(line.time)}`"
             @click="seek(line, $event)"
           >
-            <strong v-if="lyricsStore.lyrics.timing === 'WORD'" class="lyric-line-words">
-              <span
-                v-for="(word, wordIndex) in line.words"
-                :key="`${word.time}-${wordIndex}`"
-                class="lyric-word"
-                :class="{ 'is-sung': index === activeIndex && activeWordProgresses[wordIndex] > 0, 'is-current': index === activeIndex && activeWordProgresses[wordIndex] > 0 && activeWordProgresses[wordIndex] < 1 }"
-                :style="{ '--lyric-word-progress': `${(index === activeIndex ? activeWordProgresses[wordIndex] ?? 0 : 0) * 100}%` }"
-              >{{ word.text }}</span>
-            </strong>
-            <strong v-else>{{ line.text }}</strong>
-            <span v-if="lyricsStore.showTranslation && line.translation" class="lyric-translation">{{ line.translation }}</span>
+            <LyricsLineContent
+              :active-state="activeStateForLine(index)"
+              :line="line"
+              :offset="lyricsStore.offset"
+              :show-translation="lyricsStore.showTranslation"
+              :timing="lyricsStore.lyrics.timing"
+            />
           </button>
         </div>
         <div v-else class="lyrics-empty" role="status"><Languages :size="30" /><p>{{ lyricsStore.error || "这首歌曲暂无歌词" }}</p></div>

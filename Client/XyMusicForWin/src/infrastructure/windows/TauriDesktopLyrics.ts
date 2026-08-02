@@ -8,6 +8,7 @@ import {
   type DesktopLyricsSnapshot,
   type DesktopLyricsWindowState,
 } from "../../application/ports/DesktopLyrics";
+import { DESKTOP_LYRICS_EVENTS } from "../../application/ports/DesktopLyricsBridge";
 import type { DesktopLyricsFullscreenBehavior } from "../../application/ports/UserInterfacePreferences";
 
 export class TauriDesktopLyrics implements DesktopLyrics {
@@ -42,16 +43,16 @@ export class TauriDesktopLyrics implements DesktopLyrics {
   }
 
   async sendSnapshot(snapshot: DesktopLyricsSnapshot): Promise<void> {
-    if (isTauriRuntime()) await emitTo(DESKTOP_LYRICS_WINDOW_LABEL, SNAPSHOT_EVENT, snapshot);
+    if (isTauriRuntime()) await emitTo(DESKTOP_LYRICS_WINDOW_LABEL, DESKTOP_LYRICS_EVENTS.state, snapshot);
   }
 
   async sendClock(clock: DesktopLyricsClock): Promise<void> {
-    if (isTauriRuntime()) await emitTo(DESKTOP_LYRICS_WINDOW_LABEL, CLOCK_EVENT, clock);
+    if (isTauriRuntime()) await emitTo(DESKTOP_LYRICS_WINDOW_LABEL, DESKTOP_LYRICS_EVENTS.clock, clock);
   }
 
   async onAction(listener: (action: DesktopLyricsAction) => void): Promise<() => void> {
     if (!isTauriRuntime()) return () => undefined;
-    return listen<unknown>(ACTION_EVENT, (event) => {
+    return listen<unknown>(DESKTOP_LYRICS_EVENTS.action, (event) => {
       if (isDesktopLyricsAction(event.payload)) listener(event.payload);
     });
   }
@@ -64,6 +65,7 @@ export class TauriDesktopLyrics implements DesktopLyrics {
 
 function fallbackWindowState(): DesktopLyricsWindowState {
   return {
+    revision: 0,
     requestedVisible: false,
     visible: false,
     locked: false,
@@ -73,6 +75,7 @@ function fallbackWindowState(): DesktopLyricsWindowState {
 }
 
 interface NativeDesktopLyricsWindowState {
+  revision: number;
   requestedVisible: boolean;
   visible: boolean;
   locked: boolean;
@@ -83,6 +86,7 @@ interface NativeDesktopLyricsWindowState {
 
 function normalizeWindowState(state: NativeDesktopLyricsWindowState): DesktopLyricsWindowState {
   return {
+    revision: Number.isFinite(state.revision) ? Math.max(0, state.revision) : 0,
     requestedVisible: Boolean(state.requestedVisible),
     visible: Boolean(state.visible),
     locked: Boolean(state.locked),
@@ -114,7 +118,4 @@ function isDesktopLyricsAction(value: unknown): value is DesktopLyricsAction {
 }
 
 const DESKTOP_LYRICS_WINDOW_LABEL = "desktop-lyrics";
-const SNAPSHOT_EVENT = "xy-music://desktop-lyrics/state";
-const CLOCK_EVENT = "xy-music://desktop-lyrics/clock";
-const ACTION_EVENT = "xy-music://desktop-lyrics/action";
 const WINDOW_STATE_EVENT = "desktop://lyrics-window-state";

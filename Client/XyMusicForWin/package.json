@@ -8,6 +8,7 @@
     "build": "vue-tsc --noEmit && vite build",
     "typecheck": "vue-tsc --noEmit",
     "test": "vitest run",
+    "test:performance-smoke": "python scripts/playback-performance-smoke.py",
     "test:e2e:isolated": "node scripts/e2e-isolated.mjs",
     "preview": "vite preview",
     "tauri": "tauri"

@@ -160,7 +160,7 @@ export function useMusicActions() {
     actionError.value = "";
     const favorite = !track.liked;
     favoriteIntents.set(track.id, favorite);
-    track.liked = favorite;
+    player.setFavorite(track.id, favorite);
     home.setFavorite(track.id, favorite);
     library.setFavorite(track.id, favorite);
     const previous = favoriteQueues.get(track.id) ?? Promise.resolve();
@@ -173,7 +173,7 @@ export function useMusicActions() {
       toast.show(favorite ? "已添加到喜欢的音乐" : "已取消收藏", "success");
     } catch (cause) {
       if (favoriteIntents.get(track.id) !== favorite) return;
-      track.liked = !favorite;
+      player.setFavorite(track.id, !favorite);
       home.setFavorite(track.id, !favorite);
       library.setFavorite(track.id, !favorite);
       reportActionError(cause);

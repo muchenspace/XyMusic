@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { ChevronLeft, ChevronRight, Copy, LoaderCircle, Minus, Moon, Search, Square, Sun, X } from "@lucide/vue";
-import { onMounted, onUnmounted, ref } from "vue";
-import { useApplicationServices } from "../services";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useThemeStore } from "../stores/themeStore";
+import { useDesktopWindowStore } from "../stores/desktopWindowStore";
 
-const MAXIMIZED_STATE_SYNC_DELAY_MS = 120;
 const props = withDefaults(defineProps<{
   modelValue: string;
   searching: boolean;
@@ -20,12 +19,9 @@ const props = withDefaults(defineProps<{
 });
 const emit = defineEmits<{ "update:modelValue": [value: string]; back: []; forward: [] }>();
 const theme = useThemeStore();
-const desktopWindow = useApplicationServices().desktopWindow;
+const windowControls = useDesktopWindowStore();
 const searchInput = ref<HTMLInputElement | null>(null);
-const maximized = ref(false);
-let removeResizeListener: (() => void) | undefined;
-let componentMounted = false;
-let resizeSyncTimer: number | undefined;
+const maximized = computed(() => windowControls.maximized);
 
 function focusSearch(event: KeyboardEvent) {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
@@ -35,45 +31,19 @@ function focusSearch(event: KeyboardEvent) {
   }
 }
 
-function minimizeWindow() { void desktopWindow.minimize().catch(() => undefined); }
-async function syncWindowState() {
-  try {
-    const nextMaximized = await desktopWindow.isMaximized();
-    if (componentMounted) maximized.value = nextMaximized;
-  } catch { /* Browser and test environments do not expose a native window. */ }
-}
-function scheduleWindowStateSync() {
-  if (resizeSyncTimer !== undefined) window.clearTimeout(resizeSyncTimer);
-  resizeSyncTimer = window.setTimeout(() => {
-    resizeSyncTimer = undefined;
-    void syncWindowState();
-  }, MAXIMIZED_STATE_SYNC_DELAY_MS);
-}
+function minimizeWindow() { void windowControls.minimize().catch(() => undefined); }
 async function toggleMaximizeWindow() {
   if (props.fullscreen) return;
   try {
-    await desktopWindow.toggleMaximize();
-    await syncWindowState();
+    await windowControls.toggleMaximize();
   } catch { /* Browser and test environments do not expose a native window. */ }
 }
-function closeWindow() { void desktopWindow.close().catch(() => undefined); }
+function closeWindow() { void windowControls.close().catch(() => undefined); }
 
 onMounted(() => {
-  componentMounted = true;
   window.addEventListener("keydown", focusSearch);
-  void syncWindowState();
-  void desktopWindow.onResized(scheduleWindowStateSync)
-    .then((unlisten) => {
-      if (componentMounted) removeResizeListener = unlisten;
-      else unlisten();
-    })
-    .catch(() => undefined);
 });
 onUnmounted(() => {
-  componentMounted = false;
-  if (resizeSyncTimer !== undefined) window.clearTimeout(resizeSyncTimer);
-  resizeSyncTimer = undefined;
-  removeResizeListener?.();
   window.removeEventListener("keydown", focusSearch);
 });
 </script>

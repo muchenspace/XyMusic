@@ -4,20 +4,16 @@ import { Heart, ListMusic, LoaderCircle, Maximize2, Monitor, PanelTopOpen, Pause
 import type { Track } from "../../domain/music";
 import { usePlayerStore } from "../stores/playerStore";
 import { useDesktopLyricsStore } from "../stores/desktopLyricsStore";
-import { useApplicationServices } from "../services";
+import { useDesktopWindowStore } from "../stores/desktopWindowStore";
 import ArtworkImage from "./ui/ArtworkImage.vue";
+import PlaybackProgress from "./PlaybackProgress.vue";
 
 const player = usePlayerStore();
 const desktopLyrics = useDesktopLyricsStore();
-const desktopWindow = useApplicationServices().desktopWindow;
+const windowControls = useDesktopWindowStore();
 defineEmits<{ favorite: [track: Track] }>();
 let volumeBeforeMute = player.volume > 0 ? player.volume : 72;
 watch(() => player.volume, (value) => { if (value > 0) volumeBeforeMute = value; });
-const formatTime = (seconds: number) => {
-  const value = Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
-  return `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, "0")}`;
-};
-
 const playModeIcon = computed(() => {
   switch (player.playMode) {
     case "repeat-one": return Repeat1;
@@ -33,7 +29,6 @@ const playModeLabel = computed(() => {
   }
 });
 
-function updateProgress(event: Event) { player.seek(Number((event.target as HTMLInputElement).value)); }
 function updateVolume(event: Event) { player.volume = Number((event.target as HTMLInputElement).value); }
 function toggleMute() {
   if (player.volume > 0) {
@@ -44,7 +39,7 @@ function toggleMute() {
   }
 }
 function toggleFullscreen() {
-  void desktopWindow.toggleFullscreen().catch(() => undefined);
+  void windowControls.toggleFullscreen().catch(() => undefined);
 }
 
 </script>
@@ -77,21 +72,7 @@ function toggleFullscreen() {
         <button type="button" class="bare-button" title="下一首" aria-label="下一首" :disabled="player.loading" @click="player.next"><SkipForward :size="19" fill="currentColor" /></button>
         <button type="button" class="bare-button" :class="{ enabled: player.playMode !== 'repeat-all' }" :title="playModeLabel" :aria-label="playModeLabel" :aria-pressed="player.playMode !== 'repeat-all'" @click="player.cyclePlayMode"><component :is="playModeIcon" :size="17" /></button>
       </div>
-      <div class="progress-row">
-        <span>{{ formatTime(player.currentTime) }}</span>
-        <input
-          :value="player.progress"
-          type="range"
-          min="0"
-          max="100"
-          step="0.1"
-          aria-label="播放进度"
-          :aria-valuetext="`${formatTime(player.currentTime)} / ${formatTime(player.duration || player.currentTrack.duration)}`"
-          :style="{ '--range-progress': `${player.progress}%` }"
-          @input="updateProgress"
-        />
-        <span>{{ formatTime(player.duration || player.currentTrack.duration) }}</span>
-      </div>
+      <PlaybackProgress show-times :fallback-duration="player.currentTrack.duration" />
     </div>
 
     <div class="player-extras">
@@ -103,7 +84,7 @@ function toggleFullscreen() {
         <Volume1 v-else-if="player.volume > 0" :size="18" />
         <VolumeX v-else :size="18" />
       </button>
-      <input :value="player.volume" class="volume-slider" type="range" min="0" max="100" aria-label="音量" :aria-valuetext="`${Math.round(player.volume)}%`" :style="{ '--range-progress': `${player.volume}%` }" @input="updateVolume" />
+      <input :value="player.volume" class="volume-slider" type="range" min="0" max="100" aria-label="音量" :aria-valuetext="`${Math.round(player.volume)}%`" :style="{ '--range-progress': `${player.volume}%` }" @input="updateVolume" @change="player.flushPlayerPreferences" />
       <button type="button" class="bare-button mini-mode-button" title="迷你播放器" aria-label="迷你播放器" @click="player.setMiniMode(true)"><PanelTopOpen :size="17" /></button>
       <button type="button" class="bare-button fullscreen-button" title="全屏" aria-label="全屏" @click="toggleFullscreen"><Maximize2 :size="17" /></button>
     </div>

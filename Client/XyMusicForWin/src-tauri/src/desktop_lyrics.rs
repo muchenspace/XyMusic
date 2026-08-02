@@ -26,7 +26,7 @@ impl TryFrom<&str> for FullscreenBehavior {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DesktopLyricsState {
     requested_visible: bool,
     locked: bool,
@@ -37,6 +37,7 @@ pub struct DesktopLyricsState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopLyricsWindowState {
+    revision: u64,
     requested_visible: bool,
     visible: bool,
     locked: bool,
@@ -44,16 +45,24 @@ pub struct DesktopLyricsWindowState {
     fullscreen_behavior: FullscreenBehavior,
 }
 
-pub struct DesktopLyricsManager(pub Mutex<DesktopLyricsState>);
+#[derive(Debug, Default)]
+struct DesktopLyricsManagerState {
+    desired: DesktopLyricsState,
+    applied: Option<DesktopLyricsState>,
+    revision: u64,
+}
+
+pub struct DesktopLyricsManager(Mutex<DesktopLyricsManagerState>);
 
 impl Default for DesktopLyricsManager {
     fn default() -> Self {
-        Self(Mutex::new(DesktopLyricsState::default()))
+        Self(Mutex::new(DesktopLyricsManagerState::default()))
     }
 }
 
-fn public_state(state: DesktopLyricsState) -> DesktopLyricsWindowState {
+fn public_state(state: DesktopLyricsState, revision: u64) -> DesktopLyricsWindowState {
     DesktopLyricsWindowState {
+        revision,
         requested_visible: state.requested_visible,
         visible: state.requested_visible && !state.hidden_by_fullscreen,
         locked: state.locked,
@@ -62,22 +71,67 @@ fn public_state(state: DesktopLyricsState) -> DesktopLyricsWindowState {
     }
 }
 
-fn apply(app: &AppHandle, state: DesktopLyricsState) -> Result<DesktopLyricsWindowState, String> {
-    let public = public_state(state);
-    let window = app
-        .get_webview_window(LYRICS_WINDOW)
-        .ok_or_else(|| "desktop lyrics window is unavailable".to_string())?;
-    window
-        .set_ignore_cursor_events(state.locked)
-        .map_err(|error| error.to_string())?;
-    if public.visible {
-        window.show().map_err(|error| error.to_string())?;
-    } else {
-        window.hide().map_err(|error| error.to_string())?;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct NativeApplyPlan {
+    ignore_cursor_events: Option<bool>,
+    visible: Option<bool>,
+    state_event: Option<DesktopLyricsWindowState>,
+}
+
+impl NativeApplyPlan {
+    fn is_empty(self) -> bool {
+        self.ignore_cursor_events.is_none() && self.visible.is_none() && self.state_event.is_none()
     }
-    app.emit(WINDOW_STATE_EVENT, public)
-        .map_err(|error| error.to_string())?;
-    Ok(public)
+}
+
+fn native_apply_plan(
+    applied: Option<DesktopLyricsState>,
+    desired: DesktopLyricsState,
+    revision: u64,
+) -> NativeApplyPlan {
+    let desired_public = public_state(desired, revision);
+    let applied_public = applied.map(|state| public_state(state, revision));
+
+    NativeApplyPlan {
+        ignore_cursor_events: match applied {
+            Some(previous) if previous.locked == desired.locked => None,
+            _ => Some(desired.locked),
+        },
+        visible: match applied_public {
+            Some(previous) if previous.visible == desired_public.visible => None,
+            _ => Some(desired_public.visible),
+        },
+        state_event: if applied_public == Some(desired_public) {
+            None
+        } else {
+            Some(desired_public)
+        },
+    }
+}
+
+fn apply(app: &AppHandle, plan: NativeApplyPlan) -> Result<(), String> {
+    if plan.ignore_cursor_events.is_some() || plan.visible.is_some() {
+        let window = app
+            .get_webview_window(LYRICS_WINDOW)
+            .ok_or_else(|| "desktop lyrics window is unavailable".to_string())?;
+        if let Some(locked) = plan.ignore_cursor_events {
+            window
+                .set_ignore_cursor_events(locked)
+                .map_err(|error| error.to_string())?;
+        }
+        if let Some(visible) = plan.visible {
+            if visible {
+                window.show().map_err(|error| error.to_string())?;
+            } else {
+                window.hide().map_err(|error| error.to_string())?;
+            }
+        }
+    }
+    if let Some(state) = plan.state_event {
+        app.emit(WINDOW_STATE_EVENT, state)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 fn update(
@@ -85,15 +139,26 @@ fn update(
     change: impl FnOnce(&mut DesktopLyricsState),
 ) -> Result<DesktopLyricsWindowState, String> {
     let manager = app.state::<DesktopLyricsManager>();
-    let state = {
-        let mut state = manager
-            .0
-            .lock()
-            .map_err(|_| "desktop lyrics state lock is poisoned")?;
-        change(&mut state);
-        *state
+    let mut manager_state = manager
+        .0
+        .lock()
+        .map_err(|_| "desktop lyrics state lock is poisoned")?;
+    let mut desired = manager_state.desired;
+    change(&mut desired);
+    let revision = if desired == manager_state.desired {
+        manager_state.revision
+    } else {
+        manager_state.revision.saturating_add(1)
     };
-    apply(app, state)
+
+    let plan = native_apply_plan(manager_state.applied, desired, revision);
+    if !plan.is_empty() {
+        apply(app, plan)?;
+        manager_state.applied = Some(desired);
+    }
+    manager_state.desired = desired;
+    manager_state.revision = revision;
+    Ok(public_state(desired, revision))
 }
 
 pub fn synchronize_fullscreen(app: &AppHandle) -> Result<DesktopLyricsWindowState, String> {
@@ -153,7 +218,9 @@ pub fn set_desktop_lyrics_fullscreen_behavior(
 
 #[cfg(test)]
 mod tests {
-    use super::{DesktopLyricsState, FullscreenBehavior, public_state};
+    use super::{
+        DesktopLyricsState, FullscreenBehavior, NativeApplyPlan, native_apply_plan, public_state,
+    };
 
     #[test]
     fn fullscreen_hiding_preserves_requested_visibility() {
@@ -163,7 +230,8 @@ mod tests {
             fullscreen_behavior: FullscreenBehavior::Hide,
             ..DesktopLyricsState::default()
         };
-        let public = public_state(state);
+        let public = public_state(state, 3);
+        assert_eq!(public.revision, 3);
         assert!(public.requested_visible);
         assert!(!public.visible);
         assert!(public.hidden_by_fullscreen);
@@ -180,5 +248,39 @@ mod tests {
             FullscreenBehavior::Hide
         );
         assert!(FullscreenBehavior::try_from("invalid").is_err());
+    }
+
+    #[test]
+    fn unchanged_applied_state_schedules_no_native_window_work() {
+        let state = DesktopLyricsState {
+            requested_visible: true,
+            locked: true,
+            hidden_by_fullscreen: false,
+            fullscreen_behavior: FullscreenBehavior::Show,
+        };
+
+        assert_eq!(
+            native_apply_plan(Some(state), state, 4),
+            NativeApplyPlan::default()
+        );
+    }
+
+    #[test]
+    fn fullscreen_visibility_change_does_not_repeat_cursor_configuration() {
+        let applied = DesktopLyricsState {
+            requested_visible: true,
+            locked: true,
+            hidden_by_fullscreen: false,
+            fullscreen_behavior: FullscreenBehavior::Hide,
+        };
+        let desired = DesktopLyricsState {
+            hidden_by_fullscreen: true,
+            ..applied
+        };
+
+        let plan = native_apply_plan(Some(applied), desired, 5);
+        assert_eq!(plan.ignore_cursor_events, None);
+        assert_eq!(plan.visible, Some(false));
+        assert_eq!(plan.state_event, Some(public_state(desired, 5)));
     }
 }

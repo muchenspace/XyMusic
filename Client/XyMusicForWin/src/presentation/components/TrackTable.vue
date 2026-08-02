@@ -61,7 +61,7 @@ const renderedTracks = computed<RenderedTrack[]>(() => {
     .slice(start, virtualRows.end.value)
     .map((track, offset) => {
       const index = start + offset;
-      const entry = props.entries?.[index];
+    const entry = props.entries?.[index];
       return {
         track,
         index,
@@ -139,6 +139,34 @@ function clearDrag(): void {
   dragOverEntryId.value = null;
 }
 
+function rowMemo(row: RenderedTrack): unknown[] {
+  return [
+    row.track,
+    row.entry,
+    row.track.id,
+    row.track.title,
+    row.track.artist,
+    row.track.album,
+    row.track.coverUrl,
+    row.track.duration,
+    row.track.liked,
+    row.track.publishedAt,
+    row.entry?.id,
+    row.index,
+    row.current,
+    row.selected,
+    row.index === props.tracks.length - 1,
+    props.busy,
+    props.reorderDisabled,
+    draggedEntryId.value === row.entry?.id,
+    dragOverEntryId.value === row.entry?.id,
+  ];
+}
+
+function rowKey(row: RenderedTrack): string {
+  return row.entry?.id ?? row.track.id;
+}
+
 function formatTime(seconds: number): string {
   const safeSeconds = Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
   return `${Math.floor(safeSeconds / 60)}:${String(Math.floor(safeSeconds % 60)).padStart(2, "0")}`;
@@ -173,7 +201,8 @@ function formatDate(value: string): string {
         <div v-if="virtualRows.topSpacer.value" class="track-virtual-spacer" :style="{ height: `${virtualRows.topSpacer.value}px` }" aria-hidden="true"></div>
         <div
           v-for="row in renderedTracks"
-          :key="row.entry?.id ?? row.track.id"
+          :key="rowKey(row)"
+          v-memo="rowMemo(row)"
           class="track-row"
           :class="{ current: row.current, dragging: draggedEntryId === row.entry?.id, 'drag-over': dragOverEntryId === row.entry?.id }"
           role="row"

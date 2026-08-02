@@ -50,6 +50,7 @@ describe("settings view", () => {
 
     await wrapper.get("#playback-lyrics-font-scale").setValue("1.15");
     expect(wrapper.emitted("update:lyricsFontScale")).toEqual([[1.15]]);
+    expect(wrapper.emitted("flushLyricsPreferences")).toEqual([[]]);
 
     expect(wrapper.find("#playback-word-lyrics").exists()).toBe(false);
 

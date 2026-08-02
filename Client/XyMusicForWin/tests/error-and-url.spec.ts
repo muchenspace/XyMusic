@@ -14,6 +14,11 @@ describe("safe Chinese errors", () => {
       .toBe("恢复登录状态失败");
   });
 
+  it("recognizes named cancellation and timeout errors without relying on a browser constructor", () => {
+    expect(errorMessage(namedError("AbortError"))).toBe(errorMessage(new DOMException("cancelled", "AbortError")));
+    expect(errorMessage(namedError("TimeoutError"))).toBe(errorMessage(new DOMException("timed out", "TimeoutError")));
+  });
+
   it("includes the trace id for detailed server errors", () => {
     expect(errorMessage(new ApiError("账号创建未完成，请稍后重试。", 500, "INTERNAL_ERROR", undefined, "trace-register")))
       .toBe("账号创建未完成，请稍后重试。（追踪 ID：trace-register）");
@@ -38,3 +43,9 @@ describe("safe Chinese errors", () => {
     });
   });
 });
+
+function namedError(name: string): Error {
+  const error = new Error(name);
+  error.name = name;
+  return error;
+}

@@ -16,26 +16,22 @@ const queueCount = computed(() => player.queue.length);
 const virtualRows = useVirtualRows(queueCount, queueRows, { rowHeight: QUEUE_ROW_HEIGHT });
 const stableTrackKeys = new WeakMap<Track, string>();
 let nextTrackKey = 0;
-const queueRowKeys = computed(() => {
-  const occurrences = new Map<Track, number>();
-  return player.queue.map((track) => {
-    const occurrence = occurrences.get(track) ?? 0;
-    occurrences.set(track, occurrence + 1);
-    let key = stableTrackKeys.get(track);
-    if (!key) {
-      key = `queue-track-${nextTrackKey++}`;
-      stableTrackKeys.set(track, key);
-    }
-    return `${key}-${occurrence}`;
-  });
-});
 const renderedQueue = computed(() => player.queue
   .slice(virtualRows.start.value, virtualRows.end.value)
   .map((track, offset) => {
     const index = virtualRows.start.value + offset;
-    return { track, index, key: queueRowKeys.value[index]! };
+    return { track, index, key: queueRowKey(track, index) };
   }));
 let previouslyFocused: HTMLElement | null = null;
+
+function queueRowKey(track: Track, index: number): string {
+  let trackKey = stableTrackKeys.get(track);
+  if (!trackKey) {
+    trackKey = `queue-track-${nextTrackKey++}`;
+    stableTrackKeys.set(track, trackKey);
+  }
+  return `${trackKey}-${index}`;
+}
 
 watch(() => player.queueOpen, async (open) => {
   if (open) {
@@ -89,7 +85,7 @@ onBeforeUnmount(() => previouslyFocused?.focus());
           <div
             v-for="{ track, index, key } in renderedQueue"
             :key="key"
-            v-memo="[track, index === player.currentIndex, index === player.currentIndex ? player.isPlaying : false]"
+            v-memo="[track, track.title, track.artist, track.coverUrl, index, player.queue.length, index === player.currentIndex, index === player.currentIndex ? player.isPlaying : false]"
             class="queue-item"
             :class="{ active: player.currentIndex === index }"
             role="listitem"

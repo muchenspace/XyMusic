@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import { ChevronDown, Heart, LoaderCircle, Minus, Pause, Play, SkipBack, SkipForward, X } from "@lucide/vue";
 import type { Track } from "../../domain/music";
-import { useApplicationServices } from "../services";
 import { usePlayerStore } from "../stores/playerStore";
+import { useDesktopWindowStore } from "../stores/desktopWindowStore";
 import ArtworkImage from "./ui/ArtworkImage.vue";
+import PlaybackProgress from "./PlaybackProgress.vue";
 
 const player = usePlayerStore();
 withDefaults(defineProps<{ fullscreen?: boolean }>(), { fullscreen: false });
 defineEmits<{ favorite: [track: Track] }>();
-const desktopWindow = useApplicationServices().desktopWindow;
+const windowControls = useDesktopWindowStore();
 
-function minimize(): void { void desktopWindow?.minimize().catch(() => undefined); }
-function close(): void { void desktopWindow?.close().catch(() => undefined); }
-function updateProgress(event: Event): void { player.seek(Number((event.target as HTMLInputElement).value)); }
+function minimize(): void { void windowControls.minimize().catch(() => undefined); }
+function close(): void { void windowControls.close().catch(() => undefined); }
 </script>
 
 <template>
@@ -30,7 +30,7 @@ function updateProgress(event: Event): void { player.seek(Number((event.target a
       <div class="mini-track-copy">
         <strong>{{ player.currentTrack.title }}</strong>
         <span>{{ player.currentTrack.artist }}</span>
-        <input :value="player.progress" type="range" min="0" max="100" step="0.1" aria-label="播放进度" :style="{ '--range-progress': `${player.progress}%` }" @input="updateProgress" />
+        <PlaybackProgress />
       </div>
       <div class="mini-transport">
         <button type="button" :class="{ liked: player.currentTrack.liked }" :title="player.currentTrack.liked ? '取消收藏当前歌曲' : '收藏当前歌曲'" :aria-label="player.currentTrack.liked ? '取消收藏当前歌曲' : '收藏当前歌曲'" :aria-pressed="player.currentTrack.liked" @click="$emit('favorite', player.currentTrack)"><Heart :size="17" :fill="player.currentTrack.liked ? 'currentColor' : 'none'" /></button>

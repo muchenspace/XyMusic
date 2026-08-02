@@ -11,6 +11,13 @@ export interface LyricPlaybackClock {
   isPlaying: boolean;
 }
 
+export interface LyricPlaybackRenderPlan {
+  /** A word fill is in progress and benefits from display-synchronized updates. */
+  requiresAnimationFrame: boolean;
+  /** The next timestamp at which the displayed lyric state can change. */
+  nextChangeAtSeconds: number | null;
+}
+
 export function shouldReanchorLyricPlaybackClock(
   current: LyricPlaybackClock,
   next: LyricPlaybackClock,
@@ -58,6 +65,38 @@ export function resolveLyricPlaybackPosition(
   };
 }
 
+/**
+ * Describes the next visible lyric transition without coupling the domain model
+ * to a specific rendering framework. Line-only lyrics can sleep until their
+ * next timestamp; enhanced word lyrics request animation frames only while a
+ * word's fill is actively progressing.
+ */
+export function resolveLyricPlaybackRenderPlan(
+  lyrics: Lyrics | null,
+  playbackSeconds: number,
+): LyricPlaybackRenderPlan {
+  if (!lyrics?.synchronized || !lyrics.lines.length) return IDLE_RENDER_PLAN;
+
+  const playback = finiteNumber(playbackSeconds);
+  const position = resolveLyricPlaybackPosition(lyrics, playback);
+  const activeLine = position.lineIndex >= 0 ? lyrics.lines[position.lineIndex] : undefined;
+  const activeWord = lyrics.timing === "WORD" && position.wordIndex >= 0
+    ? activeLine?.words?.[position.wordIndex]
+    : undefined;
+
+  if (activeWord && hasActiveWordFill(activeWord, playback)) {
+    return {
+      requiresAnimationFrame: true,
+      nextChangeAtSeconds: activeWord.endTime ?? null,
+    };
+  }
+
+  return {
+    requiresAnimationFrame: false,
+    nextChangeAtSeconds: findNextLyricVisualChange(lyrics, playback, position.lineIndex),
+  };
+}
+
 function findActiveLineIndex(lyrics: Lyrics, playback: number): number {
   let low = 0;
   let high = lyrics.lines.length - 1;
@@ -85,9 +124,61 @@ function findActiveWordIndex(words: LyricWord[] | undefined, playback: number): 
 	return -1;
 }
 
+function hasActiveWordFill(word: LyricWord, playback: number): boolean {
+  return Number.isFinite(word.time)
+    && Number.isFinite(word.endTime)
+    && word.endTime! > word.time
+    && playback >= word.time
+    && playback < word.endTime!;
+}
+
+function findNextLyricVisualChange(lyrics: Lyrics, playback: number, activeLineIndex: number): number | null {
+  let nextChange = findNextLineTime(lyrics.lines, playback);
+  if (lyrics.timing !== "WORD" || activeLineIndex < 0) return nextChange;
+
+  // Only the active line's words are rendered dynamically. Boundaries from a
+  // later line cannot affect the display until that line becomes active.
+  const words = lyrics.lines[activeLineIndex]?.words;
+  if (!words?.length) return nextChange;
+  for (const word of words) {
+    if (Number.isFinite(word.time) && word.time > playback) {
+      nextChange = earlierTimestamp(nextChange, word.time);
+    }
+    if (Number.isFinite(word.endTime) && word.endTime! > playback) {
+      nextChange = earlierTimestamp(nextChange, word.endTime!);
+    }
+  }
+  return nextChange;
+}
+
+function findNextLineTime(lines: readonly Lyrics["lines"][number][], playback: number): number | null {
+  let low = 0;
+  let high = lines.length - 1;
+  let result: number | null = null;
+  while (low <= high) {
+    const middle = (low + high) >>> 1;
+    const time = lines[middle]?.time;
+    if (time !== null && time !== undefined && time > playback) {
+      result = time;
+      high = middle - 1;
+    } else {
+      low = middle + 1;
+    }
+  }
+  return result;
+}
+
+function earlierTimestamp(current: number | null, candidate: number): number {
+  return current === null || candidate < current ? candidate : current;
+}
+
 function finiteNumber(value: number): number {
   return Number.isFinite(value) ? value : 0;
 }
 
 const EMPTY_POSITION: LyricPlaybackPosition = { lineIndex: -1, wordIndex: -1 };
+const IDLE_RENDER_PLAN: LyricPlaybackRenderPlan = {
+  requiresAnimationFrame: false,
+  nextChangeAtSeconds: null,
+};
 const PLAYBACK_JUMP_THRESHOLD_SECONDS = 0.08;

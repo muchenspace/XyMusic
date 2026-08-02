@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Lyrics } from "../src/domain/music";
 import {
 	interpolateLyricPlaybackSeconds,
+	resolveLyricPlaybackRenderPlan,
 	resolveLyricPlaybackPosition,
 	resolveLyricWordProgress,
 } from "../src/domain/lyricsTimeline";
@@ -54,6 +55,58 @@ describe("playback lyrics timeline", () => {
 
 		expect(interpolateLyricPlaybackSeconds(clock, 1_016)).toBeCloseTo(10.016, 6);
 		expect(interpolateLyricPlaybackSeconds({ ...clock, isPlaying: false }, 1_500)).toBe(10);
+	});
+
+	it("sleeps line-timed lyrics until the next line boundary", () => {
+		const lyrics = synchronizedLyrics("LINE", [
+			{ time: 0, text: "First line" },
+			{ time: 4, text: "Second line" },
+		]);
+
+		expect(resolveLyricPlaybackRenderPlan(lyrics, 1)).toEqual({
+			requiresAnimationFrame: false,
+			nextChangeAtSeconds: 4,
+		});
+	});
+
+	it("uses animation frames only while an enhanced word fill is active", () => {
+		const lyrics = synchronizedLyrics("WORD", [{
+			time: 1,
+			text: "First second",
+			words: [
+				{ time: 1, endTime: 1.5, text: "First" },
+				{ time: 2, endTime: 2.5, text: " second" },
+			],
+		}]);
+
+		expect(resolveLyricPlaybackRenderPlan(lyrics, 1.2)).toEqual({
+			requiresAnimationFrame: true,
+			nextChangeAtSeconds: 1.5,
+		});
+		expect(resolveLyricPlaybackRenderPlan(lyrics, 1.7)).toEqual({
+			requiresAnimationFrame: false,
+			nextChangeAtSeconds: 2,
+		});
+	});
+
+	it("sleeps until the next line instead of waking for hidden future-line words", () => {
+		const lyrics = synchronizedLyrics("WORD", [
+			{
+				time: 0,
+				text: "Current line",
+				words: [{ time: 0, endTime: 0.5, text: "Current line" }],
+			},
+			{
+				time: 4,
+				text: "Future line",
+				words: [{ time: 2, endTime: 2.5, text: "Future line" }],
+			},
+		]);
+
+		expect(resolveLyricPlaybackRenderPlan(lyrics, 1)).toEqual({
+			requiresAnimationFrame: false,
+			nextChangeAtSeconds: 4,
+		});
 	});
 });
 

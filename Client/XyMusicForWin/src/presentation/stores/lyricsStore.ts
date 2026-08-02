@@ -1,15 +1,17 @@
-import { reactive, ref } from "vue";
+import { onScopeDispose, reactive, ref } from "vue";
 import { defineStore } from "pinia";
 import type { LyricsColorScheme } from "../../application/ports/UserInterfacePreferences";
 import { DEFAULT_PLAYBACK_LYRICS_COLORS } from "../../application/ports/UserInterfacePreferences";
 import type { Lyrics } from "../../domain/music";
 import { useApplicationServices } from "../services";
 import { errorMessage } from "../utils/errorMessage";
+import { LyricsPreferencePersistence } from "./LyricsPreferencePersistence";
 
 export const useLyricsStore = defineStore("lyrics", () => {
   const services = useApplicationServices();
   const catalog = services.catalog;
   const uiPreferences = services.uiPreferences;
+  const preferencePersistence = new LyricsPreferencePersistence(uiPreferences);
   const storedPreferences = uiPreferences.readLyrics();
   const lyrics = ref<Lyrics | null>(null);
   const loading = ref(false);
@@ -70,7 +72,7 @@ export const useLyricsStore = defineStore("lyrics", () => {
   function setFontScale(value: number) {
     const normalized = Number.isFinite(value) ? value : fontScale.value;
     fontScale.value = Math.max(0.85, Math.min(1.25, Number(normalized.toFixed(2))));
-    uiPreferences.writeLyricsFontScale(fontScale.value);
+    preferencePersistence.queueFontScale(fontScale.value);
   }
 
   function setTranslationVisible(visible: boolean) {
@@ -80,12 +82,16 @@ export const useLyricsStore = defineStore("lyrics", () => {
 
   function setTextColor(scheme: LyricsColorScheme, value: string) {
     colors[scheme].textColor = normalizeColor(value, DEFAULT_PLAYBACK_LYRICS_COLORS[scheme].textColor);
-    uiPreferences.writeLyricsTextColor(scheme, colors[scheme].textColor);
+    preferencePersistence.queueTextColor(scheme, colors[scheme].textColor);
   }
 
   function setHighlightColor(scheme: LyricsColorScheme, value: string) {
     colors[scheme].highlightColor = normalizeColor(value, DEFAULT_PLAYBACK_LYRICS_COLORS[scheme].highlightColor);
-    uiPreferences.writeLyricsHighlightColor(scheme, colors[scheme].highlightColor);
+    preferencePersistence.queueHighlightColor(scheme, colors[scheme].highlightColor);
+  }
+
+  function flushPreferences(): void {
+    preferencePersistence.flush();
   }
 
   function resetOffset() {
@@ -125,7 +131,16 @@ export const useLyricsStore = defineStore("lyrics", () => {
     while (lyricsCache.size > MAX_LYRICS_CACHE_ENTRIES) lyricsCache.delete(lyricsCache.keys().next().value!);
   }
 
-  return { lyrics, loading, error, offset, showTranslation, fontScale, colors, load, adjustOffset, adjustFont, setFontScale, setTranslationVisible, setTextColor, setHighlightColor, resetOffset, reset, clearServerCache };
+  window.addEventListener("pagehide", flushPreferences);
+  onScopeDispose(() => {
+    requestId += 1;
+    requestController?.abort();
+    requestController = null;
+    flushPreferences();
+    window.removeEventListener("pagehide", flushPreferences);
+  });
+
+  return { lyrics, loading, error, offset, showTranslation, fontScale, colors, load, adjustOffset, adjustFont, setFontScale, setTranslationVisible, setTextColor, setHighlightColor, flushPreferences, resetOffset, reset, clearServerCache };
 });
 
 const MAX_LYRICS_CACHE_ENTRIES = 30;

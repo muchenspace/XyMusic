@@ -1,11 +1,11 @@
-import type { Track } from "./music";
+import type { ReadonlyTrack } from "./music";
 
 export interface QueueSelection {
-  tracks: Track[];
+  tracks: ReadonlyTrack[];
   currentIndex: number;
 }
 
-export function selectTrack(track: Track, source: readonly Track[]): QueueSelection {
+export function selectTrack(track: ReadonlyTrack, source: readonly ReadonlyTrack[]): QueueSelection {
   const tracks = source.length ? [...source] : [track];
   let currentIndex = tracks.findIndex((item) => item.id === track.id);
   if (currentIndex < 0) {
@@ -26,18 +26,18 @@ export function previousTrackIndex(length: number, currentIndex: number): number
   return length > 0 ? (currentIndex - 1 + length) % length : -1;
 }
 
-export function removeTrackFromQueue(queue: readonly Track[], currentIndex: number, trackId: string): QueueSelection {
+export function removeTrackFromQueue(queue: readonly ReadonlyTrack[], currentIndex: number, trackId: string): QueueSelection {
   const removeIndex = queue.findIndex((item) => item.id === trackId);
   return removeTrackAtIndex(queue, currentIndex, removeIndex);
 }
 
-export function removeTrackAtIndex(queue: readonly Track[], currentIndex: number, removeIndex: number): QueueSelection {
+export function removeTrackAtIndex(queue: readonly ReadonlyTrack[], currentIndex: number, removeIndex: number): QueueSelection {
   if (removeIndex < 0 || removeIndex === currentIndex) return { tracks: [...queue], currentIndex };
   const tracks = queue.filter((_, index) => index !== removeIndex);
   return { tracks, currentIndex: removeIndex < currentIndex ? currentIndex - 1 : currentIndex };
 }
 
-export function keepCurrentTrack(queue: readonly Track[], currentIndex: number): QueueSelection {
+export function keepCurrentTrack(queue: readonly ReadonlyTrack[], currentIndex: number): QueueSelection {
   const current = currentIndex >= 0 ? queue[currentIndex] : undefined;
   return current ? { tracks: [current], currentIndex: 0 } : { tracks: [], currentIndex: -1 };
 }

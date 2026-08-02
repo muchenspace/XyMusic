@@ -93,6 +93,7 @@ export function useNavigationActions(shell: Ref<ScrollContainer | null>) {
 
   async function restoreScroll(entry: NavigationEntry): Promise<void> {
     await nextTick();
+    if (navigation.current.id !== entry.id) return;
     const element = shell.value?.scrollElement();
     if (element) element.scrollTop = entry.scrollTop;
   }

@@ -1,6 +1,6 @@
 import { ref } from "vue";
 import { defineStore } from "pinia";
-import type { ServerConfig, UserSession } from "../../application/ports/SessionRepository";
+import type { AvatarUpload, ServerConfig, UserSession } from "../../application/ports/SessionRepository";
 import { useApplicationServices } from "../services";
 import { errorMessage } from "../utils/errorMessage";
 
@@ -156,7 +156,7 @@ export const useSessionStore = defineStore("session", () => {
     uploadingAvatar.value = true;
     error.value = "";
     try {
-      const updated = await sessionRepository.uploadAvatar(file);
+      const updated = await sessionRepository.uploadAvatar(await toAvatarUpload(file));
       if (session.value?.user.id === userId) session.value = updated;
     }
     catch (cause) { error.value = errorMessage(cause); }
@@ -165,3 +165,16 @@ export const useSessionStore = defineStore("session", () => {
 
   return { session, serverConfig, restoring, switchingServer, savingProfile, uploadingAvatar, error, registrationMessage, restore, register, login, logout, logoutAll, switchServer, updateProfile, uploadAvatar, clearAuthFeedback };
 });
+
+async function toAvatarUpload(file: File): Promise<AvatarUpload> {
+  if (!AVATAR_MEDIA_TYPES.includes(file.type)) throw new Error("头像仅支持 JPG、PNG 或 WebP");
+  if (file.size <= 0 || file.size > MAX_AVATAR_BYTES) throw new Error("头像大小必须在 5MB 以内");
+  return {
+    name: file.name,
+    mediaType: file.type,
+    bytes: new Uint8Array(await file.arrayBuffer()),
+  };
+}
+
+const AVATAR_MEDIA_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const MAX_AVATAR_BYTES = 5 * 1024 * 1024;

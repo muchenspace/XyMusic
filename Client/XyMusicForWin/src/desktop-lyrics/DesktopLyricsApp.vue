@@ -21,28 +21,50 @@ import {
   createDesktopLyricsLockAction,
 } from "./protocol";
 import { buildDesktopLyricsFrame } from "./timeline";
-import { shouldReanchorLyricPlaybackClock } from "../domain/lyricsTimeline";
-import { resolveLyricWordProgress } from "../domain/lyricsTimeline";
-import type { LyricWord } from "../domain/music";
+import {
+  resolveLyricPlaybackRenderPlan,
+  resolveLyricWordProgress,
+  shouldReanchorLyricPlaybackClock,
+} from "../domain/lyricsTimeline";
+
+const MIN_WAKE_DELAY_MS = 4;
+const READY_RETRY_INITIAL_DELAY_MS = 250;
+const READY_RETRY_MAX_DELAY_MS = 4_000;
 
 const props = defineProps<{
   bridge?: DesktopLyricsBridge;
   initialState?: DesktopLyricsStatePayload | null;
 }>();
 
-const state = ref<DesktopLyricsStatePayload | null>(props.initialState ?? null);
-const clock = ref<DesktopLyricsClockPayload | null>(props.initialState ? clockFromState(props.initialState) : null);
-const nowMs = ref(Date.now());
+interface LocalDesktopLyricsClock extends DesktopLyricsClockPayload {
+  sourceAnchoredAtMs: number;
+  sourceRevision: number | null;
+}
+
+const initialState = isSupportedState(props.initialState) ? props.initialState : null;
+const state = ref<DesktopLyricsStatePayload | null>(initialState);
+const clock = ref<LocalDesktopLyricsClock | null>(initialState ? localClock(clockFromState(initialState)) : null);
+const nowMs = ref(monotonicNow());
 const optimisticLocked = ref(false);
 const optimisticFontScale = ref<number | null>(null);
 const bridge = props.bridge ?? createDesktopLyricsBridge();
 const unlisteners: DesktopLyricsUnlisten[] = [];
 let disposed = false;
-let animationFrame = 0;
-let stateRevision = -1;
+let animationFrame: number | null = null;
+let wakeTimer: number | null = null;
+let readyRetryTimer: number | null = null;
+let readyRetryDelay = READY_RETRY_INITIAL_DELAY_MS;
+let playbackScheduleGeneration = 0;
+let stateRevision = initialState ? finiteRevision(initialState.revision) ?? 0 : -1;
+let latestTimelineSample: LocalDesktopLyricsClock | null = clock.value;
+let activeTransportEpoch: string | null = initialState?.transportEpoch ?? null;
+const retiredTransportEpochs = new Set<string>();
+let stateHandshakeComplete = initialState !== null;
+let bridgeConnected = false;
 
 const locked = computed(() => Boolean(state.value?.locked || optimisticLocked.value));
 const isPlaying = computed(() => Boolean(clock.value?.isPlaying ?? state.value?.isPlaying));
+const renderActive = computed(() => state.value?.renderActive !== false);
 const fontScale = computed(() => clamp(optimisticFontScale.value ?? state.value?.fontScale ?? 1, 0.75, 1.5));
 const rootStyle = computed<Record<string, string | number>>(() => ({
   "--desktop-lyric-scale": fontScale.value,
@@ -61,74 +83,121 @@ const frame = computed(() => {
 });
 const currentLine = computed(() => frame.value?.current ?? null);
 const nextLine = computed(() => frame.value?.next ?? null);
+const currentWordProgresses = computed(() => {
+  const line = currentLine.value?.line;
+  const playbackSeconds = frame.value?.playbackSeconds ?? 0;
+  if (state.value?.lyrics?.timing !== "WORD" || !line?.words?.length) return [];
+  return line.words.map((word) => ({ word, progress: resolveLyricWordProgress(word, playbackSeconds) }));
+});
 const emptyMessage = computed(() => {
   if (!state.value?.track) return "等待播放";
   return state.value.lyrics?.lines.length ? "等待歌词" : "暂无歌词";
 });
 
-function desktopWordProgress(word: LyricWord, playbackSeconds: number): number {
-  return resolveLyricWordProgress(word, playbackSeconds);
-}
-
 function clearProtocolState(): void {
   state.value = null;
   clock.value = null;
   stateRevision = -1;
+  latestTimelineSample = null;
+  activeTransportEpoch = null;
   optimisticLocked.value = false;
   optimisticFontScale.value = null;
-  reanchorAnimation();
+  stateHandshakeComplete = false;
+  stopPlaybackUpdates();
+  nowMs.value = monotonicNow();
+  if (bridgeConnected) requestReady();
+}
+
+function acceptTransportEpoch(incomingEpoch: string): boolean {
+  if (incomingEpoch === activeTransportEpoch) return true;
+  if (retiredTransportEpochs.has(incomingEpoch)) return false;
+
+  if (activeTransportEpoch) retiredTransportEpochs.add(activeTransportEpoch);
+  activeTransportEpoch = incomingEpoch;
+  stateRevision = -1;
+  latestTimelineSample = null;
+  clock.value = null;
+  return true;
 }
 
 function applyState(payload: DesktopLyricsStatePayload): void {
+  if (disposed) return;
   if (payload.version !== DESKTOP_LYRICS_PROTOCOL_VERSION) {
     clearProtocolState();
     return;
   }
-  const incomingRevision = Number.isFinite(payload.revision) ? payload.revision! : 0;
-  // 主窗口 F5 刷新后 revision 会以时间戳重新计数，远大于歌词窗口保留的旧 revision。
-  // 此时差值会非常大（远超正常递增），认定为主窗口重启，接受新快照以同步最新曲目。
-  const restartGap = Math.abs(incomingRevision - stateRevision);
-  if (incomingRevision < stateRevision && restartGap < REVISION_RESTART_THRESHOLD) return;
+  const transportEpoch = transportEpochFrom(payload.transportEpoch);
+  if (!transportEpoch || !acceptTransportEpoch(transportEpoch)) return;
+  const incomingRevision = finiteRevision(payload.revision) ?? 0;
+  if (incomingRevision < stateRevision) return;
   stateRevision = incomingRevision;
   state.value = payload;
-  const stateClock = clockFromState(payload);
+  stateHandshakeComplete = true;
+  stopReadyRetries();
+  const stateClock = localClock(clockFromState(payload));
   if (
     !clock.value ||
     clock.value.trackId !== stateClock.trackId ||
-    (stateClock.anchoredAtMs >= clock.value.anchoredAtMs &&
-      shouldReanchorLyricPlaybackClock(clock.value, stateClock))
+    (claimTimelineSample(stateClock) &&
+      shouldReanchorLyricPlaybackClock(clock.value, stateClock, monotonicNow()))
   ) {
+    latestTimelineSample = stateClock;
     clock.value = stateClock;
   }
   optimisticLocked.value = false;
   optimisticFontScale.value = null;
-  reanchorAnimation();
+  schedulePlaybackUpdate(true);
 }
 
 function applyClock(payload: DesktopLyricsClockPayload): void {
+  if (disposed) return;
   if (payload.version !== DESKTOP_LYRICS_PROTOCOL_VERSION) {
     clearProtocolState();
     return;
   }
+  const transportEpoch = transportEpochFrom(payload.transportEpoch);
+  if (!transportEpoch || transportEpoch !== activeTransportEpoch) return;
   const expectedTrackId = state.value?.track?.id ?? state.value?.lyrics?.trackId ?? null;
   if (payload.trackId !== expectedTrackId) return;
+  const nextClock = localClock(payload);
+  if (!claimTimelineSample(nextClock)) return;
+  let reanchored = false;
   if (
     !clock.value ||
-    clock.value.trackId !== payload.trackId ||
-    (payload.anchoredAtMs >= clock.value.anchoredAtMs &&
-      shouldReanchorLyricPlaybackClock(clock.value, payload))
+    clock.value.trackId !== nextClock.trackId ||
+    (
+      shouldReanchorLyricPlaybackClock(clock.value, nextClock, monotonicNow()))
   ) {
-    clock.value = payload;
+    clock.value = nextClock;
+    reanchored = true;
   }
-  reanchorAnimation();
-}
-
-function reanchorAnimation(): void {
-  nowMs.value = Date.now();
+  if (reanchored) schedulePlaybackUpdate(true);
 }
 
 function sendAction(action: DesktopLyricsActionPayload): void {
   void Promise.resolve().then(() => bridge.emitAction(action)).catch(() => undefined);
+}
+
+function requestReady(): void {
+  if (disposed) return;
+  sendAction(createDesktopLyricsAction("ready"));
+  if (!stateHandshakeComplete) scheduleReadyRetry();
+}
+
+function scheduleReadyRetry(): void {
+  if (readyRetryTimer !== null || disposed || stateHandshakeComplete) return;
+  const delay = readyRetryDelay;
+  readyRetryDelay = Math.min(readyRetryDelay * 2, READY_RETRY_MAX_DELAY_MS);
+  readyRetryTimer = window.setTimeout(() => {
+    readyRetryTimer = null;
+    if (!stateHandshakeComplete) requestReady();
+  }, delay);
+}
+
+function stopReadyRetries(): void {
+  if (readyRetryTimer !== null) window.clearTimeout(readyRetryTimer);
+  readyRetryTimer = null;
+  readyRetryDelay = READY_RETRY_INITIAL_DELAY_MS;
 }
 
 function requestPrevious(): void {
@@ -162,53 +231,153 @@ function requestClose(): void {
   sendAction(createDesktopLyricsAction("close"));
 }
 
-function updateAnimationFrame(): void {
-  animationFrame = 0;
-  if (!isPlaying.value) return;
-  nowMs.value = Date.now();
-  animationFrame = window.requestAnimationFrame(updateAnimationFrame);
-}
+function schedulePlaybackUpdate(reset = false, frameTimestamp?: number): void {
+  if (reset) stopPlaybackUpdates();
+  if (animationFrame !== null || wakeTimer !== null) return;
+  nowMs.value = Number.isFinite(frameTimestamp) ? frameTimestamp! : monotonicNow();
+  if (!canRenderPlayback()) return;
 
-function synchronizeAnimationLoop(playing: boolean): void {
-  if (animationFrame) {
-    window.cancelAnimationFrame(animationFrame);
-    animationFrame = 0;
-  }
-  if (playing) animationFrame = window.requestAnimationFrame(updateAnimationFrame);
-  else reanchorAnimation();
-}
-
-watch(isPlaying, synchronizeAnimationLoop);
-
-onMounted(async () => {
-  const listenerResults = await Promise.allSettled([
-    bridge.onState(applyState),
-    bridge.onClock(applyClock),
-  ]);
-  const listeners = listenerResults.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
-  if (disposed) {
-    listeners.forEach((unlisten) => unlisten());
+  const playbackSeconds = frame.value?.playbackSeconds;
+  if (playbackSeconds === undefined) return;
+  const plan = resolveLyricPlaybackRenderPlan(state.value?.lyrics ?? null, playbackSeconds);
+  if (plan.requiresAnimationFrame) {
+    const generation = playbackScheduleGeneration;
+    animationFrame = window.requestAnimationFrame((timestamp) => {
+      if (generation !== playbackScheduleGeneration) return;
+      animationFrame = null;
+      if (!canRenderPlayback()) return;
+      schedulePlaybackUpdate(false, timestamp);
+    });
     return;
   }
-  unlisteners.push(...listeners);
-  synchronizeAnimationLoop(isPlaying.value);
-  sendAction(createDesktopLyricsAction("ready"));
+  if (plan.nextChangeAtSeconds === null) return;
+  const delay = Math.max(MIN_WAKE_DELAY_MS, Math.ceil((plan.nextChangeAtSeconds - playbackSeconds) * 1_000));
+  const generation = playbackScheduleGeneration;
+  wakeTimer = window.setTimeout(() => {
+    if (generation !== playbackScheduleGeneration) return;
+    wakeTimer = null;
+    if (!canRenderPlayback()) return;
+    nowMs.value = monotonicNow();
+    schedulePlaybackUpdate();
+  }, delay);
+}
+
+function stopPlaybackUpdates(): void {
+  playbackScheduleGeneration += 1;
+  if (animationFrame !== null) {
+    window.cancelAnimationFrame(animationFrame);
+    animationFrame = null;
+  }
+  if (wakeTimer !== null) window.clearTimeout(wakeTimer);
+  wakeTimer = null;
+}
+
+function canRenderPlayback(): boolean {
+  return !disposed
+    && isPlaying.value
+    && renderActive.value
+    && (typeof document === "undefined" || document.visibilityState !== "hidden");
+}
+
+function handleVisibilityChange(): void {
+  if (document.visibilityState === "hidden") {
+    stopPlaybackUpdates();
+    return;
+  }
+  schedulePlaybackUpdate(true);
+}
+
+watch(isPlaying, () => schedulePlaybackUpdate(true));
+
+onMounted(() => {
+  void connectBridgeListeners();
 });
 
 onBeforeUnmount(() => {
   disposed = true;
-  if (animationFrame) window.cancelAnimationFrame(animationFrame);
+  stopPlaybackUpdates();
+  stopReadyRetries();
+  document.removeEventListener("visibilitychange", handleVisibilityChange);
   unlisteners.splice(0).forEach((unlisten) => unlisten());
 });
+
+async function connectBridgeListeners(): Promise<void> {
+  const registrations = [
+    bridge.onState(applyState).then(retainUnlistener),
+    bridge.onClock(applyClock).then(retainUnlistener),
+  ];
+  await Promise.allSettled(registrations);
+  if (disposed) return;
+  bridgeConnected = true;
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+  schedulePlaybackUpdate(true);
+  requestReady();
+}
+
+function retainUnlistener(unlisten: DesktopLyricsUnlisten): void {
+  if (disposed) {
+    unlisten();
+    return;
+  }
+  unlisteners.push(unlisten);
+}
 
 function clamp(value: number, minimum: number, maximum: number): number {
   if (!Number.isFinite(value)) return minimum;
   return Math.max(minimum, Math.min(maximum, value));
 }
 
-// 主窗口重启后 revision 以 Date.now() 初始化，与歌词窗口保留的旧 revision 差值远超此阈值。
-// 正常递增的 revision 差值不会接近此值，因此超过阈值即认定为主窗口重启，必须接受新快照。
-const REVISION_RESTART_THRESHOLD = 1_000_000_000;
+function localClock(clock: DesktopLyricsClockPayload): LocalDesktopLyricsClock {
+  return {
+    ...clock,
+    anchoredAtMs: monotonicNow(),
+    sourceAnchoredAtMs: finiteTimestamp(clock.anchoredAtMs),
+    sourceRevision: finiteRevision(clock.revision),
+  };
+}
+
+function claimTimelineSample(next: LocalDesktopLyricsClock): boolean {
+  const previous = latestTimelineSample;
+  if (!previous) {
+    latestTimelineSample = next;
+    return true;
+  }
+  if (next.sourceRevision !== null && previous.sourceRevision !== null) {
+    if (next.sourceRevision > previous.sourceRevision) {
+      latestTimelineSample = next;
+      return true;
+    }
+    if (next.sourceRevision < previous.sourceRevision) return false;
+  }
+  if (next.sourceAnchoredAtMs <= previous.sourceAnchoredAtMs) return false;
+  latestTimelineSample = next;
+  return true;
+}
+
+function finiteTimestamp(value: number): number {
+  return Number.isFinite(value) ? value : 0;
+}
+
+function finiteRevision(value: number | undefined): number | null {
+  return Number.isFinite(value) ? Math.max(0, value!) : null;
+}
+
+function isSupportedState(
+  value: DesktopLyricsStatePayload | null | undefined,
+): value is DesktopLyricsStatePayload {
+  return value?.version === DESKTOP_LYRICS_PROTOCOL_VERSION
+    && transportEpochFrom(value.transportEpoch) !== null;
+}
+
+function transportEpochFrom(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function monotonicNow(): number {
+  const timestamp = typeof performance !== "undefined" ? performance.now() : Date.now();
+  return Number.isFinite(timestamp) ? timestamp : Date.now();
+}
+
 </script>
 
 <template>
@@ -263,11 +432,12 @@ const REVISION_RESTART_THRESHOLD = 1_000_000_000;
           <p class="desktop-lyric-primary" data-tauri-drag-region>
             <span v-if="state?.lyrics?.timing === 'WORD'" class="desktop-lyric-words">
               <span
-                v-for="(word, wordIndex) in currentLine.line.words"
+                v-for="({ word, progress }, wordIndex) in currentWordProgresses"
                 :key="`${word.time}-${wordIndex}`"
+                v-memo="[word, progress]"
                 class="desktop-lyric-word"
-                :class="{ 'is-sung': desktopWordProgress(word, frame?.playbackSeconds ?? 0) > 0, 'is-current': desktopWordProgress(word, frame?.playbackSeconds ?? 0) > 0 && desktopWordProgress(word, frame?.playbackSeconds ?? 0) < 1 }"
-                :style="{ '--desktop-lyric-word-progress': `${desktopWordProgress(word, frame?.playbackSeconds ?? 0) * 100}%` }"
+                :class="{ 'is-sung': progress > 0, 'is-current': progress > 0 && progress < 1 }"
+                :style="{ '--desktop-lyric-word-progress': `${progress * 100}%` }"
                 data-tauri-drag-region
               >{{ word.text }}</span>
             </span>

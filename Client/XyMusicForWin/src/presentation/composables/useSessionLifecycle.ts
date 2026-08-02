@@ -38,7 +38,7 @@ export function useSessionLifecycle(resetDialogs: () => void, clearActionError: 
   });
 
   watch(() => session.session?.user.id, async (userId) => {
-    services.playbackGrants?.clear();
+    services.playbackSession.clearGrants();
     if (!userId) { resetApplicationState(false); return; }
     navigation.reset();
     const ownerKey = `${session.serverConfig.protocol}://${session.serverConfig.host}:${session.serverConfig.port}|${userId}`;

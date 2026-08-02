@@ -1,0 +1,2 @@
+# Browser smoke scripts in scripts/.
+playwright==1.61.0
