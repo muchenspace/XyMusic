@@ -23,33 +23,44 @@ export class HtmlAudioPlayer implements AudioPlayer {
   private transitionController: AbortController | null = null;
   private transitionGains: TransitionGains | null = null;
   private updateTimer: number | null = null;
-  private lastAnimationUpdate = 0;
+  private lastProgressUpdateAt = 0;
   private lastEmittedSnapshot: AudioSnapshot | null = null;
   private preparedUrl = "";
   private configuredVolume = 1;
   private readonly updateListeners = new Set<(snapshot: AudioSnapshot) => void>();
   private readonly endedListeners = new Set<() => void>();
   private readonly errorListeners = new Set<(message: string) => void>();
-  private readonly emitUpdate = () => {
+  private readonly emitSnapshot = (): boolean => {
     const snapshot = this.snapshot();
     if (this.lastEmittedSnapshot
       && this.lastEmittedSnapshot.currentTime === snapshot.currentTime
       && this.lastEmittedSnapshot.duration === snapshot.duration
-      && this.lastEmittedSnapshot.paused === snapshot.paused) return;
+      && this.lastEmittedSnapshot.paused === snapshot.paused) return false;
     this.lastEmittedSnapshot = snapshot;
     for (const listener of this.updateListeners) listener(snapshot);
+    return true;
+  };
+  private readonly emitProgressUpdate = () => {
+    if (!this.updateListeners.size || this.audio.paused) return;
+    const now = performance.now();
+    if (now - this.lastProgressUpdateAt < UPDATE_INTERVAL_MS) return;
+    this.lastProgressUpdateAt = now;
+    this.emitSnapshot();
+  };
+  private readonly emitImmediateUpdate = () => {
+    if (this.emitSnapshot()) this.lastProgressUpdateAt = performance.now();
   };
   private readonly handlePlay = () => {
-    this.emitUpdate();
+    this.emitImmediateUpdate();
     this.startUpdateLoop();
   };
   private readonly handlePause = () => {
-    this.emitUpdate();
+    this.emitImmediateUpdate();
     this.stopUpdateLoop();
   };
   private readonly emitEnded = () => {
     this.stopUpdateLoop();
-    this.emitUpdate();
+    this.emitImmediateUpdate();
     for (const listener of this.endedListeners) listener();
   };
   private readonly emitError = () => {
@@ -190,7 +201,7 @@ export class HtmlAudioPlayer implements AudioPlayer {
     this.preloadAudio = previousAudio;
     this.bindActiveAudio(this.audio);
     onActivated?.();
-    this.emitUpdate();
+    this.emitImmediateUpdate();
     this.startUpdateLoop();
 
     if (gains) {
@@ -247,6 +258,7 @@ export class HtmlAudioPlayer implements AudioPlayer {
     this.releaseTransitionAudio();
     const duration = finiteValue(this.audio.duration);
     this.audio.currentTime = Math.max(0, Math.min(seconds, duration > 0 ? duration : seconds));
+    this.emitImmediateUpdate();
   }
 
   setVolume(volume: number): void {
@@ -309,8 +321,8 @@ export class HtmlAudioPlayer implements AudioPlayer {
   }
 
   private bindActiveAudio(audio: HTMLAudioElement): void {
-    audio.addEventListener("timeupdate", this.emitUpdate);
-    audio.addEventListener("durationchange", this.emitUpdate);
+    audio.addEventListener("timeupdate", this.emitProgressUpdate);
+    audio.addEventListener("durationchange", this.emitImmediateUpdate);
     audio.addEventListener("play", this.handlePlay);
     audio.addEventListener("pause", this.handlePause);
     audio.addEventListener("ended", this.emitEnded);
@@ -318,8 +330,8 @@ export class HtmlAudioPlayer implements AudioPlayer {
   }
 
   private unbindActiveAudio(audio: HTMLAudioElement): void {
-    audio.removeEventListener("timeupdate", this.emitUpdate);
-    audio.removeEventListener("durationchange", this.emitUpdate);
+    audio.removeEventListener("timeupdate", this.emitProgressUpdate);
+    audio.removeEventListener("durationchange", this.emitImmediateUpdate);
     audio.removeEventListener("play", this.handlePlay);
     audio.removeEventListener("pause", this.handlePause);
     audio.removeEventListener("ended", this.emitEnded);
@@ -328,16 +340,16 @@ export class HtmlAudioPlayer implements AudioPlayer {
 
   private startUpdateLoop(): void {
     if (this.updateTimer !== null || this.audio.paused || !this.updateListeners.size) return;
-    this.lastAnimationUpdate = performance.now();
+    this.lastProgressUpdateAt = performance.now();
     const tick = () => {
       this.updateTimer = null;
       if (this.audio.paused || !this.updateListeners.size) return;
-      const now = performance.now();
-      if (now - this.lastAnimationUpdate >= UPDATE_INTERVAL_MS) {
-        this.lastAnimationUpdate = now;
-        this.emitUpdate();
-      }
-      this.updateTimer = window.setTimeout(tick, UPDATE_INTERVAL_MS);
+      this.emitProgressUpdate();
+      // A listener can synchronously pause playback or unsubscribe itself.
+      // Do not leave a one-shot timer behind after that state transition.
+      if (this.audio.paused || !this.updateListeners.size) return;
+      const remaining = Math.max(1, UPDATE_INTERVAL_MS - (performance.now() - this.lastProgressUpdateAt));
+      this.updateTimer = window.setTimeout(tick, remaining);
     };
     this.updateTimer = window.setTimeout(tick, UPDATE_INTERVAL_MS);
   }

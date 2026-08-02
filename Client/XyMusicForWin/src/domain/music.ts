@@ -17,6 +17,10 @@ export interface Track {
   publishedAt: string;
 }
 
+export type ReadonlyTrack = Readonly<Omit<Track, "artistIds">> & {
+  readonly artistIds: readonly string[];
+};
+
 export interface Album {
   id: string;
   title: string;

@@ -1,4 +1,4 @@
-import type { RegistrationResult, ServerConfig, SessionRepository, UserSession } from "../../application/ports/SessionRepository";
+import type { AvatarUpload, RegistrationResult, ServerConfig, SessionRepository, UserSession } from "../../application/ports/SessionRepository";
 import {
   ApiClient,
   ApiError,
@@ -85,8 +85,8 @@ export class HttpSessionRepository implements SessionRepository {
     return result;
   }
 
-  async uploadAvatar(file: File): Promise<UserSession> {
-    return this.storeUser(await this.avatarUploader.upload(file));
+  async uploadAvatar(upload: AvatarUpload): Promise<UserSession> {
+    return this.storeUser(await this.avatarUploader.upload(upload));
   }
 
   async login(server: ServerConfig, username: string, password: string): Promise<UserSession> {

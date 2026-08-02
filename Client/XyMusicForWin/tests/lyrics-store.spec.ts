@@ -11,6 +11,7 @@ describe("lyrics store", () => {
 
   afterEach(() => {
     mountedApps.splice(0).forEach((app) => app.unmount());
+    vi.useRealTimers();
   });
 
   it("requests the latest lyrics when the same track is explicitly loaded again", async () => {
@@ -63,6 +64,37 @@ describe("lyrics store", () => {
 
     expect(store.lyrics).toBeNull();
     expect(store.error).not.toBe("");
+  });
+
+  it("flushes pending lyric display preferences before the page exits", () => {
+    vi.useFakeTimers();
+    const writeLyricsFontScale = vi.fn();
+    const services = createServices(vi.fn(async () => null));
+    services.uiPreferences.writeLyricsFontScale = writeLyricsFontScale;
+    let store!: ReturnType<typeof useLyricsStore>;
+    const app = createApp(defineComponent({
+      setup() {
+        store = useLyricsStore();
+        return () => h("div");
+      },
+    }));
+    app.use(createPinia());
+    app.provide(applicationServicesKey, services);
+    app.mount(document.createElement("div"));
+    mountedApps.push(app);
+
+    store.setFontScale(1.1);
+    store.setFontScale(1.2);
+
+    expect(store.fontScale).toBe(1.2);
+    expect(writeLyricsFontScale).not.toHaveBeenCalled();
+
+    window.dispatchEvent(new Event("pagehide"));
+
+    expect(writeLyricsFontScale).toHaveBeenCalledExactlyOnceWith(1.2);
+    vi.advanceTimersByTime(1_000);
+    expect(writeLyricsFontScale).toHaveBeenCalledTimes(1);
+    store.$dispose();
   });
 });
 

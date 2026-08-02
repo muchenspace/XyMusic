@@ -2,7 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { Activity, Disc3, Heart, Home, ListMusic, LogOut, Plus, Settings } from "@lucide/vue";
 import type { UserSession } from "../../application/ports/SessionRepository";
-import brandMark from "../../assets/brand-mark.png";
+import brandMark from "../../assets/brand-mark-512.webp";
 import type { Playlist } from "../../domain/music";
 import type { LibraryView } from "../../domain/navigation";
 

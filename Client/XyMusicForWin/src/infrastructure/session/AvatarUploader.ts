@@ -1,6 +1,7 @@
+import type { AvatarUpload as AvatarUploadInput } from "../../application/ports/SessionRepository";
 import { ApiClient, ApiError, type CurrentUserResponse } from "../http/ApiClient";
 
-interface AvatarUpload {
+interface AvatarUploadReservation {
   id: string;
   method: "PUT";
   uploadUrl: string;
@@ -10,21 +11,21 @@ interface AvatarUpload {
 export class AvatarUploader {
   constructor(private readonly api: ApiClient) {}
 
-  async upload(file: File): Promise<CurrentUserResponse> {
-    validateAvatar(file);
+  async upload(avatar: AvatarUploadInput): Promise<CurrentUserResponse> {
+    validateAvatar(avatar);
     const sessionSignal = this.api.sessionSignal;
     throwIfAborted(sessionSignal);
-    const checksumSha256 = await sha256(file);
+    const checksumSha256 = await sha256(avatar.bytes);
     throwIfAborted(sessionSignal);
-    const upload = await this.api.request<AvatarUpload>("api/v1/users/me/avatar/uploads", {
+    const upload = await this.api.request<AvatarUploadReservation>("api/v1/users/me/avatar/uploads", {
       method: "POST",
       headers: { "Idempotency-Key": crypto.randomUUID() },
-      body: JSON.stringify({ fileName: file.name, contentType: file.type, sizeBytes: file.size, checksumSha256 }),
+      body: JSON.stringify({ fileName: avatar.name, contentType: avatar.mediaType, sizeBytes: avatar.bytes.byteLength, checksumSha256 }),
     });
     const uploadHeaders = new Headers(upload.requiredHeaders);
     const uploaded = await uploadFile(
       upload.uploadUrl,
-      { method: upload.method, headers: uploadHeaders, body: file },
+      { method: upload.method, headers: uploadHeaders, body: avatar.bytes },
       sessionSignal,
     );
     if (!uploaded.ok) throw new Error(`头像上传失败 (${uploaded.status})`);
@@ -65,13 +66,13 @@ function uploadResponseError(): ApiError {
   return new ApiError("头像存储服务返回了异常响应", 0, "UPLOAD_RESPONSE_TOO_LARGE");
 }
 
-function validateAvatar(file: File): void {
-  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) throw new Error("头像仅支持 JPG、PNG 或 WebP");
-  if (file.size <= 0 || file.size > 5 * 1024 * 1024) throw new Error("头像大小必须在 5MB 以内");
+function validateAvatar(avatar: AvatarUploadInput): void {
+  if (!["image/jpeg", "image/png", "image/webp"].includes(avatar.mediaType)) throw new Error("头像仅支持 JPG、PNG 或 WebP");
+  if (avatar.bytes.byteLength <= 0 || avatar.bytes.byteLength > 5 * 1024 * 1024) throw new Error("头像大小必须在 5MB 以内");
 }
 
-async function sha256(file: File): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+async function sha256(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 

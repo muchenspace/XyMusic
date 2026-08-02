@@ -313,6 +313,7 @@ function playCurrentCollection(): void {
             @update:lyrics-font-scale="lyrics.setFontScale"
             @update:lyrics-text-color="lyrics.setTextColor(theme.theme, $event)"
             @update:lyrics-highlight-color="lyrics.setHighlightColor(theme.theme, $event)"
+            @flush-lyrics-preferences="lyrics.flushPreferences"
             @update:desktop-lyrics-visible="desktopLyrics.setVisible"
             @update:desktop-lyrics-locked="desktopLyrics.setLocked"
             @update:desktop-lyrics-fullscreen-behavior="desktopLyrics.setFullscreenBehavior"

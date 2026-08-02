@@ -3,20 +3,20 @@ import { createPinia } from "pinia";
 import { flushPromises } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApplicationServices } from "../src/application/services";
-import type { AudioPlayer, AudioSnapshot } from "../src/application/ports/AudioPlayer";
-import type { Track } from "../src/domain/music";
+import type { PlaybackQuality, Track } from "../src/domain/music";
 import { useSessionLifecycle } from "../src/presentation/composables/useSessionLifecycle";
 import { applicationServicesKey } from "../src/presentation/services";
 import { useHomeStore } from "../src/presentation/stores/homeStore";
 import { usePlayerStore } from "../src/presentation/stores/playerStore";
 import { useSessionStore } from "../src/presentation/stores/sessionStore";
+import { FakePlaybackSession } from "./support/FakePlaybackSession";
 
 describe("session workspace restoration", () => {
   beforeEach(() => localStorage.clear());
 
   it("restores the local playback queue even when the home request fails", async () => {
     const track = createTrack();
-    const restorePlayback = vi.fn(() => ({
+    const restorePlayback = vi.fn((_ownerKey: string) => ({
       ownerKey: "http://music.test:3000|user-1",
       queue: [track],
       currentIndex: 0,
@@ -73,7 +73,7 @@ describe("session workspace restoration", () => {
   });
 });
 
-function createServices(restorePlayback: () => unknown): ApplicationServices {
+function createServices(restorePlayback: (ownerKey: string) => unknown): ApplicationServices {
   return {
     catalog: {
       home: vi.fn(async () => { throw new Error("offline"); }),
@@ -82,24 +82,54 @@ function createServices(restorePlayback: () => unknown): ApplicationServices {
     },
     library: {},
     playlists: {},
-    playback: {
-      grant: vi.fn(),
-      record: vi.fn(async () => undefined),
-    },
-    playbackState: {
-      restore: restorePlayback,
-      save: vi.fn(),
-      checkpoint: vi.fn(),
-      clear: vi.fn(),
-    },
-    playbackGrants: {
-      clear: vi.fn(),
+    playbackSession: new FakePlaybackSession({
+      restore: (ownerKey) => {
+        const restored = restorePlayback(ownerKey) as {
+          queue?: Track[];
+          currentIndex?: number;
+          position?: number;
+          shuffled?: boolean;
+          repeatMode?: "off" | "all" | "one";
+          quality?: PlaybackQuality;
+          crossfadeSeconds?: number;
+        } | null;
+        if (!restored?.queue?.length || restored.currentIndex === undefined) return null;
+        const currentTrack = restored.queue[restored.currentIndex];
+        const currentTime = restored.position ?? 0;
+        return {
+          queue: restored.queue,
+          currentIndex: restored.currentIndex,
+          currentTime,
+          duration: currentTrack?.duration ?? 0,
+          progress: currentTrack?.duration ? currentTime / currentTrack.duration * 100 : 0,
+          shuffled: restored.shuffled ?? false,
+          repeatMode: restored.repeatMode ?? "off",
+          quality: restored.quality ?? "AUTO",
+          crossfadeSeconds: restored.crossfadeSeconds ?? 0,
+        };
+      },
+    }),
+    desktopLyricsController: {
+      state: () => ({
+        visible: false,
+        actuallyVisible: false,
+        locked: false,
+        hiddenForFullscreen: false,
+        fullscreenBehavior: "show" as const,
+        fontScale: 1,
+        textColor: "#f4f5f7",
+        highlightColor: "#cf9437",
+      }),
+      subscribe(listener: (state: { visible: boolean; actuallyVisible: boolean; locked: boolean; hiddenForFullscreen: boolean; fullscreenBehavior: "show" | "hide"; fontScale: number; textColor: string; highlightColor: string }) => void) {
+        listener(this.state());
+        return () => undefined;
+      },
+      dispose() {},
     },
     session: {
       restore: vi.fn(async () => null),
       serverConfig: vi.fn(() => ({ protocol: "http", host: "music.test", port: "3000" })),
     },
-    audio: new FakeAudioPlayer(),
     desktop: {
       async onMediaAction() { return () => undefined; },
       async updateMediaMetadata() { return undefined; },
@@ -145,19 +175,6 @@ function createServices(restorePlayback: () => unknown): ApplicationServices {
       clearLyricsOffsets() {},
     },
   } as unknown as ApplicationServices;
-}
-
-class FakeAudioPlayer implements AudioPlayer {
-  load(): Promise<void> { return Promise.resolve(); }
-  play(): Promise<void> { return Promise.resolve(); }
-  pause(): void {}
-  stop(): void {}
-  seek(): void {}
-  setVolume(): void {}
-  snapshot(): AudioSnapshot { return { currentTime: 0, duration: 0, paused: true }; }
-  onUpdate(): () => void { return () => undefined; }
-  onEnded(): () => void { return () => undefined; }
-  onError(): () => void { return () => undefined; }
 }
 
 function createTrack(): Track {

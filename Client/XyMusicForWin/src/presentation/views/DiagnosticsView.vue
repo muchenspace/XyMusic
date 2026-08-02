@@ -6,7 +6,7 @@ import { useApplicationServices } from "../services";
 import PageHeader from "../components/ui/PageHeader.vue";
 
 const props = defineProps<{ serverConfig: ServerConfig }>();
-const diagnostics = useApplicationServices().diagnostics;
+const { diagnostics, runtimeEnvironment, textClipboard } = useApplicationServices();
 const initialEntries = diagnostics?.entries() ?? [];
 let entriesSignature = signatureOf(initialEntries);
 const entries = ref(initialEntries.reverse());
@@ -14,7 +14,7 @@ const copyState = ref("");
 let refreshTimer = 0;
 let copyTimer = 0;
 
-const runtime = computed(() => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window ? "Tauri 桌面端" : "浏览器预览");
+const runtime = computed(() => runtimeEnvironment.kind() === "tauri" ? "Tauri 桌面端" : "浏览器预览");
 const serverAddress = computed(() => `${props.serverConfig.protocol}://${props.serverConfig.host}:${props.serverConfig.port}`);
 
 function refresh(): void {
@@ -34,12 +34,12 @@ async function copy(): Promise<void> {
   const lines = [
     `Runtime: ${runtime.value}`,
     `Server: ${serverAddress.value}`,
-    `User agent: ${navigator.userAgent}`,
+    `User agent: ${runtimeEnvironment.userAgent()}`,
     "",
     ...entries.value.slice().reverse().map((entry) => `${entry.timestamp} [${entry.level.toUpperCase()}] [${entry.category}] ${entry.message}`),
   ];
   try {
-    await navigator.clipboard.writeText(lines.join("\n"));
+    await textClipboard.writeText(lines.join("\n"));
     copyState.value = "已复制";
   } catch {
     copyState.value = "复制失败";

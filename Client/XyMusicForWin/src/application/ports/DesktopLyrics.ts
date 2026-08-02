@@ -1,7 +1,10 @@
 import type { Lyrics } from "../../domain/music";
 import type { DesktopLyricsFullscreenBehavior } from "./UserInterfacePreferences";
 
-export const DESKTOP_LYRICS_PROTOCOL_VERSION = 3 as const;
+// Version 4 adds a per-main-window transport epoch. A revision only orders
+// messages within that epoch, so a restarted main window cannot be confused
+// with delayed messages from the previous renderer process.
+export const DESKTOP_LYRICS_PROTOCOL_VERSION = 4 as const;
 
 export interface DesktopLyricsTrack {
   id: string;
@@ -11,10 +14,14 @@ export interface DesktopLyricsTrack {
 
 export interface DesktopLyricsSnapshot {
   version: typeof DESKTOP_LYRICS_PROTOCOL_VERSION;
+  /** Stable for one main-window renderer lifetime; changes after a restart. */
+  transportEpoch: string;
   revision?: number;
   track: DesktopLyricsTrack | null;
   lyrics: Lyrics | null;
   isPlaying: boolean;
+  /** False when the lyric window is hidden and should not keep a render loop alive. */
+  renderActive?: boolean;
   positionSeconds: number;
   anchoredAtMs: number;
   offsetSeconds: number;
@@ -27,6 +34,10 @@ export interface DesktopLyricsSnapshot {
 
 export interface DesktopLyricsClock {
   version: typeof DESKTOP_LYRICS_PROTOCOL_VERSION;
+  /** Matches the snapshot transport epoch that established this clock's state. */
+  transportEpoch: string;
+  /** Shared transport order with snapshots; used to reject delayed IPC samples. */
+  revision?: number;
   trackId: string | null;
   isPlaying: boolean;
   positionSeconds: number;
@@ -50,6 +61,8 @@ export type DesktopLyricsAction =
   | (DesktopLyricsActionBase & { action: "close" });
 
 export interface DesktopLyricsWindowState {
+  /** Monotonic native state order for rejecting delayed window events. */
+  revision: number;
   requestedVisible: boolean;
   visible: boolean;
   locked: boolean;

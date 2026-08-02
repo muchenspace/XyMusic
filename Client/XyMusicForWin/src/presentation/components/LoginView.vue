@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { ArrowRight, LockKeyhole, Server, UserPlus, UserRound } from "@lucide/vue";
-import brandMark from "../../assets/brand-mark.png";
+import brandMark from "../../assets/brand-mark-512.webp";
 import type { ServerProtocol } from "../../application/ports/SessionRepository";
 import { useSessionStore } from "../stores/sessionStore";
 

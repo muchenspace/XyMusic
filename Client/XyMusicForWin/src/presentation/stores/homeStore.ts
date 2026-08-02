@@ -1,4 +1,4 @@
-import { computed, ref } from "vue";
+import { computed, onScopeDispose, ref } from "vue";
 import { defineStore } from "pinia";
 import type { Album, HomeFeed, Playlist, SearchResults, SearchScope, Track } from "../../domain/music";
 import { useApplicationServices } from "../services";
@@ -254,18 +254,7 @@ export const useHomeStore = defineStore("home", () => {
   }
 
   function reset() {
-    loadRequest += 1;
-    loadController?.abort();
-    loadController = null;
-    randomAlbumsRequest += 1;
-    randomAlbumsController?.abort();
-    randomAlbumsController = null;
-    randomTracksRequest += 1;
-    randomTracksController?.abort();
-    randomTracksController = null;
-    searchController?.abort();
-    searchController = null;
-    window.clearTimeout(searchTimer);
+    cancelPendingRequests();
     feed.value = null;
     randomAlbums.value = [];
     randomTracks.value = [];
@@ -285,6 +274,24 @@ export const useHomeStore = defineStore("home", () => {
     searchCache.clear();
     favoriteOverrides.clear();
   }
+
+  function cancelPendingRequests(): void {
+    loadRequest += 1;
+    loadController?.abort();
+    loadController = null;
+    randomAlbumsRequest += 1;
+    randomAlbumsController?.abort();
+    randomAlbumsController = null;
+    randomTracksRequest += 1;
+    randomTracksController?.abort();
+    randomTracksController = null;
+    searchController?.abort();
+    searchController = null;
+    window.clearTimeout(searchTimer);
+    searchTimer = undefined;
+  }
+
+  onScopeDispose(cancelPendingRequests);
 
   function applyFavoriteOverrides(tracks: Track[]): void {
     for (const track of tracks) {

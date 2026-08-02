@@ -116,7 +116,8 @@ describe("desktop lyrics timeline", () => {
 
 function clock(overrides: Partial<DesktopLyricsClockPayload> = {}): DesktopLyricsClockPayload {
   return {
-    version: 3,
+    version: 4,
+    transportEpoch: "test-main-window",
     trackId: "track-1",
     isPlaying: false,
     positionSeconds: 0,

@@ -5,7 +5,249 @@ import DesktopLyricsApp from "../src/desktop-lyrics/DesktopLyricsApp.vue";
 import type { DesktopLyricsBridge } from "../src/desktop-lyrics/bridge";
 import type { DesktopLyricsClockPayload, DesktopLyricsStatePayload } from "../src/desktop-lyrics/protocol";
 
+const TEST_TRANSPORT_EPOCH = "test-main-window";
+
 describe("desktop lyrics window UI", () => {
+  it("does not keep a frame loop for ordinary line-timed lyrics", async () => {
+    const animationFrames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+
+    try {
+      let stateListener!: (state: DesktopLyricsStatePayload) => void;
+      const bridge: DesktopLyricsBridge = {
+        async onState(listener) { stateListener = listener; return () => undefined; },
+        async onClock() { return () => undefined; },
+        async emitAction() {},
+      };
+      const wrapper = mount(DesktopLyricsApp, { props: { bridge } });
+      await flushPromises();
+
+      stateListener({
+        ...desktopLyricsState({ isPlaying: true, positionSeconds: 0.5, anchoredAtMs: Date.now() }),
+        lyrics: {
+          trackId: "track-1",
+          source: "lrc",
+          synchronized: true,
+          timing: "LINE",
+          lines: [{ time: 0, text: "first line" }, { time: 2, text: "second line" }],
+        },
+      });
+      await nextTick();
+
+      expect(animationFrames).toHaveLength(0);
+      wrapper.unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("stops enhanced-word animation while the lyric window is not render-active", async () => {
+    const animationFrames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+
+    try {
+      let stateListener!: (state: DesktopLyricsStatePayload) => void;
+      const bridge: DesktopLyricsBridge = {
+        async onState(listener) { stateListener = listener; return () => undefined; },
+        async onClock() { return () => undefined; },
+        async emitAction() {},
+      };
+      const wrapper = mount(DesktopLyricsApp, { props: { bridge } });
+      await flushPromises();
+      const snapshot = {
+        ...desktopLyricsState({ isPlaying: true, positionSeconds: 1.2, anchoredAtMs: Date.now() }),
+        lyrics: {
+          trackId: "track-1",
+          source: "lrc",
+          synchronized: true,
+          timing: "WORD" as const,
+          lines: [{
+            time: 1,
+            text: "first line",
+            words: [{ time: 1, endTime: 2, text: "first" }],
+          }],
+        },
+        renderActive: false,
+      };
+
+      stateListener(snapshot);
+      await nextTick();
+      expect(animationFrames).toHaveLength(0);
+
+      stateListener({ ...snapshot, revision: 2, renderActive: true });
+      await nextTick();
+      expect(animationFrames).toHaveLength(1);
+      wrapper.unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("ignores a cancelled word-animation callback after a state reset", async () => {
+    const animationFrames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+
+    try {
+      let stateListener!: (state: DesktopLyricsStatePayload) => void;
+      const snapshot = {
+        ...desktopLyricsState({ isPlaying: true, positionSeconds: 1.2, anchoredAtMs: Date.now() }),
+        lyrics: {
+          trackId: "track-1",
+          source: "lrc",
+          synchronized: true,
+          timing: "WORD" as const,
+          lines: [{
+            time: 1,
+            text: "first line",
+            words: [{ time: 1, endTime: 2, text: "first" }],
+          }],
+        },
+      };
+      const bridge: DesktopLyricsBridge = {
+        async onState(listener) { stateListener = listener; return () => undefined; },
+        async onClock() { return () => undefined; },
+        async emitAction() {},
+      };
+      const wrapper = mount(DesktopLyricsApp, { props: { bridge, initialState: snapshot } });
+      await flushPromises();
+      expect(animationFrames).toHaveLength(1);
+
+      stateListener({ ...snapshot, revision: 2 });
+      await nextTick();
+      expect(animationFrames).toHaveLength(2);
+
+      // Browser cancellation can race a callback already selected for delivery.
+      animationFrames[0]?.(performance.now() + 16);
+      expect(animationFrames).toHaveLength(2);
+      wrapper.unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("ignores a cancelled line-wake timer after a state reset", async () => {
+    const timers: Array<() => void> = [];
+    vi.stubGlobal("setTimeout", (callback: () => void) => {
+      timers.push(callback);
+      return timers.length;
+    });
+    vi.stubGlobal("clearTimeout", () => undefined);
+
+    try {
+      let stateListener!: (state: DesktopLyricsStatePayload) => void;
+      const snapshot = desktopLyricsState({ isPlaying: true, positionSeconds: 0.5, anchoredAtMs: Date.now() });
+      const bridge: DesktopLyricsBridge = {
+        async onState(listener) { stateListener = listener; return () => undefined; },
+        async onClock() { return () => undefined; },
+        async emitAction() {},
+      };
+      const wrapper = mount(DesktopLyricsApp, { props: { bridge, initialState: snapshot } });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(timers).toHaveLength(1);
+
+      stateListener({ ...snapshot, revision: 2 });
+      await nextTick();
+      expect(timers).toHaveLength(2);
+
+      timers[0]?.();
+      expect(timers).toHaveLength(2);
+      wrapper.unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("releases an independently registered bridge listener after unmount", async () => {
+    const stateRegistration = deferred<() => void>();
+    const clockRegistration = deferred<() => void>();
+    const removeStateListener = vi.fn();
+    const removeClockListener = vi.fn();
+    const bridge: DesktopLyricsBridge = {
+      async onState() { return stateRegistration.promise; },
+      async onClock() { return clockRegistration.promise; },
+      async emitAction() {},
+    };
+    const wrapper = mount(DesktopLyricsApp, { props: { bridge } });
+    await Promise.resolve();
+    wrapper.unmount();
+
+    stateRegistration.resolve(removeStateListener);
+    await flushPromises();
+
+    expect(removeStateListener).toHaveBeenCalledOnce();
+
+    clockRegistration.resolve(removeClockListener);
+    await flushPromises();
+    expect(removeStateListener).toHaveBeenCalledOnce();
+    expect(removeClockListener).toHaveBeenCalledOnce();
+  });
+
+  it("retries the ready handshake until a state snapshot arrives", async () => {
+    vi.useFakeTimers();
+    let stateListener!: (state: DesktopLyricsStatePayload) => void;
+    const emitAction = vi.fn(async () => undefined);
+    const bridge: DesktopLyricsBridge = {
+      async onState(listener) { stateListener = listener; return () => undefined; },
+      async onClock() { return () => undefined; },
+      emitAction,
+    };
+    const wrapper = mount(DesktopLyricsApp, { props: { bridge } });
+    try {
+      await flushPromises();
+      expect(emitAction).toHaveBeenCalledTimes(1);
+      expect(emitAction).toHaveBeenLastCalledWith(expect.objectContaining({ action: "ready" }));
+
+      await vi.advanceTimersByTimeAsync(250);
+      await flushPromises();
+      expect(emitAction).toHaveBeenCalledTimes(2);
+
+      stateListener(desktopLyricsState());
+      await nextTick();
+      await vi.advanceTimersByTimeAsync(4_000);
+      await flushPromises();
+      expect(emitAction).toHaveBeenCalledTimes(2);
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels a pending ready retry when the lyric window unmounts", async () => {
+    vi.useFakeTimers();
+    const emitAction = vi.fn(async () => undefined);
+    const bridge: DesktopLyricsBridge = {
+      async onState() { return () => undefined; },
+      async onClock() { return () => undefined; },
+      emitAction,
+    };
+    const wrapper = mount(DesktopLyricsApp, { props: { bridge } });
+    try {
+      await flushPromises();
+      expect(emitAction).toHaveBeenCalledTimes(1);
+
+      wrapper.unmount();
+      await vi.advanceTimersByTimeAsync(4_000);
+      await flushPromises();
+      expect(emitAction).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("requests initial state, renders two lines, ignores stale clocks, and can lock", async () => {
     let stateListener!: (state: DesktopLyricsStatePayload) => void;
     let clockListener!: (clock: DesktopLyricsClockPayload) => void;
@@ -18,10 +260,11 @@ describe("desktop lyrics window UI", () => {
     const wrapper = mount(DesktopLyricsApp, { props: { bridge } });
     await flushPromises();
 
-    expect(emitAction).toHaveBeenCalledWith(expect.objectContaining({ version: 3, action: "ready" }));
+    expect(emitAction).toHaveBeenCalledWith(expect.objectContaining({ version: 4, action: "ready" }));
 
     stateListener({
-      version: 3,
+      version: 4,
+      transportEpoch: TEST_TRANSPORT_EPOCH,
       track: { id: "track-1", title: "Song", artist: "Artist" },
       lyrics: {
         trackId: "track-1",
@@ -47,16 +290,16 @@ describe("desktop lyrics window UI", () => {
     expect(wrapper.text()).toContain("second line");
     expect(wrapper.findAll(".desktop-lyric-fill")).toHaveLength(0);
 
-    clockListener({ version: 3, trackId: "other", isPlaying: false, positionSeconds: 4.5, anchoredAtMs: Date.now() });
+    clockListener({ version: 4, transportEpoch: TEST_TRANSPORT_EPOCH, trackId: "other", isPlaying: false, positionSeconds: 4.5, anchoredAtMs: Date.now() });
     await nextTick();
     expect(wrapper.text()).toContain("first line");
 
-    clockListener({ version: 3, trackId: "track-1", isPlaying: false, positionSeconds: 2.5, anchoredAtMs: Date.now() });
+    clockListener({ version: 4, transportEpoch: TEST_TRANSPORT_EPOCH, trackId: "track-1", isPlaying: false, positionSeconds: 2.5, anchoredAtMs: Date.now() });
     await nextTick();
     expect(wrapper.text()).toContain("second line");
     expect(wrapper.text()).toContain("third line");
 
-    clockListener({ version: 3, trackId: "track-1", isPlaying: false, positionSeconds: 8, anchoredAtMs: Date.now() });
+    clockListener({ version: 4, transportEpoch: TEST_TRANSPORT_EPOCH, trackId: "track-1", isPlaying: false, positionSeconds: 8, anchoredAtMs: Date.now() });
     await nextTick();
     expect(wrapper.text()).toContain("third line");
     expect(wrapper.findAll(".desktop-lyric-fill")).toHaveLength(0);
@@ -73,6 +316,52 @@ describe("desktop lyrics window UI", () => {
     wrapper.unmount();
   });
 
+  it("keeps the newest same-track clock when a delayed clock arrives", async () => {
+    let stateListener!: (state: DesktopLyricsStatePayload) => void;
+    let clockListener!: (clock: DesktopLyricsClockPayload) => void;
+    const bridge: DesktopLyricsBridge = {
+      async onState(listener) { stateListener = listener; return () => undefined; },
+      async onClock(listener) { clockListener = listener; return () => undefined; },
+      async emitAction() {},
+    };
+    const wrapper = mount(DesktopLyricsApp, { props: { bridge } });
+    await flushPromises();
+
+    stateListener(desktopLyricsState({ revision: 1, positionSeconds: 0.5, anchoredAtMs: 100 }));
+    clockListener({ version: 4, transportEpoch: TEST_TRANSPORT_EPOCH, revision: 3, trackId: "track-1", isPlaying: false, positionSeconds: 4.5, anchoredAtMs: 300 });
+    await nextTick();
+    expect(wrapper.get(".desktop-lyric-line-current").text()).toContain("third line");
+
+    clockListener({ version: 4, transportEpoch: TEST_TRANSPORT_EPOCH, revision: 2, trackId: "track-1", isPlaying: false, positionSeconds: 2.5, anchoredAtMs: 200 });
+    await nextTick();
+
+    expect(wrapper.get(".desktop-lyric-line-current").text()).toContain("third line");
+    wrapper.unmount();
+  });
+
+  it("does not let a delayed snapshot reanchor a newer same-track clock", async () => {
+    let stateListener!: (state: DesktopLyricsStatePayload) => void;
+    let clockListener!: (clock: DesktopLyricsClockPayload) => void;
+    const bridge: DesktopLyricsBridge = {
+      async onState(listener) { stateListener = listener; return () => undefined; },
+      async onClock(listener) { clockListener = listener; return () => undefined; },
+      async emitAction() {},
+    };
+    const wrapper = mount(DesktopLyricsApp, { props: { bridge } });
+    await flushPromises();
+
+    stateListener(desktopLyricsState({ revision: 1, positionSeconds: 0.5, anchoredAtMs: 100 }));
+    clockListener({ version: 4, transportEpoch: TEST_TRANSPORT_EPOCH, revision: 3, trackId: "track-1", isPlaying: false, positionSeconds: 4.5, anchoredAtMs: 300 });
+    await nextTick();
+    expect(wrapper.get(".desktop-lyric-line-current").text()).toContain("third line");
+
+    stateListener(desktopLyricsState({ revision: 2, positionSeconds: 2.5, anchoredAtMs: 200 }));
+    await nextTick();
+
+    expect(wrapper.get(".desktop-lyric-line-current").text()).toContain("third line");
+    wrapper.unmount();
+  });
+
   it("renders explicit desktop word timing without line progress", async () => {
     let stateListener!: (state: DesktopLyricsStatePayload) => void;
     let clockListener!: (clock: DesktopLyricsClockPayload) => void;
@@ -85,7 +374,8 @@ describe("desktop lyrics window UI", () => {
     await flushPromises();
 
     stateListener({
-      version: 3,
+      version: 4,
+      transportEpoch: TEST_TRANSPORT_EPOCH,
       track: { id: "track-1", title: "Song", artist: "Artist" },
       lyrics: {
         trackId: "track-1",
@@ -115,7 +405,7 @@ describe("desktop lyrics window UI", () => {
     expect(wrapper.findAll(".desktop-lyric-words")).toHaveLength(1);
     expect(wrapper.findAll(".desktop-lyric-word.is-sung")).toHaveLength(1);
     expect(wrapper.findAll(".desktop-lyric-word")[0]?.attributes("style")).toContain("--desktop-lyric-word-progress: 40%;");
-    clockListener({ version: 3, trackId: "track-1", isPlaying: false, positionSeconds: 2, anchoredAtMs: Date.now() });
+    clockListener({ version: 4, transportEpoch: TEST_TRANSPORT_EPOCH, trackId: "track-1", isPlaying: false, positionSeconds: 2, anchoredAtMs: Date.now() });
     await nextTick();
     expect(wrapper.findAll(".desktop-lyric-word.is-sung")).toHaveLength(2);
     wrapper.unmount();
@@ -163,12 +453,13 @@ describe("desktop lyrics window UI", () => {
     await flushPromises();
 
     stateListener(desktopLyricsState({ revision: 10, positionSeconds: 0.5, anchoredAtMs: 100 }));
-    clockListener({ version: 3, trackId: "track-1", isPlaying: false, positionSeconds: 2.5, anchoredAtMs: 200 });
+    clockListener({ version: 4, transportEpoch: TEST_TRANSPORT_EPOCH, trackId: "track-1", isPlaying: false, positionSeconds: 2.5, anchoredAtMs: 200 });
     await nextTick();
     expect(wrapper.get(".desktop-lyric-line-current").text()).toContain("second line");
 
     clockListener({
       version: 2 as DesktopLyricsClockPayload["version"],
+      transportEpoch: TEST_TRANSPORT_EPOCH,
       trackId: "track-1",
       isPlaying: false,
       positionSeconds: 4.5,
@@ -186,11 +477,12 @@ describe("desktop lyrics window UI", () => {
     wrapper.unmount();
   });
 
-  it("accepts snapshot after main window restart even when revision is smaller", async () => {
+  it("accepts a lower revision from a new epoch and rejects old epoch replays", async () => {
     let stateListener!: (state: DesktopLyricsStatePayload) => void;
+    let clockListener!: (clock: DesktopLyricsClockPayload) => void;
     const bridge: DesktopLyricsBridge = {
       async onState(listener) { stateListener = listener; return () => undefined; },
-      async onClock() { return () => undefined; },
+      async onClock(listener) { clockListener = listener; return () => undefined; },
       async emitAction() {},
     };
     const wrapper = mount(DesktopLyricsApp, { props: { bridge } });
@@ -198,7 +490,8 @@ describe("desktop lyrics window UI", () => {
 
     // 模拟主窗口刷新前：歌词窗口已收到 revision 较大的旧快照（track-1）
     stateListener({
-      version: 3,
+      version: 4,
+      transportEpoch: "main-before-restart",
       revision: 1_000_000_005,
       track: { id: "track-1", title: "Old Song", artist: "Old Artist" },
       lyrics: null,
@@ -213,11 +506,12 @@ describe("desktop lyrics window UI", () => {
     await nextTick();
     expect(wrapper.text()).toContain("Old Song");
 
-    // 主窗口刷新后 revision 重置为小值，差值远超阈值，应接受新快照（track-2）
+    // 主窗口刷新后换用新 epoch，低 revision 也应作为新的传输流被接受。
     stateListener({
-      version: 3,
+      version: 4,
+      transportEpoch: "main-after-restart",
       revision: 1,
-      track: { id: "track-2", title: "New Song", artist: "New Artist" },
+      track: { id: "track-1", title: "New Song", artist: "New Artist" },
       lyrics: null,
       isPlaying: true,
       positionSeconds: 0,
@@ -230,6 +524,36 @@ describe("desktop lyrics window UI", () => {
     await nextTick();
     expect(wrapper.text()).toContain("New Song");
     expect(wrapper.text()).not.toContain("Old Song");
+    expect(wrapper.find(".lucide-pause").exists()).toBe(true);
+
+    clockListener({
+      version: 4,
+      transportEpoch: "main-before-restart",
+      revision: 1_000_000_006,
+      trackId: "track-1",
+      isPlaying: false,
+      positionSeconds: 30,
+      anchoredAtMs: Date.now(),
+    });
+    stateListener({
+      version: 4,
+      transportEpoch: "main-before-restart",
+      revision: 1_000_000_007,
+      track: { id: "track-1", title: "Old Song Replay", artist: "Old Artist" },
+      lyrics: null,
+      isPlaying: false,
+      positionSeconds: 30,
+      anchoredAtMs: Date.now(),
+      offsetSeconds: 0,
+      showTranslation: false,
+      locked: false,
+      fontScale: 1,
+    });
+    await nextTick();
+
+    expect(wrapper.text()).toContain("New Song");
+    expect(wrapper.text()).not.toContain("Old Song Replay");
+    expect(wrapper.find(".lucide-pause").exists()).toBe(true);
 
     wrapper.unmount();
   });
@@ -237,7 +561,8 @@ describe("desktop lyrics window UI", () => {
 
 function desktopLyricsState(overrides: Partial<DesktopLyricsStatePayload> = {}): DesktopLyricsStatePayload {
   return {
-    version: 3,
+    version: 4,
+    transportEpoch: TEST_TRANSPORT_EPOCH,
     revision: 1,
     track: { id: "track-1", title: "Song", artist: "Artist" },
     lyrics: {
@@ -260,4 +585,12 @@ function desktopLyricsState(overrides: Partial<DesktopLyricsStatePayload> = {}):
     fontScale: 1,
     ...overrides,
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
 }

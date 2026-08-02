@@ -1,4 +1,4 @@
-import { computed, ref } from "vue";
+import { computed, onScopeDispose, ref } from "vue";
 import { defineStore } from "pinia";
 import type { Album, Artist, Playlist, PlaylistDetail, PlaylistVisibility, Track } from "../../domain/music";
 import type { LibraryView } from "../../domain/navigation";
@@ -445,6 +445,8 @@ export const useLibraryStore = defineStore("library-view", () => {
     loadingMore.value = false;
     detailLoadingMore.value = false;
   }
+
+  onScopeDispose(cancelPending);
 
   async function retry(): Promise<void> {
     const action = retryAction;

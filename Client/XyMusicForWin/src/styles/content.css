@@ -132,10 +132,7 @@
 .track-row-group { position: relative; }
 .track-virtual-spacer { width: 100%; pointer-events: none; }
 
-.album-card, .artist-card, .playlist-library-card, .mood-card, .random-track-card { content-visibility: auto; }
-.album-card { contain-intrinsic-size: auto 220px; }
-.artist-card { contain-intrinsic-size: auto 210px; }
-.playlist-library-card { contain-intrinsic-size: auto 250px; }
+.mood-card, .random-track-card { content-visibility: auto; }
 .mood-card { contain-intrinsic-size: auto 152px; }
 .random-track-card { contain-intrinsic-size: auto 72px; }
 .track-row { display: grid; height: 64px; min-height: 64px; grid-template-columns: 36px minmax(210px, 1.55fr) minmax(120px, 0.9fr) 100px 56px 112px; align-items: center; padding: 0 11px; border-bottom: 1px solid var(--line); color: var(--text-muted); font-size: 13px; transition: background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), opacity var(--motion-fast) var(--ease-standard); }
@@ -353,8 +350,8 @@
   .diagnostics-heading { align-items: flex-start; flex-direction: column; }
   .diagnostic-entry { grid-template-columns: 1fr auto; }
   .diagnostic-entry span, .diagnostic-entry p { grid-column: 1 / -1; }
-  .login-view { grid-template-columns: 1fr; grid-template-rows: 76px minmax(0, 1fr); }
-  .login-brand-panel { justify-items: start; padding: 10px 20px; border-right: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+  .login-view { grid-template-columns: 1fr; grid-template-rows: calc(var(--titlebar-height) + 76px) minmax(0, 1fr); }
+  .login-brand-panel { justify-items: start; padding: calc(var(--titlebar-height) + 10px) 20px 10px; border-right: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
   .login-brand { display: flex; gap: 12px; text-align: left; }
   .login-brand-mark { width: 48px; height: 48px; }
   .login-brand > div strong { font-size: 22px; }

@@ -18,6 +18,12 @@ export interface RegistrationResult {
   status: "ACTIVE";
 }
 
+export interface AvatarUpload {
+  name: string;
+  mediaType: string;
+  bytes: Uint8Array;
+}
+
 export type ServerProtocol = "http" | "https";
 
 export interface ServerConfig {
@@ -39,7 +45,7 @@ export interface SessionRepository {
   register(server: ServerConfig, username: string, password: string): Promise<RegistrationResult>;
   login(server: ServerConfig, username: string, password: string): Promise<UserSession>;
   updateProfile(input: { displayName: string; bio: string | null; expectedVersion: number }): Promise<UserSession>;
-  uploadAvatar(file: File): Promise<UserSession>;
+  uploadAvatar(upload: AvatarUpload): Promise<UserSession>;
   logout(): Promise<SessionActionResult>;
   logoutAll(): Promise<SessionActionResult>;
   switchServer(server: ServerConfig): Promise<ServerSwitchResult>;

@@ -37,6 +37,7 @@ const emit = defineEmits<{
   "update:lyricsFontScale": [value: number];
   "update:lyricsTextColor": [value: string];
   "update:lyricsHighlightColor": [value: string];
+  flushLyricsPreferences: [];
   "update:desktopLyricsVisible": [value: boolean];
   "update:desktopLyricsLocked": [value: boolean];
   "update:desktopLyricsFullscreenBehavior": [value: DesktopLyricsFullscreenBehavior];
@@ -222,6 +223,7 @@ function normalizedPort(value: string): string { return validPort(value) ? Strin
                   :aria-valuetext="`${Math.round(lyricsFontScale * 100)}%`"
                   :style="{ '--range-progress': `${(lyricsFontScale - 0.85) / 0.4 * 100}%` }"
                   @input="emit('update:lyricsFontScale', Number(($event.target as HTMLInputElement).value))"
+                  @change="emit('flushLyricsPreferences')"
                 />
               </label>
               <div class="lyrics-color-settings">
@@ -233,6 +235,7 @@ function normalizedPort(value: string): string { return validPort(value) ? Strin
                     type="color"
                     :aria-label="`播放页歌词普通文字颜色，当前${theme === 'dark' ? '深色' : '浅色'}主题`"
                     @input="emit('update:lyricsTextColor', ($event.target as HTMLInputElement).value)"
+                    @change="emit('flushLyricsPreferences')"
                   />
                 </label>
                 <label class="field-group">
@@ -243,6 +246,7 @@ function normalizedPort(value: string): string { return validPort(value) ? Strin
                     type="color"
                     :aria-label="`播放页歌词高亮文字颜色，当前${theme === 'dark' ? '深色' : '浅色'}主题`"
                     @input="emit('update:lyricsHighlightColor', ($event.target as HTMLInputElement).value)"
+                    @change="emit('flushLyricsPreferences')"
                   />
                 </label>
               </div>

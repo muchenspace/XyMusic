@@ -2,9 +2,10 @@ import { mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia } from "pinia";
 import { nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { LYRICS_PREFERENCE_PERSIST_DEBOUNCE_MS } from "../src/presentation/stores/LyricsPreferencePersistence";
 import type { ApplicationServices } from "../src/application/services";
-import type { AudioPlayer, AudioSnapshot } from "../src/application/ports/AudioPlayer";
 import type { Lyrics, Track } from "../src/domain/music";
+import { FakePlaybackSession } from "./support/FakePlaybackSession";
 import LyricsView from "../src/presentation/components/LyricsView.vue";
 import { applicationServicesKey } from "../src/presentation/services";
 import { useLyricsStore } from "../src/presentation/stores/lyricsStore";
@@ -24,11 +25,14 @@ describe("playback lyrics wheel controls", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
     if (originalScrollIntoView) Object.defineProperty(HTMLElement.prototype, "scrollIntoView", originalScrollIntoView);
     else Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
   });
 
-  it("prevents Ctrl+wheel defaults and persists font-size changes", async () => {
+  it("prevents Ctrl+wheel defaults while coalescing font-size persistence", async () => {
+    vi.useFakeTimers();
     const mounted = await mountLyricsView({ timing: "LINE" });
     try {
       const scroll = mounted.wrapper.get(".lyrics-scroll").element;
@@ -38,7 +42,7 @@ describe("playback lyrics wheel controls", () => {
 
       expect(increase.defaultPrevented).toBe(true);
       expect(mounted.lyrics.fontScale).toBe(1.1);
-      expect(mounted.writeLyricsFontScale).toHaveBeenLastCalledWith(1.1);
+      expect(mounted.writeLyricsFontScale).not.toHaveBeenCalled();
 
       const decrease = new WheelEvent("wheel", { cancelable: true, ctrlKey: true, deltaY: 100 });
       scroll.dispatchEvent(decrease);
@@ -46,7 +50,10 @@ describe("playback lyrics wheel controls", () => {
 
       expect(decrease.defaultPrevented).toBe(true);
       expect(mounted.lyrics.fontScale).toBe(1);
-      expect(mounted.writeLyricsFontScale).toHaveBeenLastCalledWith(1);
+      expect(mounted.writeLyricsFontScale).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(LYRICS_PREFERENCE_PERSIST_DEBOUNCE_MS);
+      expect(mounted.writeLyricsFontScale).toHaveBeenCalledExactlyOnceWith(1);
     } finally {
       mounted.wrapper.unmount();
     }
@@ -76,13 +83,201 @@ describe("playback lyrics wheel controls", () => {
       expect(wheel.defaultPrevented).toBe(false);
       expect(mounted.writeLyricsFontScale).not.toHaveBeenCalled();
 
-      mounted.player.currentTime = 1.5;
+      mounted.playbackSession.update({ currentTime: 1.5 });
       await nextTick();
       await nextTick();
 
       expect(scrollIntoView).not.toHaveBeenCalled();
     } finally {
       mounted.wrapper.unmount();
+    }
+  });
+
+  it("uses instant positioning for rapid lyric transitions", async () => {
+    vi.useFakeTimers();
+    const mounted = await mountLyricsView({
+      timing: "LINE",
+      lines: [
+        { time: 0, text: "first line" },
+        { time: 0.1, text: "second line" },
+        { time: 0.2, text: "third line" },
+      ],
+    });
+    try {
+      await nextTick();
+      await nextTick();
+      scrollIntoView.mockClear();
+
+      mounted.playbackSession.update({ currentTime: 0.1 });
+      await nextTick();
+      await nextTick();
+      await nextTick();
+
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(160);
+      await nextTick();
+
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "auto", block: "center" });
+    } finally {
+      mounted.wrapper.unmount();
+    }
+  });
+
+  it("keeps skipped dense lyric transitions instant after auto-follow coalescing", async () => {
+    vi.useFakeTimers();
+    const mounted = await mountLyricsView({
+      timing: "LINE",
+      lines: [
+        { time: 0, text: "first line" },
+        { time: 0.1, text: "second line" },
+        { time: 0.2, text: "third line" },
+        { time: 0.3, text: "fourth line" },
+      ],
+    });
+    try {
+      await nextTick();
+      await nextTick();
+      scrollIntoView.mockClear();
+
+      // A delayed timer can leave the last rendered line at 0 while playback
+      // has already advanced through several tightly-spaced lyric lines.
+      mounted.playbackSession.update({ currentTime: 0.3 });
+      await nextTick();
+      await nextTick();
+      await nextTick();
+
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(160);
+      await nextTick();
+
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "auto", block: "center" });
+    } finally {
+      mounted.wrapper.unmount();
+    }
+  });
+
+  it("restores auto-follow when lyrics reload at the same active line", async () => {
+    const mounted = await mountLyricsView({ timing: "LINE" });
+    try {
+      const reloadedLyrics = mounted.lyrics.lyrics;
+      expect(reloadedLyrics).not.toBeNull();
+      scrollIntoView.mockClear();
+
+      mounted.lyrics.lyrics = null;
+      await nextTick();
+      mounted.lyrics.lyrics = reloadedLyrics;
+      await nextTick();
+      await nextTick();
+
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
+    } finally {
+      mounted.wrapper.unmount();
+    }
+  });
+
+  it("restores auto-follow when reloaded lyrics begin after the current position", async () => {
+    const mounted = await mountLyricsView({ timing: "LINE" });
+    try {
+      mounted.lyrics.lyrics = null;
+      await nextTick();
+      mounted.lyrics.lyrics = {
+        trackId: "track-1",
+        source: "lrc",
+        synchronized: true,
+        timing: "LINE",
+        lines: [
+          { time: 5, text: "first delayed line" },
+          { time: 6, text: "second delayed line" },
+        ],
+      };
+      await nextTick();
+      await nextTick();
+      scrollIntoView.mockClear();
+
+      mounted.playbackSession.update({ currentTime: 5 });
+      await nextTick();
+      await nextTick();
+
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
+    } finally {
+      mounted.wrapper.unmount();
+    }
+  });
+
+  it("attaches global manual-scroll listeners only during an active lyric gesture", async () => {
+    const addEventListener = vi.spyOn(window, "addEventListener");
+    const removeEventListener = vi.spyOn(window, "removeEventListener");
+    const mounted = await mountLyricsView({ timing: "LINE" });
+    try {
+      expect(listenerCalls(addEventListener, "pointermove")).toHaveLength(0);
+      expect(listenerCalls(addEventListener, "pointerup")).toHaveLength(0);
+      expect(listenerCalls(addEventListener, "pointercancel")).toHaveLength(0);
+
+      const scroll = mounted.wrapper.get(".lyrics-scroll").element;
+      scroll.dispatchEvent(pointerEvent("pointerdown", { pointerId: 7, clientY: 40 }));
+
+      expect(listenerCalls(addEventListener, "pointermove")).toHaveLength(1);
+      expect(listenerCalls(addEventListener, "pointerup")).toHaveLength(1);
+      expect(listenerCalls(addEventListener, "pointercancel")).toHaveLength(1);
+
+      window.dispatchEvent(pointerEvent("pointerup", { pointerId: 7, clientY: 40 }));
+
+      expect(listenerCalls(removeEventListener, "pointermove")).toHaveLength(1);
+      expect(listenerCalls(removeEventListener, "pointerup")).toHaveLength(1);
+      expect(listenerCalls(removeEventListener, "pointercancel")).toHaveLength(1);
+    } finally {
+      mounted.wrapper.unmount();
+    }
+  });
+
+  it("coalesces manual lyric scrolling and cancels pending frames on gesture end and unmount", async () => {
+    const mounted = await mountLyricsView({ timing: "LINE" });
+    const animationFrames: FrameRequestCallback[] = [];
+    const cancelAnimationFrame = vi.fn();
+    let nextFrameHandle = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      animationFrames.push(callback);
+      nextFrameHandle += 1;
+      return nextFrameHandle;
+    });
+    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+
+    try {
+      const scroll = mounted.wrapper.get(".lyrics-scroll").element;
+      scroll.scrollTop = 100;
+      scroll.dispatchEvent(pointerEvent("pointerdown", { pointerId: 8, clientY: 10 }));
+
+      const firstMove = pointerEvent("pointermove", { pointerId: 8, clientY: 20 });
+      window.dispatchEvent(firstMove);
+      const latestMove = pointerEvent("pointermove", { pointerId: 8, clientY: 50 });
+      window.dispatchEvent(latestMove);
+
+      expect(firstMove.defaultPrevented).toBe(true);
+      expect(latestMove.defaultPrevented).toBe(true);
+      expect(animationFrames).toHaveLength(1);
+      expect(scroll.scrollTop).toBe(100);
+
+      animationFrames[0]?.(16);
+      expect(scroll.scrollTop).toBe(60);
+
+      window.dispatchEvent(pointerEvent("pointermove", { pointerId: 8, clientY: 70 }));
+      expect(animationFrames).toHaveLength(2);
+
+      window.dispatchEvent(pointerEvent("pointerup", { pointerId: 8, clientY: 70 }));
+      expect(cancelAnimationFrame).toHaveBeenCalledWith(2);
+      animationFrames[1]?.(32);
+      expect(scroll.scrollTop).toBe(60);
+
+      scroll.dispatchEvent(pointerEvent("pointerdown", { pointerId: 9, clientY: 10 }));
+      window.dispatchEvent(pointerEvent("pointermove", { pointerId: 9, clientY: 30 }));
+      expect(animationFrames).toHaveLength(3);
+
+      mounted.wrapper.unmount();
+      expect(cancelAnimationFrame).toHaveBeenCalledWith(3);
+      animationFrames[2]?.(48);
+      expect(scroll.scrollTop).toBe(60);
+    } finally {
+      if (mounted.wrapper.exists()) mounted.wrapper.unmount();
     }
   });
 
@@ -100,7 +295,7 @@ describe("playback lyrics wheel controls", () => {
       expect(mounted.wrapper.findAll(".lyric-word")).toHaveLength(2);
       expect(mounted.wrapper.findAll(".lyric-word.is-sung")).toHaveLength(0);
 
-      mounted.player.currentTime = 1.2;
+      mounted.playbackSession.update({ currentTime: 1.2 });
       await nextTick();
       expect(mounted.wrapper.findAll(".lyric-word.is-sung")).toHaveLength(2);
       expect(mounted.wrapper.findAll(".lyric-word")[1]?.attributes("style")).toContain("--lyric-word-progress: 20%;");
@@ -133,7 +328,7 @@ describe("playback lyrics wheel controls", () => {
       expect(lines[1]?.findAll(".lyric-word.is-sung")).toHaveLength(0);
       expect(lines[1]?.findAll(".lyric-word").every((word) => word.attributes("style").includes("--lyric-word-progress: 0%;"))).toBe(true);
 
-      mounted.player.currentTime = 3.2;
+      mounted.playbackSession.update({ currentTime: 3.2 });
       await nextTick();
       await nextTick();
 
@@ -145,17 +340,31 @@ describe("playback lyrics wheel controls", () => {
       mounted.wrapper.unmount();
     }
   });
+
 });
 
-async function mountLyricsView(options: { timing: Lyrics["timing"]; lines?: Lyrics["lines"]; currentTime?: number }): Promise<{
+async function mountLyricsView(options: {
+  timing: Lyrics["timing"];
+  lines?: Lyrics["lines"];
+  currentTime?: number;
+}): Promise<{
   wrapper: VueWrapper;
   player: ReturnType<typeof usePlayerStore>;
+  playbackSession: FakePlaybackSession;
   lyrics: ReturnType<typeof useLyricsStore>;
   writeLyricsFontScale: ReturnType<typeof vi.fn>;
 }> {
   const pinia = createPinia();
   const writeLyricsFontScale = vi.fn();
-  const services = createServices(writeLyricsFontScale);
+  const playbackSession = new FakePlaybackSession({
+    state: {
+      queue: [track()],
+      currentIndex: 0,
+      currentTime: options.currentTime ?? 0,
+      duration: 180,
+    },
+  });
+  const services = createServices(writeLyricsFontScale, playbackSession);
   const wrapper = mount(LyricsView, {
     global: {
       plugins: [pinia],
@@ -168,9 +377,6 @@ async function mountLyricsView(options: { timing: Lyrics["timing"]; lines?: Lyri
   });
   const player = usePlayerStore(pinia);
   const lyrics = useLyricsStore(pinia);
-  player.queue = [track()];
-  player.currentIndex = 0;
-  player.currentTime = options.currentTime ?? 0;
   player.lyricsOpen = true;
   lyrics.lyrics = {
     trackId: "track-1",
@@ -184,15 +390,19 @@ async function mountLyricsView(options: { timing: Lyrics["timing"]; lines?: Lyri
   };
   await nextTick();
   await nextTick();
-  return { wrapper, player, lyrics, writeLyricsFontScale };
+  return { wrapper, player, playbackSession, lyrics, writeLyricsFontScale };
 }
 
-function createServices(writeLyricsFontScale: (value: number) => void): ApplicationServices {
+function createServices(
+  writeLyricsFontScale: (value: number) => void,
+  playbackSession: FakePlaybackSession,
+): ApplicationServices {
   return {
     catalog: { lyrics: vi.fn(async () => null) },
-    playback: { record: vi.fn(async () => undefined) },
-    audio: new FakeAudioPlayer(),
-    desktopWindow: {
+    playbackSession,
+    desktopWindowController: {
+      state: () => ({ maximized: false, fullscreen: false }),
+      subscribe: () => () => undefined,
       toggleMaximize: vi.fn(async () => undefined),
     },
     uiPreferences: {
@@ -215,19 +425,6 @@ function createServices(writeLyricsFontScale: (value: number) => void): Applicat
   } as unknown as ApplicationServices;
 }
 
-class FakeAudioPlayer implements AudioPlayer {
-  load(): Promise<void> { return Promise.resolve(); }
-  play(): Promise<void> { return Promise.resolve(); }
-  pause(): void {}
-  stop(): void {}
-  seek(): void {}
-  setVolume(): void {}
-  snapshot(): AudioSnapshot { return { currentTime: 0, duration: 0, paused: true }; }
-  onUpdate(): () => void { return () => undefined; }
-  onEnded(): () => void { return () => undefined; }
-  onError(): () => void { return () => undefined; }
-}
-
 function track(): Track {
   return {
     id: "track-1",
@@ -240,4 +437,20 @@ function track(): Track {
     liked: false,
     publishedAt: "2026-07-18T00:00:00.000Z",
   };
+}
+
+function pointerEvent(type: string, options: { pointerId: number; clientY: number; button?: number }): PointerEvent {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    button: options.button ?? 0,
+    clientY: options.clientY,
+  });
+  Object.defineProperty(event, "pointerId", { value: options.pointerId });
+  return event as PointerEvent;
+}
+
+
+function listenerCalls(spy: ReturnType<typeof vi.spyOn>, type: string): unknown[][] {
+  return spy.mock.calls.filter(([eventType]) => eventType === type);
 }
