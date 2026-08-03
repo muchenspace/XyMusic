@@ -156,7 +156,7 @@ function normalizedPort(value: string): string { return validPort(value) ? Strin
                 <img v-if="user.avatarUrl && !avatarFailed" :src="user.avatarUrl" :alt="`${user.displayName}的当前头像`" @error="avatarFailed = true" />
                 <span v-else aria-hidden="true">{{ initials }}</span>
                 <div><strong>{{ user.displayName }}</strong><small>支持 JPG、PNG、WebP，最大 5MB</small><button type="button" class="secondary-button" :disabled="uploadingAvatar" @click="selectAvatar"><Camera :size="16" />{{ uploadingAvatar ? "正在上传…" : "更换头像" }}</button></div>
-                <input ref="avatarInput" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" aria-label="选择新头像" @change="uploadSelectedAvatar" />
+                <input ref="avatarInput" class="visually-hidden" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" aria-label="选择新头像" @change="uploadSelectedAvatar" />
               </div>
               <label class="field-group"><span>昵称</span><input v-model="displayName" maxlength="64" required /></label>
               <label class="field-group"><span>个人简介</span><textarea v-model="bio" maxlength="500" rows="4" placeholder="介绍一下自己"></textarea></label>

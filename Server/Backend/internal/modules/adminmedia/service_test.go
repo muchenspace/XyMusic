@@ -61,10 +61,12 @@ func TestCreateUploadReservesSignsAuditsAndPresentsRequiredHeaders(t *testing.T)
 		t.Fatalf("created = %#v", created)
 	}
 	if result.UploadURL != "https://storage.test/signed" || result.Method != "PUT" ||
-		result.RequiredHeaders["content-length"] != "123" ||
 		result.RequiredHeaders["x-amz-meta-sha256"] != checksum ||
 		result.ExpiresAt != "2026-07-16T01:07:03.456Z" {
 		t.Fatalf("result = %#v", result)
+	}
+	if _, present := result.RequiredHeaders["content-length"]; present {
+		t.Fatalf("content-length must not be a required signed header: %#v", result.RequiredHeaders)
 	}
 	if audit.Action != "media.upload.create" || audit.TargetID != "upload-1" ||
 		audit.Details["purpose"] != PurposeTrackSource {

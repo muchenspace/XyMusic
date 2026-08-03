@@ -167,14 +167,30 @@ export const useSessionStore = defineStore("session", () => {
 });
 
 async function toAvatarUpload(file: File): Promise<AvatarUpload> {
-  if (!AVATAR_MEDIA_TYPES.includes(file.type)) throw new Error("头像仅支持 JPG、PNG 或 WebP");
+  const mediaType = avatarMediaType(file);
+  if (!mediaType) throw new Error("头像仅支持 JPG、PNG 或 WebP");
   if (file.size <= 0 || file.size > MAX_AVATAR_BYTES) throw new Error("头像大小必须在 5MB 以内");
   return {
     name: file.name,
-    mediaType: file.type,
+    mediaType,
     bytes: new Uint8Array(await file.arrayBuffer()),
   };
 }
 
 const AVATAR_MEDIA_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
+
+function avatarMediaType(file: File): string | null {
+  const declared = file.type.trim().toLowerCase();
+  if (declared === "image/jpg") return "image/jpeg";
+  if (AVATAR_MEDIA_TYPES.includes(declared)) return declared;
+
+  const extension = file.name.trim().toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
+  switch (extension) {
+    case "jpg":
+    case "jpeg": return "image/jpeg";
+    case "png": return "image/png";
+    case "webp": return "image/webp";
+    default: return null;
+  }
+}

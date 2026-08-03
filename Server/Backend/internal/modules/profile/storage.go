@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -23,8 +22,8 @@ import (
 )
 
 // MinIOObjectStorage is the production avatar-upload adapter. Presigned PUT
-// URLs bind every header returned to clients; completion still downloads and
-// independently hashes the object instead of trusting S3 metadata.
+// URLs bind the media type and checksums; completion still downloads and
+// independently validates the object instead of trusting S3 metadata.
 type MinIOObjectStorage struct {
 	client *minio.Client
 	bucket string
@@ -65,7 +64,6 @@ func (storage *MinIOObjectStorage) CreateUploadURL(
 	}
 	headers := make(http.Header)
 	headers.Set("Content-Type", request.ContentType)
-	headers.Set("Content-Length", strconv.FormatInt(request.ContentLength, 10))
 	headers.Set("X-Amz-Checksum-Sha256", checksumBase64(request.ChecksumSHA256))
 	headers.Set("X-Amz-Meta-Sha256", request.ChecksumSHA256)
 	signed, err := storage.client.PresignHeader(
