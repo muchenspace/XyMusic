@@ -48,7 +48,7 @@ function track(id: string, trackSource: TrackSummary["source"] = null, status: T
     discNumber: 1,
     status,
     audioStatus: status,
-    metadataStatus: "ORIGINAL",
+    metadataStatus: "NORMAL",
     metadataVersion: 1,
     source: trackSource,
     mediaProcessing: null,

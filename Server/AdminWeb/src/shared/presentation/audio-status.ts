@@ -57,10 +57,9 @@ const librarySourceStatusPresentations: Record<string, StatusPresentation> = {
 };
 
 const metadataStatusPresentations: Record<string, StatusPresentation> = {
-  ORIGINAL: { label: "使用原始 Tag", tone: "success" },
-  OVERRIDDEN: { label: "使用已修改 Tag", tone: "info" },
-  PENDING_WRITE: { label: "等待写回源文件", tone: "info" },
-  WRITE_FAILED: { label: "写回源文件失败", tone: "warning" },
+  NORMAL: { label: "正常", tone: "success" },
+  PENDING_WRITE: { label: "等待写回", tone: "info" },
+  WRITE_FAILED: { label: "写回失败", tone: "warning" },
 };
 
 const variantStatusPresentations: Record<string, StatusPresentation> = {

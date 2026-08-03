@@ -52,7 +52,7 @@ func (service *Service) Update(
 	if err != nil {
 		return MetadataDTO{}, err
 	}
-	if _, err := UpdateMetadataOverrides(MetadataOverrides{}, patch, input.ResetFields); err != nil {
+	if _, err := UpdateMetadataOverrides(MetadataOverrides{}, patch); err != nil {
 		return MetadataDTO{}, err
 	}
 	if err := service.store.EnsureMetadata(ctx, []string{trackID}); err != nil {
@@ -61,7 +61,6 @@ func (service *Service) Update(
 	record, err := service.store.UpdateMetadata(ctx, actorID, traceID, trackID, MetadataMutationInput{
 		ExpectedVersion: input.ExpectedVersion,
 		Patch:           map[string]any(patch),
-		ResetFields:     append([]string(nil), input.ResetFields...),
 		Reason:          reason,
 	})
 	if err != nil {
@@ -91,7 +90,7 @@ func (service *Service) BatchUpdate(
 	if err != nil {
 		return BatchUpdateDTO{}, err
 	}
-	if _, err := UpdateMetadataOverrides(MetadataOverrides{}, patch, input.ResetFields); err != nil {
+	if _, err := UpdateMetadataOverrides(MetadataOverrides{}, patch); err != nil {
 		return BatchUpdateDTO{}, err
 	}
 	trackIDs := make([]string, 0, len(input.Items))
@@ -110,8 +109,7 @@ func (service *Service) BatchUpdate(
 		return BatchUpdateDTO{}, err
 	}
 	records, err := service.store.BatchUpdateMetadata(ctx, actorID, traceID, BatchMetadataMutationInput{
-		Items: input.Items, Patch: map[string]any(patch),
-		ResetFields: append([]string(nil), input.ResetFields...), Reason: reason,
+		Items: input.Items, Patch: map[string]any(patch), Reason: reason,
 	})
 	if err != nil {
 		return BatchUpdateDTO{}, err
@@ -124,87 +122,6 @@ func (service *Service) BatchUpdate(
 		})
 	}
 	return BatchUpdateDTO{Items: items}, nil
-}
-
-func (service *Service) Revisions(
-	ctx context.Context,
-	trackID string,
-	pageValue, pageSizeValue int,
-) (RevisionPageDTO, error) {
-	if err := service.store.EnsureMetadata(ctx, []string{trackID}); err != nil {
-		return RevisionPageDTO{}, err
-	}
-	page, err := pagination.ParseOffset(pageValue, pageSizeValue, 25)
-	if err != nil {
-		return RevisionPageDTO{}, err
-	}
-	records, total, err := service.store.ListRevisions(ctx, trackID, page.PageSize, page.Offset)
-	if err != nil {
-		return RevisionPageDTO{}, err
-	}
-	items := make([]RevisionSummaryDTO, 0, len(records))
-	for _, record := range records {
-		item, err := presentRevision(record)
-		if err != nil {
-			return RevisionPageDTO{}, err
-		}
-		items = append(items, item)
-	}
-	return RevisionPageDTO{
-		Items: items, Page: page.Page, PageSize: page.PageSize, Total: total,
-		TotalPages: pagination.BoundedTotalPages(total, page.PageSize),
-	}, nil
-}
-
-func (service *Service) Revision(
-	ctx context.Context,
-	trackID, revisionID string,
-) (RevisionDetailDTO, error) {
-	if err := service.store.EnsureMetadata(ctx, []string{trackID}); err != nil {
-		return RevisionDetailDTO{}, err
-	}
-	record, err := service.store.FindRevision(ctx, trackID, revisionID)
-	if err != nil {
-		return RevisionDetailDTO{}, err
-	}
-	summary, err := presentRevision(record)
-	if err != nil {
-		return RevisionDetailDTO{}, err
-	}
-	raw, err := decodeSnapshot(record.Raw)
-	if err != nil {
-		return RevisionDetailDTO{}, err
-	}
-	overrides, err := decodeOverrides(record.Overrides)
-	if err != nil {
-		return RevisionDetailDTO{}, err
-	}
-	effective, err := decodeSnapshot(record.Effective)
-	if err != nil {
-		return RevisionDetailDTO{}, err
-	}
-	return RevisionDetailDTO{
-		RevisionSummaryDTO: summary, Raw: raw, Overrides: overrides, Effective: effective,
-	}, nil
-}
-
-func (service *Service) Restore(
-	ctx context.Context,
-	actorID, traceID, trackID, revisionID string,
-	input VersionReasonInput,
-) (MetadataDTO, error) {
-	validated, err := validateVersionReason(input)
-	if err != nil {
-		return MetadataDTO{}, err
-	}
-	if err := service.store.EnsureMetadata(ctx, []string{trackID}); err != nil {
-		return MetadataDTO{}, err
-	}
-	record, err := service.store.RestoreMetadata(ctx, actorID, traceID, trackID, revisionID, validated)
-	if err != nil {
-		return MetadataDTO{}, err
-	}
-	return presentMetadata(record)
 }
 
 func (service *Service) EnqueueWriteback(
@@ -382,40 +299,9 @@ func presentMetadata(record MetadataRecord) (MetadataDTO, error) {
 	}, nil
 }
 
-func presentRevision(record RevisionRecord) (RevisionSummaryDTO, error) {
-	effective, err := decodeSnapshot(record.Effective)
-	if err != nil {
-		return RevisionSummaryDTO{}, err
-	}
-	overrides, err := decodeOverrides(record.Overrides)
-	if err != nil {
-		return RevisionSummaryDTO{}, err
-	}
-	artists := make([]string, 0)
-	for _, credit := range effective.Credits {
-		if credit.Role == CreditPrimary {
-			artists = append(artists, credit.Name)
-		}
-	}
-	var lyrics *RevisionLyricsDTO
-	if effective.Lyrics != nil {
-		lyrics = &RevisionLyricsDTO{
-			Format: effective.Lyrics.Format, Language: effective.Lyrics.Language,
-			Timing: string(effective.Lyrics.Timing), HasContent: true,
-		}
-	}
-	return RevisionSummaryDTO{
-		ID: record.ID, TrackID: record.TrackID, MetadataVersion: record.MetadataVersion,
-		Action: record.Action, Title: effective.Title, Artists: artists,
-		Album: effective.Album, AlbumArtists: append([]string(nil), effective.AlbumArtists...),
-		OverriddenFields: sortedOverrideFields(overrides), Lyrics: lyrics,
-		ActorID: record.ActorID, Reason: record.Reason, CreatedAt: formatTimestamp(record.CreatedAt),
-	}, nil
-}
-
 func presentWriteback(job WritebackJob) WritebackJobDTO {
 	return WritebackJobDTO{
-		ID: job.ID, TrackID: job.TrackID, SourceID: job.SourceID, RevisionID: job.RevisionID,
+		ID: job.ID, TrackID: job.TrackID, SourceID: job.SourceID,
 		Status: job.Status, Stage: job.Stage, Attempts: job.Attempts,
 		MaxAttempts: job.MaxAttempts, CancelRequested: job.CancelRequested,
 		MetadataVersion: job.MetadataVersion, Reason: job.Reason,

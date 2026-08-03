@@ -91,7 +91,7 @@ func TestLegacyAndGoAdminCatalogQueryParity(t *testing.T) {
 		"/api/v1/admin/albums?page=1&pageSize=5&sort=updatedAt&order=desc",
 		"/api/v1/admin/albums/duplicates",
 		"/api/v1/admin/tracks?page=1&pageSize=5&sort=updatedAt&order=desc",
-		"/api/v1/admin/tracks?page=1&pageSize=2&metadataStatus=ORIGINAL",
+		"/api/v1/admin/tracks?page=1&pageSize=2&metadataStatus=NORMAL",
 	}
 	for index := 0; index < len(paths); index++ {
 		path := paths[index]

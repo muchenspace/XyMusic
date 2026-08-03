@@ -178,36 +178,9 @@ func TestRepositoryProductionMetadataLifecycle(t *testing.T) {
 	if len(batch.Items) != 1 || batch.Items[0].Version != 3 {
 		t.Fatalf("batch=%+v", batch)
 	}
-	revisions, err := service.Revisions(ctx, trackID, 1, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if revisions.Total < 3 || len(revisions.Items) < 3 {
-		t.Fatalf("revisions=%+v", revisions)
-	}
-	baselineRevisionID := revisions.Items[len(revisions.Items)-1].ID
-	detail, err := service.Revision(ctx, trackID, baselineRevisionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if detail.Action != "BASELINE" || detail.Effective.Credits[0].Name != originalArtistName {
-		t.Fatalf("revision=%+v", detail)
-	}
-	restored, err := service.Restore(
-		ctx, actorID, "integration:restore", trackID, baselineRevisionID,
-		VersionReasonInput{ExpectedVersion: 3, Reason: "integration restore"},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if restored.Version != 4 || restored.Effective.Credits[0].Name != originalArtistName ||
-		restored.Effective.Album != nil {
-		t.Fatalf("restored=%+v", restored)
-	}
-
 	queued, err := service.EnqueueWriteback(
 		ctx, actorID, "integration:enqueue", trackID,
-		VersionReasonInput{ExpectedVersion: restored.Version, Reason: "integration writeback"},
+		VersionReasonInput{ExpectedVersion: batch.Items[0].Version, Reason: "integration writeback"},
 	)
 	if err != nil {
 		t.Fatal(err)

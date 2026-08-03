@@ -105,19 +105,6 @@ type MetadataSourceRecord struct {
 	Cue            bool
 }
 
-type RevisionRecord struct {
-	ID              string
-	TrackID         string
-	MetadataVersion int
-	Action          string
-	Raw             json.RawMessage
-	Overrides       json.RawMessage
-	Effective       json.RawMessage
-	ActorID         *string
-	Reason          *string
-	CreatedAt       time.Time
-}
-
 type WritebackStatus string
 
 const (
@@ -142,7 +129,6 @@ type WritebackJob struct {
 	ID                     string
 	TrackID                string
 	SourceID               string
-	RevisionID             *string
 	RequestedBy            *string
 	Reason                 string
 	MetadataSnapshot       json.RawMessage
@@ -191,7 +177,6 @@ type ArtworkReference struct {
 type MetadataMutationInput struct {
 	ExpectedVersion int
 	Patch           map[string]any
-	ResetFields     []string
 	Reason          string
 }
 
@@ -201,10 +186,9 @@ type BatchMutationItem struct {
 }
 
 type BatchMetadataMutationInput struct {
-	Items       []BatchMutationItem
-	Patch       map[string]any
-	ResetFields []string
-	Reason      string
+	Items  []BatchMutationItem
+	Patch  map[string]any
+	Reason string
 }
 
 type VersionReasonInput struct {

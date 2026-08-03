@@ -18,7 +18,7 @@ function track(overrides: Partial<TrackSummary> = {}): TrackSummary {
     discNumber: 1,
     status: "READY",
     audioStatus: "READY",
-    metadataStatus: "OVERRIDDEN",
+    metadataStatus: "NORMAL",
     metadataVersion: 2,
     source: { id: "source-1", rootId: "root-1", rootName: "Music", relativePath: "Artist/Test.flac", format: "FLAC", status: "READY", checksumSha256: null, mode: "READ_WRITE", canWriteBack: true, writebackBlockReason: null },
     mediaProcessing: { status: "READY", attempts: 1, maxAttempts: 5, lastError: null, updatedAt: "2026-07-15T00:00:00.000Z" },
@@ -40,7 +40,7 @@ describe("TrackStatusDisc", () => {
     expect(document.body.textContent).toContain("源文件分析完成");
     expect(document.body.textContent).toContain("媒体处理");
     expect(document.body.textContent).toContain("媒体处理完成");
-    expect(document.body.textContent).toContain("使用已修改 Tag");
+    expect(document.body.textContent).toContain("正常");
     expect(document.body.textContent).toContain("HIGH");
     expect(document.body.textContent).toContain("可用");
     expect(document.body.textContent).toContain("192 kbps");
@@ -104,7 +104,7 @@ describe("TrackStatusDisc", () => {
     expect(wrapper.text()).toContain("异常");
     expect(wrapper.get("button").classes()).toContain("track-disc--error");
     await wrapper.find(".inline-flex").trigger("mouseenter");
-    expect(document.body.textContent).toContain("写回源文件失败");
+    expect(document.body.textContent).toContain("写回失败");
     expect(document.body.textContent).toContain("写回后的 Tag 校验失败");
     wrapper.unmount();
   });

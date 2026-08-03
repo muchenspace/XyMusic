@@ -33,7 +33,6 @@ export interface MetadataWritebackJob {
   id: string;
   trackId: string;
   sourceId: string;
-  revisionId: string | null;
   status: "PENDING" | "PROCESSING" | "READY" | "FAILED" | "CANCELLED";
   stage: string;
   attempts: number;

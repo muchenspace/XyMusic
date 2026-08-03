@@ -81,7 +81,7 @@
     ]
   },
   "countingRules": {
-    "expectedAPIEndpoints": 136,
+    "expectedAPIEndpoints": 133,
     "includes": [
       "Two health endpoints exposed by both control and configured runtime modes, counted once by method and path.",
       "Setup endpoints exposed by the control application while setup is required.",
@@ -637,30 +637,6 @@
     {
       "method": "POST",
       "path": "/api/v1/admin/metadata/batch",
-      "scope": "admin-metadata",
-      "auth": "admin-session",
-      "idempotency": "required",
-      "bodyKind": "json"
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/admin/tracks/:id/metadata/revisions",
-      "scope": "admin-metadata",
-      "auth": "admin-session",
-      "idempotency": "none",
-      "bodyKind": "none"
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/admin/tracks/:id/metadata/revisions/:revisionId",
-      "scope": "admin-metadata",
-      "auth": "admin-session",
-      "idempotency": "none",
-      "bodyKind": "none"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/admin/tracks/:id/metadata/revisions/:revisionId/restore",
       "scope": "admin-metadata",
       "auth": "admin-session",
       "idempotency": "required",

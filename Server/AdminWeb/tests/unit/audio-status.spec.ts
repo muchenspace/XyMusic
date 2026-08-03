@@ -27,7 +27,7 @@ describe("audio status presentation", () => {
   it("keeps technical stages domain-specific and Chinese", () => {
     expect(sourceFileStatusPresentation("PROCESSING").label).toBe("源文件分析中");
     expect(mediaProcessingStatusPresentation("PROCESSING").label).toBe("媒体分析与转码中");
-    expect(metadataStatusPresentation("PENDING_WRITE").label).toBe("等待写回源文件");
+    expect(metadataStatusPresentation("PENDING_WRITE").label).toBe("等待写回");
     expect(variantStatusPresentation("FAILED").label).toBe("生成失败");
   });
 

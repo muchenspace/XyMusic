@@ -5,7 +5,7 @@ export type { ArtworkSummary } from "@/shared/domain/artwork";
 export type { AudioStatus } from "@/shared/domain/audio-status";
 
 export type TrackStatus = "READY" | "ERROR" | "ARCHIVED";
-export type MetadataStatus = "ORIGINAL" | "OVERRIDDEN" | "PENDING_WRITE" | "WRITE_FAILED";
+export type MetadataStatus = "NORMAL" | "PENDING_WRITE" | "WRITE_FAILED";
 export type CreditRole = "PRIMARY" | "FEATURED" | "COMPOSER" | "LYRICIST" | "PRODUCER";
 export type LyricTiming = "LINE" | "WORD";
 
@@ -164,22 +164,6 @@ export interface TrackMetadataRecord {
   updatedBy: string | null;
   createdAt: string;
   updatedAt: string;
-}
-
-export interface TrackTagRevision {
-  id: string;
-  trackId: string;
-  metadataVersion: number;
-  action: "BASELINE" | "SCAN" | "EDIT" | "RESTORE" | "WRITEBACK";
-  title: string;
-  artists: string[];
-  album: string | null;
-  albumArtists: string[];
-  overriddenFields: string[];
-  lyrics: { format: "PLAIN" | "LRC"; timing: LyricTiming; language: string; hasContent: true } | null;
-  actorId: string | null;
-  reason: string | null;
-  createdAt: string;
 }
 
 export interface AlbumSummary {

@@ -24,7 +24,6 @@ import type {
   TrackMetadataRecord,
   TrackMutationTarget,
   TrackSummary,
-  TrackTagRevision,
 } from "@/features/music/domain/models";
 
 export class HttpMusicAdminGateway implements MusicAdminGateway {
@@ -34,10 +33,6 @@ export class HttpMusicAdminGateway implements MusicAdminGateway {
 
   async getTrackMetadata(trackId: string, signal?: AbortSignal): Promise<TrackMetadataRecord> {
     return validateTrackMetadataRecord(await adminApi.trackMetadata(trackId, signal));
-  }
-
-  listTagHistory(trackId: string, page: number, pageSize: number, signal?: AbortSignal): Promise<MusicPage<TrackTagRevision>> {
-    return adminApi.tagHistory(trackId, { page, pageSize }, signal);
   }
 
   async updateTrackMetadata(trackId: string, command: UpdateTrackMetadataCommand): Promise<TrackMetadataRecord> {
@@ -72,10 +67,6 @@ export class HttpMusicAdminGateway implements MusicAdminGateway {
 
   batchUpdateTrackMetadata(command: BatchUpdateTrackMetadataCommand): Promise<BatchUpdateTrackMetadataResult> {
     return adminApi.bulkUpdateTracks(command.items, command.patch, command.reason);
-  }
-
-  async restoreTagRevision(trackId: string, revisionId: string, expectedVersion: number, reason: string): Promise<TrackMetadataRecord> {
-    return validateTrackMetadataRecord(await adminApi.restoreTagRevision(trackId, revisionId, expectedVersion, reason));
   }
 
   listAlbums(query: MusicListQuery, signal?: AbortSignal): Promise<MusicPage<AlbumSummary>> {

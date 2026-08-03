@@ -52,8 +52,8 @@ func TestEveryIdempotentAPIHasReplayBoundaryTestEvidence(t *testing.T) {
 		covered++
 		t.Logf("%s | idempotency=%s#%s", key, reference.file, reference.test)
 	}
-	if covered != 58 {
-		t.Fatalf("idempotency evidence covers %d endpoints, want 58", covered)
+	if covered != 57 {
+		t.Fatalf("idempotency evidence covers %d endpoints, want 57", covered)
 	}
 }
 
@@ -82,7 +82,7 @@ func successfulHTTPTest(api apiContract) (testReference, bool) {
 	case "admin-catalog-query":
 		return testReference{"internal/modules/admincatalog/routes_test.go", "TestRoutesExposeSevenAdminCatalogQueries"}, true
 	case "admin-metadata":
-		return testReference{"internal/modules/adminmetadata/routes_test.go", "TestRoutesExposeElevenMetadataEndpoints"}, true
+		return testReference{"internal/modules/adminmetadata/routes_test.go", "TestRoutesExposeEightMetadataEndpoints"}, true
 	case "admin-tag-scraping":
 		return testReference{"internal/modules/admintagscraping/routes_test.go", "TestRoutesExposeAllFifteenTagScrapingAPIs"}, true
 	case "admin-operations":
@@ -144,7 +144,7 @@ func idempotencyTest(api apiContract) (testReference, bool) {
 	case "admin-management":
 		return testReference{"internal/modules/adminmanagement/routes_test.go", "TestRoutesExposeNineEndpointsAndPreserveMutationContracts"}, true
 	case "admin-metadata":
-		return testReference{"internal/modules/adminmetadata/routes_test.go", "TestRoutesExposeElevenMetadataEndpoints"}, true
+		return testReference{"internal/modules/adminmetadata/routes_test.go", "TestRoutesExposeEightMetadataEndpoints"}, true
 	case "admin-tag-scraping":
 		return testReference{"internal/modules/admintagscraping/routes_test.go", "TestRoutesExposeAllFifteenTagScrapingAPIs"}, true
 	case "admin-operations":

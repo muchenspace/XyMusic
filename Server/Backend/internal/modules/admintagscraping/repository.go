@@ -174,8 +174,6 @@ func (repository *Repository) UpdateMetadata(
 		return TrackMetadata{}, err
 	}
 	nextOverridesJSON, _ := json.Marshal(nextOverrides)
-	rawDocument, _ := json.Marshal(raw)
-	effectiveDocument, _ := json.Marshal(nextEffective)
 	nextVersion := version + 1
 	command, err := tx.Exec(ctx, `
 		UPDATE track_metadata
@@ -190,13 +188,6 @@ func (repository *Repository) UpdateMetadata(
 			"currentVersion":  version,
 		})
 	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO track_metadata_revisions
-			(track_id, metadata_version, action, raw_tags, overrides, effective_tags, actor_id, reason)
-		VALUES ($1, $2, 'EDIT', $3::jsonb, $4::jsonb, $5::jsonb, $6, $7)`,
-		trackID, nextVersion, rawDocument, nextOverridesJSON, effectiveDocument, actorID, reason); err != nil {
-		return TrackMetadata{}, fmt.Errorf("insert track metadata revision: %w", err)
-	}
 	if err := repository.projectMetadata(ctx, tx, trackID, nextEffective, previousEffective); err != nil {
 		return TrackMetadata{}, err
 	}
@@ -204,7 +195,6 @@ func (repository *Repository) UpdateMetadata(
 	details, _ := json.Marshal(map[string]any{
 		"metadataVersion": nextVersion,
 		"changedFields":   changedFields,
-		"resetFields":     []string{},
 		"reason":          reason,
 	})
 	if _, err := tx.Exec(ctx, `
@@ -348,21 +338,17 @@ func (repository *Repository) EnqueueWriteback(
 		return WritebackJob{}, err
 	}
 	snapshotJSON, _ := json.Marshal(effective)
-	var revisionID *string
-	_ = tx.QueryRow(ctx, `
-		SELECT id FROM track_metadata_revisions
-		WHERE track_id = $1 AND metadata_version = $2 LIMIT 1`, trackID, version).Scan(&revisionID)
 	jobID := uuid.NewString()
 	row := tx.QueryRow(ctx, `
 		INSERT INTO metadata_writeback_jobs
-			(id, track_id, source_id, revision_id, requested_by, reason, metadata_snapshot,
+			(id, track_id, source_id, requested_by, reason, metadata_snapshot,
 			 metadata_version, expected_source_checksum, root_path_snapshot, source_path_snapshot)
-		VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11)
-		RETURNING id, track_id, source_id, revision_id, status::text, stage, attempts,
+		VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10)
+		RETURNING id, track_id, source_id, status::text, stage, attempts,
 		          max_attempts, cancel_requested, metadata_version, reason,
 		          output_checksum_sha256, last_error_code, last_error,
 		          version, next_attempt_at, started_at, completed_at, created_at, updated_at`,
-		jobID, trackID, sourceID, revisionID, actorID, reason, snapshotJSON, version, checksum,
+		jobID, trackID, sourceID, actorID, reason, snapshotJSON, version, checksum,
 		rootPath, sourcePath)
 	job, err := scanWritebackJob(row)
 	if err != nil {
@@ -986,14 +972,6 @@ func (repository *Repository) ensureMetadataWith(ctx context.Context, database m
 			return apperror.NotFound("Track was not found")
 		}
 	}
-	if _, err := database.Exec(ctx, `
-		INSERT INTO track_metadata_revisions
-			(track_id, metadata_version, action, raw_tags, overrides, effective_tags, reason)
-		SELECT track_id, version, 'BASELINE', raw_tags, overrides, raw_tags || overrides, 'Initial metadata snapshot'
-		FROM track_metadata WHERE track_id = $1
-		ON CONFLICT (track_id, metadata_version) DO NOTHING`, trackID); err != nil {
-		return fmt.Errorf("ensure track metadata baseline: %w", err)
-	}
 	return nil
 }
 
@@ -1377,7 +1355,7 @@ func scanWritebackJob(row pgx.Row) (WritebackJob, error) {
 	var result WritebackJob
 	var nextAttemptAt, startedAt, completedAt, createdAt, updatedAt *time.Time
 	err := row.Scan(
-		&result.ID, &result.TrackID, &result.SourceID, &result.RevisionID, &result.Status,
+		&result.ID, &result.TrackID, &result.SourceID, &result.Status,
 		&result.Stage, &result.Attempts, &result.MaxAttempts, &result.CancelRequested,
 		&result.MetadataVersion, &result.Reason,
 		&result.OutputChecksumSHA256, &result.LastErrorCode, &result.LastError, &result.Version,

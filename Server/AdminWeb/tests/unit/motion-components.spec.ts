@@ -24,7 +24,7 @@ function track(): TrackSummary {
     discNumber: 1,
     status: "READY",
     audioStatus: "PROCESSING",
-    metadataStatus: "ORIGINAL",
+    metadataStatus: "NORMAL",
     metadataVersion: 1,
     source: {
       id: "source-1",

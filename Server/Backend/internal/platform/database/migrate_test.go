@@ -157,7 +157,7 @@ func TestLyricsTimingMigrationBackfillsPersistedMetadataDocuments(t *testing.T) 
 	}
 	sql := strings.ToUpper(strings.Join(migrations[28].SQL, "\n"))
 	for _, expected := range []string{
-		"TRACK_METADATA", "RAW_TAGS", "OVERRIDES", "TRACK_METADATA_REVISIONS", "EFFECTIVE_TAGS",
+		"TRACK_METADATA", "RAW_TAGS", "OVERRIDES",
 		"METADATA_WRITEBACK_JOBS", "METADATA_SNAPSHOT", "JSONB_SET", "DROP FUNCTION",
 	} {
 		if !strings.Contains(sql, expected) {

@@ -552,8 +552,8 @@ func validAudioStatusFilter(value AudioStatus) bool {
 }
 
 func validMetadataStatusFilter(value MetadataStatus) bool {
-	return value == "" || value == MetadataOriginal || value == MetadataOverridden ||
-		value == MetadataPendingWrite || value == MetadataWriteFailed
+	return value == "" || value == MetadataNormal || value == MetadataPendingWrite ||
+		value == MetadataWriteFailed
 }
 
 func oneOf(value string, choices ...string) bool {

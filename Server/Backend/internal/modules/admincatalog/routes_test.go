@@ -29,7 +29,7 @@ func TestRoutesExposeSevenAdminCatalogQueries(t *testing.T) {
 		"/api/v1/admin/albums?sort=invalid&sort=releaseDate&order=invalid&order=desc&unknown=true",
 		"/api/v1/admin/albums/duplicates?page=bad&page=2&pageSize=bad&pageSize=10&albumPage=bad&albumPage=3&albumPageSize=bad&albumPageSize=50&albumId=bad&albumId=" + id,
 		"/api/v1/admin/albums/" + id + "?page=bad&page=3&pageSize=bad&pageSize=15",
-		"/api/v1/admin/tracks?status=INVALID&status=PROCESSING&metadataStatus=INVALID&metadataStatus=ORIGINAL&sourceId=bad&sourceId=" + id + "&sort=invalid&sort=status&order=invalid&order=asc&unknown=true",
+		"/api/v1/admin/tracks?status=INVALID&status=PROCESSING&metadataStatus=INVALID&metadataStatus=NORMAL&sourceId=bad&sourceId=" + id + "&sort=invalid&sort=status&order=invalid&order=asc&unknown=true",
 		"/api/v1/admin/tracks/" + id + "?lyricPage=bad&lyricPage=2&lyricPageSize=bad&lyricPageSize=50",
 	}
 	for _, path := range paths {

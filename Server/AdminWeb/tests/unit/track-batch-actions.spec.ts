@@ -16,7 +16,7 @@ function track(id: string, status: TrackSummary["status"] = "ARCHIVED", version 
     discNumber: 1,
     status,
     audioStatus: status,
-    metadataStatus: "ORIGINAL",
+    metadataStatus: "NORMAL",
     metadataVersion: 1,
     source: null,
     mediaProcessing: null,

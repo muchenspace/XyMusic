@@ -184,10 +184,6 @@ func TestProductionArchivedTrackScrapingGuards(t *testing.T) {
 	if err != nil || metadata.TrackStatus != archivedTrackStatus {
 		t.Fatalf("metadata=%+v error=%v", metadata, err)
 	}
-	var baselineRevisions int
-	if err := pool.QueryRow(ctx, "SELECT count(*)::int FROM track_metadata_revisions WHERE track_id=$1", trackID).Scan(&baselineRevisions); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := repository.FingerprintSource(ctx, trackID); !apperror.IsCode(err, apperror.CodeInvalidStateTransition) || !isArchivedTrackError(err) {
 		t.Fatalf("fingerprint error = %#v", err)
 	}
@@ -197,21 +193,17 @@ func TestProductionArchivedTrackScrapingGuards(t *testing.T) {
 	); !apperror.IsCode(err, apperror.CodeInvalidStateTransition) || !isArchivedTrackError(err) {
 		t.Fatalf("metadata update error = %#v", err)
 	}
-	var version, revisions, audits int
+	var version, audits int
 	var overrides string
 	if err := pool.QueryRow(ctx, `SELECT version,overrides::text,
-		(SELECT count(*)::int FROM track_metadata_revisions WHERE track_id=$1),
 		(SELECT count(*)::int FROM audit_logs WHERE actor_id=$2 AND target_id=$1)
 		FROM track_metadata WHERE track_id=$1`, trackID, actorID).Scan(
-		&version, &overrides, &revisions, &audits,
+		&version, &overrides, &audits,
 	); err != nil {
 		t.Fatal(err)
 	}
-	if version != 1 || overrides != "{}" || revisions != baselineRevisions || audits != 0 {
-		t.Fatalf(
-			"version/overrides/revisions(want %d)/audits = %d/%s/%d/%d",
-			baselineRevisions, version, overrides, revisions, audits,
-		)
+	if version != 1 || overrides != "{}" || audits != 0 {
+		t.Fatalf("version/overrides/audits = %d/%s/%d", version, overrides, audits)
 	}
 }
 

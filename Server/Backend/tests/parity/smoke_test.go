@@ -228,7 +228,7 @@ func TestLegacyAndGoPublicSmokeParity(t *testing.T) {
 		"/api/v1/admin/albums?sort=updatedAt&order=desc",
 		"/api/v1/admin/albums/duplicates",
 		"/api/v1/admin/albums/" + adminUserID,
-		"/api/v1/admin/tracks?status=READY&metadataStatus=ORIGINAL",
+		"/api/v1/admin/tracks?status=READY&metadataStatus=NORMAL",
 		"/api/v1/admin/tracks/" + adminUserID,
 	}
 	for _, path := range adminCatalogRequests {

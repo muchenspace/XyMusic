@@ -482,7 +482,7 @@ func (repository *Repository) CommitWriteback(ctx context.Context, input Writeba
 	}
 	nextVersion := contextRecord.Metadata.Version + 1
 	metadataCommand, err := tx.Exec(ctx, `
-		update track_metadata set raw_tags = $3::jsonb, raw_checksum_sha256 = $4,
+		update track_metadata set raw_tags = $3::jsonb, overrides = '{}'::jsonb, raw_checksum_sha256 = $4,
 			last_scanned_at = now(), updated_by = $5, version = $6, updated_at = now()
 		where track_id = $1 and version = $2`, contextRecord.Metadata.TrackID,
 		contextRecord.Metadata.Version, string(metadataJSON), input.OutputSHA256,
@@ -492,16 +492,6 @@ func (repository *Repository) CommitWriteback(ctx context.Context, input Writeba
 	}
 	if metadataCommand.RowsAffected() != 1 {
 		return NewWritebackError("METADATA_CHANGED", "Track metadata changed before writeback completion")
-	}
-	if _, err := tx.Exec(ctx, `
-		insert into track_metadata_revisions (
-			track_id, metadata_version, action, raw_tags, overrides,
-			effective_tags, actor_id, reason
-		) values ($1, $2, 'WRITEBACK', $3::jsonb, $4::jsonb, $3::jsonb, $5, $6)`,
-		contextRecord.Metadata.TrackID, nextVersion, string(metadataJSON),
-		string(contextRecord.Metadata.Overrides), contextRecord.Job.RequestedBy,
-		contextRecord.Job.Reason); err != nil {
-		return fmt.Errorf("record metadata writeback revision: %w", err)
 	}
 	command, err := tx.Exec(ctx, `
 		update metadata_writeback_jobs set stage = 'COMMITTED',
@@ -770,7 +760,7 @@ func scanWritebackContext(row scanRow) (WritebackContext, error) {
 	var artworkObjectKey, artworkMIMEType *string
 	err := row.Scan(
 		&result.Job.ID, &result.Job.TrackID, &result.Job.SourceID,
-		&result.Job.RevisionID, &result.Job.RequestedBy, &result.Job.Reason,
+		&result.Job.RequestedBy, &result.Job.Reason,
 		&result.Job.MetadataSnapshot, &result.Job.MetadataVersion,
 		&result.Job.ExpectedSourceChecksum, &result.Job.RootPathSnapshot,
 		&result.Job.SourcePathSnapshot, &result.Job.Status,
@@ -856,7 +846,7 @@ var terminalWritebackCodes = map[string]bool{
 }
 
 const qualifiedWritebackColumns = `
-	job.id::text, job.track_id::text, job.source_id::text, job.revision_id::text,
+	job.id::text, job.track_id::text, job.source_id::text,
 	job.requested_by::text, job.reason, job.metadata_snapshot, job.metadata_version,
 	job.expected_source_checksum, job.root_path_snapshot, job.source_path_snapshot,
 	job.status::text, job.attempts, job.max_attempts,

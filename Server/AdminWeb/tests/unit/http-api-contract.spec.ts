@@ -53,9 +53,9 @@ describe("administrator HTTP API contract", () => {
       "batchRestoreTracks", "browseSourceDirectories", "bulkUpdateTracks", "cancelJob", "cancelScan",
       "cancelWritebackJob", "createPermanentDeleteTracksJob", "createSource", "createUser", "dashboard", "deleteSource",
       "deleteTrackPermanently", "deleteUser", "job", "jobEvents", "jobs", "mergeAlbums",
-      "permanentDeleteTracksJob", "publishTrack", "resetUserPassword", "restoreTagRevision", "restoreTrack", "restoreUser", "retryJob",
+      "permanentDeleteTracksJob", "publishTrack", "resetUserPassword", "restoreTrack", "restoreUser", "retryJob",
       "retryWritebackJob", "revokeUserSession", "scanEvents", "scanSource", "scans",
-      "settings", "sourceProcessing", "sources", "systemInformation", "tagHistory",
+      "settings", "sourceProcessing", "sources", "systemInformation",
       "testDatabase", "testLocalLibrary", "testMediaTools", "testStorage", "track",
       "trackMetadata", "tracks", "updateAlbum", "updateArtist", "updateSettings",
       "updateSource", "updateTrackMetadata", "updateUser", "user", "users",
@@ -98,10 +98,10 @@ describe("administrator HTTP API contract", () => {
 
   it("maps every catalog and metadata API method", async () => {
     const listQuery = { page: 1, pageSize: 25, search: "song", sort: "updatedAt", order: "desc" as const };
-    await expectRequest(() => adminApi.tracks({ ...listQuery, status: "READY", metadataStatus: "ORIGINAL", sourceId: "source-1" }, signal), "/api/v1/admin/tracks", { query: { ...listQuery, status: "READY", metadataStatus: "ORIGINAL", sourceId: "source-1" }, signal });
+    await expectRequest(() => adminApi.tracks({ ...listQuery, status: "READY", metadataStatus: "NORMAL", sourceId: "source-1" }, signal), "/api/v1/admin/tracks", { query: { ...listQuery, status: "READY", metadataStatus: "NORMAL", sourceId: "source-1" }, signal });
     await expectRequest(() => adminApi.track("track-1", signal), "/api/v1/admin/tracks/track-1", { signal });
     await expectRequest(() => adminApi.trackMetadata("track-1", signal), "/api/v1/admin/tracks/track-1/metadata", { signal });
-    const metadataUpdate = { expectedVersion: 3, patch: { title: "Updated" }, resetFields: ["comment"], reason: "test" };
+    const metadataUpdate = { expectedVersion: 3, patch: { title: "Updated" }, reason: "test" };
     await expectRequest(() => adminApi.updateTrackMetadata("track-1", metadataUpdate), "/api/v1/admin/tracks/track-1/metadata", { method: "PATCH", body: metadataUpdate });
     await expectRequest(() => adminApi.publishTrack("track-1", 3), "/api/v1/admin/tracks/track-1/publish", { method: "POST", body: { expectedVersion: 3 } });
     await expectRequest(() => adminApi.archiveTrack("track-1", 3), "/api/v1/admin/tracks/track-1/archive", { method: "POST", body: { expectedVersion: 3 } });
@@ -112,8 +112,6 @@ describe("administrator HTTP API contract", () => {
     await expectRequest(() => adminApi.permanentDeleteTracksJob("delete-job-1", signal), "/api/v1/admin/tracks/batch/delete-permanently/delete-job-1", { signal });
     await expectRequest(() => adminApi.deleteTrackPermanently("track-1", 3), "/api/v1/admin/tracks/track-1", { method: "DELETE", body: { expectedVersion: 3 } });
     await expectRequest(() => adminApi.writeTrackMetadata("track-1", 3, "write"), "/api/v1/admin/tracks/track-1/metadata/writeback", { method: "POST", body: { expectedVersion: 3, reason: "write" } });
-    await expectRequest(() => adminApi.tagHistory("track-1", { page: 2, pageSize: 10 }, signal), "/api/v1/admin/tracks/track-1/metadata/revisions", { query: { page: 2, pageSize: 10 }, signal });
-    await expectRequest(() => adminApi.restoreTagRevision("track-1", "revision-1", 3, "restore"), "/api/v1/admin/tracks/track-1/metadata/revisions/revision-1/restore", { method: "POST", body: { expectedVersion: 3, reason: "restore" } });
     await expectRequest(() => adminApi.bulkUpdateTracks([{ trackId: "track-1", expectedVersion: 3 }], { genres: ["Rock"] }, "batch"), "/api/v1/admin/metadata/batch", { method: "POST", body: { items: [{ trackId: "track-1", expectedVersion: 3 }], patch: { genres: ["Rock"] }, reason: "batch" } });
 
     await expectRequest(() => adminApi.albums(listQuery, signal), "/api/v1/admin/albums", { query: listQuery, signal });

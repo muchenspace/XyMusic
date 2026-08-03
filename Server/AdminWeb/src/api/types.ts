@@ -21,7 +21,6 @@ export type {
   TrackMetadataRecord,
   TrackSummary,
   TrackStatus,
-  TrackTagRevision,
   TrackTagValues,
 } from "@/features/music/domain/models";
 
