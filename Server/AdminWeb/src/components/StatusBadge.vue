@@ -7,7 +7,7 @@ const props = defineProps<{ status: string; label?: string; dot?: boolean; tone?
 const kind = computed(() => {
   if (props.tone) return props.tone;
   const value = props.status.toUpperCase();
-  if (["ACTIVE", "READY", "PUBLISHED", "SUCCEEDED", "SUCCESS", "HEALTHY", "ONLINE", "ORIGINAL", "COMPLETED"].includes(value)) return "success";
+  if (["ACTIVE", "READY", "PUBLISHED", "SUCCEEDED", "SUCCESS", "HEALTHY", "ONLINE", "NORMAL", "COMPLETED"].includes(value)) return "success";
   if (["RUNNING", "PROCESSING", "SCANNING", "PENDING_WRITE", "QUEUED", "PENDING", "DRAFT"].includes(value)) return "info";
   if (["SUSPENDED", "DEGRADED", "WRITE_FAILED", "MISSING"].includes(value)) return "warning";
   if (["FAILED", "FAILURE", "UNAVAILABLE", "OFFLINE", "DELETED", "ARCHIVED", "CANCELED", "CANCELLED", "ERROR", "DISABLED"].includes(value)) return "danger";
@@ -15,12 +15,12 @@ const kind = computed(() => {
 });
 
 const text: Record<string, string> = {
+  NORMAL: "正常",
   ACTIVE: "正常", SUSPENDED: "已停用", DELETED: "已删除",
   READY: "就绪", ERROR: "异常", PUBLISHED: "已发布", DRAFT: "草稿", ARCHIVED: "已归档",
-  QUEUED: "处理中", PENDING: "处理中", PROCESSING: "处理中", RUNNING: "进行中", SUCCEEDED: "已完成", COMPLETED: "已完成", FAILED: "失败", CANCELED: "已取消", CANCELLED: "已取消",
+  QUEUED: "处理中", PENDING: "处理中", PROCESSING: "处理中", RUNNING: "进行中", PENDING_WRITE: "等待写回", WRITE_FAILED: "写回失败", SUCCEEDED: "已完成", COMPLETED: "已完成", FAILED: "失败", CANCELED: "已取消", CANCELLED: "已取消",
   SUCCESS: "成功", FAILURE: "失败", HEALTHY: "正常", DEGRADED: "降级", UNAVAILABLE: "不可用",
   ONLINE: "在线", OFFLINE: "离线", SCANNING: "扫描中", UNKNOWN: "待检查", DISABLED: "已停用",
-  ORIGINAL: "原始", OVERRIDDEN: "已修改", PENDING_WRITE: "等待写回", WRITE_FAILED: "写回失败",
   READ_ONLY: "只读", READ_WRITE: "可写",
 };
 </script>

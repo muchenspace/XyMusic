@@ -89,21 +89,6 @@ func (repository *Repository) EnsureMetadata(ctx context.Context, trackIDs []str
 		}
 	}
 
-	if _, err := repository.pool.Exec(ctx, `
-		insert into track_metadata_revisions (
-			track_id, metadata_version, action, raw_tags, overrides, effective_tags, reason
-		)
-		select metadata.track_id, metadata.version, 'BASELINE', metadata.raw_tags,
-			metadata.overrides, metadata.raw_tags || metadata.overrides, 'Initial metadata snapshot'
-		from track_metadata metadata
-		where metadata.track_id = any($1::uuid[])
-		  and not exists (
-			select 1 from track_metadata_revisions revision
-			where revision.track_id = metadata.track_id
-		  )
-		on conflict (track_id, metadata_version) do nothing`, trackIDs); err != nil {
-		return fmt.Errorf("create metadata baseline revision: %w", err)
-	}
 	return nil
 }
 
@@ -151,7 +136,7 @@ func (repository *Repository) UpdateMetadata(
 	if row.Version != input.ExpectedVersion {
 		return MetadataRecord{}, metadataVersionConflict(input.ExpectedVersion, row.Version, "")
 	}
-	raw, currentOverrides, previousEffective, nextOverrides, nextEffective, err := mutationSnapshots(row, input)
+	_, currentOverrides, previousEffective, nextOverrides, nextEffective, err := mutationSnapshots(row, input)
 	if err != nil {
 		return MetadataRecord{}, err
 	}
@@ -164,11 +149,10 @@ func (repository *Repository) UpdateMetadata(
 	}
 	nextVersion := row.Version + 1
 	if err := persistMetadataMutation(ctx, tx, mutationWrite{
-		TrackID: trackID, ActorID: actorID, TraceID: traceID, Action: "EDIT",
+		TrackID: trackID, ActorID: actorID, TraceID: traceID,
 		AuditAction: "TRACK_METADATA_UPDATED", Reason: input.Reason,
-		PreviousVersion: row.Version, NextVersion: nextVersion, Raw: raw,
+		PreviousVersion: row.Version, NextVersion: nextVersion,
 		Overrides: nextOverrides, PreviousEffective: previousEffective, Effective: nextEffective,
-		ResetFields: input.ResetFields,
 	}); err != nil {
 		return MetadataRecord{}, err
 	}
@@ -193,7 +177,6 @@ func (repository *Repository) BatchUpdateMetadata(
 	sort.Slice(items, func(left, right int) bool { return items[left].TrackID < items[right].TrackID })
 	type preparedMutation struct {
 		row               MetadataRecord
-		raw               MetadataSnapshot
 		overrides         MetadataOverrides
 		previousEffective MetadataSnapshot
 		effective         MetadataSnapshot
@@ -208,9 +191,9 @@ func (repository *Repository) BatchUpdateMetadata(
 		if row.Version != item.ExpectedVersion {
 			return nil, metadataVersionConflict(item.ExpectedVersion, row.Version, item.TrackID)
 		}
-		raw, currentOverrides, previousEffective, nextOverrides, nextEffective, err := mutationSnapshots(row, MetadataMutationInput{
+		_, currentOverrides, previousEffective, nextOverrides, nextEffective, err := mutationSnapshots(row, MetadataMutationInput{
 			ExpectedVersion: item.ExpectedVersion,
-			Patch:           input.Patch, ResetFields: input.ResetFields, Reason: input.Reason,
+			Patch:           input.Patch, Reason: input.Reason,
 		})
 		if err != nil {
 			return nil, err
@@ -223,7 +206,7 @@ func (repository *Repository) BatchUpdateMetadata(
 			)
 		}
 		prepared = append(prepared, preparedMutation{
-			row: row, raw: raw, overrides: nextOverrides, previousEffective: previousEffective,
+			row: row, overrides: nextOverrides, previousEffective: previousEffective,
 			effective: nextEffective, changedFields: MetadataChangedFields(previousEffective, nextEffective),
 		})
 	}
@@ -232,9 +215,9 @@ func (repository *Repository) BatchUpdateMetadata(
 	for _, change := range prepared {
 		nextVersion := change.row.Version + 1
 		if err := persistMetadataMutation(ctx, tx, mutationWrite{
-			TrackID: change.row.TrackID, ActorID: actorID, TraceID: traceID, Action: "EDIT",
+			TrackID: change.row.TrackID, ActorID: actorID, TraceID: traceID,
 			AuditAction: "TRACK_METADATA_BATCH_UPDATED", Reason: input.Reason,
-			PreviousVersion: change.row.Version, NextVersion: nextVersion, Raw: change.raw,
+			PreviousVersion: change.row.Version, NextVersion: nextVersion,
 			Overrides: change.overrides, PreviousEffective: change.previousEffective,
 			Effective: change.effective, BatchSize: len(prepared),
 		}); err != nil {
@@ -248,130 +231,6 @@ func (repository *Repository) BatchUpdateMetadata(
 		return nil, fmt.Errorf("commit batch metadata update: %w", err)
 	}
 	return result, nil
-}
-
-func (repository *Repository) ListRevisions(
-	ctx context.Context,
-	trackID string,
-	limit, offset int,
-) ([]RevisionRecord, int, error) {
-	rows, err := repository.pool.Query(ctx, `
-		select `+revisionColumns+`
-		from track_metadata_revisions
-		where track_id = $1
-		order by metadata_version desc
-		limit $2 offset $3`, trackID, limit, offset)
-	if err != nil {
-		return nil, 0, fmt.Errorf("list metadata revisions: %w", err)
-	}
-	defer rows.Close()
-	items := make([]RevisionRecord, 0, limit)
-	for rows.Next() {
-		item, err := scanRevision(rows)
-		if err != nil {
-			return nil, 0, fmt.Errorf("scan metadata revision: %w", err)
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("iterate metadata revisions: %w", err)
-	}
-	var total int
-	if err := repository.pool.QueryRow(ctx, `
-		select count(*)::int from track_metadata_revisions where track_id = $1`, trackID).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count metadata revisions: %w", err)
-	}
-	return items, total, nil
-}
-
-func (repository *Repository) FindRevision(
-	ctx context.Context,
-	trackID, revisionID string,
-) (RevisionRecord, error) {
-	revision, err := scanRevision(repository.pool.QueryRow(ctx, `
-		select `+revisionColumns+`
-		from track_metadata_revisions
-		where id = $1 and track_id = $2`, revisionID, trackID))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return RevisionRecord{}, apperror.NotFound("Metadata revision was not found")
-	}
-	if err != nil {
-		return RevisionRecord{}, fmt.Errorf("find metadata revision: %w", err)
-	}
-	return revision, nil
-}
-
-func (repository *Repository) RestoreMetadata(
-	ctx context.Context,
-	actorID, traceID, trackID, revisionID string,
-	input VersionReasonInput,
-) (MetadataRecord, error) {
-	tx, err := repository.pool.Begin(ctx)
-	if err != nil {
-		return MetadataRecord{}, fmt.Errorf("begin metadata restore: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	row, err := lockedMetadata(ctx, tx, trackID)
-	if err != nil {
-		return MetadataRecord{}, err
-	}
-	if row.Version != input.ExpectedVersion {
-		return MetadataRecord{}, metadataVersionConflict(input.ExpectedVersion, row.Version, "")
-	}
-	revision, err := scanRevision(tx.QueryRow(ctx, `
-		select `+revisionColumns+` from track_metadata_revisions
-		where id = $1 and track_id = $2`, revisionID, trackID))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return MetadataRecord{}, apperror.NotFound("Metadata revision was not found")
-	}
-	if err != nil {
-		return MetadataRecord{}, fmt.Errorf("find metadata restore revision: %w", err)
-	}
-	raw, err := decodeSnapshot(row.Raw)
-	if err != nil {
-		return MetadataRecord{}, err
-	}
-	currentOverrides, err := decodeOverrides(row.Overrides)
-	if err != nil {
-		return MetadataRecord{}, err
-	}
-	previousEffective, err := ApplyMetadataOverrides(raw, currentOverrides)
-	if err != nil {
-		return MetadataRecord{}, err
-	}
-	revisionEffective, err := decodeSnapshot(revision.Effective)
-	if err != nil {
-		return MetadataRecord{}, err
-	}
-	revisionEffective.HasArtwork = raw.HasArtwork
-	restoredOverrides, err := MetadataOverridesForTarget(raw, revisionEffective)
-	if err != nil {
-		return MetadataRecord{}, err
-	}
-	if stableEqual(currentOverrides, restoredOverrides) {
-		return MetadataRecord{}, apperror.Conflict(
-			apperror.CodeResourceConflict,
-			"The selected revision is already active",
-			nil,
-		)
-	}
-	nextEffective, err := ApplyMetadataOverrides(raw, restoredOverrides)
-	if err != nil {
-		return MetadataRecord{}, err
-	}
-	if err := persistMetadataMutation(ctx, tx, mutationWrite{
-		TrackID: trackID, ActorID: actorID, TraceID: traceID, Action: "RESTORE",
-		AuditAction: "TRACK_METADATA_RESTORED", Reason: input.Reason,
-		PreviousVersion: row.Version, NextVersion: row.Version + 1, Raw: raw,
-		Overrides: restoredOverrides, PreviousEffective: previousEffective, Effective: nextEffective,
-		RestoredRevisionID: revisionID, RestoredMetadataVersion: revision.MetadataVersion,
-	}); err != nil {
-		return MetadataRecord{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return MetadataRecord{}, fmt.Errorf("commit metadata restore: %w", err)
-	}
-	return repository.FindMetadata(ctx, trackID)
 }
 
 func (repository *Repository) EnqueueWriteback(
@@ -491,24 +350,14 @@ func (repository *Repository) EnqueueWriteback(
 	if err != nil {
 		return WritebackJob{}, err
 	}
-	var revisionID *string
-	err = tx.QueryRow(ctx, `
-		select id::text from track_metadata_revisions
-		where track_id = $1 and metadata_version = $2 limit 1`, trackID, metadata.Version).Scan(&revisionID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		revisionID = nil
-	} else if err != nil {
-		return WritebackJob{}, fmt.Errorf("find queued metadata revision: %w", err)
-	}
 	job, err := scanWriteback(tx.QueryRow(ctx, `
 		insert into metadata_writeback_jobs (
-			track_id, source_id, revision_id, requested_by, reason,
+			track_id, source_id, requested_by, reason,
 			metadata_snapshot, metadata_version, expected_source_checksum,
 			root_path_snapshot, source_path_snapshot
-		) values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10)
+		) values ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)
 		returning `+writebackColumns,
-		trackID, source.ID, revisionID, actorID, input.Reason,
-		string(snapshotJSON), metadata.Version, source.ChecksumSHA256,
+		trackID, source.ID, actorID, input.Reason, string(snapshotJSON), metadata.Version, source.ChecksumSHA256,
 		rootPath, source.SourcePath,
 	))
 	if err != nil {
@@ -766,20 +615,12 @@ func (repository *Repository) RetryWriteback(
 	if err != nil {
 		return WritebackJob{}, err
 	}
-	var revisionID *string
-	err = tx.QueryRow(ctx, `select id::text from track_metadata_revisions
-		where track_id = $1 and metadata_version = $2 limit 1`, job.TrackID, metadata.Version).Scan(&revisionID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		revisionID = nil
-	} else if err != nil {
-		return WritebackJob{}, fmt.Errorf("find retried metadata revision: %w", err)
-	}
 	command, err := tx.Exec(ctx, `
 		update metadata_writeback_jobs set
-			source_id = $3, revision_id = $4, requested_by = $5, reason = $6,
-			metadata_snapshot = $7::jsonb, metadata_version = $8,
-			expected_source_checksum = $9,
-			root_path_snapshot = $10, source_path_snapshot = $11,
+			source_id = $3, requested_by = $4, reason = $5,
+			metadata_snapshot = $6::jsonb, metadata_version = $7,
+			expected_source_checksum = $8,
+			root_path_snapshot = $9, source_path_snapshot = $10,
 			status = 'PENDING', attempts = 0,
 			cancel_requested = false, attempt_id = null,
 			stage = 'QUEUED',
@@ -789,7 +630,7 @@ func (repository *Repository) RetryWriteback(
 			output_checksum_sha256 = null,
 			last_error_code = null, last_error = null,
 			version = version + 1, updated_at = now()
-		where id = $1 and version = $2`, job.ID, job.Version, source.ID, revisionID,
+		where id = $1 and version = $2`, job.ID, job.Version, source.ID,
 		actorID, input.Reason, string(snapshotJSON), metadata.Version,
 		source.ChecksumSHA256, rootPath, source.SourcePath)
 	if err != nil {
@@ -821,34 +662,21 @@ func (repository *Repository) RetryWriteback(
 }
 
 type mutationWrite struct {
-	TrackID                 string
-	ActorID                 string
-	TraceID                 string
-	Action                  string
-	AuditAction             string
-	Reason                  string
-	PreviousVersion         int
-	NextVersion             int
-	Raw                     MetadataSnapshot
-	Overrides               MetadataOverrides
-	PreviousEffective       MetadataSnapshot
-	Effective               MetadataSnapshot
-	ResetFields             []string
-	BatchSize               int
-	RestoredRevisionID      string
-	RestoredMetadataVersion int
+	TrackID           string
+	ActorID           string
+	TraceID           string
+	AuditAction       string
+	Reason            string
+	PreviousVersion   int
+	NextVersion       int
+	Overrides         MetadataOverrides
+	PreviousEffective MetadataSnapshot
+	Effective         MetadataSnapshot
+	BatchSize         int
 }
 
 func persistMetadataMutation(ctx context.Context, tx pgx.Tx, input mutationWrite) error {
-	rawJSON, err := encodeJSON(input.Raw)
-	if err != nil {
-		return err
-	}
 	overridesJSON, err := encodeJSON(input.Overrides)
-	if err != nil {
-		return err
-	}
-	effectiveJSON, err := encodeJSON(input.Effective)
 	if err != nil {
 		return err
 	}
@@ -863,15 +691,6 @@ func persistMetadataMutation(ctx context.Context, tx pgx.Tx, input mutationWrite
 	if command.RowsAffected() != 1 {
 		return metadataVersionConflict(input.PreviousVersion, input.PreviousVersion+1, "")
 	}
-	if _, err := tx.Exec(ctx, `
-		insert into track_metadata_revisions (
-			track_id, metadata_version, action, raw_tags, overrides,
-			effective_tags, actor_id, reason
-		) values ($1, $2, $3::metadata_revision_action, $4::jsonb, $5::jsonb,
-			$6::jsonb, $7, $8)`, input.TrackID, input.NextVersion, input.Action,
-		string(rawJSON), string(overridesJSON), string(effectiveJSON), input.ActorID, input.Reason); err != nil {
-		return fmt.Errorf("insert track metadata revision: %w", err)
-	}
 	if err := projectMetadata(ctx, tx, input.TrackID, input.Effective, input.PreviousEffective, "MANUAL"); err != nil {
 		return err
 	}
@@ -880,15 +699,8 @@ func persistMetadataMutation(ctx context.Context, tx pgx.Tx, input mutationWrite
 		"changedFields":   MetadataChangedFields(input.PreviousEffective, input.Effective),
 		"reason":          input.Reason,
 	}
-	if input.ResetFields != nil {
-		details["resetFields"] = input.ResetFields
-	}
 	if input.BatchSize > 0 {
 		details["batchSize"] = input.BatchSize
-	}
-	if input.RestoredRevisionID != "" {
-		details["restoredRevisionId"] = input.RestoredRevisionID
-		details["restoredMetadataVersion"] = input.RestoredMetadataVersion
 	}
 	targetID := input.TrackID
 	if err := insertAudit(ctx, tx, auditWrite{
@@ -912,7 +724,7 @@ func mutationSnapshots(
 	if err != nil {
 		return MetadataSnapshot{}, nil, MetadataSnapshot{}, nil, MetadataSnapshot{}, err
 	}
-	nextOverrides, err := UpdateMetadataOverrides(currentOverrides, input.Patch, input.ResetFields)
+	nextOverrides, err := UpdateMetadataOverrides(currentOverrides, input.Patch)
 	if err != nil {
 		return MetadataSnapshot{}, nil, MetadataSnapshot{}, nil, MetadataSnapshot{}, err
 	}
@@ -1476,20 +1288,10 @@ func scanMetadata(row scanRow, withSource bool) (MetadataRecord, error) {
 	return record, nil
 }
 
-func scanRevision(row scanRow) (RevisionRecord, error) {
-	var revision RevisionRecord
-	err := row.Scan(
-		&revision.ID, &revision.TrackID, &revision.MetadataVersion, &revision.Action,
-		&revision.Raw, &revision.Overrides, &revision.Effective,
-		&revision.ActorID, &revision.Reason, &revision.CreatedAt,
-	)
-	return revision, err
-}
-
 func scanWriteback(row scanRow) (WritebackJob, error) {
 	var job WritebackJob
 	err := row.Scan(
-		&job.ID, &job.TrackID, &job.SourceID, &job.RevisionID, &job.RequestedBy,
+		&job.ID, &job.TrackID, &job.SourceID, &job.RequestedBy,
 		&job.Reason, &job.MetadataSnapshot, &job.MetadataVersion,
 		&job.ExpectedSourceChecksum, &job.RootPathSnapshot, &job.SourcePathSnapshot,
 		&job.Status, &job.Attempts, &job.MaxAttempts,
@@ -1507,12 +1309,8 @@ const metadataColumns = `
 	metadata.overrides, metadata.raw_checksum_sha256, metadata.last_scanned_at,
 	metadata.updated_by::text, metadata.version, metadata.created_at, metadata.updated_at`
 
-const revisionColumns = `
-	id::text, track_id::text, metadata_version, action::text, raw_tags,
-	overrides, effective_tags, actor_id::text, reason, created_at`
-
 const writebackColumns = `
-	id::text, track_id::text, source_id::text, revision_id::text, requested_by::text,
+	id::text, track_id::text, source_id::text, requested_by::text,
 	reason, metadata_snapshot, metadata_version, expected_source_checksum,
 	root_path_snapshot, source_path_snapshot,
 	status::text, attempts, max_attempts, version, cancel_requested, attempt_id::text,

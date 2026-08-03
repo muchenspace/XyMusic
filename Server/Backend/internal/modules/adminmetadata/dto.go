@@ -25,44 +25,6 @@ type MetadataDTO struct {
 	UpdatedAt        string             `json:"updatedAt"`
 }
 
-type RevisionLyricsDTO struct {
-	Format     string `json:"format"`
-	Language   string `json:"language"`
-	Timing     string `json:"timing"`
-	HasContent bool   `json:"hasContent"`
-}
-
-type RevisionSummaryDTO struct {
-	ID               string             `json:"id"`
-	TrackID          string             `json:"trackId"`
-	MetadataVersion  int                `json:"metadataVersion"`
-	Action           string             `json:"action"`
-	Title            string             `json:"title"`
-	Artists          []string           `json:"artists"`
-	Album            *string            `json:"album"`
-	AlbumArtists     []string           `json:"albumArtists"`
-	OverriddenFields []string           `json:"overriddenFields"`
-	Lyrics           *RevisionLyricsDTO `json:"lyrics"`
-	ActorID          *string            `json:"actorId"`
-	Reason           *string            `json:"reason"`
-	CreatedAt        string             `json:"createdAt"`
-}
-
-type RevisionDetailDTO struct {
-	RevisionSummaryDTO
-	Raw       MetadataSnapshot  `json:"raw"`
-	Overrides MetadataOverrides `json:"overrides"`
-	Effective MetadataSnapshot  `json:"effective"`
-}
-
-type RevisionPageDTO struct {
-	Items      []RevisionSummaryDTO `json:"items"`
-	Page       int                  `json:"page"`
-	PageSize   int                  `json:"pageSize"`
-	Total      int                  `json:"total"`
-	TotalPages int                  `json:"totalPages"`
-}
-
 type BatchUpdateItemDTO struct {
 	TrackID       string   `json:"trackId"`
 	Version       int      `json:"version"`
@@ -77,7 +39,6 @@ type WritebackJobDTO struct {
 	ID                   string          `json:"id"`
 	TrackID              string          `json:"trackId"`
 	SourceID             string          `json:"sourceId"`
-	RevisionID           *string         `json:"revisionId"`
 	Status               WritebackStatus `json:"status"`
 	Stage                WritebackStage  `json:"stage"`
 	Attempts             int             `json:"attempts"`

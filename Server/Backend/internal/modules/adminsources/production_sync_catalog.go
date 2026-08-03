@@ -554,12 +554,6 @@ func recordScanMetadata(
 		) VALUES($1,$2,$3::jsonb,'{}'::jsonb,$4,$5)`, trackID, sourceID, rawJSON, checksum, scannedAt); err != nil {
 			return fmt.Errorf("create scanned local library metadata: %w", err)
 		}
-		if _, err := transaction.Exec(ctx, `INSERT INTO track_metadata_revisions(
-			track_id,metadata_version,action,raw_tags,overrides,effective_tags,reason
-		) VALUES($1,1,'SCAN',$2::jsonb,'{}'::jsonb,$2::jsonb,'Initial metadata captured during library scan')`,
-			trackID, rawJSON); err != nil {
-			return fmt.Errorf("create initial local library metadata revision: %w", err)
-		}
 		return nil
 	}
 	if err != nil {
@@ -586,17 +580,6 @@ func recordScanMetadata(
 		return fmt.Errorf("update scanned local library metadata: %w", err)
 	}
 	if changed {
-		effective, err := adminmetadata.ApplyMetadataOverrides(raw, overrides)
-		if err != nil {
-			return err
-		}
-		effectiveJSON, _ := json.Marshal(effective)
-		if _, err := transaction.Exec(ctx, `INSERT INTO track_metadata_revisions(
-			track_id,metadata_version,action,raw_tags,overrides,effective_tags,reason
-		) VALUES($1,$2,'SCAN',$3::jsonb,$4::jsonb,$5::jsonb,'Source tags changed during library scan')`,
-			trackID, nextVersion, rawJSON, overridesJSON, effectiveJSON); err != nil {
-			return fmt.Errorf("create local library metadata revision: %w", err)
-		}
 	}
 	return nil
 }

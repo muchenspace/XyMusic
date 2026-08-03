@@ -181,7 +181,6 @@ func loadAdminSessionContractAPIs(t *testing.T) []adminForbiddenContractAPI {
 func validAdminForbiddenFixture(api adminForbiddenContractAPI) (adminForbiddenFixture, error) {
 	key := api.Method + " " + api.Path
 	path := strings.NewReplacer(
-		":revisionId", forbiddenSecondaryID,
 		":sessionId", forbiddenSecondaryID,
 		":scanId", forbiddenSecondaryID,
 		":jobId", forbiddenSecondaryID,
@@ -248,9 +247,6 @@ var adminForbiddenJSONBodies = map[string]string{
 	"POST /api/v1/admin/metadata/batch": `{
 		"items":[{"trackId":"` + forbiddenPrimaryID + `","expectedVersion":2}],
 		"patch":{"genres":["Rock"]},"reason":"operator batch"
-	}`,
-	"POST /api/v1/admin/tracks/:id/metadata/revisions/:revisionId/restore": `{
-		"expectedVersion":3,"reason":"operator restore"
 	}`,
 	"POST /api/v1/admin/tracks/:id/metadata/writeback": `{
 		"expectedVersion":4,"reason":"operator writeback"

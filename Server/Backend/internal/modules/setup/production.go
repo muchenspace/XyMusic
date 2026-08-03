@@ -183,7 +183,7 @@ func (connection *productionInstallationDatabase) tableHasRows(ctx context.Conte
 func (connection *productionInstallationDatabase) Reset(ctx context.Context) error {
 	const statement = `truncate table
 		tag_scraping_job_items, tag_scraping_jobs, object_cleanup_jobs,
-		metadata_writeback_jobs, track_metadata_revisions, track_metadata,
+		metadata_writeback_jobs, track_metadata,
 		library_scan_runs, local_music_source_tracks, library_roots, local_music_sources,
 		audit_logs, media_jobs, media_uploads, play_history, favorite_tracks,
 		playlist_tracks, playlists, track_variants, lyrics, track_artists, tracks,

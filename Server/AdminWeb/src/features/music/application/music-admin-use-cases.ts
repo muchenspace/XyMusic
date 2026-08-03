@@ -24,7 +24,6 @@ import {
   type TrackMutationTarget,
   type TrackSummary,
   type TrackTagPatch,
-  type TrackTagRevision,
 } from "@/features/music/domain/models";
 
 export class MusicAdminUseCases {
@@ -36,10 +35,6 @@ export class MusicAdminUseCases {
 
   getTrackMetadata(trackId: string, signal?: AbortSignal): Promise<TrackMetadataRecord> {
     return this.gateway.getTrackMetadata(trackId, signal);
-  }
-
-  listTagHistory(trackId: string, page: number, pageSize: number, signal?: AbortSignal): Promise<MusicPage<TrackTagRevision>> {
-    return this.gateway.listTagHistory(trackId, page, pageSize, signal);
   }
 
   updateTrackMetadata(trackId: string, command: UpdateTrackMetadataCommand): Promise<TrackMetadataRecord> {
@@ -78,10 +73,6 @@ export class MusicAdminUseCases {
       patch,
       reason,
     });
-  }
-
-  restoreTagRevision(trackId: string, revisionId: string, expectedVersion: number, reason: string): Promise<TrackMetadataRecord> {
-    return this.gateway.restoreTagRevision(trackId, revisionId, expectedVersion, reason);
   }
 
   listAlbums(query: MusicListQuery, signal?: AbortSignal): Promise<MusicPage<AlbumSummary>> {

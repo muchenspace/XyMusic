@@ -18,7 +18,7 @@ import (
 	"xymusic/server/internal/shared/apperror"
 )
 
-func TestRoutesExposeElevenMetadataEndpoints(t *testing.T) {
+func TestRoutesExposeEightMetadataEndpoints(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	api := &metadataAPIStub{calls: make(map[string]int)}
 	identityService := &metadataIdentityStub{actor: identity.AuthenticatedActor{
@@ -33,8 +33,7 @@ func TestRoutesExposeElevenMetadataEndpoints(t *testing.T) {
 	engine.Use(httpserver.TraceIDMiddleware(func() string { return "trace-metadata-123" }))
 	routes.Register(engine)
 	trackID := "00000000-0000-0000-0000-000000000001"
-	revisionID := "00000000-0000-0000-0000-000000000002"
-	jobID := "00000000-0000-0000-0000-000000000003"
+	jobID := "00000000-0000-0000-0000-000000000002"
 	requests := []struct {
 		method, path, body string
 		status             int
@@ -43,10 +42,7 @@ func TestRoutesExposeElevenMetadataEndpoints(t *testing.T) {
 		{http.MethodGet, "/api/v1/admin/tracks/" + trackID + "/metadata", "", http.StatusOK, false},
 		{http.MethodPatch, "/api/v1/admin/tracks/" + trackID + "/metadata", `{"expectedVersion":1,"patch":{"title":"New title"},"reason":"edit"}`, http.StatusOK, true},
 		{http.MethodPost, "/api/v1/admin/metadata/batch", `{"items":[{"trackId":"` + trackID + `","expectedVersion":2}],"patch":{"genres":["Rock"]},"reason":"batch"}`, http.StatusOK, true},
-		{http.MethodGet, "/api/v1/admin/tracks/" + trackID + "/metadata/revisions?page=2&pageSize=10", "", http.StatusOK, false},
-		{http.MethodGet, "/api/v1/admin/tracks/" + trackID + "/metadata/revisions/" + revisionID, "", http.StatusOK, false},
-		{http.MethodPost, "/api/v1/admin/tracks/" + trackID + "/metadata/revisions/" + revisionID + "/restore", `{"expectedVersion":3,"reason":"restore"}`, http.StatusOK, true},
-		{http.MethodPost, "/api/v1/admin/tracks/" + trackID + "/metadata/writeback", `{"expectedVersion":4,"reason":"write"}`, http.StatusAccepted, true},
+		{http.MethodPost, "/api/v1/admin/tracks/" + trackID + "/metadata/writeback", `{"expectedVersion":3,"reason":"write"}`, http.StatusAccepted, true},
 		{http.MethodGet, "/api/v1/admin/metadata/writeback-jobs?page=1&pageSize=20&status=FAILED&trackId=" + trackID, "", http.StatusOK, false},
 		{http.MethodGet, "/api/v1/admin/metadata/writeback-jobs/" + jobID, "", http.StatusOK, false},
 		{http.MethodPost, "/api/v1/admin/metadata/writeback-jobs/" + jobID + "/retry", `{"expectedVersion":2,"reason":"retry"}`, http.StatusAccepted, true},
@@ -74,20 +70,19 @@ func TestRoutesExposeElevenMetadataEndpoints(t *testing.T) {
 		}
 	}
 	for _, name := range []string{
-		"metadata", "update", "batch", "revisions", "revision", "restore",
+		"metadata", "update", "batch",
 		"enqueue", "writebacks", "writeback", "retry", "cancel",
 	} {
 		if api.calls[name] != 1 {
 			t.Fatalf("%s calls=%d all=%v", name, api.calls[name], api.calls)
 		}
 	}
-	if identityService.calls != 11 {
+	if identityService.calls != 8 {
 		t.Fatalf("identity calls=%d", identityService.calls)
 	}
 	wantScopes := []string{
 		"admin.track.metadata.update:" + trackID,
 		"admin.track.metadata.batch",
-		"admin.track.metadata.restore:" + trackID + ":" + revisionID,
 		"admin.track.metadata.writeback:" + trackID,
 		"admin.track.metadata.writeback.retry:" + jobID,
 		"admin.track.metadata.writeback.cancel:" + jobID,
@@ -95,9 +90,8 @@ func TestRoutesExposeElevenMetadataEndpoints(t *testing.T) {
 	if !reflect.DeepEqual(idempotency.scopes, wantScopes) {
 		t.Fatalf("scopes=%v", idempotency.scopes)
 	}
-	if api.revisionPage != 2 || api.revisionPageSize != 10 || api.writebackFilter.Status != WritebackFailed ||
-		api.writebackFilter.TrackID != trackID {
-		t.Fatalf("queries=%d/%d %+v", api.revisionPage, api.revisionPageSize, api.writebackFilter)
+	if api.writebackFilter.Status != WritebackFailed || api.writebackFilter.TrackID != trackID {
+		t.Fatalf("writeback query=%+v", api.writebackFilter)
 	}
 }
 
@@ -226,7 +220,6 @@ func TestRoutesRejectInvalidContractsBeforeAuthentication(t *testing.T) {
 		{http.MethodPatch, "/api/v1/admin/tracks/" + trackID + "/metadata", `{"expectedVersion":0,"patch":{"title":"x"},"reason":"x"}`},
 		{http.MethodPatch, "/api/v1/admin/tracks/" + trackID + "/metadata", `{"expectedVersion":1,"patch":{"title":1},"reason":"x"}`},
 		{http.MethodPatch, "/api/v1/admin/tracks/" + trackID + "/metadata", `{"expectedVersion":1,"patch":{"lyrics":{"content":"text","format":"PLAIN","language":"und"}},"reason":"x"}`},
-		{http.MethodPatch, "/api/v1/admin/tracks/" + trackID + "/metadata", `{"expectedVersion":1,"patch":{"title":"x"},"resetFields":null,"reason":"x"}`},
 		{http.MethodPost, "/api/v1/admin/metadata/batch", `{"items":[],"patch":{"title":"x"},"reason":"x"}`},
 	}
 	for _, item := range invalid {
@@ -256,7 +249,6 @@ func TestRoutesIgnoreUnknownQueryAndUseLastDuplicateValue(t *testing.T) {
 	routes.Register(engine)
 	trackID := "00000000-0000-0000-0000-000000000001"
 	requests := []string{
-		"/api/v1/admin/tracks/" + trackID + "/metadata/revisions?page=bad&page=3&pageSize=5&pageSize=7&unknown=true",
 		"/api/v1/admin/metadata/writeback-jobs?status=PENDING&status=FAILED&trackId=bad&trackId=" + trackID + "&unknown=true",
 	}
 	for _, path := range requests {
@@ -267,9 +259,6 @@ func TestRoutesIgnoreUnknownQueryAndUseLastDuplicateValue(t *testing.T) {
 		if response.Code != http.StatusOK {
 			t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body.String())
 		}
-	}
-	if api.revisionPage != 3 || api.revisionPageSize != 7 {
-		t.Fatalf("revision query=%d/%d", api.revisionPage, api.revisionPageSize)
 	}
 	if api.writebackFilter.Status != WritebackFailed || api.writebackFilter.TrackID != trackID {
 		t.Fatalf("writeback query=%+v", api.writebackFilter)
@@ -299,10 +288,9 @@ func TestMutationAuthenticatesBeforeIdempotencyKeyValidation(t *testing.T) {
 }
 
 type metadataAPIStub struct {
-	calls                          map[string]int
-	updateInput                    MetadataMutationInput
-	revisionPage, revisionPageSize int
-	writebackFilter                WritebackListInput
+	calls           map[string]int
+	updateInput     MetadataMutationInput
+	writebackFilter WritebackListInput
 }
 
 func (stub *metadataAPIStub) Metadata(context.Context, string) (MetadataDTO, error) {
@@ -317,19 +305,6 @@ func (stub *metadataAPIStub) Update(_ context.Context, _, _, _ string, input Met
 func (stub *metadataAPIStub) BatchUpdate(context.Context, string, string, BatchMetadataMutationInput) (BatchUpdateDTO, error) {
 	stub.calls["batch"]++
 	return BatchUpdateDTO{Items: []BatchUpdateItemDTO{}}, nil
-}
-func (stub *metadataAPIStub) Revisions(_ context.Context, _ string, page, pageSize int) (RevisionPageDTO, error) {
-	stub.calls["revisions"]++
-	stub.revisionPage, stub.revisionPageSize = page, pageSize
-	return RevisionPageDTO{Items: []RevisionSummaryDTO{}}, nil
-}
-func (stub *metadataAPIStub) Revision(context.Context, string, string) (RevisionDetailDTO, error) {
-	stub.calls["revision"]++
-	return RevisionDetailDTO{}, nil
-}
-func (stub *metadataAPIStub) Restore(context.Context, string, string, string, string, VersionReasonInput) (MetadataDTO, error) {
-	stub.calls["restore"]++
-	return MetadataDTO{}, nil
 }
 func (stub *metadataAPIStub) EnqueueWriteback(context.Context, string, string, string, VersionReasonInput) (WritebackJobDTO, error) {
 	stub.calls["enqueue"]++

@@ -1,39 +1,11 @@
 package adminmetadata
 
 import (
-	"encoding/json"
 	"reflect"
-	"strings"
 	"testing"
 
 	"xymusic/server/internal/shared/apperror"
 )
-
-func TestPresentRevisionIncludesLyricTiming(t *testing.T) {
-	record := RevisionRecord{
-		ID:      "revision-1",
-		TrackID: "track-1",
-		Effective: json.RawMessage(`{
-			"title":"Song","credits":[],"albumArtists":[],"album":null,
-			"releaseDate":null,"trackNumber":null,"trackTotal":null,"discNumber":null,
-			"discTotal":null,"genres":[],"bpm":null,"isrc":null,"comment":null,
-			"copyright":null,"lyrics":{"content":"[00:01.00]<00:01.00>word","format":"LRC","language":"und","timing":"WORD"},
-			"hasArtwork":false
-		}`),
-		Overrides: json.RawMessage(`{}`),
-	}
-	summary, err := presentRevision(record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload, err := json.Marshal(summary)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(payload), `"timing":"WORD"`) {
-		t.Fatalf("revision summary omitted lyric timing: %s", payload)
-	}
-}
 
 func TestNormalizeMetadataSnapshotAndOverrides(t *testing.T) {
 	snapshot, err := NormalizeMetadataSnapshot(map[string]any{
@@ -73,7 +45,7 @@ func TestNormalizeMetadataSnapshotAndOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	next, err := UpdateMetadataOverrides(MetadataOverrides{"genres": []any{"Old"}}, patch, []string{"genres"})
+	next, err := UpdateMetadataOverrides(MetadataOverrides{"genres": []any{"Old"}}, patch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,8 +53,8 @@ func TestNormalizeMetadataSnapshotAndOverrides(t *testing.T) {
 		next["comment"] != "note" {
 		t.Fatalf("overrides=%#v", next)
 	}
-	if _, exists := next["genres"]; exists {
-		t.Fatalf("reset field remains: %#v", next)
+	if _, exists := next["genres"]; !exists {
+		t.Fatalf("existing override was unexpectedly removed: %#v", next)
 	}
 	effective, err := ApplyMetadataOverrides(snapshot, next)
 	if err != nil {
@@ -104,8 +76,8 @@ func TestMetadataValidationRejectsInvalidRelationshipsAndUnknownFields(t *testin
 	if _, err := NormalizeMetadataPatch(map[string]any{"unknown": true}); !apperror.IsCode(err, apperror.CodeValidationError) {
 		t.Fatalf("unknown error=%v", err)
 	}
-	if _, err := UpdateMetadataOverrides(MetadataOverrides{}, map[string]any{"title": "x"}, []string{"title"}); !apperror.IsCode(err, apperror.CodeValidationError) {
-		t.Fatalf("patch/reset error=%v", err)
+	if _, err := UpdateMetadataOverrides(MetadataOverrides{}, map[string]any{}); !apperror.IsCode(err, apperror.CodeValidationError) {
+		t.Fatalf("empty patch error=%v", err)
 	}
 }
 

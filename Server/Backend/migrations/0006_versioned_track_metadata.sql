@@ -1,4 +1,3 @@
-CREATE TYPE metadata_revision_action AS ENUM ('BASELINE', 'SCAN', 'EDIT', 'RESTORE', 'WRITEBACK');
 CREATE TYPE metadata_writeback_status AS ENUM ('PENDING', 'PROCESSING', 'READY', 'FAILED', 'CANCELLED');
 
 CREATE TABLE track_metadata (
@@ -87,38 +86,10 @@ LEFT JOIN LATERAL (
   LIMIT 1
 ) source ON true;
 
-CREATE TABLE track_metadata_revisions (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  track_id uuid NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
-  metadata_version integer NOT NULL CONSTRAINT track_metadata_revisions_version_check CHECK (metadata_version > 0),
-  action metadata_revision_action NOT NULL,
-  raw_tags jsonb NOT NULL,
-  overrides jsonb NOT NULL,
-  effective_tags jsonb NOT NULL,
-  actor_id uuid REFERENCES users(id) ON DELETE SET NULL,
-  reason varchar(500),
-  created_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT track_metadata_revisions_raw_object_check CHECK (jsonb_typeof(raw_tags) = 'object'),
-  CONSTRAINT track_metadata_revisions_overrides_object_check CHECK (jsonb_typeof(overrides) = 'object'),
-  CONSTRAINT track_metadata_revisions_effective_object_check CHECK (jsonb_typeof(effective_tags) = 'object')
-);
-
-CREATE UNIQUE INDEX track_metadata_revisions_track_version_unique
-  ON track_metadata_revisions(track_id, metadata_version);
-CREATE INDEX track_metadata_revisions_track_time_index
-  ON track_metadata_revisions(track_id, created_at, id);
-
-INSERT INTO track_metadata_revisions (
-  track_id, metadata_version, action, raw_tags, overrides, effective_tags, reason
-)
-SELECT track_id, version, 'BASELINE', raw_tags, overrides, raw_tags, 'Initial metadata snapshot'
-FROM track_metadata;
-
 CREATE TABLE metadata_writeback_jobs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   track_id uuid NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
   source_id uuid NOT NULL REFERENCES local_music_sources(id) ON DELETE CASCADE,
-  revision_id uuid REFERENCES track_metadata_revisions(id) ON DELETE SET NULL,
   requested_by uuid REFERENCES users(id) ON DELETE SET NULL,
   reason varchar(500) NOT NULL,
   metadata_snapshot jsonb NOT NULL,

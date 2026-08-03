@@ -16,14 +16,14 @@ import StatePanel from "@/components/StatePanel.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
 import TagScrapeDialog from "@/components/TagScrapeDialog.vue";
 import TrackStatusDisc from "@/components/TrackStatusDisc.vue";
-import type { CreditRole, PermanentDeleteTrackJobItem, PermanentDeleteTracksJob, TrackMetadataRecord, TrackSummary, TrackTagRevision, TrackTagValues } from "@/features/music/domain/models";
+import type { CreditRole, PermanentDeleteTrackJobItem, PermanentDeleteTracksJob, TrackMetadataRecord, TrackSummary, TrackTagValues } from "@/features/music/domain/models";
 import { useMusicAdmin } from "@/app/services/music";
 import { normalizeTrackTagScalars } from "@/features/music/presentation/track-tag-form";
 import { assertWritebackAllowed, sourceWritebackCapability, writebackBlockedMessage } from "@/features/music/presentation/writeback-capability";
 import { useUiStore } from "@/stores/ui";
 import { formatDate, formatDuration } from "@/utils/format";
 
-type EditorTab = "metadata" | "lyrics" | "original" | "history";
+type EditorTab = "metadata" | "lyrics";
 type EditableField = Exclude<keyof TrackTagValues, "hasArtwork">;
 type TrackStateAction = "publish" | "archive" | "restore";
 type TrackSelectionKind = "ACTIVE" | "ARCHIVED" | "MIXED" | null;
@@ -49,7 +49,6 @@ const savingMetadata = ref(false);
 const bulkOpen = ref(false);
 const scrapeOpen = ref(false);
 const batchScrapeOpen = ref(false);
-const restoreOpen = ref(false);
 const archiveOpen = ref(false);
 const batchRestoreOpen = ref(false);
 const permanentDeleteOpen = ref(false);
@@ -60,18 +59,12 @@ const permanentDeleteConfirmation = ref("");
 const permanentDeleteJob = ref<PermanentDeleteTracksJob>();
 const batchRestoreError = ref("");
 const permanentDeleteError = ref("");
-const revisionToRestore = ref<TrackTagRevision>();
-const restoreReason = ref("");
 const actionError = ref("");
-const resetAllOverrides = ref(false);
 const editorDirty = ref(false);
 const remoteChanged = ref(false);
-const historyPage = ref(1);
-const historyPageSize = ref(20);
 let populating = false;
 let allowArchiveClose = false;
 let allowBulkClose = false;
-let allowRestoreClose = false;
 const bulk = reactive({ primary: "", albumArtists: "", album: "", genres: "", comment: "", reason: "" });
 const tags = reactive<TagForm>({ title: "", primary: "", albumArtists: "", featured: "", composers: "", lyricists: "", producers: "", album: "", releaseDate: "", trackNumber: "", trackTotal: "", discNumber: "", discTotal: "", genres: "", bpm: "", isrc: "", copyright: "", comment: "", lyrics: "", lyricsFormat: "PLAIN", lyricsTiming: "LINE", lyricsLanguage: "und", reason: "" });
 
@@ -90,14 +83,6 @@ const permanentDeleteJobQuery = useQuery({
   refetchInterval: (state) => !state.state.data || deleteJobStatusActive(state.state.data.status) ? 1_000 : false,
 });
 const metadataQuery = useQuery({ queryKey: computed(() => ["admin", "track", selectedTrack.value?.id, "metadata"]), queryFn: ({ signal }) => musicAdmin.getTrackMetadata(selectedTrack.value!.id, signal), enabled: computed(() => editorOpen.value && Boolean(selectedTrack.value)) });
-const historyQuery = useQuery({
-  queryKey: computed(() => ["admin", "track", selectedTrack.value?.id, "metadata", "revisions", historyPage.value, historyPageSize.value]),
-  queryFn: ({ signal }) => musicAdmin.listTagHistory(selectedTrack.value!.id, historyPage.value, historyPageSize.value, signal),
-  enabled: computed(() => editorOpen.value && editorTab.value === "history" && Boolean(selectedTrack.value)),
-  placeholderData: (previousData, previousQuery) => previousQuery?.queryKey[2] === selectedTrack.value?.id
-    ? keepPreviousData(previousData)
-    : undefined,
-});
 const editorWritebackCapability = computed(() => sourceWritebackCapability(metadataQuery.data.value?.source));
 
 function nameList(value: string): string[] { return value.split(/[;\n]/).map((item) => item.trim()).filter(Boolean); }
@@ -107,7 +92,6 @@ function populate(record: TrackMetadataRecord): void {
   populating = true;
   const value = record.effective;
   Object.assign(tags, { title: value.title, primary: credits(value, "PRIMARY"), albumArtists: value.albumArtists.join("; "), featured: credits(value, "FEATURED"), composers: credits(value, "COMPOSER"), lyricists: credits(value, "LYRICIST"), producers: credits(value, "PRODUCER"), album: value.album ?? "", releaseDate: value.releaseDate ?? "", trackNumber: value.trackNumber?.toString() ?? "", trackTotal: value.trackTotal?.toString() ?? "", discNumber: value.discNumber?.toString() ?? "", discTotal: value.discTotal?.toString() ?? "", genres: value.genres.join(", "), bpm: value.bpm?.toString() ?? "", isrc: value.isrc ?? "", copyright: value.copyright ?? "", comment: value.comment ?? "", lyrics: value.lyrics?.content ?? "", lyricsFormat: value.lyrics?.format ?? "PLAIN", lyricsTiming: value.lyrics ? value.lyrics.timing : "LINE", lyricsLanguage: value.lyrics?.language ?? "und", reason: "" });
-  resetAllOverrides.value = false;
   editorDirty.value = false;
   remoteChanged.value = false;
   queueMicrotask(() => { populating = false; });
@@ -123,7 +107,6 @@ watch(tags, () => { if (editorOpen.value && !populating) editorDirty.value = tru
 watch(() => tags.lyricsFormat, (format) => {
   if (format === "PLAIN") tags.lyricsTiming = "LINE";
 });
-watch(resetAllOverrides, () => { if (editorOpen.value && !populating) editorDirty.value = true; });
 watch(() => editorWritebackCapability.value.canWriteBack, (canWriteBack) => {
   if (!canWriteBack) writeBackAfterSave.value = false;
 }, { immediate: true });
@@ -157,7 +140,6 @@ function edit(track: TrackSummary): void {
   }
   selectedTrack.value = track;
   editorTab.value = "metadata";
-  historyPage.value = 1;
   writeBackAfterSave.value = false;
   editorDirty.value = false;
   remoteChanged.value = false;
@@ -170,7 +152,6 @@ function askArchive(track: TrackSummary): void { deletionTrack.value = track; ac
 function askPermanentDelete(track: TrackSummary): void { openPermanentDelete([track]); }
 function clearFilters(): void { search.value = ""; status.value = "READY"; metadataStatus.value = ""; page.value = 1; }
 function changePageSize(value: number): void { pageSize.value = value; page.value = 1; }
-function changeHistoryPageSize(value: number): void { historyPageSize.value = value; historyPage.value = 1; }
 function clearSelection(): void { selectedTracks.value = new Map(); }
 function removeSelected(trackIds: Iterable<string>): void {
   const next = new Map(selectedTracks.value);
@@ -246,15 +227,6 @@ watch(() => tracksQuery.data.value?.items, (items) => {
 async function refresh(): Promise<void> { await Promise.all([queryClient.invalidateQueries({ queryKey: ["admin", "tracks"] }), queryClient.invalidateQueries({ queryKey: ["admin", "track"] }), queryClient.invalidateQueries({ queryKey: ["admin", "dashboard"] }), queryClient.invalidateQueries({ queryKey: ["admin", "audit"] })]); }
 async function refreshLists(): Promise<void> { await Promise.all([queryClient.invalidateQueries({ queryKey: ["admin", "tracks"] }), queryClient.invalidateQueries({ queryKey: ["admin", "dashboard"] })]); }
 
-function displayValue(field: string, value: unknown): string {
-  if (field === "lyrics" && value && typeof value === "object" && "content" in value) {
-    const content = String((value as { content?: unknown }).content ?? "");
-    return content ? `歌词 ${content.length} 字符 · ${content.slice(0, 80).replace(/\s+/g, " ")}${content.length > 80 ? "…" : ""}` : "无歌词";
-  }
-  const serialized = JSON.stringify(value);
-  return serialized && serialized.length > 240 ? `${serialized.slice(0, 240)}…` : serialized ?? "—";
-}
-
 function beforeUnload(event: BeforeUnloadEvent): void {
   if (!editorOpen.value || !editorDirty.value) return;
   event.preventDefault();
@@ -275,7 +247,6 @@ const saveMutation = useMutation({
     command: {
       expectedVersion: number;
       patch: Partial<Omit<TrackTagValues, "hasArtwork">>;
-      resetFields?: string[];
       reason: string;
     };
   }) => musicAdmin.updateTrackMetadata(input.trackId, input.command),
@@ -301,13 +272,12 @@ async function saveMetadata(): Promise<void> {
     const currentWritebackCapability = sourceWritebackCapability(record.source);
     if (requestedWriteBack && !currentWritebackCapability.canWriteBack) writeBackAfterSave.value = false;
     assertWritebackAllowed(requestedWriteBack, currentWritebackCapability);
-    const patch = resetAllOverrides.value ? {} : changedPatch(record);
-    const resetFields = resetAllOverrides.value ? record.overriddenFields : undefined;
-    const changed = Object.keys(patch).length > 0 || Boolean(resetFields?.length);
+    const patch = changedPatch(record);
+    const changed = Object.keys(patch).length > 0;
     if (!changed && !requestedWriteBack) throw new Error("没有需要保存的 Tag 变化");
     const saved = changed ? await saveMutation.mutateAsync({
       trackId: record.trackId,
-      command: { expectedVersion: record.version, patch, resetFields, reason },
+      command: { expectedVersion: record.version, patch, reason },
     }) : record;
     if (requestedWriteBack) {
       try {
@@ -449,13 +419,10 @@ function openBatchScrape(): void {
   actionError.value = ""; batchScrapeOpen.value = true;
 }
 async function scrapingCompleted(): Promise<void> { clearSelection(); await refresh(); }
-function askRestore(revision: TrackTagRevision): void { revisionToRestore.value = revision; restoreReason.value = ""; actionError.value = ""; restoreOpen.value = true; }
-const restoreMutation = useMutation({ mutationFn: () => { if (!restoreReason.value.trim()) throw new Error("请填写恢复原因"); return musicAdmin.restoreTagRevision(metadataQuery.data.value!.trackId, revisionToRestore.value!.id, metadataQuery.data.value!.version, restoreReason.value.trim()); }, onSuccess: async (record) => { allowRestoreClose = true; restoreOpen.value = false; queryClient.setQueryData(["admin", "track", record.trackId, "metadata"], record); populate(record); editorTab.value = "metadata"; ui.notify("success", "历史 Tag 版本已恢复"); await refresh(); }, onError: (error) => { actionError.value = error instanceof Error ? error.message : "恢复失败"; } });
 watch(archiveOpen, (value) => { if (!value && stateMutation.isPending.value && stateMutation.variables.value?.action === "archive" && !allowArchiveClose) archiveOpen.value = true; allowArchiveClose = false; });
 watch(batchRestoreOpen, (value) => { if (!value && !batchRestoreMutation.isPending.value) { batchRestoreTargets.value = []; batchRestoreError.value = ""; } });
 watch(permanentDeleteOpen, (value) => { if (!value && !permanentDeletePending.value) { permanentDeleteTargets.value = []; permanentDeleteConfirmation.value = ""; permanentDeleteJob.value = undefined; permanentDeleteError.value = ""; } });
 watch(bulkOpen, (value) => { if (!value && bulkMutation.isPending.value && !allowBulkClose) bulkOpen.value = true; allowBulkClose = false; });
-watch(restoreOpen, (value) => { if (!value && restoreMutation.isPending.value && !allowRestoreClose) restoreOpen.value = true; allowRestoreClose = false; });
 </script>
 
 <template>
@@ -474,7 +441,7 @@ watch(restoreOpen, (value) => { if (!value && restoreMutation.isPending.value &&
           <input v-model="search" class="ui-input !pl-10" type="search" aria-label="搜索曲目" placeholder="搜索标题、艺术家、专辑或路径" @input="page = 1" />
         </div>
         <select v-model="status" class="ui-select lg:!w-40" aria-label="音频状态" @change="page = 1"><option value="READY">可用</option><option value="PROCESSING">处理中</option><option value="ERROR">异常</option><option value="ARCHIVED">已归档</option></select>
-        <select v-model="metadataStatus" class="ui-select lg:!w-48" aria-label="Tag 状态" @change="page = 1"><option value="">全部 Tag 状态</option><option value="ORIGINAL">原始</option><option value="OVERRIDDEN">已修改</option><option value="PENDING_WRITE">等待写回</option><option value="WRITE_FAILED">写回失败</option></select>
+        <select v-model="metadataStatus" class="ui-select lg:!w-48" aria-label="Tag 状态" @change="page = 1"><option value="">全部 Tag 状态</option><option value="NORMAL">正常</option><option value="PENDING_WRITE">等待写回</option><option value="WRITE_FAILED">写回失败</option></select>
         <AppButton class="shrink-0 whitespace-nowrap" variant="ghost" @click="clearFilters"><template #icon><ListFilter :size="15" /></template>清除</AppButton>
       </div>
       <StatePanel v-if="tracksQuery.isPending.value" state="loading" />
@@ -502,19 +469,16 @@ watch(restoreOpen, (value) => { if (!value && restoreMutation.isPending.value &&
       </template>
     </section>
 
-    <BaseDialog v-model="editorOpen" title="编辑音乐 Tag" :description="selectedTrack?.source?.relativePath ?? selectedTrack?.title" side="right" :prevent-close="savingMetadata" :confirm-close="editorDirty ? '曲目 Tag 尚未保存，确定关闭吗？' : undefined"><StatePanel v-if="metadataQuery.isPending.value" state="loading" compact /><StatePanel v-else-if="metadataQuery.isError.value" state="error" compact @retry="metadataQuery.refetch()" /><template v-else-if="metadataQuery.data.value"><div class="flex gap-4 rounded-2xl bg-[var(--surface-muted)] p-4"><span class="grid h-16 w-16 place-items-center overflow-hidden rounded-xl bg-[var(--surface-solid)]"><img v-if="selectedTrack?.artwork" :src="selectedTrack.artwork.url" class="h-full w-full object-cover" alt="封面" width="64" height="64" decoding="async" /><Disc3 v-else :size="24" /></span><div class="min-w-0 flex-1"><h3 class="truncate text-lg font-bold">{{ metadataQuery.data.value.effective.title }}</h3><p class="mt-1 text-sm text-[var(--muted)]">{{ credits(metadataQuery.data.value.effective, 'PRIMARY') }}</p><div class="mt-2 flex flex-wrap gap-2"><AudioStatusBadge v-if="selectedTrack" :status="selectedTrack.audioStatus" :source-status="selectedTrack.source?.status" /><StatusBadge :status="selectedTrack?.metadataStatus ?? 'ORIGINAL'" /><StatusBadge :status="editorWritebackCapability.canWriteBack ? 'READ_WRITE' : 'READ_ONLY'" /></div></div></div><div class="mt-5 flex gap-1 overflow-x-auto rounded-xl bg-[var(--surface-muted)] p-1"><button v-for="item in [{key:'metadata',label:'基本 Tag'},{key:'lyrics',label:'歌词'},{key:'original',label:'原始对比'},{key:'history',label:'修改历史'}]" :key="item.key" class="pressable min-w-max flex-1 rounded-lg px-3 py-2 text-xs font-bold" :class="editorTab === item.key ? 'bg-[var(--surface-solid)] text-[var(--primary)] shadow-sm' : 'text-[var(--muted)]'" type="button" @click="editorTab = item.key as EditorTab">{{ item.label }}</button></div>
+    <BaseDialog v-model="editorOpen" title="编辑音乐 Tag" :description="selectedTrack?.source?.relativePath ?? selectedTrack?.title" side="right" :prevent-close="savingMetadata" :confirm-close="editorDirty ? '曲目 Tag 尚未保存，确定关闭吗？' : undefined"><StatePanel v-if="metadataQuery.isPending.value" state="loading" compact /><StatePanel v-else-if="metadataQuery.isError.value" state="error" compact @retry="metadataQuery.refetch()" /><template v-else-if="metadataQuery.data.value"><div class="flex gap-4 rounded-2xl bg-[var(--surface-muted)] p-4"><span class="grid h-16 w-16 place-items-center overflow-hidden rounded-xl bg-[var(--surface-solid)]"><img v-if="selectedTrack?.artwork" :src="selectedTrack.artwork.url" class="h-full w-full object-cover" alt="封面" width="64" height="64" decoding="async" /><Disc3 v-else :size="24" /></span><div class="min-w-0 flex-1"><h3 class="truncate text-lg font-bold">{{ metadataQuery.data.value.effective.title }}</h3><p class="mt-1 text-sm text-[var(--muted)]">{{ credits(metadataQuery.data.value.effective, 'PRIMARY') }}</p><div class="mt-2 flex flex-wrap gap-2"><AudioStatusBadge v-if="selectedTrack" :status="selectedTrack.audioStatus" :source-status="selectedTrack.source?.status" /><StatusBadge :status="selectedTrack?.metadataStatus ?? 'NORMAL'" /><StatusBadge :status="editorWritebackCapability.canWriteBack ? 'READ_WRITE' : 'READ_ONLY'" /></div></div></div><div class="mt-5 flex gap-1 overflow-x-auto rounded-xl bg-[var(--surface-muted)] p-1"><button v-for="item in [{key:'metadata',label:'基本 Tag'},{key:'lyrics',label:'歌词'}]" :key="item.key" class="pressable min-w-max flex-1 rounded-lg px-3 py-2 text-xs font-bold" :class="editorTab === item.key ? 'bg-[var(--surface-solid)] text-[var(--primary)] shadow-sm' : 'text-[var(--muted)]'" type="button" @click="editorTab = item.key as EditorTab">{{ item.label }}</button></div>
       <Transition name="content-swap" mode="out-in">
       <div v-if="editorTab === 'metadata'" key="metadata" class="mt-6 grid gap-5 sm:grid-cols-2"><div class="sm:col-span-2"><label class="ui-label">标题</label><input v-model="tags.title" class="ui-input" /></div><div class="sm:col-span-2"><label class="ui-label">主要艺术家</label><input v-model="tags.primary" class="ui-input" /></div><div class="sm:col-span-2"><label class="ui-label">专辑艺术家</label><input v-model="tags.albumArtists" class="ui-input" placeholder="多个艺术家使用分号或换行分隔" /></div><div><label class="ui-label">合作艺术家</label><input v-model="tags.featured" class="ui-input" /></div><div><label class="ui-label">专辑</label><input v-model="tags.album" class="ui-input" /></div><div><label class="ui-label">作曲</label><input v-model="tags.composers" class="ui-input" /></div><div><label class="ui-label">作词</label><input v-model="tags.lyricists" class="ui-input" /></div><div><label class="ui-label">制作人</label><input v-model="tags.producers" class="ui-input" /></div><div><label class="ui-label">发行日期</label><input v-model="tags.releaseDate" class="ui-input" inputmode="numeric" maxlength="10" placeholder="YYYY、YYYY-MM 或 YYYY-MM-DD" /></div><div class="grid grid-cols-2 gap-2"><div><label class="ui-label">音轨号</label><input v-model="tags.trackNumber" class="ui-input" type="number" min="1" max="9999" step="1" /></div><div><label class="ui-label">总音轨</label><input v-model="tags.trackTotal" class="ui-input" type="number" min="1" max="9999" step="1" /></div></div><div class="grid grid-cols-2 gap-2"><div><label class="ui-label">碟号</label><input v-model="tags.discNumber" class="ui-input" type="number" min="1" max="999" step="1" /></div><div><label class="ui-label">总碟数</label><input v-model="tags.discTotal" class="ui-input" type="number" min="1" max="999" step="1" /></div></div><div><label class="ui-label">流派</label><input v-model="tags.genres" class="ui-input" /></div><div><label class="ui-label">BPM</label><input v-model="tags.bpm" class="ui-input" type="number" min="1" max="999.99" step="any" /></div><div><label class="ui-label">ISRC</label><input v-model="tags.isrc" class="ui-input uppercase" maxlength="20" placeholder="USABC1234567" /></div><div><label class="ui-label">版权</label><input v-model="tags.copyright" class="ui-input" /></div><div class="sm:col-span-2"><label class="ui-label">备注</label><textarea v-model="tags.comment" class="ui-textarea" /></div></div>
       <div v-else-if="editorTab === 'lyrics'" key="lyrics" class="mt-6"><div class="grid gap-3 sm:grid-cols-3"><select v-model="tags.lyricsFormat" class="ui-select" aria-label="歌词格式"><option value="PLAIN">普通文本</option><option value="LRC">LRC 时间轴</option></select><select v-model="tags.lyricsTiming" class="ui-select" aria-label="歌词粒度" :disabled="tags.lyricsFormat === 'PLAIN'"><option value="LINE">逐行歌词</option><option value="WORD">逐字歌词</option></select><input v-model="tags.lyricsLanguage" class="ui-input" maxlength="35" aria-label="歌词语言" placeholder="语言标签，例如 zh-CN 或 und" /></div><textarea v-model="tags.lyrics" class="ui-textarea mt-4 min-h-[380px] font-mono leading-7" aria-label="歌词内容" /></div>
-      <div v-else-if="editorTab === 'original'" key="original" class="mt-6"><div class="overflow-hidden rounded-xl border border-[var(--border)]"><table class="data-table"><thead><tr><th>字段</th><th>原始值</th><th>当前生效值</th></tr></thead><tbody><tr v-for="field in ['title','credits','albumArtists','album','releaseDate','trackNumber','trackTotal','discNumber','discTotal','genres','bpm','isrc','comment','copyright','lyrics']" :key="field"><td class="font-mono text-xs">{{ field }}</td><td class="max-w-52 break-all text-xs text-[var(--muted)]">{{ displayValue(field, metadataQuery.data.value.raw[field as keyof TrackTagValues]) }}</td><td class="max-w-52 break-all text-xs" :class="metadataQuery.data.value.overriddenFields.includes(field) && 'text-[var(--primary)] font-semibold'">{{ displayValue(field, metadataQuery.data.value.effective[field as keyof TrackTagValues]) }}</td></tr></tbody></table></div></div>
-      <div v-else key="history" class="mt-6" :class="{ 'data-refreshing': historyQuery.isFetching.value && !historyQuery.isPending.value }" :aria-busy="historyQuery.isFetching.value"><StatePanel v-if="historyQuery.isPending.value" state="loading" compact /><StatePanel v-else-if="historyQuery.isError.value" state="error" compact @retry="historyQuery.refetch()" /><StatePanel v-else-if="!historyQuery.data.value?.items.length" state="empty" compact title="暂无修改历史" /><template v-else><div class="space-y-3"><article v-for="revision in historyQuery.data.value.items" :key="revision.id" class="rounded-xl border border-[var(--border)] p-4"><div class="flex items-start justify-between"><div><p class="font-semibold">版本 {{ revision.metadataVersion }} · {{ revision.action }}</p><p class="mt-1 text-xs text-[var(--muted)]">{{ revision.reason ?? '系统生成' }} · {{ formatDate(revision.createdAt) }}</p></div><button class="btn btn-ghost" type="button" @click="askRestore(revision)"><RotateCcw :size="14" />恢复</button></div><div class="mt-3 flex flex-wrap gap-1"><span v-for="field in revision.overriddenFields" :key="field" class="rounded bg-[var(--surface-muted)] px-2 py-1 font-mono text-[10px]">{{ field }}</span></div></article></div><AppPagination :page="historyPage" :page-size="historyPageSize" :total="historyQuery.data.value.total" @change="historyPage = $event" @page-size-change="changeHistoryPageSize" /></template></div>
       </Transition>
-      <div class="mt-6"><label class="ui-label">修改原因</label><input v-model="tags.reason" class="ui-input" placeholder="会写入版本历史和审计日志" /></div><label v-if="editorWritebackCapability.canWriteBack" class="mt-4 flex items-center justify-between rounded-xl border border-[var(--border)] p-4"><span><span class="block font-semibold">写回源文件 Tag</span><span class="text-xs text-[var(--muted)]">保存后创建安全写回任务；默认关闭。</span></span><button type="button" class="switch" role="switch" :aria-checked="writeBackAfterSave" @click="writeBackAfterSave = !writeBackAfterSave" /></label><p v-else class="mt-4 rounded-xl bg-[var(--surface-muted)] p-4 text-xs leading-5 text-[var(--muted)]">{{ writebackBlockedMessage(editorWritebackCapability) }}，只保存数据库中的 Tag 修改。</p><label v-if="metadataQuery.data.value.overriddenFields.length" class="mt-4 flex items-center justify-between rounded-xl border border-[var(--border)] p-4"><span><span class="block font-semibold">恢复全部原始字段</span><span class="text-xs text-[var(--muted)]">移除当前 {{ metadataQuery.data.value.overriddenFields.length }} 个覆盖字段</span></span><button type="button" class="switch" role="switch" :aria-checked="resetAllOverrides" @click="resetAllOverrides = !resetAllOverrides" /></label><p v-if="actionError" class="mt-4 rounded-xl bg-rose-500/10 p-3 text-sm text-[var(--danger)]">{{ actionError }}</p></template>
-      <template #footer><AppButton v-if="selectedTrack?.status !== 'ARCHIVED'" @click="openScrape"><template #icon><Sparkles :size="15" /></template>在线刮削</AppButton><span class="flex-1" /><AppButton :disabled="savingMetadata" @click="closeEditor">关闭</AppButton><AppButton v-if="selectedTrack?.status !== 'ARCHIVED' && (editorTab === 'metadata' || editorTab === 'lyrics')" variant="primary" :loading="savingMetadata" @click="saveMetadata"><template #icon><Save :size="15" /></template>{{ writeBackAfterSave ? '保存并写回' : '保存覆盖值' }}</AppButton></template>
+      <div class="mt-6"><label class="ui-label">修改原因</label><input v-model="tags.reason" class="ui-input" placeholder="填写本次修改原因" /></div><label v-if="editorWritebackCapability.canWriteBack" class="mt-4 flex items-center justify-between rounded-xl border border-[var(--border)] p-4"><span><span class="block font-semibold">写回源文件 Tag</span><span class="text-xs text-[var(--muted)]">保存后创建安全写回任务；默认关闭。</span></span><button type="button" class="switch" role="switch" :aria-checked="writeBackAfterSave" @click="writeBackAfterSave = !writeBackAfterSave" /></label><p v-else class="mt-4 rounded-xl bg-[var(--surface-muted)] p-4 text-xs leading-5 text-[var(--muted)]">{{ writebackBlockedMessage(editorWritebackCapability) }}，只保存数据库中的 Tag 修改。</p><p v-if="actionError" class="mt-4 rounded-xl bg-rose-500/10 p-3 text-sm text-[var(--danger)]">{{ actionError }}</p></template>
+      <template #footer><AppButton v-if="selectedTrack?.status !== 'ARCHIVED'" @click="openScrape"><template #icon><Sparkles :size="15" /></template>在线刮削</AppButton><span class="flex-1" /><AppButton :disabled="savingMetadata" @click="closeEditor">关闭</AppButton><AppButton v-if="selectedTrack?.status !== 'ARCHIVED'" variant="primary" :loading="savingMetadata" @click="saveMetadata"><template #icon><Save :size="15" /></template>{{ writeBackAfterSave ? '保存并写回' : '保存覆盖值' }}</AppButton></template>
     </BaseDialog>
 
     <BaseDialog v-model="bulkOpen" :title="`批量修改 ${selectedIds.size} 首曲目`" description="服务端在一个事务中校验全部元数据版本；任一冲突则整体回滚。" width="lg"><div class="grid gap-5 sm:grid-cols-2"><div><label class="ui-label">主要艺术家</label><input v-model="bulk.primary" class="ui-input" placeholder="填写后会替换全部署名" /></div><div><label class="ui-label">专辑艺术家</label><input v-model="bulk.albumArtists" class="ui-input" placeholder="可选；多个名称使用分号或换行分隔" /></div><div><label class="ui-label">专辑</label><input v-model="bulk.album" class="ui-input" /></div><div><label class="ui-label">流派</label><input v-model="bulk.genres" class="ui-input" /></div><div><label class="ui-label">备注</label><input v-model="bulk.comment" class="ui-input" /></div><div class="sm:col-span-2"><label class="ui-label">批量修改原因</label><input v-model="bulk.reason" class="ui-input" /></div></div><p v-if="actionError" class="mt-4 rounded-xl bg-rose-500/10 p-3 text-sm text-[var(--danger)]">{{ actionError }}</p><template #footer><AppButton @click="bulkOpen = false">取消</AppButton><AppButton variant="primary" :loading="bulkMutation.isPending.value" @click="bulkMutation.mutate()">应用批量修改</AppButton></template></BaseDialog>
-    <BaseDialog v-model="restoreOpen" title="恢复历史 Tag 版本" :description="revisionToRestore ? `元数据版本 ${revisionToRestore.metadataVersion}` : ''"><div><label class="ui-label">恢复原因</label><input v-model="restoreReason" class="ui-input" /></div><p v-if="actionError" class="mt-4 rounded-xl bg-rose-500/10 p-3 text-sm text-[var(--danger)]">{{ actionError }}</p><template #footer><AppButton @click="restoreOpen = false">取消</AppButton><AppButton variant="primary" :loading="restoreMutation.isPending.value" @click="restoreMutation.mutate()">恢复此版本</AppButton></template></BaseDialog>
     <BaseDialog v-model="batchRestoreOpen" :title="`批量恢复 ${batchRestoreTargets.length} 首曲目`" description="恢复操作会原子校验全部曲目版本；任一曲目状态或版本变化时不会恢复任何曲目。" :prevent-close="batchRestoreMutation.isPending.value">
       <div class="rounded-xl bg-[var(--surface-muted)] p-4"><p class="font-semibold">恢复后曲目会重新进入曲库</p><p class="mt-1 text-xs leading-5 text-[var(--muted)]">不会删除本地文件或媒体对象；服务端会再次确认每首曲目仍然可播放。</p></div>
       <div class="mt-4 max-h-56 divide-y divide-[var(--border)] overflow-y-auto rounded-xl border border-[var(--border)]"><div v-for="track in batchRestoreTargets.slice(0, 8)" :key="track.id" class="px-4 py-3"><p class="truncate font-semibold">{{ track.title }}</p><p class="mt-0.5 truncate text-xs text-[var(--muted)]">{{ track.artists.join('、') || '未知艺术家' }}</p></div><p v-if="batchRestoreTargets.length > 8" class="px-4 py-3 text-xs text-[var(--muted)]">另有 {{ batchRestoreTargets.length - 8 }} 首曲目</p></div>

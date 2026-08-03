@@ -145,7 +145,6 @@ type WritebackJob struct {
 	ID                   string  `json:"id"`
 	TrackID              string  `json:"trackId"`
 	SourceID             string  `json:"sourceId"`
-	RevisionID           *string `json:"revisionId"`
 	Status               string  `json:"status"`
 	Stage                string  `json:"stage"`
 	Attempts             int     `json:"attempts"`

@@ -92,12 +92,6 @@ func createLyricsTimingMigrationTables(t *testing.T, ctx context.Context, transa
 			raw_tags jsonb NOT NULL,
 			overrides jsonb NOT NULL
 		)`,
-		`CREATE TABLE track_metadata_revisions (
-			id text PRIMARY KEY,
-			raw_tags jsonb NOT NULL,
-			overrides jsonb NOT NULL,
-			effective_tags jsonb NOT NULL
-		)`,
 		`CREATE TABLE metadata_writeback_jobs (
 			id text PRIMARY KEY,
 			metadata_snapshot jsonb NOT NULL
@@ -187,9 +181,6 @@ func seedLyricsTimingMigrationFixtures(
 
 	wordContent := "[ar:Artist]\n[00:01]<00:01>word"
 	lineContent := "[00:01]ordinary line"
-	timedMixedContent := "[00:01]<00:01>word\n[00:02]ordinary line"
-	equalContent := "[00:10]<00:10>first<00:10>second"
-	decreasingContent := "[00:10]<00:11>late<00:10>early"
 	crossLineContent := "[00:10]<00:10>first<00:11>later\n[00:02]<00:02>second<00:03>later"
 	if _, err := transaction.Exec(ctx, `INSERT INTO track_metadata (id, raw_tags, overrides) VALUES (
 		'metadata',
@@ -197,16 +188,6 @@ func seedLyricsTimingMigrationFixtures(
 		jsonb_build_object('lyrics', jsonb_build_object('format', 'LRC', 'content', $2::text))
 	)`, wordContent, lineContent); err != nil {
 		t.Fatalf("seed track metadata: %v", err)
-	}
-	if _, err := transaction.Exec(ctx, `INSERT INTO track_metadata_revisions (
-		id, raw_tags, overrides, effective_tags
-	) VALUES (
-		'revision',
-		jsonb_build_object('lyrics', jsonb_build_object('format', 'LRC', 'content', $1::text)),
-		jsonb_build_object('lyrics', jsonb_build_object('format', 'LRC', 'content', $2::text)),
-		jsonb_build_object('lyrics', jsonb_build_object('format', 'LRC', 'content', $3::text))
-	)`, timedMixedContent, equalContent, decreasingContent); err != nil {
-		t.Fatalf("seed metadata revision: %v", err)
 	}
 	if _, err := transaction.Exec(ctx, `INSERT INTO metadata_writeback_jobs (id, metadata_snapshot) VALUES (
 		'writeback',
@@ -252,20 +233,6 @@ func assertLyricsTimingMetadataBackfill(t *testing.T, ctx context.Context, trans
 	}
 	if raw != "WORD" || overrides != "LINE" {
 		t.Fatalf("track metadata timing raw/overrides=%s/%s, want WORD/LINE", raw, overrides)
-	}
-
-	var revisionRaw, revisionOverrides, effective string
-	if err := transaction.QueryRow(ctx, `SELECT
-		raw_tags #>> '{lyrics,timing}', overrides #>> '{lyrics,timing}',
-		effective_tags #>> '{lyrics,timing}'
-		FROM track_metadata_revisions WHERE id='revision'`).Scan(
-		&revisionRaw, &revisionOverrides, &effective,
-	); err != nil {
-		t.Fatal(err)
-	}
-	if revisionRaw != "LINE" || revisionOverrides != "WORD" || effective != "LINE" {
-		t.Fatalf("revision timing raw/overrides/effective=%s/%s/%s, want LINE/WORD/LINE",
-			revisionRaw, revisionOverrides, effective)
 	}
 
 	var snapshot string

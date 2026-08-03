@@ -26,8 +26,7 @@ const (
 type MetadataStatus string
 
 const (
-	MetadataOriginal     MetadataStatus = "ORIGINAL"
-	MetadataOverridden   MetadataStatus = "OVERRIDDEN"
+	MetadataNormal       MetadataStatus = "NORMAL"
 	MetadataPendingWrite MetadataStatus = "PENDING_WRITE"
 	MetadataWriteFailed  MetadataStatus = "WRITE_FAILED"
 )

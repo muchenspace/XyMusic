@@ -25,9 +25,6 @@ type API interface {
 	Metadata(context.Context, string) (MetadataDTO, error)
 	Update(context.Context, string, string, string, MetadataMutationInput) (MetadataDTO, error)
 	BatchUpdate(context.Context, string, string, BatchMetadataMutationInput) (BatchUpdateDTO, error)
-	Revisions(context.Context, string, int, int) (RevisionPageDTO, error)
-	Revision(context.Context, string, string) (RevisionDetailDTO, error)
-	Restore(context.Context, string, string, string, string, VersionReasonInput) (MetadataDTO, error)
 	EnqueueWriteback(context.Context, string, string, string, VersionReasonInput) (WritebackJobDTO, error)
 	ListWritebacks(context.Context, WritebackListInput) (WritebackJobPageDTO, error)
 	WritebackJob(context.Context, string) (WritebackJobDTO, error)
@@ -59,9 +56,6 @@ func (routes *Routes) Register(router gin.IRouter) {
 	admin.GET("/tracks/:id/metadata", httpserver.Handle(routes.metadata))
 	admin.PATCH("/tracks/:id/metadata", httpserver.Handle(routes.update))
 	admin.POST("/metadata/batch", httpserver.Handle(routes.batchUpdate))
-	admin.GET("/tracks/:id/metadata/revisions", httpserver.Handle(routes.revisions))
-	admin.GET("/tracks/:id/metadata/revisions/:revisionId", httpserver.Handle(routes.revision))
-	admin.POST("/tracks/:id/metadata/revisions/:revisionId/restore", httpserver.Handle(routes.restore))
 	admin.POST("/tracks/:id/metadata/writeback", httpserver.Handle(routes.enqueueWriteback))
 	admin.GET("/metadata/writeback-jobs", httpserver.Handle(routes.listWritebacks))
 	admin.GET("/metadata/writeback-jobs/:id", httpserver.Handle(routes.writebackJob))
@@ -111,69 +105,6 @@ func (routes *Routes) batchUpdate(c *gin.Context) error {
 		func(actorID, traceID string) (BatchUpdateDTO, error) {
 			return routes.service.BatchUpdate(
 				c.Request.Context(), actorID, traceID, BatchMetadataMutationInput(request),
-			)
-		})
-}
-
-func (routes *Routes) revisions(c *gin.Context) error {
-	trackID, err := routeUUID(c.Param("id"))
-	if err != nil {
-		return err
-	}
-	page, pageSize, err := bindPaginationQuery(c)
-	if err != nil {
-		return err
-	}
-	if _, err := adminauth.RequireAdmin(c, routes.identity, false); err != nil {
-		return err
-	}
-	result, err := routes.service.Revisions(c.Request.Context(), trackID, page, pageSize)
-	if err != nil {
-		return err
-	}
-	c.JSON(http.StatusOK, result)
-	return nil
-}
-
-func (routes *Routes) revision(c *gin.Context) error {
-	trackID, err := routeUUID(c.Param("id"))
-	if err != nil {
-		return err
-	}
-	revisionID, err := routeUUID(c.Param("revisionId"))
-	if err != nil {
-		return err
-	}
-	if _, err := adminauth.RequireAdmin(c, routes.identity, false); err != nil {
-		return err
-	}
-	result, err := routes.service.Revision(c.Request.Context(), trackID, revisionID)
-	if err != nil {
-		return err
-	}
-	c.JSON(http.StatusOK, result)
-	return nil
-}
-
-func (routes *Routes) restore(c *gin.Context) error {
-	trackID, err := routeUUID(c.Param("id"))
-	if err != nil {
-		return err
-	}
-	revisionID, err := routeUUID(c.Param("revisionId"))
-	if err != nil {
-		return err
-	}
-	request, err := decodeVersionReason(c.Request.Body)
-	if err != nil {
-		return err
-	}
-	scope := "admin.track.metadata.restore:" + trackID + ":" + revisionID
-	return mutateJSON(routes, c, scope, request, http.StatusOK,
-		func(actorID, traceID string) (MetadataDTO, error) {
-			return routes.service.Restore(
-				c.Request.Context(), actorID, traceID, trackID, revisionID,
-				VersionReasonInput(request),
 			)
 		})
 }
@@ -303,15 +234,13 @@ func mutateJSON[T any, P any](
 type metadataMutationRequest struct {
 	ExpectedVersion int            `json:"expectedVersion"`
 	Patch           map[string]any `json:"patch"`
-	ResetFields     []string       `json:"resetFields,omitempty"`
 	Reason          string         `json:"reason"`
 }
 
 type batchMutationRequest struct {
-	Items       []BatchMutationItem `json:"items"`
-	Patch       map[string]any      `json:"patch"`
-	ResetFields []string            `json:"resetFields,omitempty"`
-	Reason      string              `json:"reason"`
+	Items  []BatchMutationItem `json:"items"`
+	Patch  map[string]any      `json:"patch"`
+	Reason string              `json:"reason"`
 }
 
 type versionReasonRequest struct {
@@ -336,17 +265,12 @@ func decodeMetadataMutation(body io.Reader) (metadataMutationRequest, error) {
 	if err != nil {
 		return metadataMutationRequest{}, err
 	}
-	resetValue, resetPresent := object["resetFields"]
-	resetFields, err := optionalResetFields(resetValue, resetPresent)
-	if err != nil {
-		return metadataMutationRequest{}, err
-	}
 	reason, err := requiredRouteString(object, "reason", 1, 500, nil)
 	if err != nil {
 		return metadataMutationRequest{}, err
 	}
 	return metadataMutationRequest{
-		ExpectedVersion: expectedVersion, Patch: patch, ResetFields: resetFields, Reason: reason,
+		ExpectedVersion: expectedVersion, Patch: patch, Reason: reason,
 	}, nil
 }
 
@@ -383,17 +307,12 @@ func decodeBatchMutation(body io.Reader) (batchMutationRequest, error) {
 	if err != nil {
 		return batchMutationRequest{}, err
 	}
-	resetValue, resetPresent := object["resetFields"]
-	resetFields, err := optionalResetFields(resetValue, resetPresent)
-	if err != nil {
-		return batchMutationRequest{}, err
-	}
 	reason, err := requiredRouteString(object, "reason", 1, 500, nil)
 	if err != nil {
 		return batchMutationRequest{}, err
 	}
 	return batchMutationRequest{
-		Items: items, Patch: patch, ResetFields: resetFields, Reason: reason,
+		Items: items, Patch: patch, Reason: reason,
 	}, nil
 }
 
@@ -618,34 +537,6 @@ func routeLyrics(value any) (map[string]any, error) {
 		return nil, routeContractError()
 	}
 	return map[string]any{"content": content, "format": format, "language": language, "timing": timing}, nil
-}
-
-func optionalResetFields(value any, present bool) ([]string, error) {
-	if !present {
-		return nil, nil
-	}
-	items, ok := value.([]any)
-	if !ok || len(items) > 15 {
-		return nil, routeContractError()
-	}
-	seen := make(map[string]struct{}, len(items))
-	result := make([]string, 0, len(items))
-	allowed := editableFieldSet()
-	for _, value := range items {
-		field, ok := value.(string)
-		if !ok {
-			return nil, routeContractError()
-		}
-		if _, valid := allowed[field]; !valid {
-			return nil, routeContractError()
-		}
-		if _, duplicate := seen[field]; duplicate {
-			return nil, routeContractError()
-		}
-		seen[field] = struct{}{}
-		result = append(result, field)
-	}
-	return result, nil
 }
 
 func requiredObjectField(object map[string]any, name string) (map[string]any, error) {

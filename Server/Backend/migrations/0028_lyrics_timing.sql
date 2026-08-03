@@ -103,33 +103,6 @@ SET overrides = jsonb_set(
 )
 WHERE jsonb_typeof(overrides -> 'lyrics') = 'object';
 --> statement-breakpoint
-UPDATE track_metadata_revisions
-SET raw_tags = jsonb_set(
-  raw_tags,
-  '{lyrics,timing}',
-  to_jsonb(xymusic_detect_lyrics_timing(raw_tags #>> '{lyrics,format}', raw_tags #>> '{lyrics,content}')::text),
-  true
-)
-WHERE jsonb_typeof(raw_tags -> 'lyrics') = 'object';
---> statement-breakpoint
-UPDATE track_metadata_revisions
-SET overrides = jsonb_set(
-  overrides,
-  '{lyrics,timing}',
-  to_jsonb(xymusic_detect_lyrics_timing(overrides #>> '{lyrics,format}', overrides #>> '{lyrics,content}')::text),
-  true
-)
-WHERE jsonb_typeof(overrides -> 'lyrics') = 'object';
---> statement-breakpoint
-UPDATE track_metadata_revisions
-SET effective_tags = jsonb_set(
-  effective_tags,
-  '{lyrics,timing}',
-  to_jsonb(xymusic_detect_lyrics_timing(effective_tags #>> '{lyrics,format}', effective_tags #>> '{lyrics,content}')::text),
-  true
-)
-WHERE jsonb_typeof(effective_tags -> 'lyrics') = 'object';
---> statement-breakpoint
 UPDATE metadata_writeback_jobs
 SET metadata_snapshot = jsonb_set(
   metadata_snapshot,

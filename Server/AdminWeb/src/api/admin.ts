@@ -29,7 +29,6 @@ import type {
   TrackMetadataRecord,
   TrackMutationTarget,
   TrackSummary,
-  TrackTagRevision,
   TrackTagValues,
   UpdateUserInput,
   UserDetail,
@@ -66,7 +65,7 @@ export const adminApi = {
   tracks: (params: ListQuery & { status?: string; metadataStatus?: string; sourceId?: string }, signal?: AbortSignal) => apiRequest<PageResult<TrackSummary>>("/api/v1/admin/tracks", { query: query(params), signal }),
   track: (id: string, signal?: AbortSignal) => apiRequest<TrackDetail>(`/api/v1/admin/tracks/${id}`, { signal }),
   trackMetadata: (id: string, signal?: AbortSignal) => apiRequest<TrackMetadataRecord>(`/api/v1/admin/tracks/${id}/metadata`, { signal }),
-  updateTrackMetadata: (id: string, input: { expectedVersion: number; patch: Partial<Omit<TrackTagValues, "hasArtwork">>; resetFields?: string[]; reason: string }) => apiRequest<TrackMetadataRecord>(`/api/v1/admin/tracks/${id}/metadata`, { method: "PATCH", body: input }),
+  updateTrackMetadata: (id: string, input: { expectedVersion: number; patch: Partial<Omit<TrackTagValues, "hasArtwork">>; reason: string }) => apiRequest<TrackMetadataRecord>(`/api/v1/admin/tracks/${id}/metadata`, { method: "PATCH", body: input }),
   publishTrack: (id: string, expectedVersion: number) => apiRequest<unknown>(`/api/v1/admin/tracks/${id}/publish`, { method: "POST", body: { expectedVersion } }),
   archiveTrack: (id: string, expectedVersion: number) => apiRequest<unknown>(`/api/v1/admin/tracks/${id}/archive`, { method: "POST", body: { expectedVersion } }),
   restoreTrack: (id: string, expectedVersion: number) => apiRequest<unknown>(`/api/v1/admin/tracks/${id}/restore`, { method: "POST", body: { expectedVersion } }),
@@ -80,8 +79,6 @@ export const adminApi = {
     scheduledObjects: number;
   }>(`/api/v1/admin/tracks/${id}`, { method: "DELETE", body: { expectedVersion } }),
   writeTrackMetadata: (id: string, expectedVersion: number, reason: string) => apiRequest<{ id: string; status: string }>(`/api/v1/admin/tracks/${id}/metadata/writeback`, { method: "POST", body: { expectedVersion, reason } }),
-  tagHistory: (id: string, params: Pick<ListQuery, "page" | "pageSize"> = {}, signal?: AbortSignal) => apiRequest<PageResult<TrackTagRevision>>(`/api/v1/admin/tracks/${id}/metadata/revisions`, { query: query(params), signal }),
-  restoreTagRevision: (id: string, revisionId: string, expectedVersion: number, reason: string) => apiRequest<TrackMetadataRecord>(`/api/v1/admin/tracks/${id}/metadata/revisions/${revisionId}/restore`, { method: "POST", body: { expectedVersion, reason } }),
   bulkUpdateTracks: (items: Array<{ trackId: string; expectedVersion: number }>, patch: Partial<Omit<TrackTagValues, "hasArtwork">>, reason: string) => apiRequest<{ items: Array<{ trackId: string; version: number; changedFields: string[] }> }>("/api/v1/admin/metadata/batch", { method: "POST", body: { items, patch, reason } }),
 
   albums: (params: ListQuery, signal?: AbortSignal) => apiRequest<PageResult<AlbumSummary>>("/api/v1/admin/albums", { query: query(params), signal }),

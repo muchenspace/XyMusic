@@ -17,13 +17,11 @@ import type {
   TrackMutationTarget,
   TrackSummary,
   TrackTagPatch,
-  TrackTagRevision,
 } from "@/features/music/domain/models";
 
 export interface UpdateTrackMetadataCommand {
   expectedVersion: number;
   patch: TrackTagPatch;
-  resetFields?: string[];
   reason: string;
 }
 
@@ -60,7 +58,6 @@ export interface UpdateArtistCommand {
 export interface MusicAdminGateway {
   listTracks(query: TrackListQuery, signal?: AbortSignal): Promise<MusicPage<TrackSummary>>;
   getTrackMetadata(trackId: string, signal?: AbortSignal): Promise<TrackMetadataRecord>;
-  listTagHistory(trackId: string, page: number, pageSize: number, signal?: AbortSignal): Promise<MusicPage<TrackTagRevision>>;
   updateTrackMetadata(trackId: string, command: UpdateTrackMetadataCommand): Promise<TrackMetadataRecord>;
   setTrackState(trackId: string, expectedVersion: number, action: "publish" | "archive" | "restore"): Promise<void>;
   batchRestoreTracks(items: TrackMutationTarget[]): Promise<BatchRestoreTracksResult>;
@@ -74,7 +71,6 @@ export interface MusicAdminGateway {
   }>;
   writeTrackMetadata(trackId: string, expectedVersion: number, reason: string): Promise<void>;
   batchUpdateTrackMetadata(command: BatchUpdateTrackMetadataCommand): Promise<BatchUpdateTrackMetadataResult>;
-  restoreTagRevision(trackId: string, revisionId: string, expectedVersion: number, reason: string): Promise<TrackMetadataRecord>;
   listAlbums(query: MusicListQuery, signal?: AbortSignal): Promise<MusicPage<AlbumSummary>>;
   getAlbum(albumId: string, page: number, pageSize: number, signal?: AbortSignal): Promise<AlbumDetail>;
   getAlbumDuplicates(query: AlbumDuplicateQuery, signal?: AbortSignal): Promise<AlbumDuplicateSummary>;

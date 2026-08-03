@@ -31,13 +31,6 @@ describe("music metadata timing contract", () => {
     })).rejects.toThrow("lyrics timing is invalid");
   });
 
-  it("rejects an invalid timing marker returned after restoring a revision", async () => {
-    const response = metadataResponseWithLyricsTiming("UNKNOWN");
-    vi.spyOn(adminApi, "restoreTagRevision").mockResolvedValue(response);
-
-    await expect(new HttpMusicAdminGateway().restoreTagRevision("track-1", "revision-1", 1, "test"))
-      .rejects.toThrow("lyrics timing is invalid");
-  });
 });
 
 function metadataResponseWithLyricsTiming(timing: string): TrackMetadataRecord {

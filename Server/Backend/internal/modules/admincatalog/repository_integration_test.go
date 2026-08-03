@@ -61,7 +61,7 @@ func TestRepositoryQueriesConfiguredProductionCatalog(t *testing.T) {
 	if _, err := repository.FindDuplicateAlbums(ctx, DuplicateAlbumQuery{Limit: 25, AlbumLimit: 100}); err != nil {
 		t.Fatalf("FindDuplicateAlbums: %v", err)
 	}
-	for _, metadataStatus := range []MetadataStatus{"", MetadataOriginal, MetadataOverridden, MetadataPendingWrite, MetadataWriteFailed} {
+	for _, metadataStatus := range []MetadataStatus{"", MetadataNormal, MetadataPendingWrite, MetadataWriteFailed} {
 		items, _, err := repository.ListTracks(ctx, TrackQuery{
 			Sort: "updatedAt", Order: SortDescending, MetadataStatus: metadataStatus, Limit: 2,
 		})

@@ -483,7 +483,7 @@ func (repository *Repository) enrichTracks(ctx context.Context, records []TrackR
 	for index := range records {
 		records[index].Credits = []CreditRecord{}
 		records[index].Variants = []VariantRecord{}
-		records[index].MetadataStatus = MetadataOriginal
+		records[index].MetadataStatus = MetadataNormal
 		records[index].Lyrics = []LyricRecord{}
 	}
 	byID := make(map[string]*TrackRecord, len(records))
@@ -556,7 +556,7 @@ func (repository *Repository) enrichTracks(ctx context.Context, records []TrackR
 		return err
 	}
 	metadataRows, err := repository.pool.Query(ctx, `
-		SELECT track_id, version, overrides <> '{}'::jsonb FROM track_metadata
+		SELECT track_id, version FROM track_metadata
 		WHERE track_id = ANY($1::uuid[])
 	`, ids)
 	if err != nil {
@@ -565,16 +565,12 @@ func (repository *Repository) enrichTracks(ctx context.Context, records []TrackR
 	for metadataRows.Next() {
 		var trackID string
 		var version int
-		var overridden bool
-		if err := metadataRows.Scan(&trackID, &version, &overridden); err != nil {
+		if err := metadataRows.Scan(&trackID, &version); err != nil {
 			metadataRows.Close()
 			return fmt.Errorf("scan admin track metadata: %w", err)
 		}
 		if record := byID[trackID]; record != nil {
 			record.MetadataVersion = &version
-			if overridden {
-				record.MetadataStatus = MetadataOverridden
-			}
 		}
 	}
 	if err := closeRows(metadataRows, "iterate admin track metadata"); err != nil {
@@ -820,8 +816,7 @@ const metadataStatusConditionSQL = `COALESCE((
 		WHEN latest.status = 'FAILED' AND latest.metadata_version = metadata.version THEN 'WRITE_FAILED'
 		WHEN latest.status = 'CANCELLED' AND latest.metadata_version = metadata.version
 			AND (latest.last_error_code IS NOT NULL OR latest.last_error IS NOT NULL) THEN 'WRITE_FAILED'
-		WHEN metadata.overrides <> '{}'::jsonb THEN 'OVERRIDDEN'
-		ELSE 'ORIGINAL'
+		ELSE 'NORMAL'
 	END
 	FROM track_metadata metadata
 	LEFT JOIN LATERAL (
@@ -831,7 +826,7 @@ const metadataStatusConditionSQL = `COALESCE((
 		ORDER BY job.created_at DESC, job.id DESC LIMIT 1
 	) latest ON true
 	WHERE metadata.track_id = t.id
-), 'ORIGINAL') = $%d`
+), 'NORMAL') = $%d`
 
 func writebackHasTerminalError(status string, errorCode, message *string) bool {
 	return status == "FAILED" || status == "CANCELLED" && (errorCode != nil || message != nil)

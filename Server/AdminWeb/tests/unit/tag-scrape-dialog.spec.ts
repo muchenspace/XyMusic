@@ -34,7 +34,7 @@ function track(): TrackSummary {
     discNumber: 1,
     status: "READY",
     audioStatus: "READY",
-    metadataStatus: "ORIGINAL",
+    metadataStatus: "NORMAL",
     metadataVersion: 3,
     source: null,
     mediaProcessing: null,

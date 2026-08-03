@@ -177,7 +177,7 @@ test.describe("administrator browser contract", () => {
     await expect(row.getByText("异常", { exact: true }).first()).toBeVisible();
     await row.getByRole("button", { name: "曲目状态：异常" }).hover();
     tooltip = page.getByRole("tooltip");
-    await expect(tooltip.getByText("写回源文件失败", { exact: true })).toBeVisible();
+    await expect(tooltip.getByText("写回失败", { exact: true })).toBeVisible();
     await expect(tooltip.getByText("写回后的 Tag 校验失败", { exact: false })).toBeVisible();
 
     await page.mouse.move(0, 0);
@@ -683,7 +683,6 @@ async function installMockApi(page: Page, initiallyAuthenticated: boolean, setup
       return json(route, {});
     }
     if (path === "/api/v1/admin/tracks/track-1/metadata") return json(route, metadata());
-    if (path === "/api/v1/admin/tracks/track-1/metadata/revisions") return json(route, pageResult([]));
     if (path === "/api/v1/admin/tag-scraping/search" && method === "POST") {
       return json(route, [
         scrapingCandidate("candidate-1", "First candidate", "First artist", "First album"),
@@ -767,7 +766,7 @@ function track(
 ) {
   return {
     id, title, artistCredits: [{ artist: { id: "artist-1", name: "Mock artist" }, role: "PRIMARY", sortOrder: 0 }], artists: ["Mock artist"], album: { id: "album-1", title: "Mock album" }, artwork: null,
-    durationMs: 120_000, trackNumber: 1, discNumber: 1, status, audioStatus: state.audioStatus ?? status, metadataStatus: state.latestWritebackErrorCode ? "WRITE_FAILED" : "ORIGINAL", metadataVersion: 1,
+    durationMs: 120_000, trackNumber: 1, discNumber: 1, status, audioStatus: state.audioStatus ?? status, metadataStatus: state.latestWritebackErrorCode ? "WRITE_FAILED" : "NORMAL", metadataVersion: 1,
     source: { id: `asset-${id}`, rootId: "source-1", rootName: "Mock source", relativePath: `${id}.flac`, format: "FLAC", status: state.sourceStatus ?? "READY", checksumSha256: null, mode: "READ_WRITE", canWriteBack: true, writebackBlockReason: null },
     mediaProcessing: { status: "READY", attempts: 1, maxAttempts: 5, lastError: null, updatedAt: "2026-01-01T00:00:00Z" }, variantSummary: [], activeWritebackJobId: null,
     latestWritebackErrorCode: state.latestWritebackErrorCode ?? null, latestWritebackError: state.latestWritebackError ?? null,

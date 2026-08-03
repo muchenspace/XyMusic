@@ -197,29 +197,12 @@ func ApplyMetadataOverrides(raw MetadataSnapshot, overrides MetadataOverrides) (
 	return NormalizeMetadataSnapshot(combined)
 }
 
-func UpdateMetadataOverrides(
-	current MetadataOverrides,
-	patchValue any,
-	resetFields []string,
-) (MetadataOverrides, error) {
+func UpdateMetadataOverrides(current MetadataOverrides, patchValue any) (MetadataOverrides, error) {
 	patch, err := NormalizeMetadataPatch(patchValue)
 	if err != nil {
 		return nil, err
 	}
-	seen := make(map[string]struct{}, len(resetFields))
-	for _, field := range resetFields {
-		if _, valid := editableFieldSet()[field]; !valid {
-			return nil, apperror.Validation("Unknown metadata field: " + field)
-		}
-		if _, duplicate := seen[field]; duplicate {
-			return nil, apperror.Validation("resetFields must contain unique metadata fields")
-		}
-		seen[field] = struct{}{}
-		if _, patched := patch[field]; patched {
-			return nil, apperror.Validation("Metadata field cannot be patched and reset together: " + field)
-		}
-	}
-	if len(patch) == 0 && len(resetFields) == 0 {
+	if len(patch) == 0 {
 		return nil, apperror.Validation("At least one metadata field must be changed")
 	}
 	next := make(MetadataOverrides, len(current)+len(patch))
@@ -228,9 +211,6 @@ func UpdateMetadataOverrides(
 	}
 	for key, value := range patch {
 		next[key] = value
-	}
-	for field := range seen {
-		delete(next, field)
 	}
 	return NormalizeMetadataOverrides(next)
 }

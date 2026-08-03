@@ -484,14 +484,13 @@ func TestProductionSynchronizerPersistsFilesMetadataAndCUEInConfiguredDatabase(t
 	if title != "Scanned Song" || artistName != "Scan Artist" || lyricOrigin != "EXTERNAL" || lyricFormat != "LRC" {
 		t.Fatalf("catalog=%q/%q lyric=%s/%s", title, artistName, lyricOrigin, lyricFormat)
 	}
-	var metadataVersion, revisionCount int
-	if err := transaction.QueryRow(ctx, `SELECT metadata.version,
-		(SELECT count(*)::int FROM track_metadata_revisions revision WHERE revision.track_id=metadata.track_id)
-		FROM track_metadata metadata WHERE track_id=$1`, trackID).Scan(&metadataVersion, &revisionCount); err != nil {
+	var metadataVersion int
+	if err := transaction.QueryRow(ctx, `SELECT metadata.version
+		FROM track_metadata metadata WHERE track_id=$1`, trackID).Scan(&metadataVersion); err != nil {
 		t.Fatal(err)
 	}
-	if metadataVersion != 1 || revisionCount != 1 {
-		t.Fatalf("metadata version/revisions=%d/%d", metadataVersion, revisionCount)
+	if metadataVersion != 1 {
+		t.Fatalf("metadata version=%d", metadataVersion)
 	}
 	if err := synchronizer.ProcessFile(ctx, rootID, "", DiscoveredFile{
 		AudioPath: audioPath, RelativePath: "song.flac",
