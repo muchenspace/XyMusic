@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -64,7 +63,6 @@ func (storage *MinIOObjectStorage) CreateUploadURL(
 	}
 	headers := make(http.Header)
 	headers.Set("Content-Type", request.ContentType)
-	headers.Set("Content-Length", strconv.FormatInt(request.ContentLength, 10))
 	headers.Set("X-Amz-Checksum-Sha256", checksumBase64(request.ChecksumSHA256))
 	headers.Set("X-Amz-Meta-Sha256", request.ChecksumSHA256)
 	signed, err := storage.client.PresignHeader(

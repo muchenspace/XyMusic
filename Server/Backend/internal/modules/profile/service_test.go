@@ -229,9 +229,11 @@ func TestCreateAvatarUploadReservesOnlyActorAndReturnsSignedHeaderContract(t *te
 	}
 	decoded, _ := hex.DecodeString(checksum)
 	if result.Body.RequiredHeaders["x-amz-checksum-sha256"] != base64.StdEncoding.EncodeToString(decoded) ||
-		result.Body.RequiredHeaders["content-type"] != "image/png" ||
-		result.Body.RequiredHeaders["content-length"] != "1024" {
+		result.Body.RequiredHeaders["content-type"] != "image/png" {
 		t.Fatalf("headers = %#v", result.Body.RequiredHeaders)
+	}
+	if _, present := result.Body.RequiredHeaders["content-length"]; present {
+		t.Fatalf("content-length must not be a required signed header: %#v", result.Body.RequiredHeaders)
 	}
 	if storage.request.ObjectKey != "uploads/user-1/upload-1" || storage.request.ChecksumSHA256 != checksum {
 		t.Fatalf("storage request = %#v", storage.request)

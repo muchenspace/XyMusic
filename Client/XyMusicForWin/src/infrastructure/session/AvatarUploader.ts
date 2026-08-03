@@ -37,6 +37,7 @@ export class AvatarUploader {
       method: "POST",
       headers: { "Idempotency-Key": crypto.randomUUID() },
       body: JSON.stringify(observedEtag ? { observedEtag } : {}),
+      timeoutMs: AVATAR_COMPLETE_TIMEOUT_MS,
     });
   }
 }
@@ -107,4 +108,5 @@ function abortError(): DOMException {
 }
 
 const AVATAR_UPLOAD_TIMEOUT_MS = 30_000;
+const AVATAR_COMPLETE_TIMEOUT_MS = 75_000;
 const MAX_UPLOAD_RESPONSE_BYTES = 64 * 1024;

@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -190,7 +189,6 @@ func TestProfileProductionAvatarLifecycle(t *testing.T) {
 	}
 	request.ContentLength = int64(len(payload))
 	request.Header.Set("Content-Type", "image/png")
-	request.Header.Set("Content-Length", strconv.FormatInt(int64(len(payload)), 10))
 	request.Header.Set("X-Amz-Checksum-Sha256", base64.StdEncoding.EncodeToString(digest[:]))
 	request.Header.Set("X-Amz-Meta-Sha256", checksum)
 	response, err := http.DefaultClient.Do(request)

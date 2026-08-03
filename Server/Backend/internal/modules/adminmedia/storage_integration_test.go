@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"testing"
 	"time"
 
@@ -78,7 +77,6 @@ func TestProductionStorageRoundTrip(t *testing.T) {
 	}
 	request.ContentLength = int64(len(payload))
 	request.Header.Set("Content-Type", "image/png")
-	request.Header.Set("Content-Length", strconv.Itoa(len(payload)))
 	request.Header.Set("X-Amz-Checksum-Sha256", checksumBase64(checksum))
 	request.Header.Set("X-Amz-Meta-Sha256", checksum)
 	response, err := http.DefaultClient.Do(request)

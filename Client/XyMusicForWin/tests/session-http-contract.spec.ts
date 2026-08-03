@@ -105,6 +105,7 @@ describe("desktop authentication API contract", () => {
     const credentials = new MemoryCredentialStore();
     const api = new ApiClient({ credentialStore: credentials as SessionCredentialStore });
     await api.setSession(storedSession());
+    const requestSpy = vi.spyOn(api, "request");
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
         id: "upload/1",
@@ -145,6 +146,8 @@ describe("desktop authentication API contract", () => {
     expect(new Headers(upload.init.headers).get("X-Upload-Token")).toBe("token");
     expect(complete.url).toBe("https://music.example.com/api/v1/users/me/avatar/uploads/upload%2F1/complete");
     expect(JSON.parse(String(complete.init.body))).toEqual({ observedEtag: "etag-1" });
+    const completeRequest = requestSpy.mock.calls.find(([path]) => String(path).endsWith("/complete"));
+    expect(completeRequest?.[1]).toMatchObject({ timeoutMs: 75_000 });
     expect(credentials.value?.user.avatarUrl)
       .toBe("https://music.example.com/api/v1/oss/c3RvcmFnZS5leGFtcGxl/avatar?X-Amz-Signature=image");
   });

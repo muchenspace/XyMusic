@@ -200,6 +200,55 @@ func TestProxyForwardsSignedRequestsToConfiguredStorage(t *testing.T) {
 	}
 }
 
+func TestProxyDoesNotForwardUpstreamCORSHeaders(t *testing.T) {
+	storage := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Access-Control-Allow-Origin", "http://client.example")
+		writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		writer.WriteHeader(http.StatusOK)
+	}))
+	defer storage.Close()
+
+	proxy, err := New(storage.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "http://client.example")
+		c.Header("Access-Control-Allow-Credentials", "true")
+		c.Next()
+	})
+	proxy.Register(engine)
+	backend := httptest.NewServer(engine)
+	defer backend.Close()
+
+	clientURL, err := ClientURL(storage.URL + "/music/avatar.webp?X-Amz-Signature=test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := http.NewRequest(http.MethodGet, backend.URL+clientURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Origin", "http://client.example")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+	if values := response.Header.Values("Access-Control-Allow-Origin"); len(values) != 1 || values[0] != "http://client.example" {
+		t.Fatalf("allow-origin headers = %#v", values)
+	}
+	if values := response.Header.Values("Access-Control-Allow-Credentials"); len(values) != 1 || values[0] != "true" {
+		t.Fatalf("allow-credentials headers = %#v", values)
+	}
+}
+
 func TestProxyRejectsAuthorityOutsideConfiguredEndpoint(t *testing.T) {
 	proxy, err := New("https://objects.example.test", "")
 	if err != nil {

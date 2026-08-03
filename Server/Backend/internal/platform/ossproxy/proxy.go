@@ -50,6 +50,10 @@ func New(rawEndpoint, rawPublicBaseURL string, options ...Option) (*Proxy, error
 	reverse := &httputil.ReverseProxy{
 		Director:      func(*http.Request) {},
 		FlushInterval: -1 * time.Second,
+		ModifyResponse: func(response *http.Response) error {
+			stripUpstreamCORSHeaders(response.Header)
+			return nil
+		},
 		ErrorHandler: func(writer http.ResponseWriter, _ *http.Request, _ error) {
 			http.Error(writer, "object storage is unavailable", http.StatusBadGateway)
 		},
@@ -64,6 +68,23 @@ func New(rawEndpoint, rawPublicBaseURL string, options ...Option) (*Proxy, error
 		}
 	}
 	return result, nil
+}
+
+// The API CORS middleware owns browser-facing CORS headers. Object storage
+// may return its own CORS headers, but forwarding them would create duplicate
+// values on the proxied response and browsers reject that response.
+func stripUpstreamCORSHeaders(headers http.Header) {
+	for _, name := range []string{
+		"Access-Control-Allow-Credentials",
+		"Access-Control-Allow-Headers",
+		"Access-Control-Allow-Methods",
+		"Access-Control-Allow-Origin",
+		"Access-Control-Expose-Headers",
+		"Access-Control-Max-Age",
+		"Access-Control-Allow-Private-Network",
+	} {
+		headers.Del(name)
+	}
 }
 
 func (proxy *Proxy) Register(router gin.IRouter) {

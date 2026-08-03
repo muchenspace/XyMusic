@@ -62,4 +62,13 @@ describe("settings view", () => {
 
     expect(wrapper.find("#desktop-word-lyrics").exists()).toBe(false);
   });
+
+  it("accepts image extensions as well as MIME types for Windows file pickers", () => {
+    const wrapper = mount(SettingsView, { props });
+    const accept = wrapper.get('input[type="file"]').attributes("accept");
+    expect(accept).toContain(".jpg");
+    expect(accept).toContain(".jpeg");
+    expect(accept).toContain(".png");
+    expect(accept).toContain(".webp");
+  });
 });

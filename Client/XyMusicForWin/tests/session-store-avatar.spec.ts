@@ -44,6 +44,44 @@ describe("session avatar upload", () => {
     expect(store.session?.user.avatarUrl).toBe("https://music.example.com/avatar.png");
     app.unmount();
   });
+
+  it("falls back to the file extension when Windows omits the MIME type", async () => {
+    const uploadAvatar = vi.fn(async (upload: AvatarUpload): Promise<UserSession> => ({
+      user: { ...user(), avatarUrl: "https://music.example.com/avatar.jpg" },
+    }));
+    const services = {
+      session: {
+        serverConfig: () => ({ protocol: "https", host: "music.example.com", port: "443" }),
+        uploadAvatar,
+      },
+      diagnostics: {},
+    } as unknown as ApplicationServices;
+    let store!: ReturnType<typeof useSessionStore>;
+    const app = createApp(defineComponent({
+      setup() {
+        store = useSessionStore();
+        return () => h("div");
+      },
+    }));
+    app.use(createPinia());
+    app.provide(applicationServicesKey, services);
+    const element = document.createElement("div");
+    app.mount(element);
+    store.session = { user: user() };
+    const bytes = new Uint8Array([1, 2, 3]);
+    const file = new File([bytes], "avatar.JPG", { type: "" });
+    Object.defineProperty(file, "arrayBuffer", { value: async () => bytes.buffer });
+
+    await store.uploadAvatar(file);
+
+    expect(uploadAvatar).toHaveBeenCalledExactlyOnceWith({
+      name: "avatar.JPG",
+      mediaType: "image/jpeg",
+      bytes,
+    });
+    expect(store.error).toBe("");
+    app.unmount();
+  });
 });
 
 function user(): UserSession["user"] {

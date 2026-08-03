@@ -164,7 +164,6 @@ func (service *Service) CreateUpload(
 		UploadURL: uploadURL,
 		RequiredHeaders: map[string]string{
 			"content-type":          upload.ExpectedMIMEType,
-			"content-length":        fmt.Sprintf("%d", upload.ExpectedSize),
 			"x-amz-checksum-sha256": checksumBase64(upload.ExpectedChecksumSHA256),
 			"x-amz-meta-sha256":     upload.ExpectedChecksumSHA256,
 		},
