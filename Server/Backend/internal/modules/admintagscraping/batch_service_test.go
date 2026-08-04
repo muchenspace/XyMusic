@@ -3,6 +3,8 @@ package admintagscraping
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -10,6 +12,18 @@ import (
 
 	"xymusic/server/internal/shared/apperror"
 )
+
+func TestBatchServiceUsesImmediateSuccessfulWindowPollingByDefault(t *testing.T) {
+	service, err := NewBatchService(BatchServiceDependencies{
+		Store: &storeStub{}, Processor: &batchProcessorStub{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if service.workingPoll != 0 {
+		t.Fatalf("working poll = %s, want immediate polling", service.workingPoll)
+	}
+}
 
 func TestBatchPresentationSeparatesSkippedAndKeepsUnsuccessful(t *testing.T) {
 	now := time.Date(2026, 7, 16, 1, 2, 3, 0, time.UTC)
@@ -275,6 +289,224 @@ func TestBatchItemAppliesFirstReliableCandidate(t *testing.T) {
 	}
 }
 
+func TestBatchItemUsesMetadataAttachedToClaim(t *testing.T) {
+	metadata := metadataFixture(3)
+	processor := &batchProcessorStub{
+		metadataErr: errors.New("metadata lookup should not run"),
+		matches: []Candidate{{
+			ID: "candidate", Name: "Song", Source: SourceQMusic,
+			TitleScore: floatPointer(2), Score: floatPointer(4),
+		}},
+	}
+	service, err := NewBatchService(BatchServiceDependencies{Store: &storeStub{}, Processor: processor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := "admin"
+	status, candidate, message := service.executeItem(context.Background(), ClaimedBatchItem{
+		Job: BatchJobRecord{ID: "job", RequestedBy: &actor, Options: BatchOptions{
+			Sources: []Source{SourceQMusic}, MatchMode: MatchStrict,
+			Fields: ApplyFields{Title: true}, Reason: "claim metadata",
+		}},
+		Item:     BatchItemRecord{ID: "item", TrackID: "track", ExpectedVersion: 3},
+		Metadata: &metadata,
+	}, nilAtomicBool())
+	if status != ItemSucceeded || candidate == nil || message != "Scraping completed" {
+		t.Fatalf("item result = %s/%#v/%q", status, candidate, message)
+	}
+	if len(processor.metadataTrackIDs) != 0 {
+		t.Fatalf("metadata lookup calls = %d", len(processor.metadataTrackIDs))
+	}
+}
+
+func TestBatchWorkerUsesBatchedClaimWindow(t *testing.T) {
+	actor := "admin"
+	metadata := metadataFixture(1)
+	store := &batchClaimStoreStub{
+		storeStub: &storeStub{},
+		claims: []ClaimedBatchItem{{
+			Job: BatchJobRecord{ID: "job", RequestedBy: &actor, Status: JobRunning, Options: BatchOptions{
+				Sources: []Source{SourceQMusic}, MatchMode: MatchStrict,
+				Fields: ApplyFields{Title: true}, Reason: "batched claim",
+			}},
+			Item:      BatchItemRecord{ID: "item", JobID: "job", TrackID: "track", ExpectedVersion: 1},
+			AttemptID: "attempt", Metadata: &metadata,
+		}},
+	}
+	processor := &batchProcessorStub{matches: []Candidate{{
+		ID: "candidate", Name: "Song", Source: SourceQMusic,
+		TitleScore: floatPointer(2), Score: floatPointer(4),
+	}}}
+	service, err := NewBatchService(BatchServiceDependencies{Store: store, Processor: processor, Workers: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worked, err := service.processBatchNext(context.Background(), store)
+	if err != nil || !worked {
+		t.Fatalf("worked=%v error=%v", worked, err)
+	}
+	if store.claimCalls != 1 || len(processor.metadataTrackIDs) != 0 {
+		t.Fatalf("claim/metadata calls = %d/%d", store.claimCalls, len(processor.metadataTrackIDs))
+	}
+}
+
+func TestBatchWorkerClaimWindowDoesNotIncreaseProcessingConcurrency(t *testing.T) {
+	const (
+		workers     = 2
+		claimWindow = 8
+		claimCount  = 8
+	)
+	actor := "admin"
+	claims := make([]ClaimedBatchItem, claimCount)
+	for index := range claims {
+		metadata := metadataFixture(index + 1)
+		claims[index] = ClaimedBatchItem{
+			Job: BatchJobRecord{ID: "job", RequestedBy: &actor, Status: JobRunning, Options: BatchOptions{
+				Sources: []Source{SourceQMusic, SourceNetease}, MatchMode: MatchStrict,
+				Fields: ApplyFields{Title: true}, Reason: "claim window concurrency",
+			}},
+			Item:      BatchItemRecord{ID: fmt.Sprintf("item-%d", index), JobID: "job", TrackID: fmt.Sprintf("track-%d", index), ExpectedVersion: 1},
+			AttemptID: fmt.Sprintf("attempt-%d", index), Metadata: &metadata,
+		}
+	}
+	store := &batchClaimStoreStub{
+		storeStub: &storeStub{}, claims: claims,
+	}
+	processor := &parallelFallbackProcessor{}
+	service, err := NewBatchService(BatchServiceDependencies{
+		Store: store, Processor: processor, Workers: workers, ClaimWindow: claimWindow,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	worked, err := service.processBatchNext(context.Background(), store)
+	if err != nil || !worked {
+		t.Fatalf("worked/error = %t/%v", worked, err)
+	}
+	if maximum := processor.maximum.Load(); maximum > workers {
+		t.Fatalf("processing concurrency = %d, want <= %d", maximum, workers)
+	}
+}
+
+func TestBatchWorkerUsesBatchedCompletionWindow(t *testing.T) {
+	actor := "admin"
+	store := &batchCompletionStoreStub{
+		batchClaimStoreStub: &batchClaimStoreStub{
+			storeStub: &storeStub{},
+			claims: []ClaimedBatchItem{{
+				Job: BatchJobRecord{ID: "job", RequestedBy: &actor, Status: JobRunning, Options: BatchOptions{
+					Sources: []Source{SourceQMusic}, MatchMode: MatchStrict,
+					Fields: ApplyFields{Title: true}, Reason: "batched completion",
+				}},
+				Item:      BatchItemRecord{ID: "item", JobID: "job", TrackID: "track", ExpectedVersion: 1},
+				AttemptID: "attempt",
+			}},
+		},
+	}
+	processor := &batchProcessorStub{matches: []Candidate{{
+		ID: "candidate", Name: "Song", Source: SourceQMusic,
+		TitleScore: floatPointer(2), Score: floatPointer(4),
+	}}}
+	service, err := NewBatchService(BatchServiceDependencies{
+		Store: store, Processor: processor, Workers: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worked, err := service.processBatchNext(context.Background(), store)
+	if err != nil || !worked {
+		t.Fatalf("worked=%v error=%v", worked, err)
+	}
+	if store.claimCalls != 1 || store.completeCalls != 1 || len(store.completions) != 1 {
+		t.Fatalf("claim/completion calls=%d/%d completions=%#v", store.claimCalls, store.completeCalls, store.completions)
+	}
+	completion := store.completions[0]
+	if completion.ItemID != "item" || completion.AttemptID != "attempt" ||
+		completion.Status != ItemSucceeded || completion.Candidate == nil || completion.Candidate.ID != "candidate" {
+		t.Fatalf("completion=%#v", completion)
+	}
+}
+
+func TestBatchWorkerFallsBackToItemCompletionWhenBatchCompletionIsIncomplete(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		completedIDs []string
+		batchError   error
+	}{
+		{name: "partial result", completedIDs: []string{}},
+		{name: "batch error", batchError: errors.New("batch completion unavailable")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			actor := "admin"
+			store := &batchCompletionStoreStub{
+				batchClaimStoreStub: &batchClaimStoreStub{
+					storeStub: &storeStub{},
+					claims: []ClaimedBatchItem{{
+						Job: BatchJobRecord{ID: "job", RequestedBy: &actor, Status: JobRunning, Options: BatchOptions{
+							Sources: []Source{SourceQMusic}, MatchMode: MatchStrict,
+							Fields: ApplyFields{Title: true}, Reason: "completion fallback",
+						}},
+						Item:      BatchItemRecord{ID: "item", JobID: "job", TrackID: "track", ExpectedVersion: 1},
+						AttemptID: "attempt",
+					}},
+				},
+				completedIDs:     test.completedIDs,
+				batchCompleteErr: test.batchError,
+			}
+			processor := &batchProcessorStub{matches: []Candidate{{
+				ID: "candidate", Name: "Song", Source: SourceQMusic,
+				TitleScore: floatPointer(2), Score: floatPointer(4),
+			}}}
+			service, err := NewBatchService(BatchServiceDependencies{
+				Store: store, Processor: processor, Workers: 1,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			worked, err := service.processBatchNext(context.Background(), store)
+			if err != nil || !worked {
+				t.Fatalf("worked=%v error=%v", worked, err)
+			}
+			if store.completeCalls != 1 || store.itemCompleteCalls != 1 {
+				t.Fatalf("batch/item completion calls = %d/%d", store.completeCalls, store.itemCompleteCalls)
+			}
+			if len(store.itemCompletions) != 1 {
+				t.Fatalf("item completions = %#v", store.itemCompletions)
+			}
+			completion := store.itemCompletions[0]
+			if completion.ItemID != "item" || completion.AttemptID != "attempt" || completion.Status != ItemSucceeded {
+				t.Fatalf("fallback completion = %#v", completion)
+			}
+		})
+	}
+}
+
+func TestBatchItemSearchesFallbackSourcesConcurrentlyInConfiguredOrder(t *testing.T) {
+	processor := &parallelFallbackProcessor{}
+	service, err := NewBatchService(BatchServiceDependencies{
+		Store: &storeStub{}, Processor: processor,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := "admin"
+	status, candidate, _ := service.executeItem(context.Background(), ClaimedBatchItem{
+		Job: BatchJobRecord{ID: "job", RequestedBy: &actor, Options: BatchOptions{
+			Sources: []Source{SourceQMusic, SourceNetease, SourceKugou}, MatchMode: MatchStrict,
+			Fields: ApplyFields{Title: true}, Reason: "parallel fallback",
+		}},
+		Item: BatchItemRecord{ID: "item", TrackID: "track", ExpectedVersion: 1},
+	}, nilAtomicBool())
+	if status != ItemSucceeded || candidate == nil || candidate.Source != SourceNetease {
+		t.Fatalf("item result = %s/%#v", status, candidate)
+	}
+	if processor.maximum.Load() < 2 {
+		t.Fatalf("fallback searches were not concurrent: maximum=%d", processor.maximum.Load())
+	}
+}
+
 func TestBatchItemSkipsWhenMissingFieldConditionDoesNotMatch(t *testing.T) {
 	metadata := metadataFixture(1)
 	metadata.Effective.Lyrics = &MetadataLyrics{Content: "present", Format: "PLAIN", Language: "und", Timing: "LINE"}
@@ -348,6 +580,79 @@ func TestBatchItemDoesNotSkipUnrelatedInvalidStateTransition(t *testing.T) {
 	}
 }
 
+func TestBatchItemRequeuesTransientUpstreamFailureWithBackoff(t *testing.T) {
+	now := time.Date(2026, 7, 16, 1, 2, 3, 0, time.UTC)
+	store := &batchRetryStoreStub{
+		storeStub:    &storeStub{},
+		retryControl: BatchLeaseControl{Owned: true},
+	}
+	processor := &batchProcessorStub{
+		metadata:  metadataFixture(1),
+		searchErr: apperror.DependencyUnavailable("music provider unavailable"),
+	}
+	service, err := NewBatchService(BatchServiceDependencies{
+		Store: store, Processor: processor, Clock: func() time.Time { return now },
+		RetryBase: 10 * time.Second, RetryMax: time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim := splitCancellationClaim()
+	claim.Item.Attempts = 1
+	claim.Item.MaxAttempts = 3
+	service.processItem(context.Background(), claim)
+	if store.retryCalls != 1 || store.completeCalls != 0 {
+		t.Fatalf("retry/completion calls = %d/%d", store.retryCalls, store.completeCalls)
+	}
+	if !store.retryNextAttempt.Equal(now.Add(10 * time.Second)) {
+		t.Fatalf("next attempt = %s", store.retryNextAttempt)
+	}
+}
+
+func TestBatchItemCompletesTransientFailureAfterRetryExhaustion(t *testing.T) {
+	store := &batchRetryStoreStub{storeStub: &storeStub{}}
+	processor := &batchProcessorStub{
+		metadata:  metadataFixture(1),
+		searchErr: apperror.RateLimited(1),
+	}
+	service, err := NewBatchService(BatchServiceDependencies{Store: store, Processor: processor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim := splitCancellationClaim()
+	claim.Item.Attempts = 3
+	claim.Item.MaxAttempts = 3
+	service.processItem(context.Background(), claim)
+	if store.retryCalls != 0 || store.completeCalls != 1 || store.completeStatus != ItemFailed {
+		t.Fatalf("retry/completion/status = %d/%d/%s", store.retryCalls, store.completeCalls, store.completeStatus)
+	}
+	if !strings.Contains(store.completeMessage, "All retry attempts failed") {
+		t.Fatalf("completion message = %q", store.completeMessage)
+	}
+}
+
+func TestBatchItemCompletesAsSkippedWhenCancellationWinsRetryRace(t *testing.T) {
+	store := &batchRetryStoreStub{
+		storeStub:    &storeStub{},
+		retryControl: BatchLeaseControl{Owned: true, CancelRequested: true},
+	}
+	processor := &batchProcessorStub{
+		metadata:  metadataFixture(1),
+		searchErr: apperror.DependencyUnavailable("music provider unavailable"),
+	}
+	service, err := NewBatchService(BatchServiceDependencies{Store: store, Processor: processor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim := splitCancellationClaim()
+	claim.Item.Attempts = 1
+	claim.Item.MaxAttempts = 3
+	service.processItem(context.Background(), claim)
+	if store.retryCalls != 1 || store.completeCalls != 1 || store.completeStatus != ItemSkipped {
+		t.Fatalf("retry/completion/status = %d/%d/%s", store.retryCalls, store.completeCalls, store.completeStatus)
+	}
+}
+
 func TestBatchLifecycleRecoversLeasesAndCancelInterruptsActiveItem(t *testing.T) {
 	store := &storeStub{batchJob: BatchJobRecord{ID: "job", CreatedAt: time.Now(), UpdatedAt: time.Now()}}
 	processor := &batchProcessorStub{}
@@ -379,6 +684,30 @@ func TestBatchLifecycleRecoversLeasesAndCancelInterruptsActiveItem(t *testing.T)
 	}
 	if store.cancelRequests != 1 {
 		t.Fatalf("cancel requests = %d", store.cancelRequests)
+	}
+}
+
+func TestBatchCancelInterruptsEveryActiveItemInTheSameJob(t *testing.T) {
+	service, err := NewBatchService(BatchServiceDependencies{
+		Store: &storeStub{}, Processor: &batchProcessorStub{}, Workers: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstContext, firstCancel := context.WithCancel(context.Background())
+	secondContext, secondCancel := context.WithCancel(context.Background())
+	service.setActiveItem("job", "item-1", firstCancel)
+	service.setActiveItem("job", "item-2", secondCancel)
+	service.cancelJob("job")
+	select {
+	case <-firstContext.Done():
+	case <-time.After(time.Second):
+		t.Fatal("first active item was not cancelled")
+	}
+	select {
+	case <-secondContext.Done():
+	case <-time.After(time.Second):
+		t.Fatal("second active item was not cancelled")
 	}
 }
 
@@ -546,11 +875,111 @@ type splitCancellationStore struct {
 	completed  chan ItemStatus
 }
 
+type batchClaimStoreStub struct {
+	*storeStub
+	claims     []ClaimedBatchItem
+	claimCalls int
+}
+
+type batchCompletionStoreStub struct {
+	*batchClaimStoreStub
+	completeCalls     int
+	completions       []BatchItemCompletion
+	completedIDs      []string
+	batchCompleteErr  error
+	itemCompleteCalls int
+	itemCompletions   []BatchItemCompletion
+}
+
+func (store *batchClaimStoreStub) ClaimBatchItems(
+	context.Context, string, time.Time, time.Duration, int,
+) (BatchClaimResult, error) {
+	store.claimCalls++
+	claims := store.claims
+	store.claims = nil
+	return BatchClaimResult{Items: claims}, nil
+}
+
+func (store *batchCompletionStoreStub) CompleteBatchItems(
+	_ context.Context,
+	_ string,
+	_ string,
+	completions []BatchItemCompletion,
+	_ time.Time,
+) ([]string, error) {
+	store.completeCalls++
+	store.completions = append([]BatchItemCompletion(nil), completions...)
+	if store.batchCompleteErr != nil {
+		return nil, store.batchCompleteErr
+	}
+	if store.completedIDs != nil {
+		return append([]string(nil), store.completedIDs...), nil
+	}
+	completed := make([]string, 0, len(completions))
+	for _, completion := range completions {
+		completed = append(completed, completion.ItemID)
+	}
+	return completed, nil
+}
+
+func (store *batchCompletionStoreStub) CompleteBatchItem(
+	_ context.Context,
+	_, itemID, attemptID, _ string,
+	status ItemStatus,
+	candidate *Candidate,
+	message string,
+	_ time.Time,
+) (bool, error) {
+	store.itemCompleteCalls++
+	store.itemCompletions = append(store.itemCompletions, BatchItemCompletion{
+		ItemID: itemID, AttemptID: attemptID, Status: status,
+		Candidate: candidate, Message: message,
+	})
+	return true, nil
+}
+
 type batchFaultStore struct {
 	*storeStub
 	renewErr    error
 	completeErr error
 	releaseErr  error
+}
+
+type batchRetryStoreStub struct {
+	*storeStub
+	retryControl     BatchLeaseControl
+	retryCalls       int
+	retryNextAttempt time.Time
+	completeCalls    int
+	completeStatus   ItemStatus
+	completeMessage  string
+}
+
+func (store *batchRetryStoreStub) RetryBatchItem(
+	_ context.Context,
+	_, _, _, _ string,
+	_ *Candidate,
+	_ string,
+	nextAttemptAt time.Time,
+	_ time.Time,
+) (BatchLeaseControl, error) {
+	store.retryCalls++
+	store.retryNextAttempt = nextAttemptAt
+	return store.retryControl, nil
+}
+
+func (store *batchRetryStoreStub) CompleteBatchItem(
+	_ context.Context,
+	_, _, _, _ string,
+	status ItemStatus,
+	_ *Candidate,
+	message string,
+	_ time.Time,
+) (bool, error) {
+	store.completeCalls++
+	store.completeStatus = status
+	store.completeMessage = message
+	return true, nil
 }
 
 func (store *batchFaultStore) RenewBatchItemLease(
@@ -696,6 +1125,44 @@ type blockingBatchProcessor struct {
 	waitCancel bool
 	startOnce  sync.Once
 	applyCalls atomic.Int32
+}
+
+type parallelFallbackProcessor struct {
+	active  atomic.Int32
+	maximum atomic.Int32
+}
+
+func (processor *parallelFallbackProcessor) TrackMetadata(context.Context, string) (TrackMetadata, error) {
+	return metadataFixture(1), nil
+}
+
+func (processor *parallelFallbackProcessor) Search(ctx context.Context, input SearchInput) ([]Candidate, error) {
+	if input.Source == SourceQMusic {
+		return nil, nil
+	}
+	active := processor.active.Add(1)
+	for {
+		maximum := processor.maximum.Load()
+		if active <= maximum || processor.maximum.CompareAndSwap(maximum, active) {
+			break
+		}
+	}
+	defer processor.active.Add(-1)
+	timer := time.NewTimer(25 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer.C:
+	}
+	return []Candidate{{
+		ID: string(input.Source), Source: input.Source,
+		TitleScore: floatPointer(2), Score: floatPointer(4),
+	}}, nil
+}
+
+func (*parallelFallbackProcessor) Apply(context.Context, string, string, string, ApplyInput) (ApplyResult, error) {
+	return ApplyResult{}, nil
 }
 
 func newBlockingBatchProcessor(waitCancel bool) *blockingBatchProcessor {

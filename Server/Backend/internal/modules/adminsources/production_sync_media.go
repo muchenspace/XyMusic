@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"golang.org/x/text/unicode/norm"
 
@@ -18,26 +19,43 @@ import (
 )
 
 func readSidecarLyrics(audioPath string) ([]scannedLyric, error) {
+	return readSidecarLyricsCached(nil, audioPath)
+}
+
+func readSidecarLyricsCached(snapshot *sourceScanSnapshot, audioPath string) ([]scannedLyric, error) {
 	directory := filepath.Dir(audioPath)
 	stem := normalizePlatformPath(strings.TrimSuffix(filepath.Base(audioPath), filepath.Ext(audioPath)))
-	entries, err := os.ReadDir(directory)
-	if err != nil {
-		return nil, err
+	var names []string
+	if snapshot != nil {
+		var err error
+		names, err = snapshot.sidecarNamesForStem(directory, stem)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		entries, err := os.ReadDir(directory)
+		if err != nil {
+			return nil, err
+		}
+		names = make([]string, 0, len(entries))
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			names = append(names, entry.Name())
+		}
 	}
 	type candidate struct {
 		path, language, format string
 		base                   bool
 	}
 	candidates := make([]candidate, 0)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		extension := strings.ToLower(filepath.Ext(entry.Name()))
+	for _, name := range names {
+		extension := strings.ToLower(filepath.Ext(name))
 		if extension != ".lrc" && extension != ".txt" {
 			continue
 		}
-		rawStem := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
+		rawStem := strings.TrimSuffix(name, filepath.Ext(name))
 		candidateStem := normalizePlatformPath(rawStem)
 		language := "und"
 		base := candidateStem == stem
@@ -53,7 +71,7 @@ func readSidecarLyrics(audioPath string) ([]scannedLyric, error) {
 			format = "LRC"
 		}
 		candidates = append(candidates, candidate{
-			path: filepath.Join(directory, entry.Name()), language: language, format: format, base: base,
+			path: filepath.Join(directory, name), language: language, format: format, base: base,
 		})
 	}
 	sort.Slice(candidates, func(i, j int) bool {
@@ -74,16 +92,12 @@ func readSidecarLyrics(audioPath string) ([]scannedLyric, error) {
 		if _, exists := seen[candidate.language]; exists {
 			continue
 		}
-		metadata, err := os.Stat(candidate.path)
+		content, err := readSidecarContent(candidate.path)
 		if err != nil {
 			return nil, err
 		}
-		if metadata.Size() > 1_000_000 {
+		if content == nil {
 			continue
-		}
-		content, err := os.ReadFile(candidate.path)
-		if err != nil {
-			return nil, err
 		}
 		value := strings.TrimSpace(norm.NFC.String(strings.TrimPrefix(string(content), "\ufeff")))
 		if value == "" {
@@ -97,6 +111,34 @@ func readSidecarLyrics(audioPath string) ([]scannedLyric, error) {
 		})
 	}
 	return result, nil
+}
+
+func readSidecarContent(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	metadata, statErr := file.Stat()
+	if statErr != nil {
+		_ = file.Close()
+		return nil, statErr
+	}
+	if metadata.Size() > 1_000_000 {
+		_ = file.Close()
+		return nil, nil
+	}
+	content, readErr := io.ReadAll(io.LimitReader(file, 1_000_001))
+	closeErr := file.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	if len(content) > 1_000_000 {
+		return nil, nil
+	}
+	return content, nil
 }
 
 func mergeLyrics(sidecars []scannedLyric, embedded *adminmetadata.MetadataLyrics) []scannedLyric {
@@ -133,7 +175,9 @@ func fileSHA256(path string) (string, error) {
 	}
 	defer file.Close()
 	hasher := sha256.New()
-	if _, err := io.Copy(hasher, file); err != nil {
+	buffer := sourceHashBufferPool.Get().([]byte)
+	defer sourceHashBufferPool.Put(buffer)
+	if _, err := io.CopyBuffer(hasher, file, buffer); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(hasher.Sum(nil)), nil
@@ -169,3 +213,7 @@ func sourceMediaType(path string) (string, error) {
 }
 
 var lyricLanguagePattern = regexp.MustCompile(`^[a-z]{2,8}(?:-[a-z0-9]{2,8})*$`)
+
+var sourceHashBufferPool = sync.Pool{
+	New: func() any { return make([]byte, 64*1024) },
+}

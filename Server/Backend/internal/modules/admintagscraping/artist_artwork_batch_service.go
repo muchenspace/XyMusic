@@ -24,6 +24,8 @@ type ArtistArtworkBatchServiceDependencies struct {
 	Processor   ArtistArtworkBatchProcessor
 	Logger      Logger
 	WorkerID    string
+	Workers     int
+	ClaimWindow int
 	Clock       func() time.Time
 	Lease       time.Duration
 	Heartbeat   time.Duration
@@ -39,6 +41,8 @@ type ArtistArtworkBatchService struct {
 	processor   ArtistArtworkBatchProcessor
 	logger      Logger
 	workerID    string
+	workers     int
+	claimWindow int
 	now         func() time.Time
 	lease       time.Duration
 	heartbeat   time.Duration
@@ -56,7 +60,56 @@ type ArtistArtworkBatchService struct {
 	done        chan struct{}
 
 	activeMu sync.Mutex
-	active   map[string]context.CancelFunc
+	active   map[string]map[string]context.CancelFunc
+}
+
+const artistArtworkCancellationCacheWindow = 500 * time.Millisecond
+
+type artistArtworkActivityChecker struct {
+	service   *ArtistArtworkBatchService
+	jobID     string
+	mu        sync.Mutex
+	checkedAt time.Time
+	requested bool
+}
+
+func (checker *artistArtworkActivityChecker) Invalidate() {
+	checker.mu.Lock()
+	checker.checkedAt = time.Time{}
+	checker.mu.Unlock()
+}
+
+func (checker *artistArtworkActivityChecker) CheckFresh(ctx context.Context) error {
+	checker.Invalidate()
+	return checker.Check(ctx)
+}
+
+func (checker *artistArtworkActivityChecker) Check(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	now := checker.service.now().UTC()
+	checker.mu.Lock()
+	if !checker.checkedAt.IsZero() && now.Sub(checker.checkedAt) < artistArtworkCancellationCacheWindow {
+		requested := checker.requested
+		checker.mu.Unlock()
+		if requested {
+			return errArtistArtworkBatchCancellationRequested
+		}
+		return nil
+	}
+	checker.mu.Unlock()
+	requested, err := checker.service.store.ArtistArtworkBatchCancelRequested(ctx, checker.jobID)
+	if err != nil {
+		return err
+	}
+	checker.mu.Lock()
+	checker.checkedAt, checker.requested = now, requested
+	checker.mu.Unlock()
+	if requested {
+		return errArtistArtworkBatchCancellationRequested
+	}
+	return nil
 }
 
 func NewArtistArtworkBatchService(
@@ -74,6 +127,18 @@ func NewArtistArtworkBatchService(
 	if dependencies.WorkerID == "" {
 		dependencies.WorkerID = "artist-artwork-batch-" + uuid.NewString()
 	}
+	if dependencies.Workers <= 0 {
+		dependencies.Workers = 1
+	}
+	if dependencies.Workers > 64 {
+		return nil, errors.New("artist artwork batch worker count must not exceed 64")
+	}
+	if dependencies.ClaimWindow <= 0 {
+		dependencies.ClaimWindow = min(64, dependencies.Workers*4)
+	}
+	if dependencies.ClaimWindow < dependencies.Workers || dependencies.ClaimWindow > 256 {
+		return nil, errors.New("artist artwork batch claim window must be between worker count and 256")
+	}
 	if dependencies.Clock == nil {
 		dependencies.Clock = time.Now
 	}
@@ -89,7 +154,7 @@ func NewArtistArtworkBatchService(
 	if dependencies.IdlePoll <= 0 {
 		dependencies.IdlePoll = defaultBatchIdlePoll
 	}
-	if dependencies.WorkingPoll <= 0 {
+	if dependencies.WorkingPoll < 0 {
 		dependencies.WorkingPoll = defaultBatchWorkPoll
 	}
 	if dependencies.MaxAttempts <= 0 {
@@ -109,11 +174,11 @@ func NewArtistArtworkBatchService(
 	}
 	return &ArtistArtworkBatchService{
 		store: dependencies.Store, processor: dependencies.Processor, logger: dependencies.Logger,
-		workerID: dependencies.WorkerID, now: dependencies.Clock,
+		workerID: dependencies.WorkerID, workers: dependencies.Workers, claimWindow: dependencies.ClaimWindow, now: dependencies.Clock,
 		lease: dependencies.Lease, heartbeat: dependencies.Heartbeat,
 		idlePoll: dependencies.IdlePoll, workingPoll: dependencies.WorkingPoll,
 		maxAttempts: dependencies.MaxAttempts, retryBase: dependencies.RetryBase, retryMax: dependencies.RetryMax,
-		wake: make(chan struct{}, 1), active: make(map[string]context.CancelFunc),
+		wake: make(chan struct{}, dependencies.Workers), active: make(map[string]map[string]context.CancelFunc),
 	}, nil
 }
 
@@ -136,7 +201,7 @@ func (service *ArtistArtworkBatchService) Start(ctx context.Context) error {
 	service.cancel = cancel
 	service.done = make(chan struct{})
 	service.started = true
-	go service.run(workerContext, service.done)
+	go service.runWorkers(workerContext, service.done)
 	service.signal()
 	return nil
 }
@@ -228,8 +293,67 @@ func (service *ArtistArtworkBatchService) Retry(
 	return service.Job(ctx, jobID, nil)
 }
 
-func (service *ArtistArtworkBatchService) run(ctx context.Context, done chan struct{}) {
-	defer close(done)
+func (service *ArtistArtworkBatchService) runWorkers(ctx context.Context, done chan struct{}) {
+	if batchStore, ok := service.store.(ArtistArtworkBatchClaimStore); ok {
+		service.runBatchWorkers(ctx, batchStore)
+		close(done)
+		return
+	}
+	var group sync.WaitGroup
+	for index := 0; index < service.workers; index++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			service.run(ctx)
+		}()
+	}
+	group.Wait()
+	close(done)
+}
+
+func (service *ArtistArtworkBatchService) runBatchWorkers(
+	ctx context.Context,
+	store ArtistArtworkBatchClaimStore,
+) {
+	delay := time.Duration(0)
+	for {
+		if delay > 0 {
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-service.wake:
+				timer.Stop()
+			case <-timer.C:
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+		}
+		worked, err := service.processBatchNext(ctx, store)
+		if err != nil {
+			service.logger.Error("artist_artwork.batch.poll_failed", map[string]any{
+				"workerId": service.workerID, "message": messageOf(err),
+			})
+			delay = service.idlePoll
+			continue
+		}
+		if worked {
+			delay = service.workingPoll
+		} else {
+			delay = service.idlePoll
+		}
+	}
+}
+
+func (service *ArtistArtworkBatchService) run(ctx context.Context, done ...chan struct{}) {
+	if len(done) > 0 && done[0] != nil {
+		defer close(done[0])
+	}
 	delay := time.Duration(0)
 	for {
 		if delay > 0 {
@@ -285,6 +409,138 @@ func (service *ArtistArtworkBatchService) processNext(ctx context.Context) (bool
 	return true, nil
 }
 
+func (service *ArtistArtworkBatchService) processBatchNext(
+	ctx context.Context,
+	store ArtistArtworkBatchClaimStore,
+) (bool, error) {
+	result, err := store.ClaimArtistArtworkBatchItems(
+		ctx, service.workerID, service.now().UTC(), service.lease, service.claimWindow,
+	)
+	if err != nil {
+		return false, err
+	}
+	if result.FinishJobID != "" {
+		finished, err := service.store.FinishArtistArtworkBatch(
+			ctx, result.FinishJobID, service.now().UTC(),
+		)
+		return finished, err
+	}
+	claims := result.Items
+	if len(claims) == 0 && result.Item != nil {
+		claims = []ClaimedArtistArtworkBatchItem{*result.Item}
+	}
+	if len(claims) == 0 {
+		return false, nil
+	}
+	if completeStore, ok := service.store.(ArtistArtworkBatchCompleteStore); ok {
+		service.processBatchItemsWithCompletion(ctx, completeStore, claims)
+		return true, nil
+	}
+	claimQueue := make(chan ClaimedArtistArtworkBatchItem)
+	var group sync.WaitGroup
+	workerCount := min(service.workers, len(claims))
+	group.Add(workerCount)
+	for index := 0; index < workerCount; index++ {
+		go func() {
+			defer group.Done()
+			for claim := range claimQueue {
+				service.processItem(ctx, claim)
+			}
+		}()
+	}
+	for index := range claims {
+		claimQueue <- claims[index]
+	}
+	close(claimQueue)
+	group.Wait()
+	return true, nil
+}
+
+type artistArtworkBatchCompletionResult struct {
+	claim      ClaimedArtistArtworkBatchItem
+	completion ArtistArtworkBatchItemCompletion
+}
+
+func (service *ArtistArtworkBatchService) processBatchItemsWithCompletion(
+	ctx context.Context,
+	store ArtistArtworkBatchCompleteStore,
+	claims []ClaimedArtistArtworkBatchItem,
+) {
+	results := make(chan artistArtworkBatchCompletionResult, len(claims))
+	claimQueue := make(chan ClaimedArtistArtworkBatchItem)
+	var group sync.WaitGroup
+	workerCount := min(service.workers, len(claims))
+	group.Add(workerCount)
+	for index := 0; index < workerCount; index++ {
+		go func() {
+			defer group.Done()
+			for claim := range claimQueue {
+				service.processItemWithCompletion(ctx, claim, func(completion ArtistArtworkBatchItemCompletion) {
+					results <- artistArtworkBatchCompletionResult{claim: claim, completion: completion}
+				})
+			}
+		}()
+	}
+	for index := range claims {
+		claimQueue <- claims[index]
+	}
+	close(claimQueue)
+	group.Wait()
+	close(results)
+	completedByJob := make(map[string][]artistArtworkBatchCompletionResult)
+	for result := range results {
+		jobID := result.claim.Job.ID
+		completedByJob[jobID] = append(completedByJob[jobID], result)
+	}
+	if len(completedByJob) == 0 {
+		return
+	}
+	for jobID, completed := range completedByJob {
+		completions := make([]ArtistArtworkBatchItemCompletion, 0, len(completed))
+		for _, result := range completed {
+			completions = append(completions, result.completion)
+		}
+		completedIDs, err := store.CompleteArtistArtworkBatchItems(
+			context.WithoutCancel(ctx), jobID, service.workerID,
+			completions, service.now().UTC(),
+		)
+		if err != nil {
+			for _, result := range completed {
+				service.logger.Warn("artist_artwork.batch.complete_failed", map[string]any{
+					"jobId": result.claim.Job.ID, "itemId": result.completion.ItemID,
+					"attemptId": result.completion.AttemptID, "workerId": service.workerID,
+					"message": messageOf(err),
+				})
+				service.completeItemResult(context.WithoutCancel(ctx), result.claim, result.completion)
+			}
+			continue
+		}
+		accepted := make(map[string]struct{}, len(completedIDs))
+		for _, itemID := range completedIDs {
+			accepted[itemID] = struct{}{}
+		}
+		if len(accepted) < len(completed) {
+			service.logger.Warn("artist_artwork.batch.complete_partial", map[string]any{
+				"workerId": service.workerID, "jobId": jobID,
+				"expected": len(completed), "completed": len(accepted),
+			})
+		}
+		for _, result := range completed {
+			fields := map[string]any{
+				"jobId": result.claim.Job.ID, "itemId": result.completion.ItemID,
+				"attemptId": result.completion.AttemptID, "workerId": service.workerID,
+			}
+			if _, ok := accepted[result.completion.ItemID]; !ok {
+				service.logger.Warn("artist_artwork.batch.complete_rejected", fields)
+				service.completeItemResult(context.WithoutCancel(ctx), result.claim, result.completion)
+				continue
+			}
+			fields["status"] = string(result.completion.Status)
+			service.logger.Info("artist_artwork.batch.item_completed", fields)
+		}
+	}
+}
+
 type artistArtworkBatchExecution struct {
 	status     ItemStatus
 	candidate  *ArtistCandidate
@@ -297,11 +553,19 @@ func (service *ArtistArtworkBatchService) processItem(
 	workerContext context.Context,
 	claim ClaimedArtistArtworkBatchItem,
 ) {
+	service.processItemWithCompletion(workerContext, claim, nil)
+}
+
+func (service *ArtistArtworkBatchService) processItemWithCompletion(
+	workerContext context.Context,
+	claim ClaimedArtistArtworkBatchItem,
+	completionSink func(ArtistArtworkBatchItemCompletion),
+) {
 	itemContext, cancel := context.WithCancel(workerContext)
-	service.setActive(claim.Job.ID, cancel)
+	service.setActiveItem(claim.Job.ID, claim.Item.ID, cancel)
 	defer func() {
 		cancel()
-		service.clearActive(claim.Job.ID)
+		service.clearActiveItem(claim.Job.ID, claim.Item.ID)
 	}()
 	var ownershipLost atomic.Bool
 	var cancelRequested atomic.Bool
@@ -399,23 +663,50 @@ func (service *ArtistArtworkBatchService) processItem(
 		execution.status = ItemFailed
 		execution.message = "All retry attempts failed: " + execution.message
 	}
+	if completionSink != nil {
+		completionSink(ArtistArtworkBatchItemCompletion{
+			ItemID: claim.Item.ID, AttemptID: claim.AttemptID,
+			Status: execution.status, Candidate: execution.candidate, Message: execution.message,
+		})
+		return
+	}
+	service.completeItemResult(context.WithoutCancel(itemContext), claim, ArtistArtworkBatchItemCompletion{
+		ItemID: claim.Item.ID, AttemptID: claim.AttemptID,
+		Status: execution.status, Candidate: execution.candidate, Message: execution.message,
+	})
+}
+
+func (service *ArtistArtworkBatchService) completeItemResult(
+	workerContext context.Context,
+	claim ClaimedArtistArtworkBatchItem,
+	completion ArtistArtworkBatchItemCompletion,
+) {
 	completed, err := service.store.CompleteArtistArtworkBatchItem(
-		context.WithoutCancel(itemContext), claim.Job.ID, claim.Item.ID, claim.AttemptID,
-		service.workerID, execution.status, execution.candidate, execution.message, service.now().UTC(),
+		context.WithoutCancel(workerContext), claim.Job.ID, completion.ItemID, completion.AttemptID,
+		service.workerID, completion.Status, completion.Candidate, completion.Message, service.now().UTC(),
 	)
 	if err != nil {
 		if !errors.Is(err, ErrArtistArtworkBatchLeaseLost) {
 			service.logger.Warn("artist_artwork.batch.complete_failed", map[string]any{
-				"jobId": claim.Job.ID, "itemId": claim.Item.ID, "message": messageOf(err),
+				"jobId": claim.Job.ID, "itemId": completion.ItemID,
+				"attemptId": completion.AttemptID, "workerId": service.workerID,
+				"message": messageOf(err),
 			})
 		}
 		return
 	}
 	if completed {
 		service.logger.Info("artist_artwork.batch.item_completed", map[string]any{
-			"jobId": claim.Job.ID, "itemId": claim.Item.ID, "status": string(execution.status),
+			"jobId": claim.Job.ID, "itemId": completion.ItemID,
+			"attemptId": completion.AttemptID, "workerId": service.workerID,
+			"status": string(completion.Status),
 		})
+		return
 	}
+	service.logger.Warn("artist_artwork.batch.complete_rejected", map[string]any{
+		"jobId": claim.Job.ID, "itemId": completion.ItemID,
+		"attemptId": completion.AttemptID, "workerId": service.workerID,
+	})
 }
 
 func (service *ArtistArtworkBatchService) executeItem(
@@ -430,7 +721,9 @@ func (service *ArtistArtworkBatchService) executeItem(
 	if claim.Job.RequestedBy == nil {
 		return artistArtworkBatchExecution{status: ItemFailed, message: "The administrator who created the job no longer exists"}
 	}
-	if err := service.ensureActive(ctx, claim.Job.ID); err != nil {
+	activity := &artistArtworkActivityChecker{service: service, jobID: claim.Job.ID}
+	ensureActive := activity.Check
+	if err := ensureActive(ctx); err != nil {
 		return service.executionError(ctx, err, ownershipLost)
 	}
 	if claim.Target.Version != claim.Item.ExpectedVersion {
@@ -451,13 +744,12 @@ func (service *ArtistArtworkBatchService) executeItem(
 	successfulSources := 0
 	transientFailure := false
 	retryAfter := time.Duration(0)
-	for _, source := range claim.Job.Options.Sources {
-		if err := service.ensureActive(ctx, claim.Job.ID); err != nil {
-			return service.executionError(ctx, err, ownershipLost)
-		}
-		matches, searchErr := service.processor.SearchArtists(ctx, ArtistSearchInput{
-			Source: source, Query: claim.Target.Name,
-		})
+	type artistSearchResult struct {
+		source  Source
+		matches []ArtistCandidate
+		err     error
+	}
+	recordSearch := func(source Source, matches []ArtistCandidate, searchErr error) {
 		if searchErr != nil {
 			sourceErrors = append(sourceErrors, string(source)+": "+messageOf(searchErr))
 			if retry, hint := transientArtistArtworkBatchError(searchErr); retry {
@@ -466,19 +758,60 @@ func (service *ArtistArtworkBatchService) executeItem(
 					retryAfter = hint
 				}
 			}
-			continue
+			return
 		}
 		successfulSources++
+		if selected != nil {
+			return
+		}
 		for index := range matches {
 			if reliableArtistArtworkMatch(claim.Target.Name, matches[index]) {
 				match := matches[index]
 				selected = &match
-				break
+				return
 			}
 		}
+	}
+	for sourceIndex := 0; sourceIndex < len(claim.Job.Options.Sources); sourceIndex++ {
+		if err := ensureActive(ctx); err != nil {
+			return service.executionError(ctx, err, ownershipLost)
+		}
+		remaining := claim.Job.Options.Sources[sourceIndex:]
+		if sourceIndex > 0 && len(remaining) > 1 {
+			results := make([]artistSearchResult, len(remaining))
+			var searchGroup sync.WaitGroup
+			for resultIndex, source := range remaining {
+				resultIndex, source := resultIndex, source
+				searchGroup.Add(1)
+				go func() {
+					defer searchGroup.Done()
+					matches, searchErr := service.processor.SearchArtists(ctx, ArtistSearchInput{
+						Source: source, Query: claim.Target.Name,
+					})
+					results[resultIndex] = artistSearchResult{
+						source: source, matches: matches, err: searchErr,
+					}
+				}()
+			}
+			searchGroup.Wait()
+			for _, result := range results {
+				recordSearch(result.source, result.matches, result.err)
+			}
+			break
+		}
+		source := claim.Job.Options.Sources[sourceIndex]
+		matches, searchErr := service.processor.SearchArtists(ctx, ArtistSearchInput{
+			Source: source, Query: claim.Target.Name,
+		})
+		recordSearch(source, matches, searchErr)
 		if selected != nil {
 			break
 		}
+	}
+	// Refresh after the complete read-only search phase so cancellation cannot
+	// pass through to ApplyArtistArtwork, without querying once per source.
+	if err := activity.CheckFresh(ctx); err != nil {
+		return service.executionError(ctx, err, ownershipLost)
 	}
 	if selected == nil {
 		if transientFailure {
@@ -497,9 +830,6 @@ func (service *ArtistArtworkBatchService) executeItem(
 			message += "; some sources failed: " + strings.Join(sourceErrors, "; ")
 		}
 		return artistArtworkBatchExecution{status: ItemSkipped, message: message}
-	}
-	if err := service.ensureActive(ctx, claim.Job.ID); err != nil {
-		return service.executionError(ctx, err, ownershipLost)
 	}
 	result, err := service.processor.ApplyArtistArtwork(
 		ctx, *claim.Job.RequestedBy, uuid.NewString(), claim.Item.ArtistID,
@@ -548,20 +878,6 @@ func (service *ArtistArtworkBatchService) executionError(
 		}
 	}
 	return artistArtworkBatchExecution{status: ItemFailed, message: messageOf(err)}
-}
-
-func (service *ArtistArtworkBatchService) ensureActive(ctx context.Context, jobID string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	requested, err := service.store.ArtistArtworkBatchCancelRequested(ctx, jobID)
-	if err != nil {
-		return err
-	}
-	if requested {
-		return errArtistArtworkBatchCancellationRequested
-	}
-	return nil
 }
 
 func (service *ArtistArtworkBatchService) retryDelay(attempt int, hint time.Duration) time.Duration {
@@ -715,15 +1031,27 @@ func presentArtistArtworkBatch(
 }
 
 func (service *ArtistArtworkBatchService) signal() {
-	select {
-	case service.wake <- struct{}{}:
-	default:
+	for index := 0; index < service.workers; index++ {
+		select {
+		case service.wake <- struct{}{}:
+		default:
+			return
+		}
 	}
 }
 
 func (service *ArtistArtworkBatchService) setActive(jobID string, cancel context.CancelFunc) {
+	service.setActiveItem(jobID, "", cancel)
+}
+
+func (service *ArtistArtworkBatchService) setActiveItem(jobID, itemID string, cancel context.CancelFunc) {
 	service.activeMu.Lock()
-	service.active[jobID] = cancel
+	items := service.active[jobID]
+	if items == nil {
+		items = make(map[string]context.CancelFunc)
+		service.active[jobID] = items
+	}
+	items[itemID] = cancel
 	service.activeMu.Unlock()
 }
 
@@ -733,11 +1061,25 @@ func (service *ArtistArtworkBatchService) clearActive(jobID string) {
 	service.activeMu.Unlock()
 }
 
+func (service *ArtistArtworkBatchService) clearActiveItem(jobID, itemID string) {
+	service.activeMu.Lock()
+	items := service.active[jobID]
+	delete(items, itemID)
+	if len(items) == 0 {
+		delete(service.active, jobID)
+	}
+	service.activeMu.Unlock()
+}
+
 func (service *ArtistArtworkBatchService) cancelJob(jobID string) {
 	service.activeMu.Lock()
-	cancel := service.active[jobID]
+	items := service.active[jobID]
+	cancellations := make([]context.CancelFunc, 0, len(items))
+	for _, cancel := range items {
+		cancellations = append(cancellations, cancel)
+	}
 	service.activeMu.Unlock()
-	if cancel != nil {
+	for _, cancel := range cancellations {
 		cancel()
 	}
 }
@@ -745,8 +1087,10 @@ func (service *ArtistArtworkBatchService) cancelJob(jobID string) {
 func (service *ArtistArtworkBatchService) cancelActive() {
 	service.activeMu.Lock()
 	cancellations := make([]context.CancelFunc, 0, len(service.active))
-	for _, cancel := range service.active {
-		cancellations = append(cancellations, cancel)
+	for _, items := range service.active {
+		for _, cancel := range items {
+			cancellations = append(cancellations, cancel)
+		}
 	}
 	service.activeMu.Unlock()
 	for _, cancel := range cancellations {

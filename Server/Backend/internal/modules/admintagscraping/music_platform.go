@@ -24,15 +24,22 @@ import (
 )
 
 const (
-	platformUserAgent      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36"
-	defaultUpstreamTimeout = 12 * time.Second
-	maximumArtworkBytes    = int64(20 * 1024 * 1024)
-	maximumJSONBytes       = int64(2 * 1024 * 1024)
-	maximumTextBytes       = int64(2 * 1024 * 1024)
-	maximumRequestAttempts = 3
-	maximumRedirects       = 5
-	neteaseLinuxForwardKey = "rFgB&h#%2?^eDg:Q"
-	kugouSignatureSalt     = "NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt"
+	platformUserAgent        = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36"
+	defaultUpstreamTimeout   = 12 * time.Second
+	maximumArtworkBytes      = int64(20 * 1024 * 1024)
+	maximumJSONBytes         = int64(2 * 1024 * 1024)
+	maximumTextBytes         = int64(2 * 1024 * 1024)
+	maximumRequestAttempts   = 3
+	maximumRedirects         = 5
+	maximumHostBackoff       = 30 * time.Second
+	baseHostBackoff          = 500 * time.Millisecond
+	searchCacheTTL           = 30 * time.Second
+	searchCacheMaximum       = 2_048
+	artworkCacheTTL          = 5 * time.Minute
+	artworkCacheMaximum      = 256
+	artworkCacheMaximumBytes = int64(32 * 1024 * 1024)
+	neteaseLinuxForwardKey   = "rFgB&h#%2?^eDg:Q"
+	kugouSignatureSalt       = "NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt"
 )
 
 var allowedArtworkHosts = []string{"music.126.net", "y.qq.com", "kugou.com"}
@@ -42,10 +49,38 @@ type ProductionMusicPlatform struct {
 	acoustIDClient string
 	gate           *requestGate
 	artworkGate    *requestGate
+	searchMu       sync.Mutex
+	searchCalls    map[string]*trackSearchCall
+	artistCalls    map[string]*artistSearchCall
 	artworkMu      sync.Mutex
 	artworkCalls   map[string]*artworkCall
+	artworkCache   map[string]artworkCacheEntry
+	artworkBytes   int64
 	circuitMu      sync.Mutex
 	circuitOpen    map[string]time.Time
+	hostMu         sync.Mutex
+	hostStates     map[string]*upstreamHostState
+}
+
+type MusicPlatformOptions struct {
+	Client         *http.Client
+	AcoustIDClient string
+	RequestWorkers int
+	ArtworkWorkers int
+}
+
+type trackSearchCall struct {
+	done      chan struct{}
+	result    []Candidate
+	err       error
+	expiresAt time.Time
+}
+
+type artistSearchCall struct {
+	done      chan struct{}
+	result    []ArtistCandidate
+	err       error
+	expiresAt time.Time
 }
 
 var _ MusicPlatform = (*ProductionMusicPlatform)(nil)
@@ -56,34 +91,250 @@ type artworkCall struct {
 	err    error
 }
 
+type artworkCacheEntry struct {
+	result    DownloadedArtwork
+	expiresAt time.Time
+	bytes     int64
+}
+
+type upstreamHostState struct {
+	mu                  sync.Mutex
+	nextStart           time.Time
+	consecutiveFailures int
+}
+
 func NewMusicPlatformClient(client *http.Client, acoustIDClient string) *ProductionMusicPlatform {
+	return NewMusicPlatformClientWithOptions(MusicPlatformOptions{
+		Client: client, AcoustIDClient: acoustIDClient,
+	})
+}
+
+func NewMusicPlatformClientWithOptions(options MusicPlatformOptions) *ProductionMusicPlatform {
+	client := options.Client
 	if client == nil {
 		client = &http.Client{}
 	}
+	if options.RequestWorkers <= 0 {
+		options.RequestWorkers = 6
+	}
+	if options.ArtworkWorkers <= 0 {
+		options.ArtworkWorkers = 2
+	}
+	options.RequestWorkers = min(64, options.RequestWorkers)
+	options.ArtworkWorkers = min(32, options.ArtworkWorkers)
 	return &ProductionMusicPlatform{
-		client: client, acoustIDClient: strings.TrimSpace(acoustIDClient),
-		gate: newRequestGate(6, 128), artworkGate: newRequestGate(2, 32),
-		artworkCalls: make(map[string]*artworkCall), circuitOpen: make(map[string]time.Time),
+		client: tuneMusicHTTPClient(client, options.RequestWorkers), acoustIDClient: strings.TrimSpace(options.AcoustIDClient),
+		gate:        newRequestGate(options.RequestWorkers, options.RequestWorkers*32),
+		artworkGate: newRequestGate(options.ArtworkWorkers, options.ArtworkWorkers*16),
+		searchCalls: make(map[string]*trackSearchCall), artistCalls: make(map[string]*artistSearchCall),
+		artworkCalls: make(map[string]*artworkCall), artworkCache: make(map[string]artworkCacheEntry),
+		circuitOpen: make(map[string]time.Time), hostStates: make(map[string]*upstreamHostState),
 	}
 }
 
-func (platform *ProductionMusicPlatform) Search(ctx context.Context, source Source, query string) ([]Candidate, error) {
-	var result []Candidate
-	var err error
-	switch source {
-	case SourceNetease:
-		result, err = platform.searchNetease(ctx, query)
-	case SourceQMusic:
-		result, err = platform.searchQQ(ctx, query)
-	case SourceKugou:
-		result, err = platform.searchKugou(ctx, query)
-	default:
-		return nil, apperror.Validation("The music platform source is invalid")
+// tuneMusicHTTPClient gives the platform request gate enough keep-alive
+// capacity to reuse connections under a batch window. Keep custom transports
+// that are not net/http transports untouched so tests and callers retain their
+// own RoundTripper behavior.
+func tuneMusicHTTPClient(client *http.Client, requestWorkers int) *http.Client {
+	if client == nil {
+		return nil
 	}
+	transport, ok := client.Transport.(*http.Transport)
+	if client.Transport == nil {
+		transport, ok = http.DefaultTransport.(*http.Transport)
+	}
+	if !ok || transport == nil {
+		return client
+	}
+	transport = transport.Clone()
+	idlePerHost := min(64, max(8, requestWorkers))
+	if transport.MaxIdleConnsPerHost < idlePerHost {
+		transport.MaxIdleConnsPerHost = idlePerHost
+	}
+	minimumIdle := min(256, max(32, idlePerHost*2))
+	if transport.MaxIdleConns < minimumIdle {
+		transport.MaxIdleConns = minimumIdle
+	}
+	clone := *client
+	clone.Transport = transport
+	return &clone
+}
+
+func (platform *ProductionMusicPlatform) Search(ctx context.Context, source Source, query string) ([]Candidate, error) {
+	key := string(source) + "\x00" + strings.TrimSpace(query)
+	call, leader := platform.beginTrackSearch(key)
+	if !leader {
+		result, err := awaitTrackSearch(ctx, call)
+		if err != nil {
+			return nil, normalizeUpstreamError(err, ctx)
+		}
+		return result, nil
+	}
+	result, err := platform.searchUncached(ctx, source, query)
+	platform.finishTrackSearch(key, call, result, err)
 	if err != nil {
 		return nil, normalizeUpstreamError(err, ctx)
 	}
 	return result, nil
+}
+
+func (platform *ProductionMusicPlatform) searchUncached(
+	ctx context.Context,
+	source Source,
+	query string,
+) ([]Candidate, error) {
+	switch source {
+	case SourceNetease:
+		return platform.searchNetease(ctx, query)
+	case SourceQMusic:
+		return platform.searchQQ(ctx, query)
+	case SourceKugou:
+		return platform.searchKugou(ctx, query)
+	default:
+		return nil, apperror.Validation("The music platform source is invalid")
+	}
+}
+
+func (platform *ProductionMusicPlatform) beginTrackSearch(key string) (*trackSearchCall, bool) {
+	platform.searchMu.Lock()
+	defer platform.searchMu.Unlock()
+	now := time.Now()
+	if call := platform.searchCalls[key]; call != nil {
+		if call.expiresAt.IsZero() || call.expiresAt.After(now) {
+			return call, false
+		}
+		delete(platform.searchCalls, key)
+	}
+	platform.trimTrackSearchCache(now)
+	call := &trackSearchCall{done: make(chan struct{})}
+	platform.searchCalls[key] = call
+	return call, true
+}
+
+func (platform *ProductionMusicPlatform) finishTrackSearch(
+	key string,
+	call *trackSearchCall,
+	result []Candidate,
+	err error,
+) {
+	platform.searchMu.Lock()
+	call.result = cloneCandidates(result)
+	call.err = err
+	if err == nil {
+		call.expiresAt = time.Now().Add(searchCacheTTL)
+	} else {
+		delete(platform.searchCalls, key)
+	}
+	close(call.done)
+	platform.searchMu.Unlock()
+}
+
+func (platform *ProductionMusicPlatform) trimTrackSearchCache(now time.Time) {
+	for key, call := range platform.searchCalls {
+		if !call.expiresAt.IsZero() && !call.expiresAt.After(now) {
+			delete(platform.searchCalls, key)
+		}
+	}
+	for len(platform.searchCalls) >= searchCacheMaximum {
+		removed := false
+		for key, call := range platform.searchCalls {
+			if !call.expiresAt.IsZero() {
+				delete(platform.searchCalls, key)
+				removed = true
+				break
+			}
+		}
+		if !removed {
+			return
+		}
+	}
+}
+
+func awaitTrackSearch(ctx context.Context, call *trackSearchCall) ([]Candidate, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-call.done:
+		return cloneCandidates(call.result), call.err
+	}
+}
+
+func (platform *ProductionMusicPlatform) beginArtistSearch(key string) (*artistSearchCall, bool) {
+	platform.searchMu.Lock()
+	defer platform.searchMu.Unlock()
+	now := time.Now()
+	if call := platform.artistCalls[key]; call != nil {
+		if call.expiresAt.IsZero() || call.expiresAt.After(now) {
+			return call, false
+		}
+		delete(platform.artistCalls, key)
+	}
+	platform.trimArtistSearchCache(now)
+	call := &artistSearchCall{done: make(chan struct{})}
+	platform.artistCalls[key] = call
+	return call, true
+}
+
+func (platform *ProductionMusicPlatform) finishArtistSearch(
+	key string,
+	call *artistSearchCall,
+	result []ArtistCandidate,
+	err error,
+) {
+	platform.searchMu.Lock()
+	call.result = cloneArtistCandidates(result)
+	call.err = err
+	if err == nil {
+		call.expiresAt = time.Now().Add(searchCacheTTL)
+	} else {
+		delete(platform.artistCalls, key)
+	}
+	close(call.done)
+	platform.searchMu.Unlock()
+}
+
+func (platform *ProductionMusicPlatform) trimArtistSearchCache(now time.Time) {
+	for key, call := range platform.artistCalls {
+		if !call.expiresAt.IsZero() && !call.expiresAt.After(now) {
+			delete(platform.artistCalls, key)
+		}
+	}
+	for len(platform.artistCalls) >= searchCacheMaximum {
+		removed := false
+		for key, call := range platform.artistCalls {
+			if !call.expiresAt.IsZero() {
+				delete(platform.artistCalls, key)
+				removed = true
+				break
+			}
+		}
+		if !removed {
+			return
+		}
+	}
+}
+
+func awaitArtistSearch(ctx context.Context, call *artistSearchCall) ([]ArtistCandidate, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-call.done:
+		return cloneArtistCandidates(call.result), call.err
+	}
+}
+
+func cloneCandidates(result []Candidate) []Candidate {
+	return append([]Candidate(nil), result...)
+}
+
+func cloneArtistCandidates(result []ArtistCandidate) []ArtistCandidate {
+	clone := make([]ArtistCandidate, len(result))
+	for index, candidate := range result {
+		clone[index] = candidate
+		clone[index].Aliases = append([]string(nil), candidate.Aliases...)
+	}
+	return clone
 }
 
 func (platform *ProductionMusicPlatform) Lyric(ctx context.Context, source Source, candidate Candidate, verbatim bool) (LyricResult, error) {
@@ -155,11 +406,20 @@ func (platform *ProductionMusicPlatform) DownloadArtwork(ctx context.Context, ra
 	}
 	normalized := parsed.String()
 	host := strings.ToLower(parsed.Hostname())
+	platform.artworkMu.Lock()
+	if cached, exists := platform.artworkCache[normalized]; exists {
+		if cached.expiresAt.After(time.Now()) {
+			result := cloneDownloadedArtwork(cached.result)
+			platform.artworkMu.Unlock()
+			return result, nil
+		}
+		platform.artworkBytes -= cached.bytes
+		delete(platform.artworkCache, normalized)
+	}
 	if retryAfter := platform.circuitRetryAfter(host); retryAfter > 0 {
+		platform.artworkMu.Unlock()
 		return DownloadedArtwork{}, dependencyUnavailable("The artwork host is temporarily unavailable", retryAfter)
 	}
-
-	platform.artworkMu.Lock()
 	call := platform.artworkCalls[normalized]
 	if call == nil {
 		call = &artworkCall{done: make(chan struct{})}
@@ -174,9 +434,7 @@ func (platform *ProductionMusicPlatform) DownloadArtwork(ctx context.Context, ra
 		if call.err != nil {
 			return DownloadedArtwork{}, normalizeUpstreamError(call.err, ctx)
 		}
-		result := call.result
-		result.Bytes = append([]byte(nil), result.Bytes...)
-		return result, nil
+		return cloneDownloadedArtwork(call.result), nil
 	}
 }
 
@@ -206,6 +464,52 @@ func (platform *ProductionMusicPlatform) performArtwork(rawURL, host string, cal
 	}
 	platform.closeCircuit(host)
 	call.result = result
+	platform.artworkMu.Lock()
+	platform.storeArtworkCacheLocked(rawURL, result)
+	platform.artworkMu.Unlock()
+}
+
+func cloneDownloadedArtwork(result DownloadedArtwork) DownloadedArtwork {
+	result.Bytes = append([]byte(nil), result.Bytes...)
+	return result
+}
+
+func (platform *ProductionMusicPlatform) storeArtworkCacheLocked(
+	rawURL string,
+	result DownloadedArtwork,
+) {
+	if len(result.Bytes) == 0 || int64(len(result.Bytes)) > artworkCacheMaximumBytes {
+		return
+	}
+	if previous, exists := platform.artworkCache[rawURL]; exists {
+		platform.artworkBytes -= previous.bytes
+		delete(platform.artworkCache, rawURL)
+	}
+	now := time.Now()
+	for key, cached := range platform.artworkCache {
+		if !cached.expiresAt.After(now) {
+			platform.artworkBytes -= cached.bytes
+			delete(platform.artworkCache, key)
+		}
+	}
+	for len(platform.artworkCache) >= artworkCacheMaximum ||
+		platform.artworkBytes+int64(len(result.Bytes)) > artworkCacheMaximumBytes {
+		removed := false
+		for key, cached := range platform.artworkCache {
+			platform.artworkBytes -= cached.bytes
+			delete(platform.artworkCache, key)
+			removed = true
+			break
+		}
+		if !removed {
+			return
+		}
+	}
+	platform.artworkCache[rawURL] = artworkCacheEntry{
+		result: cloneDownloadedArtwork(result), expiresAt: now.Add(artworkCacheTTL),
+		bytes: int64(len(result.Bytes)),
+	}
+	platform.artworkBytes += int64(len(result.Bytes))
 }
 
 func (platform *ProductionMusicPlatform) downloadArtworkRequest(ctx context.Context, rawURL string) (DownloadedArtwork, error) {
@@ -474,10 +778,7 @@ func (platform *ProductionMusicPlatform) requestBytes(
 	options requestOptions,
 	maximumBytes int64,
 ) (byteResponse, error) {
-	if err := platform.gate.acquire(ctx); err != nil {
-		return byteResponse{}, err
-	}
-	defer platform.gate.release()
+	host := upstreamHostKey(rawURL)
 	method := options.Method
 	if method == "" {
 		method = http.MethodGet
@@ -513,7 +814,16 @@ func (platform *ProductionMusicPlatform) requestBytes(
 				return byteResponse{}, err
 			}
 		}
+		if err := platform.waitForHost(attemptContext, host); err != nil {
+			cancel()
+			return byteResponse{}, err
+		}
+		if err := platform.gate.acquire(attemptContext); err != nil {
+			cancel()
+			return byteResponse{}, err
+		}
 		response, requestErr := client.Do(request)
+		platform.gate.release()
 		if requestErr != nil {
 			cancel()
 			if ctx.Err() != nil {
@@ -522,6 +832,7 @@ func (platform *ProductionMusicPlatform) requestBytes(
 			if attemptContext.Err() == context.DeadlineExceeded {
 				requestErr = &upstreamTimeoutError{}
 			}
+			platform.recordHostFailure(host, requestErr)
 			if attempt < maximumRequestAttempts && retryableRequestError(requestErr) {
 				if err := sleepContext(ctx, retryDelay(attempt, "")); err != nil {
 					return byteResponse{}, err
@@ -536,6 +847,7 @@ func (platform *ProductionMusicPlatform) requestBytes(
 			response.Body.Close()
 			cancel()
 			requestErr = &upstreamHTTPError{status: response.StatusCode, retryAfter: retryAfter}
+			platform.recordHostFailure(host, requestErr)
 			if attempt < maximumRequestAttempts && retryableStatus(response.StatusCode) {
 				if err := sleepContext(ctx, retryDelay(attempt, retryAfter)); err != nil {
 					return byteResponse{}, err
@@ -549,8 +861,10 @@ func (platform *ProductionMusicPlatform) requestBytes(
 		header := response.Header.Clone()
 		cancel()
 		if readErr != nil {
+			platform.recordHostFailure(host, readErr)
 			return byteResponse{}, readErr
 		}
+		platform.recordHostSuccess(host)
 		return byteResponse{Bytes: body, Header: header, URL: finalURL}, nil
 	}
 	return byteResponse{}, errors.New("upstream request attempts exhausted")
@@ -609,6 +923,145 @@ func (gate *requestGate) acquire(ctx context.Context) error {
 }
 
 func (gate *requestGate) release() { <-gate.semaphore }
+
+func (platform *ProductionMusicPlatform) hostState(host string) *upstreamHostState {
+	platform.hostMu.Lock()
+	defer platform.hostMu.Unlock()
+	state := platform.hostStates[host]
+	if state == nil {
+		state = &upstreamHostState{}
+		platform.hostStates[host] = state
+	}
+	return state
+}
+
+func (platform *ProductionMusicPlatform) waitForHost(ctx context.Context, host string) error {
+	if host == "" {
+		return nil
+	}
+	state := platform.hostState(host)
+	for {
+		now := time.Now()
+		state.mu.Lock()
+		wait := time.Until(state.nextStart)
+		if wait <= 0 {
+			state.nextStart = now.Add(upstreamHostInterval(host))
+			state.mu.Unlock()
+			return nil
+		}
+		state.mu.Unlock()
+		if err := sleepContext(ctx, wait); err != nil {
+			return err
+		}
+	}
+}
+
+func (platform *ProductionMusicPlatform) recordHostFailure(host string, err error) {
+	if host == "" || err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return
+	}
+	var httpError *upstreamHTTPError
+	if errors.As(err, &httpError) {
+		if !retryableStatus(httpError.status) {
+			return
+		}
+	} else {
+		var timeout *upstreamTimeoutError
+		if !errors.As(err, &timeout) && !retryableRequestError(err) {
+			return
+		}
+	}
+	state := platform.hostState(host)
+	state.mu.Lock()
+	state.consecutiveFailures = min(state.consecutiveFailures+1, 8)
+	delay := hostBackoffDelay(state.consecutiveFailures)
+	if httpError != nil {
+		if retryAfter := boundedRetryAfter(httpError.retryAfter, maximumHostBackoff); retryAfter > delay {
+			delay = retryAfter
+		}
+	}
+	cooldownUntil := time.Now().Add(delay)
+	if cooldownUntil.After(state.nextStart) {
+		state.nextStart = cooldownUntil
+	}
+	state.mu.Unlock()
+}
+
+func (platform *ProductionMusicPlatform) recordHostSuccess(host string) {
+	if host == "" {
+		return
+	}
+	state := platform.hostState(host)
+	state.mu.Lock()
+	if state.consecutiveFailures > 0 {
+		state.consecutiveFailures--
+	}
+	state.mu.Unlock()
+}
+
+func upstreamHostKey(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
+	switch {
+	case host == "music.163.com" || strings.HasSuffix(host, ".music.163.com"):
+		return "music.163.com"
+	case host == "y.qq.com" || strings.HasSuffix(host, ".y.qq.com"):
+		return "y.qq.com"
+	case host == "kugou.com" || strings.HasSuffix(host, ".kugou.com"):
+		return "kugou.com"
+	case host == "music.126.net" || strings.HasSuffix(host, ".music.126.net"):
+		return "music.126.net"
+	case host == "api.acoustid.org" || strings.HasSuffix(host, ".api.acoustid.org"):
+		return "api.acoustid.org"
+	default:
+		return host
+	}
+}
+
+func upstreamHostInterval(host string) time.Duration {
+	switch host {
+	case "api.acoustid.org":
+		return 250 * time.Millisecond
+	case "y.qq.com", "kugou.com", "music.126.net":
+		return 100 * time.Millisecond
+	case "music.163.com":
+		return 75 * time.Millisecond
+	default:
+		return 50 * time.Millisecond
+	}
+}
+
+func hostBackoffDelay(failures int) time.Duration {
+	if failures <= 0 {
+		return 0
+	}
+	shift := min(failures-1, 6)
+	return min(maximumHostBackoff, baseHostBackoff*time.Duration(1<<shift))
+}
+
+func boundedRetryAfter(value string, maximum time.Duration) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.ParseFloat(value, 64); err == nil && seconds > 0 {
+		if seconds >= maximum.Seconds() {
+			return maximum
+		}
+		return time.Duration(seconds * float64(time.Second))
+	}
+	if timestamp, err := http.ParseTime(value); err == nil {
+		delay := time.Until(timestamp)
+		if delay <= 0 {
+			return 0
+		}
+		return min(maximum, delay)
+	}
+	return 0
+}
 
 func (platform *ProductionMusicPlatform) circuitRetryAfter(host string) int {
 	platform.circuitMu.Lock()

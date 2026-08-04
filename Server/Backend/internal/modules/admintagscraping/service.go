@@ -13,6 +13,7 @@ import (
 	"sync"
 	"unicode"
 
+	"github.com/google/uuid"
 	"golang.org/x/text/unicode/norm"
 
 	"xymusic/server/internal/shared/apperror"
@@ -41,6 +42,10 @@ var (
 	_ ScrapingAPI    = (*Service)(nil)
 	_ BatchProcessor = (*Service)(nil)
 )
+
+type batchMetadataStore interface {
+	MetadataBatch(context.Context, []string) (map[string]TrackMetadata, error)
+}
 
 func NewService(dependencies ServiceDependencies) (*Service, error) {
 	if dependencies.Store == nil {
@@ -200,12 +205,64 @@ func (service *Service) TrackMetadata(ctx context.Context, trackID string) (Trac
 	return service.store.Metadata(ctx, trackID)
 }
 
+func (service *Service) TrackMetadataBatch(
+	ctx context.Context,
+	trackIDs []string,
+) (map[string]TrackMetadata, error) {
+	validIDs := true
+	for _, trackID := range trackIDs {
+		if _, err := uuid.Parse(trackID); err != nil {
+			validIDs = false
+			break
+		}
+	}
+	if validIDs {
+		if batchStore, ok := service.store.(batchMetadataStore); ok {
+			return batchStore.MetadataBatch(ctx, trackIDs)
+		}
+	}
+	result := make(map[string]TrackMetadata, len(trackIDs))
+	for _, trackID := range trackIDs {
+		metadata, err := service.TrackMetadata(ctx, trackID)
+		if err != nil {
+			return nil, err
+		}
+		result[trackID] = metadata
+	}
+	return result, nil
+}
+
 func (service *Service) Apply(
 	ctx context.Context,
 	actorID string,
 	traceID string,
 	trackID string,
 	input ApplyInput,
+) (ApplyResult, error) {
+	return service.apply(ctx, actorID, traceID, trackID, input, nil)
+}
+
+// applyWithMetadata is used by the batch worker when the claim transaction
+// already loaded the metadata snapshot. UpdateMetadata still fences the
+// expected version before any projection or writeback mutation is committed.
+func (service *Service) applyWithMetadata(
+	ctx context.Context,
+	actorID string,
+	traceID string,
+	trackID string,
+	input ApplyInput,
+	currentMetadata TrackMetadata,
+) (ApplyResult, error) {
+	return service.apply(ctx, actorID, traceID, trackID, input, &currentMetadata)
+}
+
+func (service *Service) apply(
+	ctx context.Context,
+	actorID string,
+	traceID string,
+	trackID string,
+	input ApplyInput,
+	claimedMetadata *TrackMetadata,
 ) (ApplyResult, error) {
 	if err := validateCandidate(input.Candidate); err != nil {
 		return ApplyResult{}, err
@@ -220,9 +277,15 @@ func (service *Service) Apply(
 	if err := checkApplyCancellation(ctx, input); err != nil {
 		return ApplyResult{}, err
 	}
-	current, err := service.store.Metadata(ctx, trackID)
-	if err != nil {
-		return ApplyResult{}, err
+	var current TrackMetadata
+	var err error
+	if claimedMetadata != nil {
+		current = *claimedMetadata
+	} else {
+		current, err = service.store.Metadata(ctx, trackID)
+		if err != nil {
+			return ApplyResult{}, err
+		}
 	}
 	if trackIsArchived(current.TrackStatus) {
 		return ApplyResult{}, archivedTrackError(trackID)

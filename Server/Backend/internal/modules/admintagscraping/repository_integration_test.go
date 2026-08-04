@@ -49,7 +49,13 @@ func TestRepositoryReadsConfiguredProductionScrapingState(t *testing.T) {
 	for _, query := range []string{
 		`EXPLAIN SELECT id FROM tag_scraping_jobs WHERE status IN ('PENDING','RUNNING') ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1`,
 		`EXPLAIN SELECT id FROM tag_scraping_job_items WHERE job_id = '00000000-0000-0000-0000-000000000000'
-		 AND status = 'PENDING' ORDER BY position FOR UPDATE SKIP LOCKED LIMIT 1`,
+		 AND status = 'PENDING' AND next_attempt_at <= now() AND attempts < max_attempts
+		 ORDER BY next_attempt_at, position FOR UPDATE SKIP LOCKED LIMIT 1`,
+		claimedBatchItemSelect + `
+		 WHERE item.job_id = '00000000-0000-0000-0000-000000000000'
+		   AND item.status = 'PENDING' AND item.next_attempt_at <= now()
+		   AND item.attempts < item.max_attempts
+		 ORDER BY item.next_attempt_at, item.position FOR UPDATE OF item SKIP LOCKED LIMIT 8`,
 	} {
 		if _, err := pool.Pool.Exec(ctx, query); err != nil {
 			t.Fatalf("batch claim SQL: %v", err)
@@ -90,6 +96,314 @@ func TestRepositoryReadsConfiguredProductionScrapingState(t *testing.T) {
 		}
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("select tag scraping batch: %v", err)
+	}
+}
+
+func TestProductionBatchClaimWindowLoadsMetadataAndRecoversExpiredLeases(t *testing.T) {
+	environmentPath := os.Getenv("XYMUSIC_INTEGRATION_ENV")
+	if environmentPath == "" {
+		t.Skip("set XYMUSIC_INTEGRATION_ENV to run production batch claim window checks")
+	}
+	testsupport.RequireWriteIntegration(t)
+	absolutePath, err := filepath.Abs(environmentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.NewStore(absolutePath).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = config.ResolveRuntime(cfg, filepath.Dir(absolutePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	pool, err := database.Open(ctx, cfg.Database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+
+	suffix := uuid.NewString()
+	actorID := uuid.NewString()
+	trackIDs := []string{uuid.NewString(), uuid.NewString()}
+	jobID := ""
+	cleanup := func() {
+		cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cleanupCancel()
+		if jobID != "" {
+			_, _ = pool.Exec(cleanupContext, "DELETE FROM tag_scraping_jobs WHERE id = $1", jobID)
+		}
+		for _, trackID := range trackIDs {
+			_, _ = pool.Exec(cleanupContext, "DELETE FROM tracks WHERE id = $1", trackID)
+		}
+		_, _ = pool.Exec(cleanupContext, "DELETE FROM users WHERE id = $1", actorID)
+	}
+	t.Cleanup(cleanup)
+	cleanup()
+
+	username := "it_tag_claim_" + suffix[:8]
+	if _, err := pool.Exec(ctx, `INSERT INTO users(
+		id,username,normalized_username,password_hash,role,status
+	) VALUES($1,$2,$2,$3,'ADMIN','ACTIVE')`, actorID, username, integrationPasswordHash(t, suffix)); err != nil {
+		t.Fatal(err)
+	}
+	items := make([]BatchItemInput, 0, len(trackIDs))
+	for index, trackID := range trackIDs {
+		title := "Batch Claim Track " + suffix[:8] + " " + string(rune('A'+index))
+		if _, err := pool.Exec(ctx, `INSERT INTO tracks(
+			id,title,normalized_title,status
+		) VALUES($1,$2,$3,'READY')`, trackID, title, strings.ToLower(title)); err != nil {
+			t.Fatal(err)
+		}
+		rawTags, err := json.Marshal(MetadataSnapshot{
+			Title: title, Credits: []MetadataCredit{}, AlbumArtists: []string{}, Genres: []string{},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO track_metadata(track_id,raw_tags,overrides,version)
+			VALUES($1,$2::jsonb,'{}'::jsonb,1)`, trackID, rawTags); err != nil {
+			t.Fatal(err)
+		}
+		items = append(items, BatchItemInput{TrackID: trackID, ExpectedVersion: 1})
+	}
+
+	repository := NewRepository(pool.Pool)
+	jobID, err = repository.CreateBatch(ctx, actorID, CreateBatchInput{
+		Items: items,
+		Options: BatchOptions{
+			Sources: []Source{SourceQMusic}, MatchMode: MatchStrict,
+			Fields: ApplyFields{Title: true}, Reason: "batch claim window integration",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE tag_scraping_jobs SET created_at = '1900-01-01' WHERE id = $1", jobID); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	first, err := repository.ClaimBatchItems(ctx, "batch-window-worker-a", now, time.Minute, len(trackIDs))
+	if err != nil || first.FinishJobID != "" || len(first.Items) != len(trackIDs) {
+		t.Fatalf("first batch claim=%+v error=%v", first, err)
+	}
+	attempts := make(map[string]struct{}, len(first.Items))
+	for _, claim := range first.Items {
+		if claim.Metadata == nil || claim.Metadata.TrackID != claim.Item.TrackID ||
+			claim.Metadata.Version != 1 || claim.Metadata.Effective.Title == "" ||
+			claim.AttemptID == "" || claim.Item.AttemptID == nil || *claim.Item.AttemptID != claim.AttemptID {
+			t.Fatalf("claimed item metadata/fence=%+v", claim)
+		}
+		if _, exists := attempts[claim.AttemptID]; exists {
+			t.Fatalf("duplicate attempt id %q", claim.AttemptID)
+		}
+		attempts[claim.AttemptID] = struct{}{}
+	}
+	var running, distinctAttempts int
+	if err := pool.QueryRow(ctx, `SELECT count(*)::int, count(DISTINCT attempt_id)::int
+		FROM tag_scraping_job_items WHERE job_id = $1 AND status = 'RUNNING'`, jobID).Scan(
+		&running, &distinctAttempts,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if running != len(trackIDs) || distinctAttempts != len(trackIDs) {
+		t.Fatalf("running/distinct attempts = %d/%d", running, distinctAttempts)
+	}
+	var minimumAttempts, maximumAttempts int
+	if err := pool.QueryRow(ctx, `SELECT min(attempts), max(max_attempts)
+		FROM tag_scraping_job_items WHERE job_id = $1`, jobID).Scan(&minimumAttempts, &maximumAttempts); err != nil {
+		t.Fatal(err)
+	}
+	if minimumAttempts != 1 || maximumAttempts != 3 {
+		t.Fatalf("initial retry state = attempts %d/max %d", minimumAttempts, maximumAttempts)
+	}
+
+	second, err := repository.ClaimBatchItems(ctx, "batch-window-worker-b", now, time.Minute, len(trackIDs))
+	if err != nil || second.FinishJobID != "" || len(second.Items) != 0 {
+		t.Fatalf("duplicate batch claim=%+v error=%v", second, err)
+	}
+
+	recovered, err := repository.ClaimBatchItems(ctx, "batch-window-worker-b", now.Add(2*time.Minute), time.Minute, 1)
+	if err != nil || recovered.FinishJobID != "" || len(recovered.Items) != 1 {
+		t.Fatalf("expired batch claim=%+v error=%v", recovered, err)
+	}
+	if recovered.Items[0].Metadata == nil || recovered.Items[0].Metadata.TrackID != recovered.Items[0].Item.TrackID ||
+		recovered.Items[0].AttemptID == "" || recovered.Items[0].AttemptID == first.Items[0].AttemptID ||
+		recovered.Items[0].Item.Attempts != 2 ||
+		recovered.Items[0].Item.LockedBy == nil || *recovered.Items[0].Item.LockedBy != "batch-window-worker-b" {
+		t.Fatalf("expired lease recovery=%+v", recovered.Items[0])
+	}
+}
+
+func TestProductionBatchRetryItemFencingBackoffAndCancellation(t *testing.T) {
+	environmentPath := os.Getenv("XYMUSIC_INTEGRATION_ENV")
+	if environmentPath == "" {
+		t.Skip("set XYMUSIC_INTEGRATION_ENV to run production tag scraping item retry checks")
+	}
+	testsupport.RequireWriteIntegration(t)
+	absolutePath, err := filepath.Abs(environmentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.NewStore(absolutePath).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = config.ResolveRuntime(cfg, filepath.Dir(absolutePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	pool, err := database.Open(ctx, cfg.Database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+
+	suffix := uuid.NewString()
+	actorID := uuid.NewString()
+	trackID := uuid.NewString()
+	jobID := ""
+	cleanup := func() {
+		cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cleanupCancel()
+		if jobID != "" {
+			_, _ = pool.Exec(cleanupContext, "DELETE FROM tag_scraping_jobs WHERE id = $1", jobID)
+		}
+		_, _ = pool.Exec(cleanupContext, "DELETE FROM tracks WHERE id = $1", trackID)
+		_, _ = pool.Exec(cleanupContext, "DELETE FROM users WHERE id = $1", actorID)
+	}
+	t.Cleanup(cleanup)
+	cleanup()
+
+	username := "it_tag_retry_" + suffix[:8]
+	if _, err := pool.Exec(ctx, `INSERT INTO users(
+		id,username,normalized_username,password_hash,role,status
+	) VALUES($1,$2,$2,$3,'ADMIN','ACTIVE')`, actorID, username, integrationPasswordHash(t, suffix)); err != nil {
+		t.Fatal(err)
+	}
+	title := "Batch Retry Track " + suffix[:8]
+	if _, err := pool.Exec(ctx, `INSERT INTO tracks(
+		id,title,normalized_title,status
+	) VALUES($1,$2,$3,'READY')`, trackID, title, strings.ToLower(title)); err != nil {
+		t.Fatal(err)
+	}
+	rawTags, err := json.Marshal(MetadataSnapshot{
+		Title: title, Credits: []MetadataCredit{}, AlbumArtists: []string{}, Genres: []string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO track_metadata(track_id,raw_tags,overrides,version)
+		VALUES($1,$2::jsonb,'{}'::jsonb,1)`, trackID, rawTags); err != nil {
+		t.Fatal(err)
+	}
+
+	repository := NewRepository(pool.Pool)
+	jobID, err = repository.CreateBatch(ctx, actorID, CreateBatchInput{
+		Items: []BatchItemInput{{TrackID: trackID, ExpectedVersion: 1}},
+		Options: BatchOptions{
+			Sources: []Source{SourceQMusic}, MatchMode: MatchStrict,
+			Fields: ApplyFields{Title: true}, Reason: "batch item retry integration",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE tag_scraping_jobs SET created_at = '1900-01-01' WHERE id = $1", jobID); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	first, err := repository.ClaimBatchItems(ctx, "retry-worker-a", now, time.Minute, 1)
+	if err != nil || len(first.Items) != 1 {
+		t.Fatalf("initial claim=%+v error=%v", first, err)
+	}
+	claim := first.Items[0]
+	if claim.Item.Attempts != 1 || claim.Item.MaxAttempts != 3 {
+		t.Fatalf("initial attempts=%d/%d", claim.Item.Attempts, claim.Item.MaxAttempts)
+	}
+	if _, err := repository.RetryBatchItem(
+		ctx, jobID, claim.Item.ID, "wrong-attempt", "retry-worker-a", nil,
+		"must be rejected", now.Add(time.Second), now,
+	); !errors.Is(err, ErrBatchLeaseLost) {
+		t.Fatalf("stale retry error=%v", err)
+	}
+
+	candidate := &Candidate{ID: "candidate-1", Name: "Retry Candidate", Source: SourceQMusic}
+	nextAttemptAt := now.Add(10 * time.Second)
+	control, err := repository.RetryBatchItem(
+		ctx, jobID, claim.Item.ID, claim.AttemptID, "retry-worker-a", candidate,
+		"temporary upstream failure", nextAttemptAt, now,
+	)
+	if err != nil || !control.Owned || control.CancelRequested {
+		t.Fatalf("retry control=%+v error=%v", control, err)
+	}
+	var status string
+	var attempts int
+	var lockedBy *string
+	var storedCandidate []byte
+	var storedNext time.Time
+	if err := pool.QueryRow(ctx, `SELECT status::text,attempts,locked_by,candidate,next_attempt_at
+		FROM tag_scraping_job_items WHERE id = $1`, claim.Item.ID).Scan(
+		&status, &attempts, &lockedBy, &storedCandidate, &storedNext,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if status != string(ItemPending) || attempts != 1 || lockedBy != nil || !storedNext.Equal(nextAttemptAt) {
+		t.Fatalf("requeued item state=%s attempts=%d lockedBy=%v next=%s", status, attempts, lockedBy, storedNext)
+	}
+	var stored Candidate
+	if err := json.Unmarshal(storedCandidate, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.ID != candidate.ID || stored.Source != candidate.Source {
+		t.Fatalf("stored candidate=%+v", stored)
+	}
+
+	beforeDue, err := repository.ClaimBatchItems(ctx, "retry-worker-b", now.Add(5*time.Second), time.Minute, 1)
+	if err != nil || len(beforeDue.Items) != 0 {
+		t.Fatalf("claim before backoff=%+v error=%v", beforeDue, err)
+	}
+	second, err := repository.ClaimBatchItems(ctx, "retry-worker-b", nextAttemptAt.Add(time.Second), time.Minute, 1)
+	if err != nil || len(second.Items) != 1 {
+		t.Fatalf("claim after backoff=%+v error=%v", second, err)
+	}
+	secondClaim := second.Items[0]
+	if secondClaim.Item.Attempts != 2 || secondClaim.AttemptID == claim.AttemptID ||
+		secondClaim.Item.LockedBy == nil || *secondClaim.Item.LockedBy != "retry-worker-b" {
+		t.Fatalf("second attempt=%+v", secondClaim)
+	}
+
+	if err := repository.RequestBatchCancel(ctx, jobID); err != nil {
+		t.Fatal(err)
+	}
+	control, err = repository.RetryBatchItem(
+		ctx, jobID, secondClaim.Item.ID, secondClaim.AttemptID, "retry-worker-b", nil,
+		"cancelled retry", nextAttemptAt.Add(2*time.Second), nextAttemptAt.Add(time.Second),
+	)
+	if err != nil || !control.Owned || !control.CancelRequested {
+		t.Fatalf("cancelled retry control=%+v error=%v", control, err)
+	}
+	completed, err := repository.CompleteBatchItem(
+		ctx, jobID, secondClaim.Item.ID, secondClaim.AttemptID, "retry-worker-b",
+		ItemSkipped, nil, "The batch was cancelled", nextAttemptAt.Add(2*time.Second),
+	)
+	if err != nil || !completed {
+		t.Fatalf("cancelled completion=%v error=%v", completed, err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT status::text,attempts,candidate
+		FROM tag_scraping_job_items WHERE id = $1`, secondClaim.Item.ID).Scan(
+		&status, &attempts, &storedCandidate,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if status != string(ItemSkipped) || attempts != 2 || storedCandidate != nil {
+		t.Fatalf("cancelled item state=%s attempts=%d candidate=%s", status, attempts, storedCandidate)
 	}
 }
 
@@ -508,12 +822,12 @@ func TestProductionBatchAttemptFenceAndCancelledCompletion(t *testing.T) {
 	if err != nil || updated.Version != 2 || updated.Effective.Title != updatedTitle {
 		t.Fatalf("current attempt update=%+v error=%v", updated, err)
 	}
-	completed, err = repository.CompleteBatchItem(
-		ctx, jobID, claimB.Item.Item.ID, claimB.Item.AttemptID, "attempt-worker-b",
-		ItemSucceeded, nil, "completed by current attempt", now.Add(2*time.Minute),
-	)
-	if err != nil || !completed {
-		t.Fatalf("current CompleteBatchItem=%v error=%v", completed, err)
+	acceptedIDs, err := repository.CompleteBatchItems(ctx, jobID, "attempt-worker-b", []BatchItemCompletion{{
+		ItemID: claimB.Item.Item.ID, AttemptID: claimB.Item.AttemptID,
+		Status: ItemSucceeded, Message: "completed by current attempt",
+	}}, now.Add(2*time.Minute))
+	if err != nil || len(acceptedIDs) != 1 || acceptedIDs[0] != claimB.Item.Item.ID {
+		t.Fatalf("current CompleteBatchItems=%v error=%v", acceptedIDs, err)
 	}
 	if finished, err := repository.FinishBatch(ctx, jobID, now.Add(2*time.Minute)); err != nil || !finished {
 		t.Fatalf("FinishBatch=%v error=%v", finished, err)
@@ -533,12 +847,12 @@ func TestProductionBatchAttemptFenceAndCancelledCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	candidate := &Candidate{ID: "must-be-discarded", Name: "Must Be Discarded", Source: SourceQMusic}
-	completed, err = repository.CompleteBatchItem(
-		ctx, cancelledJobID, cancelledClaim.Item.Item.ID, cancelledClaim.Item.AttemptID, "cancelled-completion-worker",
-		ItemSucceeded, candidate, "must be replaced", now.Add(3*time.Minute),
-	)
-	if err != nil || !completed {
-		t.Fatalf("cancelled CompleteBatchItem=%v error=%v", completed, err)
+	acceptedIDs, err = repository.CompleteBatchItems(ctx, cancelledJobID, "cancelled-completion-worker", []BatchItemCompletion{{
+		ItemID: cancelledClaim.Item.Item.ID, AttemptID: cancelledClaim.Item.AttemptID,
+		Status: ItemSucceeded, Candidate: candidate, Message: "must be replaced",
+	}}, now.Add(3*time.Minute))
+	if err != nil || len(acceptedIDs) != 1 || acceptedIDs[0] != cancelledClaim.Item.Item.ID {
+		t.Fatalf("cancelled CompleteBatchItems=%v error=%v", acceptedIDs, err)
 	}
 	cancelledJob, cancelledItems, err := repository.Batch(ctx, cancelledJobID, nil)
 	if err != nil || cancelledJob.Processed != 1 || cancelledJob.Succeeded != 0 || cancelledJob.Failed != 0 ||

@@ -78,8 +78,17 @@ type ClaimedArtistArtworkBatchItem struct {
 	AttemptID string
 }
 
+type ArtistArtworkBatchItemCompletion struct {
+	ItemID    string
+	AttemptID string
+	Status    ItemStatus
+	Candidate *ArtistCandidate
+	Message   string
+}
+
 type ArtistArtworkBatchClaimResult struct {
 	Item        *ClaimedArtistArtworkBatchItem
+	Items       []ClaimedArtistArtworkBatchItem
 	FinishJobID string
 }
 

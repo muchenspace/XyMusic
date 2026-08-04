@@ -120,6 +120,11 @@ func qrcInitialPermutation(input []byte) (uint32, uint32) {
 
 func qrcInversePermutation(left, right uint32) []byte {
 	result := make([]byte, 8)
+	qrcInversePermutationInto(left, right, result)
+	return result
+}
+
+func qrcInversePermutationInto(left, right uint32, result []byte) {
 	for group := 0; group < 8; group++ {
 		outputByte := (group + 4) % 8
 		var value uint32
@@ -130,7 +135,6 @@ func qrcInversePermutation(left, right uint32) []byte {
 		}
 		result[outputByte] = byte(value)
 	}
-	return result
 }
 
 func qrcRoundFunction(state uint32, key [6]byte) uint32 {
@@ -174,6 +178,12 @@ func qrcRoundFunction(state uint32, key [6]byte) uint32 {
 }
 
 func qrcCryptBlock(input []byte, key qrcRoundKey) []byte {
+	result := make([]byte, 8)
+	qrcCryptBlockInto(input, key, result)
+	return result
+}
+
+func qrcCryptBlockInto(input []byte, key qrcRoundKey, result []byte) {
 	left, right := qrcInitialPermutation(input)
 	for index := 0; index < 15; index++ {
 		previousRight := right
@@ -181,7 +191,7 @@ func qrcCryptBlock(input []byte, key qrcRoundKey) []byte {
 		left = previousRight
 	}
 	left = qrcRoundFunction(right, key[15]) ^ left
-	return qrcInversePermutation(left, right)
+	qrcInversePermutationInto(left, right, result)
 }
 
 func qrcKeySchedule(key []byte, mode int) qrcRoundKey {
@@ -224,9 +234,16 @@ func qrcTripleKeySchedule(key []byte, mode int) qrcTripleRoundKey {
 }
 
 func qrcTripleCryptBlock(input []byte, key qrcTripleRoundKey) []byte {
-	result := append([]byte(nil), input[:8]...)
-	for index := range key {
-		result = qrcCryptBlock(result, key[index])
-	}
+	result := make([]byte, 8)
+	qrcTripleCryptBlockInto(input, key, result)
 	return result
+}
+
+func qrcTripleCryptBlockInto(input []byte, key qrcTripleRoundKey, result []byte) {
+	var state [8]byte
+	copy(state[:], input[:8])
+	for index := range key {
+		qrcCryptBlockInto(state[:], key[index], state[:])
+	}
+	copy(result, state[:])
 }

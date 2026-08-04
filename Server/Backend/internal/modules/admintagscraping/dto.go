@@ -3,13 +3,13 @@ package admintagscraping
 import "context"
 
 type SearchInput struct {
-	Source  Source   `json:"source"`
+	Source   Source   `json:"source"`
 	Verbatim bool     `json:"verbatim"`
-	Query   *string  `json:"query,omitempty"`
-	Title   *string  `json:"title,omitempty"`
-	Artist  *string  `json:"artist,omitempty"`
-	Album   *string  `json:"album,omitempty"`
-	Sources []Source `json:"sources,omitempty"`
+	Query    *string  `json:"query,omitempty"`
+	Title    *string  `json:"title,omitempty"`
+	Artist   *string  `json:"artist,omitempty"`
+	Album    *string  `json:"album,omitempty"`
+	Sources  []Source `json:"sources,omitempty"`
 }
 
 type CandidateDetailsInput struct {
@@ -57,6 +57,9 @@ type BatchItemDTO struct {
 	ExpectedVersion int        `json:"expectedVersion"`
 	Position        int        `json:"position"`
 	Status          ItemStatus `json:"status"`
+	Attempts        int        `json:"attempts"`
+	MaxAttempts     int        `json:"maxAttempts"`
+	NextAttemptAt   string     `json:"nextAttemptAt"`
 	Candidate       *Candidate `json:"candidate"`
 	Source          *Source    `json:"source"`
 	Message         *string    `json:"message"`

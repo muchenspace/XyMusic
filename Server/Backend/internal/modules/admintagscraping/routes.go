@@ -414,7 +414,7 @@ func validateApplyInput(input ApplyInput, shape map[string]json.RawMessage) erro
 }
 
 func validateBatchInput(input CreateBatchInput, shape map[string]json.RawMessage) error {
-	if len(input.Items) < 1 || len(input.Items) > 200 {
+	if len(input.Items) < 1 || len(input.Items) > maxTagScrapingBatchItems {
 		return contractError()
 	}
 	seenTracks := make(map[string]struct{}, len(input.Items))

@@ -29,7 +29,11 @@ func TestDevelopmentDefaultsAreCompatible(t *testing.T) {
 	if cfg.HTTP.IPv4Host != "0.0.0.0" || cfg.HTTP.IPv4Port != 3000 || cfg.HTTP.IPv6Host != "::" || cfg.HTTP.IPv6Port != 3000 {
 		t.Fatalf("unexpected listener defaults: %+v", cfg.HTTP)
 	}
-	if cfg.HTTP.Port != 3000 || cfg.Database.MaxConnections != 10 {
+	wantDatabaseConnections := defaultDatabaseConnections(
+		cfg.LocalLibrary.ScanCommitWorkers, cfg.Media.Workers,
+		cfg.Scraping.BatchWorkers, cfg.Scraping.ArtworkWorkers,
+	)
+	if cfg.HTTP.Port != 3000 || int(cfg.Database.MaxConnections) != wantDatabaseConnections {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
 	if len(cfg.Security.AccessTokenSecret) < 32 {
@@ -43,6 +47,86 @@ func TestDevelopmentDefaultsAreCompatible(t *testing.T) {
 	}
 	if cfg.Media.ProfileVersion != "v1" {
 		t.Fatalf("unexpected media profile version: %#v", cfg.Media)
+	}
+	if cfg.Media.FFmpegThreads != 0 {
+		t.Fatalf("unexpected automatic FFmpeg thread setting: %#v", cfg.Media)
+	}
+	if cfg.LocalLibrary.ScanCommitWorkers < 1 || cfg.LocalLibrary.ScanCommitBatchSize < 1 || cfg.LocalLibrary.ScanProbeWorkers < 1 ||
+		cfg.Media.Workers < 1 || cfg.Media.ProbeWorkers < 1 || cfg.Media.StorageWorkers < 1 {
+		t.Fatalf("unexpected scan stage defaults: %#v", cfg.LocalLibrary)
+	}
+	if cfg.LocalLibrary.ReadySourceObjectStatTTLSeconds != 300 {
+		t.Fatalf("unexpected ready source object stat TTL: %d", cfg.LocalLibrary.ReadySourceObjectStatTTLSeconds)
+	}
+}
+
+func TestPerformanceWorkerLimitsAreConfigurable(t *testing.T) {
+	cfg, err := Parse(map[string]string{
+		"LOCAL_MUSIC_SCAN_COMMIT_WORKERS":    "3",
+		"LOCAL_MUSIC_SCAN_COMMIT_BATCH_SIZE": "11",
+		"LOCAL_MUSIC_SCAN_PROBE_WORKERS":     "5",
+		"MEDIA_WORKERS":                      "6",
+		"MEDIA_PROBE_WORKERS":                "2",
+		"MEDIA_STORAGE_WORKERS":              "5",
+		"MEDIA_FFMPEG_THREADS":               "2",
+		"TAG_SCRAPING_WORKERS":               "4",
+		"TAG_SCRAPING_CLAIM_WINDOW":          "17",
+		"TAG_SCRAPING_ARTWORK_WORKERS":       "3",
+		"TAG_SCRAPING_ARTWORK_CLAIM_WINDOW":  "13",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LocalLibrary.ScanCommitWorkers != 3 || cfg.LocalLibrary.ScanCommitBatchSize != 11 || cfg.LocalLibrary.ScanProbeWorkers != 5 ||
+		cfg.Media.Workers != 6 || cfg.Media.ProbeWorkers != 2 || cfg.Media.StorageWorkers != 5 || cfg.Media.FFmpegThreads != 2 ||
+		cfg.Scraping.BatchWorkers != 4 || cfg.Scraping.BatchClaimWindow != 17 || cfg.Scraping.ArtworkWorkers != 3 || cfg.Scraping.ArtworkClaimWindow != 13 {
+		t.Fatalf("performance limits = %#v/%#v", cfg.LocalLibrary, cfg.Media)
+	}
+	environment := ToEnvironment(cfg)
+	if environment["LOCAL_MUSIC_SCAN_COMMIT_WORKERS"] != "3" || environment["LOCAL_MUSIC_SCAN_COMMIT_BATCH_SIZE"] != "11" ||
+		environment["LOCAL_MUSIC_SCAN_PROBE_WORKERS"] != "5" || environment["MEDIA_WORKERS"] != "6" ||
+		environment["MEDIA_PROBE_WORKERS"] != "2" || environment["MEDIA_STORAGE_WORKERS"] != "5" || environment["MEDIA_FFMPEG_THREADS"] != "2" ||
+		environment["TAG_SCRAPING_WORKERS"] != "4" || environment["TAG_SCRAPING_CLAIM_WINDOW"] != "17" ||
+		environment["TAG_SCRAPING_ARTWORK_WORKERS"] != "3" || environment["TAG_SCRAPING_ARTWORK_CLAIM_WINDOW"] != "13" {
+		t.Fatalf("performance limits were not persisted: %#v", environment)
+	}
+}
+
+func TestDatabaseConnectionDefaultFollowsConfiguredWorkerBudget(t *testing.T) {
+	cfg, err := Parse(map[string]string{
+		"LOCAL_MUSIC_SCAN_COMMIT_WORKERS": "12",
+		"MEDIA_WORKERS":                   "16",
+		"TAG_SCRAPING_WORKERS":            "20",
+		"TAG_SCRAPING_ARTWORK_WORKERS":    "4",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := defaultDatabaseConnections(12, 16, 20, 4)
+	if int(cfg.Database.MaxConnections) != want {
+		t.Fatalf("default database connections=%d want %d", cfg.Database.MaxConnections, want)
+	}
+
+	cfg, err = Parse(map[string]string{
+		"DATABASE_MAX_CONNECTIONS":        "9",
+		"LOCAL_MUSIC_SCAN_COMMIT_WORKERS": "12",
+		"MEDIA_WORKERS":                   "16",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Database.MaxConnections != 9 {
+		t.Fatalf("explicit database connection limit=%d want 9", cfg.Database.MaxConnections)
+	}
+}
+
+func TestReadySourceObjectStatTTLCanBeDisabled(t *testing.T) {
+	cfg, err := Parse(map[string]string{"LOCAL_MUSIC_READY_OBJECT_STAT_TTL_SECONDS": "0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LocalLibrary.ReadySourceObjectStatTTLSeconds != 0 {
+		t.Fatalf("TTL=%d want 0", cfg.LocalLibrary.ReadySourceObjectStatTTLSeconds)
 	}
 }
 

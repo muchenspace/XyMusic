@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -15,6 +16,8 @@ import (
 )
 
 var ErrScanCancelled = errors.New("library scan was cancelled")
+
+const scanControlPoll = 500 * time.Millisecond
 
 type WorkerOptions struct {
 	Store         WorkerStore
@@ -172,6 +175,9 @@ func (worker *Worker) RunNextScan(ctx context.Context) (bool, error) {
 	}()
 
 	var lastProgress atomic.Int64
+	var controlMu sync.Mutex
+	var lastControlAt time.Time
+	var cachedCancelled, cachedOwned bool
 	result, scanErr := worker.scanner.Scan(ctx, ScanInput{
 		ScanRunID: claim.Run.ID, RootID: claim.Root.ID, Directory: claim.Root.Path,
 		IncludePatterns: cloneStrings(claim.Root.IncludePatterns),
@@ -180,19 +186,36 @@ func (worker *Worker) RunNextScan(ctx context.Context) (bool, error) {
 			if ctx.Err() != nil || ownershipLost.Load() {
 				return true, nil
 			}
+			now := worker.now()
+			controlMu.Lock()
+			if !lastControlAt.IsZero() && now.Sub(lastControlAt) < scanControlPoll {
+				cancelled, owned := cachedCancelled, cachedOwned
+				controlMu.Unlock()
+				if !owned {
+					ownershipLost.Store(true)
+				}
+				if cancelled && owned {
+					cancellationSeen.Store(true)
+				}
+				return cancelled || !owned, nil
+			}
+			controlMu.Unlock()
 			cancelled, owned, err := worker.store.ScanControl(
 				callbackContext, claim.Run.ID, attemptID, worker.workerID,
 			)
 			if err != nil {
 				return false, err
 			}
+			controlMu.Lock()
+			lastControlAt, cachedCancelled, cachedOwned = now, cancelled, owned
+			controlMu.Unlock()
 			if !owned {
 				ownershipLost.Store(true)
 			}
 			if cancelled && owned {
 				cancellationSeen.Store(true)
 			}
-			return cancelled, nil
+			return cancelled || !owned, nil
 		},
 		OnProgress: func(callbackContext context.Context, progress ScanProgress) error {
 			now := worker.now()

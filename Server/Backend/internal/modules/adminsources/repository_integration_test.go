@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -446,7 +447,7 @@ func TestProductionSynchronizerPersistsFilesMetadataAndCUEInConfiguredDatabase(t
 		Title: "Scanned Song", Credits: []adminmetadata.MetadataCredit{{Name: "Scan Artist", Role: adminmetadata.CreditPrimary}},
 		AlbumArtists: []string{"Scan Artist"}, Album: stringPointer("Scan Album"),
 		TrackNumber: intPointer(1), DiscNumber: intPointer(1), Genres: []string{},
-	}}
+	}, calls: &atomic.Int32{}}
 	synchronizer := &ProductionSynchronizer{
 		database: transaction, storage: storage, probe: probe, now: func() time.Time { return time.Now().UTC() },
 	}
@@ -635,10 +636,14 @@ FILE "disc.wav" WAVE
 	if err := os.WriteFile(cuePath, []byte(cueContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	probeCallsBeforeCue := probe.calls.Load()
 	if err := synchronizer.ProcessFile(ctx, rootID, "", DiscoveredFile{
 		AudioPath: cueAudio, RelativePath: "disc.wav", CuePath: cuePath,
 	}, seenAt.Add(5*time.Second)); err != nil {
 		t.Fatal(err)
+	}
+	if probe.calls.Load()-probeCallsBeforeCue != 1 {
+		t.Fatalf("CUE metadata probe calls=%d, want 1", probe.calls.Load()-probeCallsBeforeCue)
 	}
 	var cueSourceID string
 	if err := transaction.QueryRow(ctx, `SELECT id FROM local_music_sources
@@ -830,9 +835,13 @@ func (stub *syncStorageStub) StatObject(
 
 type metadataProbeStub struct {
 	metadata adminmetadata.MetadataSnapshot
+	calls    *atomic.Int32
 }
 
 func (stub metadataProbeStub) Probe(context.Context, string) (adminmetadata.ProbedMetadataFile, error) {
+	if stub.calls != nil {
+		stub.calls.Add(1)
+	}
 	return adminmetadata.ProbedMetadataFile{Metadata: stub.metadata}, nil
 }
 

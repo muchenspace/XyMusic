@@ -20,6 +20,19 @@ type ArtistArtworkBatchStore interface {
 	FinishArtistArtworkBatch(context.Context, string, time.Time) (bool, error)
 }
 
+// ArtistArtworkBatchClaimStore is an optional store fast path. Implementations
+// can claim the service's worker window in one transaction while older stores
+// keep the single-item contract above.
+type ArtistArtworkBatchClaimStore interface {
+	ClaimArtistArtworkBatchItems(context.Context, string, time.Time, time.Duration, int) (ArtistArtworkBatchClaimResult, error)
+}
+
+// ArtistArtworkBatchCompleteStore is an optional completion fast path. Stores
+// that do not implement it continue to use the item-level completion method.
+type ArtistArtworkBatchCompleteStore interface {
+	CompleteArtistArtworkBatchItems(context.Context, string, string, []ArtistArtworkBatchItemCompletion, time.Time) ([]string, error)
+}
+
 type ArtistArtworkBatchProcessor interface {
 	SearchArtists(context.Context, ArtistSearchInput) ([]ArtistCandidate, error)
 	ApplyArtistArtwork(context.Context, string, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error)

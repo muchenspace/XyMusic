@@ -3,6 +3,7 @@ package admintagscraping
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,6 +12,13 @@ import (
 
 	"xymusic/server/internal/shared/apperror"
 )
+
+func TestArtistArtworkBatchUsesImmediateSuccessfulWindowPollingByDefault(t *testing.T) {
+	service := newArtistArtworkBatchTestService(t, &artistArtworkBatchStoreStub{}, artistArtworkBatchProcessorStub{})
+	if service.workingPoll != 0 {
+		t.Fatalf("working poll = %s, want immediate polling", service.workingPoll)
+	}
+}
 
 func TestArtistArtworkBatchCreateReturnsConditionExclusionsWithoutEmptyJob(t *testing.T) {
 	store := &artistArtworkBatchStoreStub{createSelected: 0, createExcluded: 2}
@@ -210,6 +218,164 @@ func TestArtistArtworkBatchProcessItemRetriesTransientFailureThenFailsAtLimit(t 
 	}
 }
 
+func TestArtistArtworkBatchUsesClaimWindow(t *testing.T) {
+	store := &artistArtworkBatchWindowStoreStub{
+		artistArtworkBatchStoreStub: &artistArtworkBatchStoreStub{},
+	}
+	claims := make([]ClaimedArtistArtworkBatchItem, 2)
+	for index := range claims {
+		claim := artistArtworkBatchClaim(ArtistArtworkBatchTarget{
+			ID: "artist-" + fmt.Sprint(index), Name: "Artist " + fmt.Sprint(index),
+			NormalizedName: "artist " + fmt.Sprint(index), Version: 1, PerformerRole: true,
+		}, 1, 1, 3)
+		claim.Item.ID = "item-" + fmt.Sprint(index)
+		claim.Item.ArtistID = claim.Target.ID
+		claims[index] = claim
+	}
+	store.claims = claims
+	processor := artistArtworkBatchProcessorStub{
+		search: func(_ context.Context, input ArtistSearchInput) ([]ArtistCandidate, error) {
+			return []ArtistCandidate{{
+				Source: input.Source, ID: input.Query, Name: input.Query,
+				ImageURL: "https://y.qq.com/avatar.jpg", Score: 2,
+			}}, nil
+		},
+		apply: func(context.Context, string, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error) {
+			return ArtistArtworkApplyResult{Applied: true}, nil
+		},
+	}
+	service := newArtistArtworkBatchTestServiceWith(t, store, processor, ArtistArtworkBatchServiceDependencies{
+		Workers: 2, ClaimWindow: 2, Heartbeat: time.Hour, Lease: 2 * time.Hour,
+	})
+	worked, err := service.processBatchNext(context.Background(), store)
+	if err != nil || !worked {
+		t.Fatalf("worked/error = %t/%v", worked, err)
+	}
+	if store.claimLimit != 2 || store.claimCalls.Load() != 1 || store.completeCalls.Load() != 2 {
+		t.Fatalf("claim limit/calls/completions = %d/%d/%d", store.claimLimit, store.claimCalls.Load(), store.completeCalls.Load())
+	}
+}
+
+func TestArtistArtworkBatchClaimWindowDoesNotIncreaseProcessingConcurrency(t *testing.T) {
+	const (
+		workers     = 2
+		claimWindow = 8
+		claimCount  = 8
+	)
+	store := &artistArtworkBatchCompletionWindowStoreStub{
+		artistArtworkBatchWindowStoreStub: &artistArtworkBatchWindowStoreStub{
+			artistArtworkBatchStoreStub: &artistArtworkBatchStoreStub{},
+		},
+	}
+	claims := make([]ClaimedArtistArtworkBatchItem, claimCount)
+	for index := range claims {
+		claim := artistArtworkBatchClaim(ArtistArtworkBatchTarget{
+			ID: fmt.Sprintf("artist-%d", index), Name: fmt.Sprintf("Artist %d", index),
+			NormalizedName: fmt.Sprintf("artist %d", index), Version: 1, PerformerRole: true,
+		}, 1, 1, 3)
+		claim.Item.ID = fmt.Sprintf("item-%d", index)
+		claim.Item.ArtistID = claim.Target.ID
+		claims[index] = claim
+	}
+	store.claims = claims
+	processor := &parallelArtistArtworkProcessor{}
+	service := newArtistArtworkBatchTestServiceWith(t, store, processor, ArtistArtworkBatchServiceDependencies{
+		Workers: workers, ClaimWindow: claimWindow, Heartbeat: time.Hour, Lease: 2 * time.Hour,
+	})
+
+	worked, err := service.processBatchNext(context.Background(), store)
+	if err != nil || !worked {
+		t.Fatalf("worked/error = %t/%v", worked, err)
+	}
+	if maximum := processor.maximum.Load(); maximum > workers {
+		t.Fatalf("processing concurrency = %d, want <= %d", maximum, workers)
+	}
+}
+
+func TestArtistArtworkBatchGroupsCompletionByJob(t *testing.T) {
+	store := &artistArtworkBatchCompletionWindowStoreStub{
+		artistArtworkBatchWindowStoreStub: &artistArtworkBatchWindowStoreStub{
+			artistArtworkBatchStoreStub: &artistArtworkBatchStoreStub{},
+		},
+	}
+	first := artistArtworkBatchClaim(ArtistArtworkBatchTarget{
+		ID: "artist-1", Name: "Artist 1", NormalizedName: "artist 1", Version: 1, PerformerRole: true,
+	}, 1, 1, 3)
+	second := artistArtworkBatchClaim(ArtistArtworkBatchTarget{
+		ID: "artist-2", Name: "Artist 2", NormalizedName: "artist 2", Version: 1, PerformerRole: true,
+	}, 1, 1, 3)
+	second.Job.ID = "job-2"
+	second.Item.JobID = "job-2"
+	second.Item.ID = "item-2"
+	store.claims = []ClaimedArtistArtworkBatchItem{first, second}
+	processor := artistArtworkBatchProcessorStub{
+		search: func(_ context.Context, input ArtistSearchInput) ([]ArtistCandidate, error) {
+			return []ArtistCandidate{{
+				Source: input.Source, ID: input.Query, Name: input.Query,
+				ImageURL: "https://y.qq.com/avatar.jpg", Score: 2,
+			}}, nil
+		},
+		apply: func(context.Context, string, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error) {
+			return ArtistArtworkApplyResult{Applied: true}, nil
+		},
+	}
+	service := newArtistArtworkBatchTestServiceWith(t, store, processor, ArtistArtworkBatchServiceDependencies{
+		Workers: 2, ClaimWindow: 2, Heartbeat: time.Hour, Lease: 2 * time.Hour,
+	})
+
+	worked, err := service.processBatchNext(context.Background(), store)
+	if err != nil || !worked {
+		t.Fatalf("worked/error = %t/%v", worked, err)
+	}
+	if len(store.completedJobIDs) != 2 {
+		t.Fatalf("completion job count = %d, want 2", len(store.completedJobIDs))
+	}
+	seenJobs := make(map[string]string, len(store.completedJobIDs))
+	for index, jobID := range store.completedJobIDs {
+		if len(store.completedItemIDs[index]) != 1 {
+			t.Fatalf("job %s completion items = %#v", jobID, store.completedItemIDs[index])
+		}
+		seenJobs[jobID] = store.completedItemIDs[index][0]
+	}
+	if seenJobs["job-1"] != "item-1" || seenJobs["job-2"] != "item-2" {
+		t.Fatalf("completion grouping = %#v", seenJobs)
+	}
+}
+
+func TestArtistArtworkBatchFallsBackWhenBatchCompletionIsIncomplete(t *testing.T) {
+	store := &artistArtworkBatchCompletionWindowStoreStub{
+		artistArtworkBatchWindowStoreStub: &artistArtworkBatchWindowStoreStub{
+			artistArtworkBatchStoreStub: &artistArtworkBatchStoreStub{},
+		},
+		acceptedIDs: []string{},
+	}
+	store.claims = []ClaimedArtistArtworkBatchItem{artistArtworkBatchClaim(ArtistArtworkBatchTarget{
+		ID: "artist-1", Name: "Artist", NormalizedName: "artist", Version: 1, PerformerRole: true,
+	}, 1, 1, 3)}
+	processor := artistArtworkBatchProcessorStub{
+		search: func(_ context.Context, input ArtistSearchInput) ([]ArtistCandidate, error) {
+			return []ArtistCandidate{{
+				Source: input.Source, ID: input.Query, Name: input.Query,
+				ImageURL: "https://y.qq.com/avatar.jpg", Score: 2,
+			}}, nil
+		},
+		apply: func(context.Context, string, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error) {
+			return ArtistArtworkApplyResult{Applied: true}, nil
+		},
+	}
+	service := newArtistArtworkBatchTestServiceWith(t, store, processor, ArtistArtworkBatchServiceDependencies{
+		Workers: 1, ClaimWindow: 1, Heartbeat: time.Hour, Lease: 2 * time.Hour,
+	})
+
+	worked, err := service.processBatchNext(context.Background(), store)
+	if err != nil || !worked {
+		t.Fatalf("worked/error = %t/%v", worked, err)
+	}
+	if len(store.completedJobIDs) != 1 || store.artistArtworkBatchWindowStoreStub.completeCalls.Load() != 1 {
+		t.Fatalf("batch completion calls = %d/%d", len(store.completedJobIDs), store.artistArtworkBatchWindowStoreStub.completeCalls.Load())
+	}
+}
+
 func TestArtistArtworkBatchApplyConflictIsSkipped(t *testing.T) {
 	service := newArtistArtworkBatchTestService(t, &artistArtworkBatchStoreStub{}, artistArtworkBatchProcessorStub{
 		search: func(context.Context, ArtistSearchInput) ([]ArtistCandidate, error) {
@@ -320,6 +486,42 @@ type artistArtworkBatchProcessorStub struct {
 	apply  func(context.Context, string, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error)
 }
 
+type parallelArtistArtworkProcessor struct {
+	active  atomic.Int32
+	maximum atomic.Int32
+}
+
+func (processor *parallelArtistArtworkProcessor) SearchArtists(
+	ctx context.Context,
+	input ArtistSearchInput,
+) ([]ArtistCandidate, error) {
+	active := processor.active.Add(1)
+	for {
+		maximum := processor.maximum.Load()
+		if active <= maximum || processor.maximum.CompareAndSwap(maximum, active) {
+			break
+		}
+	}
+	defer processor.active.Add(-1)
+	timer := time.NewTimer(10 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer.C:
+	}
+	return []ArtistCandidate{{
+		ID: input.Query, Name: input.Query, Source: input.Source,
+		ImageURL: "https://y.qq.com/avatar.jpg", Score: 2,
+	}}, nil
+}
+
+func (*parallelArtistArtworkProcessor) ApplyArtistArtwork(
+	context.Context, string, string, string, ArtistArtworkApplyInput,
+) (ArtistArtworkApplyResult, error) {
+	return ArtistArtworkApplyResult{Applied: true}, nil
+}
+
 func (stub artistArtworkBatchProcessorStub) SearchArtists(
 	ctx context.Context,
 	input ArtistSearchInput,
@@ -355,6 +557,61 @@ type artistArtworkBatchStoreStub struct {
 	retryNextAttempt  time.Time
 	completeCalls     int
 	completeStatus    ItemStatus
+}
+
+type artistArtworkBatchWindowStoreStub struct {
+	*artistArtworkBatchStoreStub
+	claims        []ClaimedArtistArtworkBatchItem
+	claimLimit    int
+	claimCalls    atomic.Int32
+	completeCalls atomic.Int32
+}
+
+type artistArtworkBatchCompletionWindowStoreStub struct {
+	*artistArtworkBatchWindowStoreStub
+	completedJobIDs  []string
+	completedItemIDs [][]string
+	acceptedIDs      []string
+	completeErr      error
+}
+
+func (store *artistArtworkBatchWindowStoreStub) ClaimArtistArtworkBatchItems(
+	_ context.Context, _ string, _ time.Time, _ time.Duration, limit int,
+) (ArtistArtworkBatchClaimResult, error) {
+	store.claimCalls.Add(1)
+	store.claimLimit = limit
+	return ArtistArtworkBatchClaimResult{Items: store.claims}, nil
+}
+
+func (store *artistArtworkBatchWindowStoreStub) CompleteArtistArtworkBatchItem(
+	context.Context,
+	string, string, string, string,
+	ItemStatus, *ArtistCandidate, string, time.Time,
+) (bool, error) {
+	store.completeCalls.Add(1)
+	return true, nil
+}
+
+func (store *artistArtworkBatchCompletionWindowStoreStub) CompleteArtistArtworkBatchItems(
+	_ context.Context,
+	jobID string,
+	_ string,
+	completions []ArtistArtworkBatchItemCompletion,
+	_ time.Time,
+) ([]string, error) {
+	if store.completeErr != nil {
+		return nil, store.completeErr
+	}
+	itemIDs := make([]string, 0, len(completions))
+	for _, completion := range completions {
+		itemIDs = append(itemIDs, completion.ItemID)
+	}
+	store.completedJobIDs = append(store.completedJobIDs, jobID)
+	store.completedItemIDs = append(store.completedItemIDs, itemIDs)
+	if store.acceptedIDs != nil {
+		return append([]string(nil), store.acceptedIDs...), nil
+	}
+	return itemIDs, nil
 }
 
 func (stub *artistArtworkBatchStoreStub) CreateArtistArtworkBatch(

@@ -74,6 +74,20 @@ func TestDecryptQRCDecodesCompressedWordLyrics(t *testing.T) {
 	}
 }
 
+func TestDecompressLyricsRejectsOversizedExpansion(t *testing.T) {
+	var compressed bytes.Buffer
+	writer := zlib.NewWriter(&compressed)
+	if _, err := writer.Write(bytes.Repeat([]byte{'x'}, maximumDecompressedLyricsBytes+1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decompressLyrics(compressed.Bytes()); err == nil {
+		t.Fatal("oversized decompressed lyrics were accepted")
+	}
+}
+
 func zlibBytes(t *testing.T, plain []byte) []byte {
 	t.Helper()
 	var buffer bytes.Buffer

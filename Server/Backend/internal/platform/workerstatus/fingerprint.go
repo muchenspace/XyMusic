@@ -40,6 +40,7 @@ func configurationDocument(cfg config.Config) fingerprintDocument {
 		},
 		Media: fingerprintMedia{
 			Mode: cfg.Media.Mode, FFmpegPath: cfg.Media.FFmpegPath, FFprobePath: cfg.Media.FFprobePath,
+			ProbeWorkers: cfg.Media.ProbeWorkers, StorageWorkers: cfg.Media.StorageWorkers,
 		},
 		LocalLibrary: fingerprintLocalLibrary{
 			Name: cfg.LocalLibrary.Name, Directory: cfg.LocalLibrary.Directory,
@@ -87,9 +88,11 @@ type fingerprintStorage struct {
 }
 
 type fingerprintMedia struct {
-	Mode        string `json:"mode"`
-	FFmpegPath  string `json:"ffmpegPath"`
-	FFprobePath string `json:"ffprobePath"`
+	Mode           string `json:"mode"`
+	FFmpegPath     string `json:"ffmpegPath"`
+	FFprobePath    string `json:"ffprobePath"`
+	ProbeWorkers   int    `json:"probeWorkers"`
+	StorageWorkers int    `json:"storageWorkers"`
 }
 
 type fingerprintLocalLibrary struct {

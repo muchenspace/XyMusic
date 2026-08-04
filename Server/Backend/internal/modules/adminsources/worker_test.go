@@ -105,6 +105,40 @@ func TestWorkerFinalizesRequestedCancellation(t *testing.T) {
 	}
 }
 
+func TestWorkerStopsScannerWhenScanOwnershipIsLost(t *testing.T) {
+	attemptID := "00000000-0000-4000-8000-000000000003"
+	controlOwned := false
+	store := &workerStoreStub{
+		claim: &ClaimedScan{
+			Run:  ScanRun{ID: testRunID, RootID: testRootID, RootVersion: 1, Status: ScanStatusRunning, AttemptID: &attemptID},
+			Root: Root{ID: testRootID, Path: t.TempDir(), Version: 1, Enabled: true},
+		},
+		scanControlOwned: &controlOwned,
+	}
+	scanner := scannerFunc(func(ctx context.Context, input ScanInput) (ScanResult, error) {
+		cancelled, err := input.IsCancelled(ctx)
+		if err != nil || !cancelled {
+			return ScanResult{}, errors.New("expected ownership loss to cancel the scan")
+		}
+		return ScanResult{}, ErrScanCancelled
+	})
+	worker, err := NewWorker(WorkerOptions{
+		Store: store, Scanner: scanner, RootDirectory: t.TempDir(), WorkerID: "worker-test",
+		Lease: time.Second, Heartbeat: 100 * time.Millisecond,
+		DefaultRoot: config.LocalLibrary{Directory: store.claim.Root.Path, Mode: string(RootModeReadOnly), IncludePatterns: []string{}, ExcludePatterns: []string{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worked, err := worker.RunNextScan(context.Background())
+	if err != nil || !worked {
+		t.Fatalf("worked=%v err=%v", worked, err)
+	}
+	if store.finalStatus != ScanStatusPending || store.finalError != nil {
+		t.Fatalf("final status=%s error=%v", store.finalStatus, store.finalError)
+	}
+}
+
 type scannerFunc func(context.Context, ScanInput) (ScanResult, error)
 
 func (function scannerFunc) Scan(ctx context.Context, input ScanInput) (ScanResult, error) {
@@ -112,18 +146,19 @@ func (function scannerFunc) Scan(ctx context.Context, input ScanInput) (ScanResu
 }
 
 type workerStoreStub struct {
-	initializeCalls int
-	scheduleCalls   int
-	defaultMutation RootMutation
-	startupIDs      []string
-	enqueued        []EnqueueScanCommand
-	claim           *ClaimedScan
-	cancelled       bool
-	owned           bool
-	progress        ScanProgress
-	completed       ScanResult
-	finalStatus     ScanStatus
-	finalError      *string
+	initializeCalls  int
+	scheduleCalls    int
+	defaultMutation  RootMutation
+	startupIDs       []string
+	enqueued         []EnqueueScanCommand
+	claim            *ClaimedScan
+	cancelled        bool
+	owned            bool
+	scanControlOwned *bool
+	progress         ScanProgress
+	completed        ScanResult
+	finalStatus      ScanStatus
+	finalError       *string
 }
 
 func (stub *workerStoreStub) InitializeScans(context.Context, time.Time) error {
@@ -157,7 +192,11 @@ func (stub *workerStoreStub) HeartbeatScan(context.Context, string, string, stri
 	return stub.owned, nil
 }
 func (stub *workerStoreStub) ScanControl(context.Context, string, string, string) (bool, bool, error) {
-	return stub.cancelled, stub.owned, nil
+	owned := stub.owned
+	if stub.scanControlOwned != nil {
+		owned = *stub.scanControlOwned
+	}
+	return stub.cancelled, owned, nil
 }
 func (stub *workerStoreStub) UpdateScanProgress(_ context.Context, _, _, _ string, progress ScanProgress, _ time.Time) (bool, error) {
 	stub.progress = progress

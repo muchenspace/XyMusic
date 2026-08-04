@@ -135,7 +135,12 @@ func (s *Store) Save(cfg Config) error {
 		"ACOUSTID_CLIENT", "LOCAL_MUSIC_SOURCE_NAME", "LOCAL_MUSIC_SOURCE_MODE",
 		"LOCAL_MUSIC_SOURCE_ENABLED", "LOCAL_MUSIC_SYNC_ON_STARTUP",
 		"LOCAL_MUSIC_SCAN_INTERVAL_MINUTES", "LOCAL_MUSIC_INCLUDE_PATTERNS",
-		"LOCAL_MUSIC_EXCLUDE_PATTERNS", "MEDIA_VARIANT_PROFILE_VERSION", "REGISTRATION_ENABLED",
+		"LOCAL_MUSIC_EXCLUDE_PATTERNS", "LOCAL_MUSIC_SCAN_WORKERS", "LOCAL_MUSIC_SCAN_COMMIT_WORKERS",
+		"LOCAL_MUSIC_SCAN_COMMIT_BATCH_SIZE", "LOCAL_MUSIC_SCAN_PROBE_WORKERS", "LOCAL_MUSIC_READY_OBJECT_STAT_TTL_SECONDS",
+		"MEDIA_VARIANT_PROFILE_VERSION",
+		"MEDIA_WORKERS", "MEDIA_PROBE_WORKERS", "MEDIA_STORAGE_WORKERS", "MEDIA_FFMPEG_THREADS", "TAG_SCRAPING_WORKERS", "TAG_SCRAPING_REQUEST_WORKERS",
+		"TAG_SCRAPING_CLAIM_WINDOW", "TAG_SCRAPING_ARTWORK_WORKERS",
+		"TAG_SCRAPING_ARTWORK_CLAIM_WINDOW", "REGISTRATION_ENABLED",
 	}
 	var content strings.Builder
 	for _, key := range keys {
@@ -152,51 +157,127 @@ func ToEnvironment(cfg Config) map[string]string {
 	if cfg.LocalLibrary.ScanIntervalMinutes != nil {
 		scanInterval = strconv.Itoa(*cfg.LocalLibrary.ScanIntervalMinutes)
 	}
+	scanWorkers := cfg.LocalLibrary.ScanWorkers
+	if scanWorkers <= 0 {
+		scanWorkers = defaultScanWorkers()
+	}
+	scanCommitWorkers := cfg.LocalLibrary.ScanCommitWorkers
+	if scanCommitWorkers <= 0 {
+		scanCommitWorkers = defaultScanCommitWorkers()
+	}
+	scanCommitBatchSize := cfg.LocalLibrary.ScanCommitBatchSize
+	if scanCommitBatchSize <= 0 {
+		scanCommitBatchSize = 8
+	}
+	scanProbeWorkers := cfg.LocalLibrary.ScanProbeWorkers
+	if scanProbeWorkers <= 0 {
+		scanProbeWorkers = defaultScanProbeWorkers()
+	}
+	readySourceObjectStatTTLSeconds := cfg.LocalLibrary.ReadySourceObjectStatTTLSeconds
+	if readySourceObjectStatTTLSeconds < 0 {
+		readySourceObjectStatTTLSeconds = 300
+	}
+	mediaWorkers := cfg.Media.Workers
+	if mediaWorkers <= 0 {
+		mediaWorkers = defaultMediaWorkers()
+	}
+	mediaProbeWorkers := cfg.Media.ProbeWorkers
+	if mediaProbeWorkers <= 0 {
+		mediaProbeWorkers = defaultMediaProbeWorkers(mediaWorkers)
+	}
+	mediaStorageWorkers := cfg.Media.StorageWorkers
+	if mediaStorageWorkers <= 0 {
+		mediaStorageWorkers = defaultMediaStorageWorkers(mediaWorkers)
+	}
+	mediaFFmpegThreads := cfg.Media.FFmpegThreads
+	if mediaFFmpegThreads < 0 {
+		mediaFFmpegThreads = 0
+	}
+	batchWorkers := cfg.Scraping.BatchWorkers
+	if batchWorkers <= 0 {
+		batchWorkers = 8
+	}
+	batchClaimWindow := cfg.Scraping.BatchClaimWindow
+	if batchClaimWindow < batchWorkers {
+		batchClaimWindow = defaultScrapingClaimWindow(batchWorkers)
+	}
+	requestWorkers := cfg.Scraping.RequestWorkers
+	if requestWorkers <= 0 {
+		requestWorkers = 6
+	}
+	artworkWorkers := cfg.Scraping.ArtworkWorkers
+	if artworkWorkers <= 0 {
+		artworkWorkers = 2
+	}
+	artworkClaimWindow := cfg.Scraping.ArtworkClaimWindow
+	if artworkClaimWindow < artworkWorkers {
+		artworkClaimWindow = defaultScrapingClaimWindow(artworkWorkers)
+	}
+	databaseMaxConnections := int(cfg.Database.MaxConnections)
+	if databaseMaxConnections <= 0 {
+		databaseMaxConnections = defaultDatabaseConnections(
+			scanCommitWorkers, mediaWorkers, batchWorkers, artworkWorkers,
+		)
+	}
 	include, _ := jsonStringArray(cfg.LocalLibrary.IncludePatterns)
 	exclude, _ := jsonStringArray(cfg.LocalLibrary.ExcludePatterns)
 	return map[string]string{
-		"NODE_ENV":                          string(cfg.Environment),
-		"MIGRATIONS_DIRECTORY":              cfg.Paths.MigrationsDirectory,
-		"ADMIN_WEB_DIRECTORY":               cfg.Paths.AdminWebDirectory,
-		"MEDIA_TOOLS_DIRECTORY":             cfg.Paths.MediaToolsDirectory,
-		"MEDIA_TOOLS_MODE":                  cfg.Media.Mode,
-		"LOCAL_MUSIC_DIRECTORY":             cfg.Paths.LocalMusicDirectory,
-		"HTTP_HOST":                         cfg.HTTP.IPv4Host,
-		"HTTP_PORT":                         strconv.Itoa(cfg.HTTP.IPv4Port),
-		"HTTP_IPV4_HOST":                    cfg.HTTP.IPv4Host,
-		"HTTP_IPV4_PORT":                    strconv.Itoa(cfg.HTTP.IPv4Port),
-		"HTTP_IPV6_HOST":                    cfg.HTTP.IPv6Host,
-		"HTTP_IPV6_PORT":                    strconv.Itoa(cfg.HTTP.IPv6Port),
-		"HTTP_TRUSTED_PROXY_ADDRESSES":      strings.Join(cfg.HTTP.TrustedProxyAddresses, ","),
-		"DATABASE_URL":                      cfg.Database.URL,
-		"DATABASE_MAX_CONNECTIONS":          strconv.Itoa(int(cfg.Database.MaxConnections)),
-		"ACCESS_TOKEN_SECRET":               cfg.Security.AccessTokenSecret,
-		"IDEMPOTENCY_ENCRYPTION_SECRET":     cfg.Security.IdempotencyEncryptionSecret,
-		"CURSOR_SIGNING_SECRET":             cfg.Security.CursorSigningSecret,
-		"ACCESS_TOKEN_TTL_SECONDS":          strconv.Itoa(cfg.Security.AccessTokenTTLSeconds),
-		"REFRESH_TOKEN_TTL_SECONDS":         strconv.Itoa(cfg.Security.RefreshTokenTTLSeconds),
-		"S3_ENDPOINT":                       cfg.Storage.Endpoint,
-		"S3_REGION":                         cfg.Storage.Region,
-		"S3_BUCKET":                         cfg.Storage.Bucket,
-		"S3_ACCESS_KEY_ID":                  cfg.Storage.AccessKeyID,
-		"S3_SECRET_ACCESS_KEY":              cfg.Storage.SecretAccessKey,
-		"S3_FORCE_PATH_STYLE":               strconv.FormatBool(cfg.Storage.ForcePathStyle),
-		"S3_PUBLIC_BASE_URL":                cfg.Storage.PublicBaseURL,
-		"MEDIA_SIGNED_URL_TTL_SECONDS":      strconv.Itoa(cfg.Storage.SignedURLTTLSeconds),
-		"MEDIA_MAX_UPLOAD_BYTES":            strconv.FormatInt(cfg.Storage.MaxUploadBytes, 10),
-		"FFMPEG_PATH":                       cfg.Media.FFmpegPath,
-		"FFPROBE_PATH":                      cfg.Media.FFprobePath,
-		"MEDIA_VARIANT_PROFILE_VERSION":     cfg.Media.ProfileVersion,
-		"FPCALC_PATH":                       cfg.Scraping.FPcalcPath,
-		"ACOUSTID_CLIENT":                   cfg.Scraping.AcoustIDClient,
-		"LOCAL_MUSIC_SOURCE_NAME":           cfg.LocalLibrary.Name,
-		"LOCAL_MUSIC_SOURCE_MODE":           cfg.LocalLibrary.Mode,
-		"LOCAL_MUSIC_SOURCE_ENABLED":        strconv.FormatBool(cfg.LocalLibrary.Enabled),
-		"LOCAL_MUSIC_SYNC_ON_STARTUP":       strconv.FormatBool(cfg.LocalLibrary.SyncOnStartup),
-		"LOCAL_MUSIC_SCAN_INTERVAL_MINUTES": scanInterval,
-		"LOCAL_MUSIC_INCLUDE_PATTERNS":      include,
-		"LOCAL_MUSIC_EXCLUDE_PATTERNS":      exclude,
-		"REGISTRATION_ENABLED":              strconv.FormatBool(cfg.Registration.Enabled),
+		"NODE_ENV":                                  string(cfg.Environment),
+		"MIGRATIONS_DIRECTORY":                      cfg.Paths.MigrationsDirectory,
+		"ADMIN_WEB_DIRECTORY":                       cfg.Paths.AdminWebDirectory,
+		"MEDIA_TOOLS_DIRECTORY":                     cfg.Paths.MediaToolsDirectory,
+		"MEDIA_TOOLS_MODE":                          cfg.Media.Mode,
+		"LOCAL_MUSIC_DIRECTORY":                     cfg.Paths.LocalMusicDirectory,
+		"HTTP_HOST":                                 cfg.HTTP.IPv4Host,
+		"HTTP_PORT":                                 strconv.Itoa(cfg.HTTP.IPv4Port),
+		"HTTP_IPV4_HOST":                            cfg.HTTP.IPv4Host,
+		"HTTP_IPV4_PORT":                            strconv.Itoa(cfg.HTTP.IPv4Port),
+		"HTTP_IPV6_HOST":                            cfg.HTTP.IPv6Host,
+		"HTTP_IPV6_PORT":                            strconv.Itoa(cfg.HTTP.IPv6Port),
+		"HTTP_TRUSTED_PROXY_ADDRESSES":              strings.Join(cfg.HTTP.TrustedProxyAddresses, ","),
+		"DATABASE_URL":                              cfg.Database.URL,
+		"DATABASE_MAX_CONNECTIONS":                  strconv.Itoa(databaseMaxConnections),
+		"ACCESS_TOKEN_SECRET":                       cfg.Security.AccessTokenSecret,
+		"IDEMPOTENCY_ENCRYPTION_SECRET":             cfg.Security.IdempotencyEncryptionSecret,
+		"CURSOR_SIGNING_SECRET":                     cfg.Security.CursorSigningSecret,
+		"ACCESS_TOKEN_TTL_SECONDS":                  strconv.Itoa(cfg.Security.AccessTokenTTLSeconds),
+		"REFRESH_TOKEN_TTL_SECONDS":                 strconv.Itoa(cfg.Security.RefreshTokenTTLSeconds),
+		"S3_ENDPOINT":                               cfg.Storage.Endpoint,
+		"S3_REGION":                                 cfg.Storage.Region,
+		"S3_BUCKET":                                 cfg.Storage.Bucket,
+		"S3_ACCESS_KEY_ID":                          cfg.Storage.AccessKeyID,
+		"S3_SECRET_ACCESS_KEY":                      cfg.Storage.SecretAccessKey,
+		"S3_FORCE_PATH_STYLE":                       strconv.FormatBool(cfg.Storage.ForcePathStyle),
+		"S3_PUBLIC_BASE_URL":                        cfg.Storage.PublicBaseURL,
+		"MEDIA_SIGNED_URL_TTL_SECONDS":              strconv.Itoa(cfg.Storage.SignedURLTTLSeconds),
+		"MEDIA_MAX_UPLOAD_BYTES":                    strconv.FormatInt(cfg.Storage.MaxUploadBytes, 10),
+		"FFMPEG_PATH":                               cfg.Media.FFmpegPath,
+		"FFPROBE_PATH":                              cfg.Media.FFprobePath,
+		"MEDIA_VARIANT_PROFILE_VERSION":             cfg.Media.ProfileVersion,
+		"FPCALC_PATH":                               cfg.Scraping.FPcalcPath,
+		"ACOUSTID_CLIENT":                           cfg.Scraping.AcoustIDClient,
+		"LOCAL_MUSIC_SOURCE_NAME":                   cfg.LocalLibrary.Name,
+		"LOCAL_MUSIC_SOURCE_MODE":                   cfg.LocalLibrary.Mode,
+		"LOCAL_MUSIC_SOURCE_ENABLED":                strconv.FormatBool(cfg.LocalLibrary.Enabled),
+		"LOCAL_MUSIC_SYNC_ON_STARTUP":               strconv.FormatBool(cfg.LocalLibrary.SyncOnStartup),
+		"LOCAL_MUSIC_SCAN_INTERVAL_MINUTES":         scanInterval,
+		"LOCAL_MUSIC_INCLUDE_PATTERNS":              include,
+		"LOCAL_MUSIC_EXCLUDE_PATTERNS":              exclude,
+		"LOCAL_MUSIC_SCAN_WORKERS":                  strconv.Itoa(scanWorkers),
+		"LOCAL_MUSIC_SCAN_COMMIT_WORKERS":           strconv.Itoa(scanCommitWorkers),
+		"LOCAL_MUSIC_SCAN_COMMIT_BATCH_SIZE":        strconv.Itoa(scanCommitBatchSize),
+		"LOCAL_MUSIC_SCAN_PROBE_WORKERS":            strconv.Itoa(scanProbeWorkers),
+		"LOCAL_MUSIC_READY_OBJECT_STAT_TTL_SECONDS": strconv.Itoa(readySourceObjectStatTTLSeconds),
+		"MEDIA_WORKERS":                             strconv.Itoa(mediaWorkers),
+		"MEDIA_PROBE_WORKERS":                       strconv.Itoa(mediaProbeWorkers),
+		"MEDIA_STORAGE_WORKERS":                     strconv.Itoa(mediaStorageWorkers),
+		"MEDIA_FFMPEG_THREADS":                      strconv.Itoa(mediaFFmpegThreads),
+		"TAG_SCRAPING_WORKERS":                      strconv.Itoa(batchWorkers),
+		"TAG_SCRAPING_CLAIM_WINDOW":                 strconv.Itoa(batchClaimWindow),
+		"TAG_SCRAPING_REQUEST_WORKERS":              strconv.Itoa(requestWorkers),
+		"TAG_SCRAPING_ARTWORK_WORKERS":              strconv.Itoa(artworkWorkers),
+		"TAG_SCRAPING_ARTWORK_CLAIM_WINDOW":         strconv.Itoa(artworkClaimWindow),
+		"REGISTRATION_ENABLED":                      strconv.FormatBool(cfg.Registration.Enabled),
 	}
 }
 
