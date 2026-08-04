@@ -12,17 +12,86 @@ func TestLegacyMigrationsCanBeRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(migrations) != 30 {
-		t.Fatalf("expected 30 migrations, got %d", len(migrations))
+	if len(migrations) != 34 {
+		t.Fatalf("expected 34 migrations, got %d", len(migrations))
 	}
 	if migrations[0].Tag != "0000_initial" || migrations[25].Tag != "0025_track_permanent_delete_batches" ||
 		migrations[26].Tag != "0026_remove_writeback_backup_references" ||
 		migrations[27].Tag != "0027_artist_artwork_scraping_jobs" || migrations[28].Tag != "0028_lyrics_timing" ||
-		migrations[29].Tag != "0029_media_variant_reuse" {
-		t.Fatalf("unexpected migration boundaries: %s - %s - %s - %s - %s - %s", migrations[0].Tag, migrations[25].Tag, migrations[26].Tag, migrations[27].Tag, migrations[28].Tag, migrations[29].Tag)
+		migrations[29].Tag != "0029_media_variant_reuse" || migrations[30].Tag != "0030_tag_scraping_claim_indexes" ||
+		migrations[31].Tag != "0031_local_music_scan_indexes" || migrations[32].Tag != "0032_tag_scraping_large_batches" || migrations[33].Tag != "0033_tag_scraping_item_retries" {
+		t.Fatalf("unexpected migration boundaries: %s - %s - %s - %s - %s - %s - %s - %s - %s - %s", migrations[0].Tag, migrations[25].Tag, migrations[26].Tag, migrations[27].Tag, migrations[28].Tag, migrations[29].Tag, migrations[30].Tag, migrations[31].Tag, migrations[32].Tag, migrations[33].Tag)
 	}
 	if len(migrations[0].SQL) < 2 || len(migrations[0].Hash) != 64 {
 		t.Fatalf("migration parsing is incompatible: %#v", migrations[0])
+	}
+}
+
+func TestLocalMusicScanMigrationAddsRootScopedScanIndexes(t *testing.T) {
+	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToUpper(strings.Join(migrations[31].SQL, "\n"))
+	for _, expected := range []string{
+		"LOCAL_MUSIC_SOURCES_ROOT_SEEN_INDEX",
+		"LOCAL_MUSIC_SOURCES_ROOT_CHECKSUM_INDEX",
+		"ROOT_ID", "LAST_SEEN_AT", "CHECKSUM_SHA256",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("local music scan migration does not contain %q: %s", expected, sql)
+		}
+	}
+}
+
+func TestTagScrapingLargeBatchMigrationRaisesJobLimit(t *testing.T) {
+	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToUpper(strings.Join(migrations[32].SQL, "\n"))
+	if !strings.Contains(sql, `"TOTAL" BETWEEN 1 AND 5000`) {
+		t.Fatalf("large tag scraping batch migration does not raise the total limit: %s", sql)
+	}
+}
+
+func TestTagScrapingItemRetryMigrationAddsDurableClaimState(t *testing.T) {
+	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToUpper(strings.Join(migrations[33].SQL, "\n"))
+	for _, expected := range []string{
+		"TAG_SCRAPING_JOB_ITEMS",
+		"ATTEMPTS",
+		"MAX_ATTEMPTS",
+		"NEXT_ATTEMPT_AT",
+		"TAG_SCRAPING_JOB_ITEMS_ATTEMPTS_CHECK",
+		"TAG_SCRAPING_JOB_ITEMS_PENDING_READY_INDEX",
+		"WHERE \"STATUS\" = 'PENDING'",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("tag scraping retry migration does not contain %q: %s", expected, sql)
+		}
+	}
+}
+
+func TestTagScrapingClaimMigrationAddsPartialWorkIndexes(t *testing.T) {
+	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToUpper(strings.Join(migrations[30].SQL, "\n"))
+	for _, expected := range []string{
+		"TAG_SCRAPING_JOB_ITEMS_PENDING_POSITION_INDEX",
+		"TAG_SCRAPING_JOB_ITEMS_RUNNING_LEASE_INDEX",
+		"TAG_SCRAPING_JOB_ITEMS_RECOVERY_INDEX",
+		"WHERE \"STATUS\" = 'PENDING'",
+		"WHERE \"STATUS\" = 'RUNNING'",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("tag scraping claim migration does not contain %q: %s", expected, sql)
+		}
 	}
 }
 

@@ -1,8 +1,10 @@
 package media
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -70,13 +72,6 @@ func (storage *MinIOObjectStorage) DownloadToFile(
 		return DownloadedObject{}, fmt.Errorf("open media worker object %q: %w", objectKey, err)
 	}
 	defer object.Close()
-	info, err := object.Stat()
-	if err != nil {
-		return DownloadedObject{}, fmt.Errorf("inspect media worker object %q: %w", objectKey, err)
-	}
-	if info.Size < 0 || info.Size > maximumBytes {
-		return DownloadedObject{}, fmt.Errorf("media worker object %q exceeds its permitted size", objectKey)
-	}
 	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
 		return DownloadedObject{}, fmt.Errorf("prepare media worker download directory: %w", err)
 	}
@@ -103,9 +98,6 @@ func (storage *MinIOObjectStorage) DownloadToFile(
 	if written > maximumBytes {
 		return DownloadedObject{}, fmt.Errorf("media worker object %q exceeds its permitted size", objectKey)
 	}
-	if written != info.Size {
-		return DownloadedObject{}, fmt.Errorf("media worker object %q size changed while downloading", objectKey)
-	}
 	completed = true
 	return DownloadedObject{
 		SizeBytes: written, ChecksumSHA256: hex.EncodeToString(hasher.Sum(nil)),
@@ -116,6 +108,10 @@ func (storage *MinIOObjectStorage) UploadFile(
 	ctx context.Context,
 	objectKey, path, contentType, checksumSHA256 string,
 ) (int64, error) {
+	expectedChecksum, err := decodeSHA256Hex(checksumSHA256)
+	if err != nil {
+		return 0, err
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return 0, fmt.Errorf("open media worker upload: %w", err)
@@ -124,17 +120,6 @@ func (storage *MinIOObjectStorage) UploadFile(
 	info, err := file.Stat()
 	if err != nil {
 		return 0, fmt.Errorf("inspect media worker upload: %w", err)
-	}
-	hasher := sha256.New()
-	if _, err := io.Copy(hasher, file); err != nil {
-		return 0, fmt.Errorf("checksum media worker upload: %w", err)
-	}
-	observedChecksum := hex.EncodeToString(hasher.Sum(nil))
-	if !strings.EqualFold(observedChecksum, checksumSHA256) {
-		return 0, errors.New("media worker upload checksum does not match the requested checksum")
-	}
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return 0, fmt.Errorf("rewind media worker upload: %w", err)
 	}
 	uploaded, err := storage.client.PutObject(
 		ctx, storage.bucket, objectKey, file, info.Size(),
@@ -150,6 +135,14 @@ func (storage *MinIOObjectStorage) UploadFile(
 		_ = storage.Delete(context.WithoutCancel(ctx), objectKey)
 		return 0, fmt.Errorf("uploaded media worker object %q has the wrong size", objectKey)
 	}
+	if uploaded.ChecksumSHA256 != "" {
+		observedChecksum, decodeErr := base64.StdEncoding.DecodeString(strings.TrimSpace(uploaded.ChecksumSHA256))
+		if decodeErr != nil || !bytes.Equal(observedChecksum, expectedChecksum) {
+			_ = storage.Delete(context.WithoutCancel(ctx), objectKey)
+			return 0, fmt.Errorf("uploaded media worker object %q failed checksum validation", objectKey)
+		}
+		return uploaded.Size, nil
+	}
 	stored, err := storage.client.StatObject(ctx, storage.bucket, objectKey, minio.StatObjectOptions{})
 	if err != nil {
 		return 0, fmt.Errorf("validate media worker object %q: %w", objectKey, err)
@@ -163,6 +156,14 @@ func (storage *MinIOObjectStorage) UploadFile(
 		return 0, fmt.Errorf("uploaded media worker object %q failed validation", objectKey)
 	}
 	return uploaded.Size, nil
+}
+
+func decodeSHA256Hex(value string) ([]byte, error) {
+	decoded, err := hex.DecodeString(strings.TrimSpace(value))
+	if err != nil || len(decoded) != sha256.Size {
+		return nil, errors.New("media worker upload checksum must be a SHA-256 hex digest")
+	}
+	return decoded, nil
 }
 
 func (storage *MinIOObjectStorage) StatObject(

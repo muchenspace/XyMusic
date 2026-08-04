@@ -15,7 +15,45 @@ import (
 
 	"xymusic/server/internal/modules/adminmetadata"
 	sharedlyrics "xymusic/server/internal/shared/lyrics"
+	sharedmediapayload "xymusic/server/internal/shared/mediapayload"
 )
+
+func lockStandardFileSource(
+	ctx context.Context,
+	transaction pgx.Tx,
+	input standardFileMutation,
+) (localSourceRecord, bool, error) {
+	query := `SELECT ` + localSourceColumns + ` FROM local_music_sources WHERE `
+	var argument any
+	var secondArgument any
+	if input.ExistingFound {
+		query += `id=$1 FOR UPDATE`
+		argument = input.Existing.ID
+	} else {
+		query += `root_id=$1 AND normalized_source_path=$2 FOR UPDATE`
+		argument = input.RootID
+		secondArgument = normalizePlatformPath(input.File.RelativePath)
+	}
+	var (
+		locked localSourceRecord
+		err    error
+	)
+	if input.ExistingFound {
+		locked, err = scanLocalSource(transaction.QueryRow(ctx, query, argument))
+	} else {
+		locked, err = scanLocalSource(transaction.QueryRow(ctx, query, argument, secondArgument))
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		if input.ExistingFound {
+			return localSourceRecord{}, false, errors.New("local library source disappeared during synchronization")
+		}
+		return localSourceRecord{}, false, nil
+	}
+	if err != nil {
+		return localSourceRecord{}, false, err
+	}
+	return locked, true, nil
+}
 
 func (synchronizer *ProductionSynchronizer) storeStandardFile(
 	ctx context.Context,
@@ -26,13 +64,14 @@ func (synchronizer *ProductionSynchronizer) storeStandardFile(
 		return localSourceRecord{}, false, fmt.Errorf("begin local library file synchronization: %w", err)
 	}
 	defer transaction.Rollback(ctx)
-	if input.ExistingFound {
-		locked, err := scanLocalSource(transaction.QueryRow(ctx, `SELECT `+localSourceColumns+`
-			FROM local_music_sources WHERE id=$1 FOR UPDATE`, input.Existing.ID))
-		if err != nil {
-			return localSourceRecord{}, false, fmt.Errorf("lock local library source: %w", err)
-		}
+	locked, exists, err := lockStandardFileSource(ctx, transaction, input)
+	if err != nil {
+		return localSourceRecord{}, false, fmt.Errorf("lock local library source: %w", err)
+	}
+	if exists {
 		input.Existing = locked
+		input.ExistingFound = true
+		input.TrackID = locked.TrackID
 		pathChanging := locked.RootID != input.RootID ||
 			locked.NormalizedPath != normalizePlatformPath(input.File.RelativePath)
 		if pathChanging {
@@ -47,28 +86,58 @@ func (synchronizer *ProductionSynchronizer) storeStandardFile(
 				return localSourceRecord{}, false, fmt.Errorf("Tag writeback keeps the local source path frozen")
 			}
 		}
+		if locked.Status == SourceFileMissing {
+			now := synchronizer.now()
+			if _, err := transaction.Exec(ctx, `UPDATE tracks track SET
+				status=CASE WHEN track.published_at IS NOT NULL AND track.duration_ms>0 AND EXISTS(
+					SELECT 1 FROM track_variants variant
+					JOIN media_assets asset ON asset.id=variant.asset_id
+					WHERE variant.track_id=track.id AND variant.status='READY' AND asset.status='READY'
+				) THEN 'READY'::catalog_status ELSE 'ERROR'::catalog_status END,
+				version=track.version+1,updated_at=$3
+				WHERE track.status='ARCHIVED' AND track.updated_at=$2
+				AND EXISTS(
+					SELECT 1 FROM local_music_source_tracks mapping
+					WHERE mapping.source_id=$1 AND mapping.track_id=track.id
+				)
+				AND NOT EXISTS(
+					SELECT 1 FROM audit_logs audit
+					WHERE audit.action='admin.track.archive' AND audit.target_type='track'
+					AND audit.target_id=track.id AND audit.result='SUCCESS'
+				)`, locked.ID, locked.UpdatedAt, now); err != nil {
+				return localSourceRecord{}, false, fmt.Errorf("restore incorrectly archived local library tracks: %w", err)
+			}
+		}
 	}
-	effective, overridesLyrics, err := effectiveScanMetadata(ctx, transaction, input.TrackID, input.Raw)
-	if err != nil {
-		return localSourceRecord{}, false, err
+	effective := input.Raw
+	var overridesLyrics bool
+	if input.ExistingFound {
+		effective, overridesLyrics, err = effectiveScanMetadata(ctx, transaction, input.TrackID, input.Raw)
+		if err != nil {
+			return localSourceRecord{}, false, err
+		}
 	}
-	artistIDs, albumArtistIDs, err := resolveMetadataArtists(ctx, transaction, effective)
+	catalogCache := newScanCatalogCache()
+	artistIDs, albumArtistIDs, err := resolveMetadataArtists(ctx, transaction, effective, catalogCache)
 	if err != nil {
 		return localSourceRecord{}, false, err
 	}
 	var albumID *string
 	if effective.Album != nil {
-		preferredAlbum, err := currentTrackAlbum(ctx, transaction, input.TrackID)
-		if err != nil {
-			return localSourceRecord{}, false, err
+		var preferredAlbum *string
+		if input.ExistingFound {
+			preferredAlbum, err = currentTrackAlbum(ctx, transaction, input.TrackID)
+			if err != nil {
+				return localSourceRecord{}, false, err
+			}
 		}
-		value, err := resolveScanAlbum(ctx, transaction, *effective.Album, albumArtistIDs, effective.ReleaseDate, preferredAlbum)
+		value, err := resolveScanAlbum(ctx, transaction, *effective.Album, albumArtistIDs, effective.ReleaseDate, preferredAlbum, catalogCache)
 		if err != nil {
 			return localSourceRecord{}, false, err
 		}
 		albumID = &value
 	}
-	if err := upsertScanTrack(ctx, transaction, input.TrackID, input.ExistingFound, effective, albumID, artistIDs); err != nil {
+	if err := upsertScanTrack(ctx, transaction, input.TrackID, input.ExistingFound, effective, albumID, artistIDs, catalogCache); err != nil {
 		return localSourceRecord{}, false, err
 	}
 	var assetID string
@@ -95,9 +164,11 @@ func (synchronizer *ProductionSynchronizer) storeStandardFile(
 		WHERE id=$1 RETURNING media_generation`, input.TrackID).Scan(&generation); err != nil {
 		return localSourceRecord{}, false, fmt.Errorf("advance local library track generation: %w", err)
 	}
-	payload, err := json.Marshal(map[string]any{
+	payloadFields := map[string]any{
 		"sourcePath": input.File.RelativePath, "originalFileName": filepath.Base(input.File.AudioPath),
-	})
+	}
+	addSourceProbeHint(payloadFields, input.Probed)
+	payload, err := json.Marshal(payloadFields)
 	if err != nil {
 		return localSourceRecord{}, false, err
 	}
@@ -179,24 +250,130 @@ func (synchronizer *ProductionSynchronizer) storeStandardFile(
 	if err != nil {
 		return localSourceRecord{}, false, err
 	}
-	if err := recordScanMetadata(ctx, transaction, input.TrackID, source.ID, input.Raw, input.Checksum, input.SeenAt); err != nil {
+	if input.ExistingFound {
+		err = recordScanMetadata(ctx, transaction, input.TrackID, source.ID, input.Raw, input.Checksum, input.SeenAt)
+	} else {
+		err = recordNewScanMetadata(ctx, transaction, input.TrackID, source.ID, input.Raw, input.Checksum, input.SeenAt)
+	}
+	if err != nil {
 		return localSourceRecord{}, false, err
 	}
 	if !overridesLyrics {
-		if err := syncScannedLyrics(ctx, transaction, input.TrackID, input.Lyrics); err != nil {
-			return localSourceRecord{}, false, err
+		var lyricErr error
+		if input.ExistingFound {
+			lyricErr = syncScannedLyrics(ctx, transaction, input.TrackID, input.Lyrics)
+		} else {
+			lyricErr = syncNewScannedLyrics(ctx, transaction, input.TrackID, input.Lyrics)
+		}
+		if lyricErr != nil {
+			return localSourceRecord{}, false, lyricErr
 		}
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return localSourceRecord{}, false, fmt.Errorf("commit local library file synchronization: %w", err)
 	}
+	if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
+		snapshot.rememberCatalog(catalogCache)
+	}
 	return source, artworkUsed, nil
+}
+
+func addSourceProbeHint(payload map[string]any, probed *adminmetadata.ProbedMetadataFile) {
+	if payload == nil || probed == nil || probed.DurationMS == nil || *probed.DurationMS <= 0 {
+		return
+	}
+	for _, stream := range probed.Streams {
+		if stream.CodecType != "audio" || strings.TrimSpace(stream.CodecName) == "" {
+			continue
+		}
+		hint := sharedmediapayload.SourceProbe{
+			DurationMS: *probed.DurationMS,
+			Codec:      strings.TrimSpace(stream.CodecName),
+		}
+		if stream.SampleRate != nil && *stream.SampleRate > 0 {
+			rate := *stream.SampleRate
+			hint.SampleRate = &rate
+		}
+		payload[sharedmediapayload.SourceProbeKey] = hint
+		return
+	}
+}
+
+func recordNewScanMetadata(
+	ctx context.Context,
+	transaction pgx.Tx,
+	trackID, sourceID string,
+	raw adminmetadata.MetadataSnapshot,
+	checksum string,
+	scannedAt time.Time,
+) error {
+	rawJSON, err := encodeScanMetadata(raw)
+	if err != nil {
+		return err
+	}
+	if _, err := transaction.Exec(ctx, `INSERT INTO track_metadata(
+		track_id,source_id,raw_tags,overrides,raw_checksum_sha256,last_scanned_at
+	) VALUES($1,$2,$3::jsonb,'{}'::jsonb,$4,$5)`, trackID, sourceID, rawJSON, checksum, scannedAt); err != nil {
+		return fmt.Errorf("create scanned local library metadata: %w", err)
+	}
+	return nil
+}
+
+func encodeScanMetadata(raw adminmetadata.MetadataSnapshot) ([]byte, error) {
+	if raw.Lyrics != nil {
+		if err := sharedlyrics.ValidateDocument(raw.Lyrics.Format, raw.Lyrics.Timing, raw.Lyrics.Content); err != nil {
+			return nil, fmt.Errorf("validate scanned local library metadata lyrics: %w", err)
+		}
+	}
+	rawJSON, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("encode scanned local library metadata: %w", err)
+	}
+	return rawJSON, nil
+}
+
+func syncNewScannedLyrics(
+	ctx context.Context,
+	transaction pgx.Tx,
+	trackID string,
+	incoming []scannedLyric,
+) error {
+	if len(incoming) == 0 {
+		return nil
+	}
+	languages := make([]string, len(incoming))
+	formats := make([]string, len(incoming))
+	timings := make([]string, len(incoming))
+	contents := make([]string, len(incoming))
+	origins := make([]string, len(incoming))
+	defaults := make([]bool, len(incoming))
+	for index, lyric := range incoming {
+		if err := sharedlyrics.ValidateDocument(lyric.Format, lyric.Timing, lyric.Content); err != nil {
+			return fmt.Errorf("validate scanned lyric %d: %w", index, err)
+		}
+		languages[index], formats[index], timings[index] = lyric.Language, lyric.Format, string(lyric.Timing)
+		contents[index], origins[index], defaults[index] = lyric.Content, lyric.Origin, lyric.IsDefault
+	}
+	if _, err := transaction.Exec(ctx, `INSERT INTO lyrics(
+		track_id,language,format,timing,content,origin,is_default)
+		SELECT $1,lyric.language,lyric.format::lyrics_format,lyric.timing::lyrics_timing,
+			lyric.content,lyric.origin::lyrics_origin,lyric.is_default
+		FROM unnest($2::text[],$3::text[],$4::text[],$5::text[],$6::text[],$7::bool[])
+			AS lyric(language,format,timing,content,origin,is_default)`,
+		trackID, languages, formats, timings, contents, origins, defaults); err != nil {
+		return fmt.Errorf("store scanned local library lyrics: %w", err)
+	}
+	return nil
 }
 
 func (synchronizer *ProductionSynchronizer) findSource(
 	ctx context.Context,
 	rootID, normalizedPath string,
 ) (localSourceRecord, bool, error) {
+	if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
+		source, found := snapshot.sourcesByPath[normalizedPath]
+		return source, found, nil
+	}
 	source, err := scanLocalSource(synchronizer.database.QueryRow(ctx, `SELECT `+localSourceColumns+`
 		FROM local_music_sources WHERE root_id=$1 AND normalized_source_path=$2`, rootID, normalizedPath))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -213,6 +390,19 @@ func (synchronizer *ProductionSynchronizer) findRenameCandidates(
 	rootID, checksum string,
 	seenAt time.Time,
 ) ([]localSourceRecord, error) {
+	if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
+		candidates := snapshot.renameCandidates[checksum]
+		result := make([]localSourceRecord, 0, min(2, len(candidates)))
+		for _, source := range candidates {
+			if source.RootID == rootID && source.LastSeenAt.Before(seenAt) && !snapshot.sourceSeen(source.ID) {
+				result = append(result, source)
+				if len(result) == 2 {
+					break
+				}
+			}
+		}
+		return result, nil
+	}
 	rows, err := synchronizer.database.Query(ctx, `SELECT `+localSourceColumns+`
 		FROM local_music_sources WHERE root_id=$1 AND checksum_sha256=$2 AND last_seen_at<$3 LIMIT 2`,
 		rootID, checksum, seenAt)
@@ -236,19 +426,45 @@ func scanLocalSource(scanner rowScanner) (localSourceRecord, error) {
 	err := scanner.Scan(
 		&source.ID, &source.RootID, &source.SourcePath, &source.NormalizedPath,
 		&source.Checksum, &source.SizeBytes, &source.ModifiedAt, &source.TrackID,
-		&source.SourceAssetID, &source.MediaJobID, &source.Status, &source.LastSeenAt,
+		&source.SourceAssetID, &source.MediaJobID, &source.Status, &source.LastSeenAt, &source.UpdatedAt,
 	)
 	return source, err
 }
 
 const localSourceColumns = `
 	id,root_id,source_path,normalized_source_path,checksum_sha256,size_bytes,modified_at,
-	track_id,source_asset_id,media_job_id,status,last_seen_at`
+	track_id,source_asset_id,media_job_id,status,last_seen_at,updated_at`
 
 type trackArtistAssignment struct {
 	ArtistID string
 	Role     adminmetadata.CreditRole
 	Order    int
+}
+
+// scanCatalogCache is intentionally scoped to one write transaction. It can
+// reuse rows created earlier in a multi-track CUE transaction without making
+// uncommitted IDs visible to another scan.
+type scanCatalogCache struct {
+	artistIDs map[string]string
+	albumIDs  map[string]string
+}
+
+func newScanCatalogCache() *scanCatalogCache {
+	return &scanCatalogCache{
+		artistIDs: make(map[string]string),
+		albumIDs:  make(map[string]string),
+	}
+}
+
+func (cache *scanCatalogCache) forgetAlbum(albumID string) {
+	if cache == nil || albumID == "" {
+		return
+	}
+	for key, cachedID := range cache.albumIDs {
+		if cachedID == albumID {
+			delete(cache.albumIDs, key)
+		}
+	}
 }
 
 func effectiveScanMetadata(
@@ -282,6 +498,7 @@ func resolveMetadataArtists(
 	ctx context.Context,
 	transaction pgx.Tx,
 	metadata adminmetadata.MetadataSnapshot,
+	cache *scanCatalogCache,
 ) ([]trackArtistAssignment, []string, error) {
 	credits := metadata.Credits
 	if len(credits) == 0 {
@@ -303,7 +520,7 @@ func resolveMetadataArtists(
 		names = append(names, credit.Name)
 	}
 	names = append(names, albumArtists...)
-	ids, err := resolveScanArtists(ctx, transaction, names)
+	ids, err := resolveScanArtists(ctx, transaction, names, cache)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -344,6 +561,7 @@ func resolveScanArtists(
 	ctx context.Context,
 	transaction pgx.Tx,
 	names []string,
+	cache *scanCatalogCache,
 ) (map[string]string, error) {
 	displays := make(map[string]string)
 	for _, name := range names {
@@ -360,16 +578,43 @@ func resolveScanArtists(
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	for _, key := range keys {
-		if _, err := transaction.Exec(ctx,
-			`SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "artist:"+key); err != nil {
-			return nil, fmt.Errorf("lock local library artist: %w", err)
-		}
-	}
 	result := make(map[string]string, len(keys))
-	if len(keys) > 0 {
+	missingKeys := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if cache != nil {
+			if id := cache.artistIDs[key]; id != "" {
+				result[key] = id
+				continue
+			}
+		}
+		if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
+			if id, exists := snapshot.catalogArtist(key); exists {
+				result[key] = id
+				if cache != nil {
+					cache.artistIDs[key] = id
+				}
+				continue
+			}
+		}
+		missingKeys = append(missingKeys, key)
+	}
+	if len(missingKeys) > 0 {
+		lockKeys := make([]string, 0, len(missingKeys))
+		for _, key := range missingKeys {
+			lockKeys = append(lockKeys, "artist:"+key)
+		}
+		var lockedCount int64
+		if err := transaction.QueryRow(ctx, `SELECT count(*) FROM (
+		SELECT pg_advisory_xact_lock(hashtextextended(lock_key,0))
+		FROM unnest($1::text[]) AS requested(lock_key)
+	) AS locks`, lockKeys).Scan(&lockedCount); err != nil {
+			return nil, fmt.Errorf("lock local library artists: %w", err)
+		}
+		if lockedCount != int64(len(missingKeys)) {
+			return nil, fmt.Errorf("lock local library artists: locked %d of %d", lockedCount, len(missingKeys))
+		}
 		rows, err := transaction.Query(ctx, `SELECT id,normalized_name FROM artists
-			WHERE normalized_name=ANY($1::text[]) ORDER BY id`, keys)
+			WHERE normalized_name=ANY($1::text[]) ORDER BY id`, missingKeys)
 		if err != nil {
 			return nil, fmt.Errorf("find local library artists: %w", err)
 		}
@@ -381,20 +626,55 @@ func resolveScanArtists(
 			}
 			if result[key] == "" {
 				result[key] = id
+				if cache != nil {
+					cache.artistIDs[key] = id
+				}
 			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("iterate local library artists: %w", err)
 		}
 		rows.Close()
 	}
-	for _, key := range keys {
+	newKeys := make([]string, 0, len(missingKeys))
+	newNames := make([]string, 0, len(missingKeys))
+	for _, key := range missingKeys {
 		if result[key] != "" {
 			continue
 		}
-		var id string
-		if err := transaction.QueryRow(ctx, `INSERT INTO artists(name,normalized_name)
-			VALUES($1,$2) RETURNING id`, displays[key], key).Scan(&id); err != nil {
-			return nil, fmt.Errorf("create local library artist: %w", err)
+		newKeys = append(newKeys, key)
+		newNames = append(newNames, displays[key])
+	}
+	if len(newKeys) > 0 {
+		rows, err := transaction.Query(ctx, `INSERT INTO artists(name,normalized_name)
+			SELECT requested.display_name,requested.normalized_name
+			FROM unnest($1::text[],$2::text[]) AS requested(display_name,normalized_name)
+			RETURNING id,normalized_name`, newNames, newKeys)
+		if err != nil {
+			return nil, fmt.Errorf("create local library artists: %w", err)
 		}
-		result[key] = id
+		for rows.Next() {
+			var id, key string
+			if err := rows.Scan(&id, &key); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			result[key] = id
+			if cache != nil {
+				cache.artistIDs[key] = id
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("iterate created local library artists: %w", err)
+		}
+		rows.Close()
+		for _, key := range newKeys {
+			if result[key] == "" {
+				return nil, fmt.Errorf("created local library artist has no id: %s", key)
+			}
+		}
 	}
 	return result, nil
 }
@@ -406,14 +686,46 @@ func resolveScanAlbum(
 	artistIDs []string,
 	releaseDate *string,
 	preferredID *string,
+	cache *scanCatalogCache,
 ) (string, error) {
 	if len(artistIDs) == 0 {
 		return "", errors.New("album artist is required")
 	}
 	normalizedTitle := normalizeCatalogText(title)
-	if _, err := transaction.Exec(ctx,
-		`SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "album:"+normalizedTitle); err != nil {
-		return "", fmt.Errorf("lock local library album: %w", err)
+	cacheKey := scanAlbumCacheKey(normalizedTitle, artistIDs, preferredID)
+	if cache != nil {
+		if albumID := cache.albumIDs[cacheKey]; albumID != "" {
+			return albumID, nil
+		}
+	}
+	catalogLockHeld := false
+	if preferredID == nil {
+		if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
+			if _, err := transaction.Exec(ctx,
+				`SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "album:"+normalizedTitle); err != nil {
+				return "", fmt.Errorf("lock local library album: %w", err)
+			}
+			catalogLockHeld = true
+			if albumID, exists := snapshot.catalogAlbum(cacheKey); exists {
+				valid, err := validateCachedScanAlbum(ctx, transaction, albumID, normalizedTitle, artistIDs)
+				if err != nil {
+					return "", err
+				}
+				if valid {
+					if cache != nil {
+						cache.albumIDs[cacheKey] = albumID
+					}
+					return albumID, nil
+				}
+				snapshot.forgetAlbum(albumID)
+			}
+		}
+	}
+	if !catalogLockHeld {
+		if _, err := transaction.Exec(ctx,
+			`SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "album:"+normalizedTitle); err != nil {
+			return "", fmt.Errorf("lock local library album: %w", err)
+		}
 	}
 	rows, err := transaction.Query(ctx, `SELECT id FROM albums
 		WHERE normalized_title=$1 ORDER BY id FOR UPDATE`, normalizedTitle)
@@ -429,24 +741,38 @@ func resolveScanAlbum(
 		}
 		candidates = append(candidates, id)
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return "", fmt.Errorf("iterate local library albums: %w", err)
+	}
 	rows.Close()
-	for _, candidate := range preferredFirst(candidates, preferredID) {
-		creditRows, err := transaction.Query(ctx, `SELECT artist_id FROM album_artists
-			WHERE album_id=$1 AND role='PRIMARY' ORDER BY sort_order,artist_id`, candidate)
+	artistCredits := make(map[string][]string, len(candidates))
+	if len(candidates) > 0 {
+		creditRows, err := transaction.Query(ctx, `SELECT album_id,artist_id FROM album_artists
+			WHERE album_id=ANY($1::uuid[]) AND role='PRIMARY'
+			ORDER BY album_id,sort_order,artist_id`, candidates)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("find local library album artists: %w", err)
 		}
-		credits := make([]string, 0)
 		for creditRows.Next() {
-			var id string
-			if err := creditRows.Scan(&id); err != nil {
+			var albumID, artistID string
+			if err := creditRows.Scan(&albumID, &artistID); err != nil {
 				creditRows.Close()
 				return "", err
 			}
-			credits = append(credits, id)
+			artistCredits[albumID] = append(artistCredits[albumID], artistID)
+		}
+		if err := creditRows.Err(); err != nil {
+			creditRows.Close()
+			return "", fmt.Errorf("iterate local library album artists: %w", err)
 		}
 		creditRows.Close()
-		if equalStrings(credits, artistIDs) {
+	}
+	for _, candidate := range preferredFirst(candidates, preferredID) {
+		if equalStrings(artistCredits[candidate], artistIDs) {
+			if cache != nil {
+				cache.albumIDs[cacheKey] = candidate
+			}
 			return candidate, nil
 		}
 	}
@@ -456,13 +782,52 @@ func resolveScanAlbum(
 	if err != nil {
 		return "", fmt.Errorf("create local library album: %w", err)
 	}
-	for order, artistID := range artistIDs {
-		if _, err := transaction.Exec(ctx, `INSERT INTO album_artists(
-			album_id,artist_id,role,sort_order) VALUES($1,$2,'PRIMARY',$3)`, albumID, artistID, order); err != nil {
-			return "", fmt.Errorf("link local library album artist: %w", err)
-		}
+	artistOrders := make([]int32, len(artistIDs))
+	for order := range artistIDs {
+		artistOrders[order] = int32(order)
+	}
+	if _, err := transaction.Exec(ctx, `INSERT INTO album_artists(
+		album_id,artist_id,role,sort_order)
+		SELECT $1,requested.artist_id,'PRIMARY'::artist_credit_role,requested.sort_order
+		FROM unnest($2::uuid[],$3::int4[]) AS requested(artist_id,sort_order)`,
+		albumID, artistIDs, artistOrders); err != nil {
+		return "", fmt.Errorf("link local library album artists: %w", err)
+	}
+	if cache != nil {
+		cache.albumIDs[cacheKey] = albumID
 	}
 	return albumID, nil
+}
+
+func validateCachedScanAlbum(
+	ctx context.Context,
+	transaction pgx.Tx,
+	albumID, normalizedTitle string,
+	artistIDs []string,
+) (bool, error) {
+	var foundID string
+	err := transaction.QueryRow(ctx, `SELECT album.id
+		FROM albums album
+		WHERE album.id=$1 AND album.normalized_title=$2
+		AND ARRAY(SELECT link.artist_id
+			FROM album_artists link WHERE link.album_id=album.id AND link.role='PRIMARY'
+			ORDER BY link.sort_order,link.artist_id)
+			=$3::uuid[] FOR UPDATE OF album`, albumID, normalizedTitle, artistIDs).Scan(&foundID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("validate cached local library album: %w", err)
+	}
+	return foundID == albumID, nil
+}
+
+func scanAlbumCacheKey(normalizedTitle string, artistIDs []string, preferredID *string) string {
+	key := normalizedTitle + "\x00" + strings.Join(artistIDs, "\x00")
+	if preferredID != nil {
+		key += "\x00preferred:" + *preferredID
+	}
+	return key
 }
 
 func currentTrackAlbum(ctx context.Context, transaction pgx.Tx, trackID string) (*string, error) {
@@ -482,6 +847,7 @@ func upsertScanTrack(
 	metadata adminmetadata.MetadataSnapshot,
 	albumID *string,
 	artists []trackArtistAssignment,
+	cache *scanCatalogCache,
 ) error {
 	discNumber := metadata.DiscNumber
 	if discNumber == nil {
@@ -490,18 +856,15 @@ func upsertScanTrack(
 	}
 	var previousAlbum *string
 	if exists {
-		if err := transaction.QueryRow(ctx, `SELECT album_id FROM tracks WHERE id=$1 FOR UPDATE`, trackID).Scan(&previousAlbum); err != nil {
-			return fmt.Errorf("lock existing local library track: %w", err)
-		}
-		if _, err := transaction.Exec(ctx, `UPDATE tracks SET
+		if err := transaction.QueryRow(ctx, `WITH current AS (
+			SELECT album_id FROM tracks WHERE id=$1 FOR UPDATE
+		) UPDATE tracks AS track SET
 			title=$2,normalized_title=$3,album_id=$4,track_number=$5,disc_number=$6,
 			status=CASE WHEN status='ARCHIVED' THEN status ELSE 'READY' END,
-			version=version+1,updated_at=now() WHERE id=$1`,
-			trackID, metadata.Title, normalizeCatalogText(metadata.Title), albumID, metadata.TrackNumber, discNumber); err != nil {
+			version=version+1,updated_at=now()
+			FROM current WHERE track.id=$1 RETURNING current.album_id`,
+			trackID, metadata.Title, normalizeCatalogText(metadata.Title), albumID, metadata.TrackNumber, discNumber).Scan(&previousAlbum); err != nil {
 			return fmt.Errorf("update local library track: %w", err)
-		}
-		if _, err := transaction.Exec(ctx, `DELETE FROM track_artists WHERE track_id=$1`, trackID); err != nil {
-			return fmt.Errorf("replace local library track artists: %w", err)
 		}
 	} else if _, err := transaction.Exec(ctx, `INSERT INTO tracks(
 		id,title,normalized_title,album_id,track_number,disc_number,status
@@ -509,15 +872,27 @@ func upsertScanTrack(
 		trackID, metadata.Title, normalizeCatalogText(metadata.Title), albumID, metadata.TrackNumber, discNumber); err != nil {
 		return fmt.Errorf("create local library track: %w", err)
 	}
-	for _, artist := range artists {
-		if _, err := transaction.Exec(ctx, `INSERT INTO track_artists(
-			track_id,artist_id,role,sort_order) VALUES($1,$2,$3,$4)`,
-			trackID, artist.ArtistID, artist.Role, artist.Order); err != nil {
-			return fmt.Errorf("link local library track artist: %w", err)
-		}
+	artistIDs := make([]string, len(artists))
+	roles := make([]string, len(artists))
+	artistOrders := make([]int32, len(artists))
+	for index, artist := range artists {
+		artistIDs[index] = artist.ArtistID
+		roles[index] = string(artist.Role)
+		artistOrders[index] = int32(artist.Order)
+	}
+	trackArtistSQL := `INSERT INTO track_artists(track_id,artist_id,role,sort_order)
+		SELECT $1,requested.artist_id,requested.role::artist_credit_role,requested.sort_order
+		FROM unnest($2::uuid[],$3::text[],$4::int4[]) AS requested(artist_id,role,sort_order)`
+	if exists {
+		trackArtistSQL = `WITH deleted AS (
+			DELETE FROM track_artists WHERE track_id=$1
+		) ` + trackArtistSQL
+	}
+	if _, err := transaction.Exec(ctx, trackArtistSQL, trackID, artistIDs, roles, artistOrders); err != nil {
+		return fmt.Errorf("link local library track artists: %w", err)
 	}
 	if exists && !sameOptionalString(previousAlbum, albumID) {
-		if err := deleteAlbumIfEmpty(ctx, transaction, previousAlbum); err != nil {
+		if err := deleteAlbumIfEmpty(ctx, transaction, previousAlbum, cache); err != nil {
 			return err
 		}
 	}
@@ -585,14 +960,37 @@ func recordScanMetadata(
 }
 
 func syncScannedLyrics(ctx context.Context, transaction pgx.Tx, trackID string, incoming []scannedLyric) error {
+	desired := ""
 	for index, lyric := range incoming {
 		if err := sharedlyrics.ValidateDocument(lyric.Format, lyric.Timing, lyric.Content); err != nil {
 			return fmt.Errorf("validate scanned lyric %d: %w", index, err)
 		}
+		if desired == "" && lyric.IsDefault {
+			desired = lyric.Language
+		}
 	}
+	uniqueIncoming := make([]scannedLyric, 0, len(incoming))
+	positions := make(map[string]int, len(incoming))
+	for _, lyric := range incoming {
+		if position, exists := positions[lyric.Language]; exists {
+			uniqueIncoming[position] = lyric
+			continue
+		}
+		positions[lyric.Language] = len(uniqueIncoming)
+		uniqueIncoming = append(uniqueIncoming, lyric)
+	}
+	incoming = uniqueIncoming
 	languages := make([]string, 0, len(incoming))
+	formats := make([]string, 0, len(incoming))
+	timings := make([]string, 0, len(incoming))
+	contents := make([]string, 0, len(incoming))
+	origins := make([]string, 0, len(incoming))
 	for _, lyric := range incoming {
 		languages = append(languages, lyric.Language)
+		formats = append(formats, lyric.Format)
+		timings = append(timings, string(lyric.Timing))
+		contents = append(contents, lyric.Content)
+		origins = append(origins, lyric.Origin)
 	}
 	if len(languages) == 0 {
 		if _, err := transaction.Exec(ctx, `DELETE FROM lyrics
@@ -603,15 +1001,19 @@ func syncScannedLyrics(ctx context.Context, transaction pgx.Tx, trackID string, 
 		WHERE track_id=$1 AND origin IN('SCAN','EXTERNAL') AND NOT(language=ANY($2::text[]))`, trackID, languages); err != nil {
 		return fmt.Errorf("remove stale scanned lyric languages: %w", err)
 	}
-	for _, lyric := range incoming {
+	if len(incoming) > 0 {
 		if _, err := transaction.Exec(ctx, `INSERT INTO lyrics(
-			track_id,language,format,timing,content,origin,is_default
-		) VALUES($1,$2,$3,$4,$5,$6,false)
-		ON CONFLICT(track_id,language) DO UPDATE SET format=EXCLUDED.format,timing=EXCLUDED.timing,content=EXCLUDED.content,
-			origin=EXCLUDED.origin,asset_id=NULL,version=lyrics.version+1,updated_at=now()
-		WHERE lyrics.origin IN('SCAN','EXTERNAL')`,
-			trackID, lyric.Language, lyric.Format, lyric.Timing, lyric.Content, lyric.Origin); err != nil {
-			return fmt.Errorf("store scanned local library lyric: %w", err)
+			track_id,language,format,timing,content,origin,is_default)
+			SELECT $1,lyric.language,lyric.format::lyrics_format,lyric.timing::lyrics_timing,
+				lyric.content,lyric.origin::lyrics_origin,false
+			FROM unnest($2::text[],$3::text[],$4::text[],$5::text[],$6::text[])
+				AS lyric(language,format,timing,content,origin)
+			ON CONFLICT(track_id,language) DO UPDATE SET format=EXCLUDED.format,timing=EXCLUDED.timing,
+				content=EXCLUDED.content,origin=EXCLUDED.origin,asset_id=NULL,
+				version=lyrics.version+1,updated_at=now()
+			WHERE lyrics.origin IN('SCAN','EXTERNAL')`,
+			trackID, languages, formats, timings, contents, origins); err != nil {
+			return fmt.Errorf("store scanned local library lyrics: %w", err)
 		}
 	}
 	var protected bool
@@ -623,13 +1025,6 @@ func syncScannedLyrics(ctx context.Context, transaction pgx.Tx, trackID string, 
 		return nil
 	}
 	var selectedID string
-	desired := ""
-	for _, lyric := range incoming {
-		if lyric.IsDefault {
-			desired = lyric.Language
-			break
-		}
-	}
 	err := transaction.QueryRow(ctx, `SELECT id FROM lyrics WHERE track_id=$1
 		ORDER BY CASE WHEN language=$2 THEN 0 ELSE 1 END,created_at,id LIMIT 1`, trackID, desired).Scan(&selectedID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -697,6 +1092,9 @@ func (synchronizer *ProductionSynchronizer) syncUnchangedSidecars(
 }
 
 func (synchronizer *ProductionSynchronizer) sourceHasExternalLyrics(ctx context.Context, sourceID string) (bool, error) {
+	if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
+		return snapshot.externalLyricsByID[sourceID], nil
+	}
 	var exists bool
 	err := synchronizer.database.QueryRow(ctx, `SELECT EXISTS(
 		SELECT 1 FROM local_music_source_tracks mapping JOIN lyrics lyric ON lyric.track_id=mapping.track_id

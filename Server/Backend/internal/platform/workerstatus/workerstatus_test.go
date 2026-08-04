@@ -26,7 +26,8 @@ func TestConfigurationFingerprintMatchesLegacyDocument(t *testing.T) {
 			AccessKeyID: "access", SecretAccessKey: "secret", ForcePathStyle: true,
 			SignedURLTTLSeconds: 300, MaxUploadBytes: 1024,
 		},
-		Media: config.Media{Mode: "DIRECTORY", FFmpegPath: "tools/ffmpeg", FFprobePath: "tools/ffprobe"},
+		Media: config.Media{Mode: "DIRECTORY", FFmpegPath: "tools/ffmpeg", FFprobePath: "tools/ffprobe",
+			ProbeWorkers: 2, StorageWorkers: 5},
 		LocalLibrary: config.LocalLibrary{
 			Name: "Local", Directory: "music", Mode: "READ_ONLY", Enabled: true,
 			SyncOnStartup: false, ScanIntervalMinutes: &interval,
@@ -34,7 +35,7 @@ func TestConfigurationFingerprintMatchesLegacyDocument(t *testing.T) {
 		},
 		Security: config.Security{IdempotencyEncryptionSecret: "idempotency-secret"},
 	}
-	legacyJSON := `{"environment":"production","paths":{"migrationsDirectory":"migrations","mediaToolsDirectory":"tools","localMusicDirectory":"music"},"database":{"url":"postgres://user:pass@db/xymusic","maxConnections":12},"storage":{"endpoint":"http://minio:9000","region":"us-east-1","bucket":"music","accessKeyId":"access","secretAccessKey":"secret","forcePathStyle":true,"signedUrlTtlSeconds":300,"maxUploadBytes":1024},"media":{"mode":"DIRECTORY","ffmpegPath":"tools/ffmpeg","ffprobePath":"tools/ffprobe"},"localLibrary":{"name":"Local","directory":"music","mode":"READ_ONLY","enabled":true,"syncOnStartup":false,"scanIntervalMinutes":30,"includePatterns":["**/*.flac"],"excludePatterns":[]},"idempotencyEncryptionSecret":"idempotency-secret"}`
+	legacyJSON := `{"environment":"production","paths":{"migrationsDirectory":"migrations","mediaToolsDirectory":"tools","localMusicDirectory":"music"},"database":{"url":"postgres://user:pass@db/xymusic","maxConnections":12},"storage":{"endpoint":"http://minio:9000","region":"us-east-1","bucket":"music","accessKeyId":"access","secretAccessKey":"secret","forcePathStyle":true,"signedUrlTtlSeconds":300,"maxUploadBytes":1024},"media":{"mode":"DIRECTORY","ffmpegPath":"tools/ffmpeg","ffprobePath":"tools/ffprobe","probeWorkers":2,"storageWorkers":5},"localLibrary":{"name":"Local","directory":"music","mode":"READ_ONLY","enabled":true,"syncOnStartup":false,"scanIntervalMinutes":30,"includePatterns":["**/*.flac"],"excludePatterns":[]},"idempotencyEncryptionSecret":"idempotency-secret"}`
 	digest := sha256.Sum256([]byte(legacyJSON))
 	want := hex.EncodeToString(digest[:])
 	if got := ConfigurationFingerprint(cfg); got != want {

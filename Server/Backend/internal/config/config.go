@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -91,22 +92,36 @@ type Media struct {
 	FFmpegPath     string
 	FFprobePath    string
 	ProfileVersion string
+	Workers        int
+	ProbeWorkers   int
+	StorageWorkers int
+	FFmpegThreads  int
 }
 
 type Scraping struct {
-	FPcalcPath     string
-	AcoustIDClient string
+	FPcalcPath         string
+	AcoustIDClient     string
+	BatchWorkers       int
+	BatchClaimWindow   int
+	RequestWorkers     int
+	ArtworkWorkers     int
+	ArtworkClaimWindow int
 }
 
 type LocalLibrary struct {
-	Name                string
-	Directory           string
-	Mode                string
-	Enabled             bool
-	SyncOnStartup       bool
-	ScanIntervalMinutes *int
-	IncludePatterns     []string
-	ExcludePatterns     []string
+	Name                            string
+	Directory                       string
+	Mode                            string
+	Enabled                         bool
+	SyncOnStartup                   bool
+	ScanIntervalMinutes             *int
+	IncludePatterns                 []string
+	ExcludePatterns                 []string
+	ScanWorkers                     int
+	ScanCommitWorkers               int
+	ScanCommitBatchSize             int
+	ScanProbeWorkers                int
+	ReadySourceObjectStatTTLSeconds int
 }
 
 type Registration struct {
@@ -159,10 +174,6 @@ func Parse(env map[string]string) (Config, error) {
 		return Config{}, err
 	}
 
-	databaseConnections, err := integer(env, "DATABASE_MAX_CONNECTIONS", 10, 1, 100)
-	if err != nil {
-		return Config{}, err
-	}
 	legacyHTTPPort, err := integer(env, "HTTP_PORT", 3000, 1, 65535)
 	if err != nil {
 		return Config{}, err
@@ -188,6 +199,74 @@ func Parse(env map[string]string) (Config, error) {
 		return Config{}, err
 	}
 	maxUploadBytes, err := integer64(env, "MEDIA_MAX_UPLOAD_BYTES", MaxServerRequestBodyBytes, 1, MaxServerRequestBodyBytes)
+	if err != nil {
+		return Config{}, err
+	}
+	scanWorkers, err := integer(env, "LOCAL_MUSIC_SCAN_WORKERS", defaultScanWorkers(), 1, 64)
+	if err != nil {
+		return Config{}, err
+	}
+	scanCommitWorkers, err := integer(env, "LOCAL_MUSIC_SCAN_COMMIT_WORKERS", defaultScanCommitWorkers(), 1, 64)
+	if err != nil {
+		return Config{}, err
+	}
+	scanCommitBatchSize, err := integer(env, "LOCAL_MUSIC_SCAN_COMMIT_BATCH_SIZE", 8, 1, 64)
+	if err != nil {
+		return Config{}, err
+	}
+	scanProbeWorkers, err := integer(env, "LOCAL_MUSIC_SCAN_PROBE_WORKERS", defaultScanProbeWorkers(), 1, 64)
+	if err != nil {
+		return Config{}, err
+	}
+	readySourceObjectStatTTLSeconds, err := integer(
+		env, "LOCAL_MUSIC_READY_OBJECT_STAT_TTL_SECONDS", 300, 0, 86400,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	mediaWorkers, err := integer(env, "MEDIA_WORKERS", defaultMediaWorkers(), 1, 32)
+	if err != nil {
+		return Config{}, err
+	}
+	mediaProbeWorkers, err := integer(env, "MEDIA_PROBE_WORKERS", defaultMediaProbeWorkers(mediaWorkers), 1, 64)
+	if err != nil {
+		return Config{}, err
+	}
+	mediaStorageWorkers, err := integer(env, "MEDIA_STORAGE_WORKERS", defaultMediaStorageWorkers(mediaWorkers), 1, 64)
+	if err != nil {
+		return Config{}, err
+	}
+	mediaFFmpegThreads, err := integer(env, "MEDIA_FFMPEG_THREADS", 0, 0, 64)
+	if err != nil {
+		return Config{}, err
+	}
+	batchWorkers, err := integer(env, "TAG_SCRAPING_WORKERS", 8, 1, 64)
+	if err != nil {
+		return Config{}, err
+	}
+	batchClaimWindow, err := integer(
+		env, "TAG_SCRAPING_CLAIM_WINDOW", defaultScrapingClaimWindow(batchWorkers), batchWorkers, 256,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	requestWorkers, err := integer(env, "TAG_SCRAPING_REQUEST_WORKERS", 6, 1, 64)
+	if err != nil {
+		return Config{}, err
+	}
+	artworkWorkers, err := integer(env, "TAG_SCRAPING_ARTWORK_WORKERS", 2, 1, 32)
+	if err != nil {
+		return Config{}, err
+	}
+	artworkClaimWindow, err := integer(
+		env, "TAG_SCRAPING_ARTWORK_CLAIM_WINDOW", defaultScrapingClaimWindow(artworkWorkers), artworkWorkers, 256,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	databaseConnections, err := integer(env, "DATABASE_MAX_CONNECTIONS", defaultDatabaseConnections(
+		scanCommitWorkers, mediaWorkers, batchWorkers, artworkWorkers,
+	), 1, 100)
 	if err != nil {
 		return Config{}, err
 	}
@@ -348,20 +427,66 @@ func Parse(env map[string]string) (Config, error) {
 			SignedURLTTLSeconds: signedURLTTL,
 			MaxUploadBytes:      maxUploadBytes,
 		},
-		Media:    Media{Mode: mediaMode, FFmpegPath: ffmpegPath, FFprobePath: ffprobePath, ProfileVersion: mediaProfileVersion},
-		Scraping: Scraping{FPcalcPath: fpcalcPath, AcoustIDClient: acoustIDClient},
+		Media: Media{Mode: mediaMode, FFmpegPath: ffmpegPath, FFprobePath: ffprobePath,
+			ProfileVersion: mediaProfileVersion, Workers: mediaWorkers, ProbeWorkers: mediaProbeWorkers,
+			StorageWorkers: mediaStorageWorkers, FFmpegThreads: mediaFFmpegThreads},
+		Scraping: Scraping{FPcalcPath: fpcalcPath, AcoustIDClient: acoustIDClient,
+			BatchWorkers: batchWorkers, BatchClaimWindow: batchClaimWindow,
+			RequestWorkers: requestWorkers, ArtworkWorkers: artworkWorkers, ArtworkClaimWindow: artworkClaimWindow},
 		LocalLibrary: LocalLibrary{
-			Name:                value(env, "LOCAL_MUSIC_SOURCE_NAME", "Music"),
-			Directory:           paths.LocalMusicDirectory,
-			Mode:                localMode,
-			Enabled:             localEnabled,
-			SyncOnStartup:       syncOnStartup,
-			ScanIntervalMinutes: scanInterval,
-			IncludePatterns:     includePatterns,
-			ExcludePatterns:     excludePatterns,
+			Name:                            value(env, "LOCAL_MUSIC_SOURCE_NAME", "Music"),
+			Directory:                       paths.LocalMusicDirectory,
+			Mode:                            localMode,
+			Enabled:                         localEnabled,
+			SyncOnStartup:                   syncOnStartup,
+			ScanIntervalMinutes:             scanInterval,
+			IncludePatterns:                 includePatterns,
+			ExcludePatterns:                 excludePatterns,
+			ScanWorkers:                     scanWorkers,
+			ScanCommitWorkers:               scanCommitWorkers,
+			ScanCommitBatchSize:             scanCommitBatchSize,
+			ScanProbeWorkers:                scanProbeWorkers,
+			ReadySourceObjectStatTTLSeconds: readySourceObjectStatTTLSeconds,
 		},
 		Registration: Registration{Enabled: registrationEnabled},
 	}, nil
+}
+
+func defaultScanWorkers() int {
+	return max(4, min(32, runtime.GOMAXPROCS(0)*2))
+}
+
+func defaultScanCommitWorkers() int {
+	return max(1, min(4, runtime.GOMAXPROCS(0)/2))
+}
+
+func defaultScanProbeWorkers() int {
+	return max(1, min(4, runtime.GOMAXPROCS(0)))
+}
+
+func defaultMediaWorkers() int {
+	return max(1, min(8, runtime.GOMAXPROCS(0)/2))
+}
+
+func defaultMediaProbeWorkers(mediaWorkers int) int {
+	return max(1, min(mediaWorkers, 4))
+}
+
+func defaultMediaStorageWorkers(mediaWorkers int) int {
+	return max(1, min(mediaWorkers*2, 16))
+}
+
+func defaultScrapingClaimWindow(workers int) int {
+	return min(64, max(1, workers*4))
+}
+
+// defaultDatabaseConnections leaves room for HTTP and maintenance work while
+// covering the independently active scan, media, scraping, and artwork pools.
+// DATABASE_MAX_CONNECTIONS remains the authoritative override for a shared
+// or tightly sized PostgreSQL instance.
+func defaultDatabaseConnections(scanCommitWorkers, mediaWorkers, batchWorkers, artworkWorkers int) int {
+	activeWorkers := scanCommitWorkers + mediaWorkers + batchWorkers + artworkWorkers
+	return max(16, min(64, activeWorkers+4))
 }
 
 func ResolveRuntime(cfg Config, root string) (Config, error) {

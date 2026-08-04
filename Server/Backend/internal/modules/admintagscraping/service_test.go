@@ -258,6 +258,30 @@ func TestApplyPassesVerbatimToLyricProvider(t *testing.T) {
 	}
 }
 
+func TestApplyWithClaimedMetadataSkipsMetadataReload(t *testing.T) {
+	metadata := metadataFixture(1)
+	metadataErr := errors.New("metadata reload should not happen")
+	store := &storeStub{metadataErr: metadataErr, updatedMetadata: metadataFixture(2)}
+	service, err := NewService(ServiceDependencies{
+		Store: store, Music: &musicStub{}, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.applyWithMetadata(context.Background(), "admin", "trace", "track", ApplyInput{
+		ExpectedVersion: 1,
+		Candidate:       Candidate{ID: "candidate", Name: "Changed", Source: SourceQMusic},
+		Fields:          ApplyFields{Title: true, Overwrite: true},
+		Reason:          "claimed metadata",
+	}, metadata)
+	if err != nil {
+		t.Fatalf("applyWithMetadata() error = %v", err)
+	}
+	if store.updateCalls != 1 {
+		t.Fatalf("metadata update calls = %d, want 1", store.updateCalls)
+	}
+}
+
 func TestFingerprintConfigurationFailsBeforeDatabaseAccess(t *testing.T) {
 	store := &storeStub{}
 	service, _ := NewService(ServiceDependencies{
@@ -668,6 +692,19 @@ func (stub *storeStub) RenewBatchItemLease(context.Context, string, string, stri
 }
 func (stub *storeStub) BatchCancelRequested(context.Context, string) (bool, error) {
 	return stub.cancelled, nil
+}
+func (stub *storeStub) RetryBatchItem(
+	context.Context,
+	string,
+	string,
+	string,
+	string,
+	*Candidate,
+	string,
+	time.Time,
+	time.Time,
+) (BatchLeaseControl, error) {
+	return BatchLeaseControl{Owned: true}, nil
 }
 func (stub *storeStub) CompleteBatchItem(context.Context, string, string, string, string, ItemStatus, *Candidate, string, time.Time) (bool, error) {
 	return true, nil

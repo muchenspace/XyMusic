@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -16,6 +17,17 @@ import (
 
 	"xymusic/server/internal/shared/apperror"
 )
+
+func TestMusicPlatformTunesDefaultHTTPTransportForBatchConcurrency(t *testing.T) {
+	platform := NewMusicPlatformClientWithOptions(MusicPlatformOptions{RequestWorkers: 12})
+	transport, ok := platform.client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport type = %T, want *http.Transport", platform.client.Transport)
+	}
+	if transport.MaxIdleConnsPerHost < 12 || transport.MaxIdleConns < 24 {
+		t.Fatalf("idle connection limits = %d/%d", transport.MaxIdleConnsPerHost, transport.MaxIdleConns)
+	}
+}
 
 func TestArtworkDownloadsAreCoalescedAndContentValidated(t *testing.T) {
 	var calls atomic.Int32
@@ -54,6 +66,112 @@ func TestArtworkDownloadsAreCoalescedAndContentValidated(t *testing.T) {
 	}
 }
 
+func TestArtworkDownloadsReuseRecentSuccessfulCache(t *testing.T) {
+	var calls atomic.Int32
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return responseFor(request, http.StatusOK, "image/png", []byte{0x89, 0x50, 0x4e, 0x47}), nil
+	})}
+	platform := NewMusicPlatformClient(client, "")
+	first, firstErr := platform.DownloadArtwork(context.Background(), "https://y.qq.com/cover/cached.png")
+	second, secondErr := platform.DownloadArtwork(context.Background(), "https://y.qq.com/cover/cached.png")
+	if firstErr != nil || secondErr != nil || calls.Load() != 1 ||
+		first.ContentType != second.ContentType || string(first.Bytes) != string(second.Bytes) {
+		t.Fatalf("artwork cache = %#v/%v, %#v/%v, calls=%d", first, firstErr, second, secondErr, calls.Load())
+	}
+	second.Bytes[0] = 0
+	if secondAgain, err := platform.DownloadArtwork(context.Background(), "https://y.qq.com/cover/cached.png"); err != nil ||
+		secondAgain.Bytes[0] != 0x89 || calls.Load() != 1 {
+		t.Fatalf("cached artwork was not isolated = %#v/%v, calls=%d", secondAgain, err, calls.Load())
+	}
+}
+
+func TestArtworkCacheHitBypassesHostCircuit(t *testing.T) {
+	var calls atomic.Int32
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return responseFor(request, http.StatusOK, "image/jpeg", []byte{0xff, 0xd8, 0xff}), nil
+	})}
+	platform := NewMusicPlatformClient(client, "")
+	url := "https://y.qq.com/cover/circuit-cache.jpg"
+	if _, err := platform.DownloadArtwork(context.Background(), url); err != nil {
+		t.Fatal(err)
+	}
+	platform.openCircuit("y.qq.com", time.Minute)
+	if _, err := platform.DownloadArtwork(context.Background(), url); err != nil {
+		t.Fatalf("cached artwork was blocked by circuit: %v", err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("artwork upstream calls = %d, want 1", calls.Load())
+	}
+}
+
+func TestSongSearchesAreCoalescedAndCached(t *testing.T) {
+	var calls atomic.Int32
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		once.Do(func() { close(started) })
+		<-release
+		return responseFor(request, http.StatusOK, "application/json", []byte(
+			`{"data":{"song":{"list":[{"songmid":"song","songname":"Song"}]}}}`,
+		)), nil
+	})}
+	platform := NewMusicPlatformClient(client, "")
+	results := make(chan error, 4)
+	for index := 0; index < 4; index++ {
+		go func() {
+			items, err := platform.Search(context.Background(), SourceQMusic, "Song")
+			if err == nil && (len(items) != 1 || items[0].ID != "song") {
+				err = errors.New("unexpected coalesced search result")
+			}
+			results <- err
+		}()
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("search request did not start")
+	}
+	time.Sleep(20 * time.Millisecond)
+	if calls.Load() != 1 {
+		t.Fatalf("upstream calls while coalescing = %d", calls.Load())
+	}
+	close(release)
+	for index := 0; index < 4; index++ {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, err := platform.Search(context.Background(), SourceQMusic, "Song")
+	if err != nil || len(items) != 1 || calls.Load() != 1 {
+		t.Fatalf("cached search = %#v/%v, calls=%d", items, err, calls.Load())
+	}
+}
+
+func BenchmarkSongSearchCacheHit(b *testing.B) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return responseFor(request, http.StatusOK, "application/json", []byte(
+			`{"data":{"song":{"list":[{"songmid":"song","songname":"Song"}]}}}`,
+		)), nil
+	})}
+	platform := NewMusicPlatformClientWithOptions(MusicPlatformOptions{
+		Client: client, RequestWorkers: 1,
+	})
+	if _, err := platform.Search(context.Background(), SourceQMusic, "Song"); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		if _, err := platform.Search(context.Background(), SourceQMusic, "Song"); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func TestArtworkFailureOpensShortHostCircuit(t *testing.T) {
 	var calls atomic.Int32
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -69,6 +187,37 @@ func TestArtworkFailureOpensShortHostCircuit(t *testing.T) {
 	}
 	if !apperror.IsCode(secondErr, apperror.CodeDependencyUnavailable) {
 		t.Fatalf("circuit error = %v", secondErr)
+	}
+}
+
+func TestUpstreamHostThrottleUsesProviderKeysAndRetryAfter(t *testing.T) {
+	for _, test := range []struct {
+		rawURL string
+		want   string
+	}{
+		{rawURL: "https://c.y.qq.com/soso", want: "y.qq.com"},
+		{rawURL: "https://p1.music.126.net/cover.jpg", want: "music.126.net"},
+		{rawURL: "https://complexsearch.kugou.com/search", want: "kugou.com"},
+		{rawURL: "https://music.163.com/api", want: "music.163.com"},
+	} {
+		if got := upstreamHostKey(test.rawURL); got != test.want {
+			t.Fatalf("upstreamHostKey(%q) = %q, want %q", test.rawURL, got, test.want)
+		}
+	}
+	platform := NewMusicPlatformClient(nil, "")
+	platform.recordHostFailure("y.qq.com", &upstreamHTTPError{
+		status: http.StatusTooManyRequests, retryAfter: "2",
+	})
+	state := platform.hostState("y.qq.com")
+	state.mu.Lock()
+	remaining := time.Until(state.nextStart)
+	failures := state.consecutiveFailures
+	state.mu.Unlock()
+	if failures != 1 || remaining < time.Second {
+		t.Fatalf("host backoff failures/remaining = %d/%s", failures, remaining)
+	}
+	if got := boundedRetryAfter("999", time.Second); got != time.Second {
+		t.Fatalf("boundedRetryAfter() = %s, want %s", got, time.Second)
 	}
 }
 

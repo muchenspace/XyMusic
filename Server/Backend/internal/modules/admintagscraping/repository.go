@@ -26,10 +26,13 @@ type Repository struct {
 
 type metadataDatabase interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	Query(context.Context, string, ...any) (pgx.Rows, error)
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
 var _ Store = (*Repository)(nil)
+var _ BatchClaimStore = (*Repository)(nil)
+var _ BatchCompleteStore = (*Repository)(nil)
 
 func NewRepository(pool *pgxpool.Pool) *Repository { return &Repository{pool: pool} }
 
@@ -445,21 +448,23 @@ func (repository *Repository) CreateBatch(ctx context.Context, actorID string, i
 		VALUES ($1, $2, $3::jsonb, $4)`, jobID, actorID, optionsJSON, len(input.Items)); err != nil {
 		return "", fmt.Errorf("insert tag scraping batch: %w", err)
 	}
-	batch := &pgx.Batch{}
+	itemIDs := make([]string, len(input.Items))
+	trackIDs := make([]string, len(input.Items))
+	expectedVersions := make([]int, len(input.Items))
+	positions := make([]int, len(input.Items))
 	for position, item := range input.Items {
-		batch.Queue(`
-			INSERT INTO tag_scraping_job_items (id, job_id, track_id, expected_version, position)
-			VALUES ($1, $2, $3, $4, $5)`, uuid.NewString(), jobID, item.TrackID, item.ExpectedVersion, position)
+		itemIDs[position] = uuid.NewString()
+		trackIDs[position] = item.TrackID
+		expectedVersions[position] = item.ExpectedVersion
+		positions[position] = position
 	}
-	results := tx.SendBatch(ctx, batch)
-	for range input.Items {
-		if _, err := results.Exec(); err != nil {
-			results.Close()
-			return "", fmt.Errorf("insert tag scraping batch item: %w", err)
-		}
-	}
-	if err := results.Close(); err != nil {
-		return "", fmt.Errorf("close tag scraping item batch: %w", err)
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO tag_scraping_job_items (id, job_id, track_id, expected_version, position)
+		SELECT input.item_id, $5, input.track_id, input.expected_version, input.position
+		FROM unnest($1::uuid[], $2::uuid[], $3::int[], $4::int[])
+			AS input(item_id, track_id, expected_version, position)`,
+		itemIDs, trackIDs, expectedVersions, positions, jobID); err != nil {
+		return "", fmt.Errorf("insert tag scraping batch items: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("commit tag scraping batch: %w", err)
@@ -541,7 +546,8 @@ func (repository *Repository) RetryBatch(ctx context.Context, jobID string) erro
 	}
 	command, err := tx.Exec(ctx, `
 		UPDATE tag_scraping_job_items SET
-			status = 'PENDING', attempt_id = NULL, locked_by = NULL, locked_until = NULL,
+			status = 'PENDING', attempts = 0, next_attempt_at = now(),
+			attempt_id = NULL, locked_by = NULL, locked_until = NULL,
 			candidate = NULL, source = NULL, message = NULL, started_at = NULL,
 			completed_at = NULL, updated_at = now()
 		WHERE job_id = $1 AND status = 'FAILED'`, jobID)
@@ -571,13 +577,96 @@ func (repository *Repository) RetryBatch(ctx context.Context, jobID string) erro
 }
 
 func (repository *Repository) RecoverExpiredBatchItems(ctx context.Context, now time.Time) error {
-	_, err := repository.pool.Exec(ctx, `
-		UPDATE tag_scraping_job_items SET
-			status = 'PENDING', attempt_id = NULL, locked_by = NULL, locked_until = NULL,
-			started_at = NULL, updated_at = $1
-		WHERE status = 'RUNNING' AND (locked_until IS NULL OR locked_until < $1)`, now)
+	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin tag scraping recovery: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if err := recoverExpiredBatchItems(ctx, tx, now, nil); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit tag scraping recovery: %w", err)
+	}
+	return nil
+}
+
+func recoverExpiredBatchItems(ctx context.Context, tx pgx.Tx, now time.Time, onlyJobID *string) error {
+	query := `
+		UPDATE tag_scraping_job_items item SET
+			status = CASE
+				WHEN job.cancel_requested THEN 'SKIPPED'::tag_scraping_item_status
+				WHEN item.attempts >= item.max_attempts THEN 'FAILED'::tag_scraping_item_status
+				ELSE 'PENDING'::tag_scraping_item_status
+			END,
+			next_attempt_at = $1,
+			attempt_id = NULL, locked_by = NULL, locked_until = NULL,
+			started_at = NULL,
+			completed_at = CASE
+				WHEN job.cancel_requested OR item.attempts >= item.max_attempts THEN $1
+				ELSE NULL
+			END,
+			message = CASE
+				WHEN job.cancel_requested THEN 'The batch was cancelled'
+				WHEN item.attempts >= item.max_attempts THEN 'Tag scraping attempts exhausted'
+				ELSE item.message
+			END,
+			updated_at = $1
+		FROM tag_scraping_jobs job
+		WHERE item.job_id = job.id
+		  AND job.status IN ('PENDING', 'RUNNING')
+		  AND (
+			(item.status = 'RUNNING' AND (item.locked_until IS NULL OR item.locked_until < $1))
+			OR (item.status = 'PENDING' AND item.attempts >= item.max_attempts)
+		  )
+	`
+	arguments := []any{now}
+	if onlyJobID != nil {
+		query += " AND item.job_id = $2"
+		arguments = append(arguments, *onlyJobID)
+	}
+	query += " RETURNING item.job_id::text"
+	rows, err := tx.Query(ctx, query, arguments...)
 	if err != nil {
 		return fmt.Errorf("recover expired tag scraping items: %w", err)
+	}
+	affectedJobs := make(map[string]struct{})
+	for rows.Next() {
+		var jobID string
+		if err := rows.Scan(&jobID); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan recovered tag scraping job: %w", err)
+		}
+		affectedJobs[jobID] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate recovered tag scraping jobs: %w", err)
+	}
+	rows.Close()
+	for jobID := range affectedJobs {
+		if err := recountBatch(ctx, tx, jobID, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func recountBatch(ctx context.Context, tx pgx.Tx, jobID string, now time.Time) error {
+	if _, err := tx.Exec(ctx, `
+		UPDATE tag_scraping_jobs job SET
+			processed = counts.processed,
+			succeeded = counts.succeeded,
+			failed = counts.failed,
+			updated_at = $2
+		FROM (
+			SELECT count(*) FILTER (WHERE status NOT IN ('PENDING', 'RUNNING'))::int AS processed,
+			       count(*) FILTER (WHERE status = 'SUCCEEDED')::int AS succeeded,
+			       count(*) FILTER (WHERE status = 'FAILED')::int AS failed
+			FROM tag_scraping_job_items WHERE job_id = $1
+		) counts
+		WHERE job.id = $1`, jobID, now); err != nil {
+		return fmt.Errorf("recount recovered tag scraping batch: %w", err)
 	}
 	return nil
 }
@@ -588,22 +677,64 @@ func (repository *Repository) ClaimBatchItem(
 	now time.Time,
 	lease time.Duration,
 ) (ClaimResult, error) {
+	result, err := repository.claimBatchItems(ctx, workerID, now, lease, 1)
+	if err != nil {
+		return ClaimResult{}, err
+	}
+	if result.FinishJobID != "" {
+		return ClaimResult{FinishJobID: result.FinishJobID}, nil
+	}
+	if len(result.Items) == 0 {
+		return ClaimResult{}, nil
+	}
+	item := result.Items[0]
+	return ClaimResult{Item: &item}, nil
+}
+
+func (repository *Repository) ClaimBatchItems(
+	ctx context.Context,
+	workerID string,
+	now time.Time,
+	lease time.Duration,
+	limit int,
+) (BatchClaimResult, error) {
+	return repository.claimBatchItems(ctx, workerID, now, lease, limit)
+}
+
+func (repository *Repository) claimBatchItems(
+	ctx context.Context,
+	workerID string,
+	now time.Time,
+	lease time.Duration,
+	limit int,
+) (BatchClaimResult, error) {
+	if limit <= 0 {
+		return BatchClaimResult{}, nil
+	}
 	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return ClaimResult{}, fmt.Errorf("begin tag scraping claim: %w", err)
+		return BatchClaimResult{}, fmt.Errorf("begin tag scraping claim: %w", err)
 	}
 	defer tx.Rollback(ctx)
 	job, err := scanBatchJob(tx.QueryRow(ctx, batchJobSelect+`
 		WHERE status IN ('PENDING','RUNNING')
 		  AND (
+			tag_scraping_jobs.cancel_requested
+			OR
 			EXISTS (
 				SELECT 1 FROM tag_scraping_job_items claimable
-				WHERE claimable.job_id = tag_scraping_jobs.id AND (
-					claimable.status = 'PENDING' OR (
-						claimable.status = 'RUNNING' AND
-						(claimable.locked_until IS NULL OR claimable.locked_until < $1)
-					)
-				)
+				WHERE claimable.job_id = tag_scraping_jobs.id
+				  AND claimable.status = 'PENDING'
+				  AND claimable.next_attempt_at <= $1
+				  AND claimable.attempts < claimable.max_attempts
+			) OR EXISTS (
+				SELECT 1 FROM tag_scraping_job_items recoverable
+				WHERE recoverable.job_id = tag_scraping_jobs.id
+				  AND (
+					recoverable.status = 'PENDING' AND recoverable.attempts >= recoverable.max_attempts
+					OR recoverable.status = 'RUNNING'
+					   AND (recoverable.locked_until IS NULL OR recoverable.locked_until < $1)
+				  )
 			) OR NOT EXISTS (
 				SELECT 1 FROM tag_scraping_job_items active
 				WHERE active.job_id = tag_scraping_jobs.id
@@ -612,10 +743,16 @@ func (repository *Repository) ClaimBatchItem(
 		  )
 		ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1`, now))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ClaimResult{}, nil
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			return BatchClaimResult{}, fmt.Errorf("commit empty tag scraping claim: %w", commitErr)
+		}
+		return BatchClaimResult{}, nil
 	}
 	if err != nil {
-		return ClaimResult{}, fmt.Errorf("claim tag scraping batch: %w", err)
+		return BatchClaimResult{}, fmt.Errorf("claim tag scraping batch: %w", err)
+	}
+	if err := recoverExpiredBatchItems(ctx, tx, now, &job.ID); err != nil {
+		return BatchClaimResult{}, err
 	}
 	if job.CancelRequested {
 		if _, err := tx.Exec(ctx, `
@@ -625,44 +762,81 @@ func (repository *Repository) ClaimBatchItem(
 			WHERE job_id = $1 AND (
 				status = 'PENDING' OR (status = 'RUNNING' AND (locked_until IS NULL OR locked_until < $2))
 			)`, job.ID, now); err != nil {
-			return ClaimResult{}, fmt.Errorf("skip cancelled tag scraping items: %w", err)
+			return BatchClaimResult{}, fmt.Errorf("skip cancelled tag scraping items: %w", err)
 		}
 		if err := tx.Commit(ctx); err != nil {
-			return ClaimResult{}, fmt.Errorf("commit cancelled tag scraping claim: %w", err)
+			return BatchClaimResult{}, fmt.Errorf("commit cancelled tag scraping claim: %w", err)
 		}
-		return ClaimResult{FinishJobID: job.ID}, nil
+		return BatchClaimResult{FinishJobID: job.ID}, nil
 	}
-	item, err := scanBatchItem(tx.QueryRow(ctx, batchItemSelect+`
-		WHERE job_id = $1 AND (
-			status = 'PENDING' OR (status = 'RUNNING' AND (locked_until IS NULL OR locked_until < $2))
-		)
-		ORDER BY position FOR UPDATE SKIP LOCKED LIMIT 1`, job.ID, now))
-	if errors.Is(err, pgx.ErrNoRows) {
-		if err := tx.Commit(ctx); err != nil {
-			return ClaimResult{}, fmt.Errorf("commit empty tag scraping claim: %w", err)
-		}
-		return ClaimResult{FinishJobID: job.ID}, nil
-	}
+	rows, err := tx.Query(ctx, claimedBatchItemSelect+`
+		WHERE item.job_id = $1 AND item.status = 'PENDING'
+		  AND item.next_attempt_at <= $2 AND item.attempts < item.max_attempts
+		ORDER BY item.position FOR UPDATE OF item SKIP LOCKED LIMIT $3`, job.ID, now, limit)
 	if err != nil {
-		return ClaimResult{}, fmt.Errorf("claim tag scraping item: %w", err)
+		return BatchClaimResult{}, fmt.Errorf("query tag scraping items: %w", err)
 	}
-	attemptID := uuid.NewString()
-	command, err := tx.Exec(ctx, `
-		UPDATE tag_scraping_job_items SET
-			status = 'RUNNING', attempt_id = $2, locked_by = $3, locked_until = $4,
-			started_at = $5, completed_at = NULL, updated_at = $5
-		WHERE id = $1`, item.ID, attemptID, workerID, now.Add(lease), now)
-	if err != nil || command.RowsAffected() != 1 {
-		if err == nil {
-			err = errors.New("claimed item disappeared")
+	type pendingClaim struct {
+		item     BatchItemRecord
+		metadata *TrackMetadata
+	}
+	claims := make([]pendingClaim, 0, limit)
+	for rows.Next() {
+		item, metadata, scanErr := scanClaimedBatchItem(rows)
+		if scanErr != nil {
+			rows.Close()
+			return BatchClaimResult{}, fmt.Errorf("scan tag scraping item: %w", scanErr)
 		}
-		return ClaimResult{}, fmt.Errorf("own tag scraping item: %w", err)
+		claims = append(claims, pendingClaim{item: item, metadata: metadata})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return BatchClaimResult{}, fmt.Errorf("iterate tag scraping items: %w", err)
+	}
+	rows.Close()
+	if len(claims) == 0 {
+		if err := tx.Commit(ctx); err != nil {
+			return BatchClaimResult{}, fmt.Errorf("commit empty tag scraping claim: %w", err)
+		}
+		return BatchClaimResult{FinishJobID: job.ID}, nil
+	}
+	itemIDs := make([]string, len(claims))
+	for index := range claims {
+		itemIDs[index] = claims[index].item.ID
+	}
+	attemptRows, err := tx.Query(ctx, `
+		UPDATE tag_scraping_job_items SET
+			status = 'RUNNING', attempts = attempts + 1, attempt_id = gen_random_uuid(),
+			locked_by = $3, locked_until = $4, started_at = $5, completed_at = NULL,
+			updated_at = $5
+		WHERE id = ANY($6::uuid[]) AND job_id = $1
+		  AND status = 'PENDING' AND next_attempt_at <= $2 AND attempts < max_attempts
+		RETURNING id::text, attempt_id::text`, job.ID, now, workerID, now.Add(lease), now, itemIDs)
+	if err != nil {
+		return BatchClaimResult{}, fmt.Errorf("own tag scraping items: %w", err)
+	}
+	attemptIDs := make(map[string]string, len(claims))
+	for attemptRows.Next() {
+		var itemID, attemptID string
+		if err := attemptRows.Scan(&itemID, &attemptID); err != nil {
+			attemptRows.Close()
+			return BatchClaimResult{}, fmt.Errorf("scan tag scraping attempt: %w", err)
+		}
+		attemptIDs[itemID] = attemptID
+	}
+	if err := attemptRows.Err(); err != nil {
+		attemptRows.Close()
+		return BatchClaimResult{}, fmt.Errorf("iterate tag scraping attempts: %w", err)
+	}
+	attemptRows.Close()
+	if len(attemptIDs) != len(claims) {
+		return BatchClaimResult{}, errors.New("claimed tag scraping items disappeared")
 	}
 	if job.Status == JobPending {
 		if _, err := tx.Exec(ctx, `
 			UPDATE tag_scraping_jobs SET status = 'RUNNING', started_at = COALESCE(started_at, $2), updated_at = $2
 			WHERE id = $1`, job.ID, now); err != nil {
-			return ClaimResult{}, fmt.Errorf("start tag scraping batch: %w", err)
+			return BatchClaimResult{}, fmt.Errorf("start tag scraping batch: %w", err)
 		}
 		job.Status = JobRunning
 		if job.StartedAt == nil {
@@ -671,15 +845,23 @@ func (repository *Repository) ClaimBatchItem(
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return ClaimResult{}, fmt.Errorf("commit tag scraping claim: %w", err)
+		return BatchClaimResult{}, fmt.Errorf("commit tag scraping claim: %w", err)
 	}
-	item.Status = ItemRunning
-	item.AttemptID = &attemptID
-	item.LockedBy = &workerID
 	lockedUntil := now.Add(lease)
-	item.LockedUntil = &lockedUntil
-	item.StartedAt = &now
-	return ClaimResult{Item: &ClaimedBatchItem{Job: job, Item: item, AttemptID: attemptID}}, nil
+	result := BatchClaimResult{Items: make([]ClaimedBatchItem, len(claims))}
+	for index, claim := range claims {
+		attemptID := attemptIDs[claim.item.ID]
+		claim.item.Status = ItemRunning
+		claim.item.Attempts++
+		claim.item.AttemptID = &attemptID
+		claim.item.LockedBy = &workerID
+		claim.item.LockedUntil = &lockedUntil
+		claim.item.StartedAt = &now
+		result.Items[index] = ClaimedBatchItem{
+			Job: job, Item: claim.item, AttemptID: attemptID, Metadata: claim.metadata,
+		}
+	}
+	return result, nil
 }
 
 func (repository *Repository) RenewBatchItemLease(
@@ -751,6 +933,97 @@ func (repository *Repository) BatchCancelRequested(ctx context.Context, jobID st
 		return false, fmt.Errorf("read tag scraping cancellation: %w", err)
 	}
 	return requested, nil
+}
+
+func (repository *Repository) RetryBatchItem(
+	ctx context.Context,
+	jobID string,
+	itemID string,
+	attemptID string,
+	workerID string,
+	candidate *Candidate,
+	message string,
+	nextAttemptAt time.Time,
+	now time.Time,
+) (BatchLeaseControl, error) {
+	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return BatchLeaseControl{}, fmt.Errorf("begin tag scraping item retry: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	var jobStatus string
+	var cancelRequested bool
+	err = tx.QueryRow(ctx, `
+		SELECT status::text, cancel_requested
+		FROM tag_scraping_jobs WHERE id = $1 FOR UPDATE`, jobID).Scan(&jobStatus, &cancelRequested)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return BatchLeaseControl{}, ErrBatchLeaseLost
+	}
+	if err != nil {
+		return BatchLeaseControl{}, fmt.Errorf("lock tag scraping item retry job: %w", err)
+	}
+	if jobStatus != string(JobPending) && jobStatus != string(JobRunning) {
+		return BatchLeaseControl{}, ErrBatchLeaseLost
+	}
+	var itemStatus string
+	var currentAttempt, currentWorker *string
+	var leaseActive bool
+	err = tx.QueryRow(ctx, `
+		SELECT status::text, attempt_id::text, locked_by,
+		       COALESCE(locked_until > clock_timestamp(), false)
+		FROM tag_scraping_job_items
+		WHERE id = $1 AND job_id = $2
+		FOR UPDATE`, itemID, jobID).Scan(&itemStatus, &currentAttempt, &currentWorker, &leaseActive)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return BatchLeaseControl{}, ErrBatchLeaseLost
+	}
+	if err != nil {
+		return BatchLeaseControl{}, fmt.Errorf("lock tag scraping item retry item: %w", err)
+	}
+	if itemStatus != string(ItemRunning) || currentAttempt == nil || *currentAttempt != attemptID ||
+		currentWorker == nil || *currentWorker != workerID || !leaseActive {
+		return BatchLeaseControl{}, ErrBatchLeaseLost
+	}
+	if cancelRequested {
+		if err := tx.Commit(ctx); err != nil {
+			return BatchLeaseControl{}, fmt.Errorf("commit cancelled tag scraping retry check: %w", err)
+		}
+		return BatchLeaseControl{Owned: true, CancelRequested: true}, nil
+	}
+	var candidateJSON []byte
+	var source *string
+	if candidate != nil {
+		candidateJSON, err = json.Marshal(candidate)
+		if err != nil {
+			return BatchLeaseControl{}, fmt.Errorf("encode tag scraping retry candidate: %w", err)
+		}
+		value := string(candidate.Source)
+		source = &value
+	}
+	if len(message) > 4_000 {
+		message = message[:4_000]
+	}
+	command, err := tx.Exec(ctx, `
+		UPDATE tag_scraping_job_items SET
+			status = 'PENDING', next_attempt_at = $5,
+			attempt_id = NULL, locked_by = NULL, locked_until = NULL,
+			candidate = $6::jsonb, source = $7, message = $8,
+			started_at = NULL, completed_at = NULL, updated_at = $9
+		WHERE id = $1 AND job_id = $2 AND attempt_id = $3 AND locked_by = $4
+		  AND status = 'RUNNING' AND attempts < max_attempts`,
+		itemID, jobID, attemptID, workerID, nextAttemptAt,
+		nullableJSON(candidateJSON), source, message, now,
+	)
+	if err != nil {
+		return BatchLeaseControl{}, fmt.Errorf("requeue tag scraping item: %w", err)
+	}
+	if command.RowsAffected() != 1 {
+		return BatchLeaseControl{}, ErrBatchLeaseLost
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return BatchLeaseControl{}, fmt.Errorf("commit tag scraping item retry: %w", err)
+	}
+	return BatchLeaseControl{Owned: true}, nil
 }
 
 func (repository *Repository) CompleteBatchItem(
@@ -843,6 +1116,130 @@ func (repository *Repository) CompleteBatchItem(
 	return true, nil
 }
 
+type batchCompletionPayload struct {
+	ItemID    string     `json:"item_id"`
+	AttemptID string     `json:"attempt_id"`
+	Status    ItemStatus `json:"status"`
+	Candidate *Candidate `json:"candidate,omitempty"`
+	Source    *string    `json:"source,omitempty"`
+	Message   string     `json:"message"`
+}
+
+// CompleteBatchItems keeps the attempt and lease checks in the UPDATE
+// predicate, so a stale result can be omitted without affecting newer work.
+// The job row is locked once for the whole completion window and counts are
+// advanced only for rows that passed that predicate.
+func (repository *Repository) CompleteBatchItems(
+	ctx context.Context,
+	jobID string,
+	workerID string,
+	completions []BatchItemCompletion,
+	now time.Time,
+) ([]string, error) {
+	if len(completions) == 0 {
+		return nil, nil
+	}
+	payload := make([]batchCompletionPayload, len(completions))
+	seenItems := make(map[string]struct{}, len(completions))
+	for index, completion := range completions {
+		if completion.ItemID == "" || completion.AttemptID == "" {
+			return nil, errors.New("tag scraping batch completion is missing an item or attempt")
+		}
+		if _, exists := seenItems[completion.ItemID]; exists {
+			return nil, fmt.Errorf("tag scraping batch completion contains duplicate item %q", completion.ItemID)
+		}
+		seenItems[completion.ItemID] = struct{}{}
+		var source *string
+		if completion.Candidate != nil {
+			value := string(completion.Candidate.Source)
+			source = &value
+		}
+		payload[index] = batchCompletionPayload{
+			ItemID: completion.ItemID, AttemptID: completion.AttemptID, Status: completion.Status,
+			Candidate: completion.Candidate, Source: source, Message: completion.Message,
+		}
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode tag scraping batch completion: %w", err)
+	}
+	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("begin tag scraping batch completion: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	var jobStatus string
+	var cancelRequested bool
+	err = tx.QueryRow(ctx, `SELECT status::text,cancel_requested
+		FROM tag_scraping_jobs WHERE id=$1 FOR UPDATE`, jobID).Scan(&jobStatus, &cancelRequested)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrBatchLeaseLost
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock tag scraping batch completion: %w", err)
+	}
+	if jobStatus != string(JobPending) && jobStatus != string(JobRunning) {
+		return nil, ErrBatchLeaseLost
+	}
+	rows, err := tx.Query(ctx, `
+		WITH input AS (
+			SELECT item_id,attempt_id,status,candidate,source,message
+			FROM jsonb_to_recordset($3::jsonb) AS input(
+				item_id uuid,attempt_id uuid,status text,candidate jsonb,source text,message text
+			)
+		)
+		UPDATE tag_scraping_job_items item SET
+			status = CASE WHEN $4 THEN 'SKIPPED'::tag_scraping_item_status
+				ELSE input.status::tag_scraping_item_status END,
+			attempt_id = NULL, locked_by = NULL, locked_until = NULL,
+			candidate = CASE WHEN $4 THEN NULL::jsonb ELSE input.candidate END,
+			source = CASE WHEN $4 THEN NULL::varchar ELSE input.source END,
+			message = CASE WHEN $4 THEN 'The batch was cancelled' ELSE LEFT(input.message, 4000) END,
+			completed_at = $5, updated_at = $5
+		FROM input
+		WHERE item.id = input.item_id AND item.job_id = $1
+			AND item.status = 'RUNNING'
+			AND item.attempt_id = input.attempt_id
+			AND item.locked_by = $2
+			AND COALESCE(item.locked_until > clock_timestamp(), false)
+		RETURNING item.id::text,item.status::text`, jobID, workerID, encoded, cancelRequested, now)
+	if err != nil {
+		return nil, fmt.Errorf("complete tag scraping batch items: %w", err)
+	}
+	completedIDs := make([]string, 0, len(completions))
+	succeeded, failed := 0, 0
+	for rows.Next() {
+		var itemID, status string
+		if err := rows.Scan(&itemID, &status); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan tag scraping batch completion: %w", err)
+		}
+		completedIDs = append(completedIDs, itemID)
+		switch ItemStatus(status) {
+		case ItemSucceeded:
+			succeeded++
+		case ItemFailed:
+			failed++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("iterate tag scraping batch completion: %w", err)
+	}
+	rows.Close()
+	if len(completedIDs) > 0 {
+		if _, err := tx.Exec(ctx, `UPDATE tag_scraping_jobs SET
+			processed=processed+$2,succeeded=succeeded+$3,failed=failed+$4,updated_at=$5
+			WHERE id=$1`, jobID, len(completedIDs), succeeded, failed, now); err != nil {
+			return nil, fmt.Errorf("update tag scraping batch counts: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit tag scraping batch completion: %w", err)
+	}
+	return completedIDs, nil
+}
+
 func (repository *Repository) ReleaseBatchItem(
 	ctx context.Context,
 	itemID string,
@@ -852,7 +1249,8 @@ func (repository *Repository) ReleaseBatchItem(
 ) error {
 	command, err := repository.pool.Exec(ctx, `
 		UPDATE tag_scraping_job_items SET
-			status = 'PENDING', attempt_id = NULL, locked_by = NULL, locked_until = NULL,
+			status = 'PENDING', attempts = GREATEST(attempts - 1, 0), next_attempt_at = $4,
+			attempt_id = NULL, locked_by = NULL, locked_until = NULL,
 			started_at = NULL, updated_at = $4
 		WHERE id = $1 AND status = 'RUNNING' AND attempt_id = $2 AND locked_by = $3`,
 		itemID, attemptID, workerID, now)
@@ -980,15 +1378,7 @@ func (repository *Repository) loadMetadata(ctx context.Context, trackID string) 
 }
 
 func (repository *Repository) loadMetadataWith(ctx context.Context, database metadataDatabase, trackID string) (TrackMetadata, error) {
-	var rawJSON, overridesJSON []byte
-	var result TrackMetadata
-	var lastScannedAt *time.Time
-	var createdAt, updatedAt time.Time
-	var sourceID, rootID, sourcePath, sourceStatus, checksum, rootMode, rootStatus, trackStatus *string
-	var rootEnabled *bool
-	var mappingCount int
-	var cue bool
-	err := database.QueryRow(ctx, `
+	return scanMetadataRow(database.QueryRow(ctx, `
 		SELECT metadata.track_id, metadata.raw_tags, metadata.overrides, metadata.version,
 		       metadata.last_scanned_at, metadata.updated_by, metadata.created_at, metadata.updated_at,
 		       source.id, source.root_id, source.source_path, source.status, source.checksum_sha256,
@@ -1003,59 +1393,74 @@ func (repository *Repository) loadMetadataWith(ctx context.Context, database met
 			       COALESCE(bool_or(mapping.cue_path IS NOT NULL), false) AS cue
 			FROM local_music_source_tracks mapping WHERE mapping.source_id = source.id
 		) mapping_stats ON true
-		WHERE metadata.track_id = $1`, trackID).Scan(
-		&result.TrackID, &rawJSON, &overridesJSON, &result.Version,
-		&lastScannedAt, &result.UpdatedBy, &createdAt, &updatedAt,
-		&sourceID, &rootID, &sourcePath, &sourceStatus, &checksum,
-		&rootMode, &rootEnabled, &rootStatus, &trackStatus, &mappingCount, &cue,
-	)
+		WHERE metadata.track_id = $1`, trackID))
+}
+
+type metadataRowScanner interface {
+	Scan(...any) error
+}
+
+func scanMetadataRow(row metadataRowScanner) (TrackMetadata, error) {
+	var values trackMetadataRowValues
+	err := row.Scan(values.scanTargets()...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TrackMetadata{}, apperror.NotFound("Track metadata was not found")
 	}
 	if err != nil {
 		return TrackMetadata{}, fmt.Errorf("load track metadata: %w", err)
 	}
-	raw, overrides, err := decodeMetadataDocuments(rawJSON, overridesJSON)
+	result, err := values.build()
 	if err != nil {
 		return TrackMetadata{}, err
 	}
-	effective, err := applyOverrides(raw, overrides)
-	if err != nil {
-		return TrackMetadata{}, err
+	return result, nil
+}
+
+func (repository *Repository) MetadataBatch(
+	ctx context.Context,
+	trackIDs []string,
+) (map[string]TrackMetadata, error) {
+	result := make(map[string]TrackMetadata, len(trackIDs))
+	if len(trackIDs) == 0 {
+		return result, nil
 	}
-	result.Raw = raw
-	result.Overrides = overrides
-	result.Effective = effective
-	result.OverriddenFields = sortedMapKeys(overrides)
-	result.TrackStatus = pointerValue(trackStatus)
-	result.LastScannedAt = optionalTimestamp(lastScannedAt)
-	result.CreatedAt = formatTimestamp(createdAt)
-	result.UpdatedAt = formatTimestamp(updatedAt)
-	if sourceID != nil {
-		mode, rootState, trackState := "", "", ""
-		enabled := false
-		if rootMode != nil {
-			mode = *rootMode
+	identifiers := make([]uuid.UUID, len(trackIDs))
+	for index, trackID := range trackIDs {
+		identifier, parseErr := uuid.Parse(trackID)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse track metadata batch id: %w", parseErr)
 		}
-		if rootEnabled != nil {
-			enabled = *rootEnabled
+		identifiers[index] = identifier
+	}
+	rows, err := repository.pool.Query(ctx, `
+		SELECT metadata.track_id, metadata.raw_tags, metadata.overrides, metadata.version,
+		       metadata.last_scanned_at, metadata.updated_by, metadata.created_at, metadata.updated_at,
+		       source.id, source.root_id, source.source_path, source.status, source.checksum_sha256,
+		       root.mode, root.enabled, root.status, track.status::text,
+		       COALESCE(mapping_stats.mapping_count, 0), COALESCE(mapping_stats.cue, false)
+		FROM track_metadata metadata
+		LEFT JOIN local_music_sources source ON source.id = metadata.source_id
+		LEFT JOIN library_roots root ON root.id = source.root_id
+		LEFT JOIN tracks track ON track.id = metadata.track_id
+		LEFT JOIN LATERAL (
+			SELECT count(*)::int AS mapping_count,
+			       COALESCE(bool_or(mapping.cue_path IS NOT NULL), false) AS cue
+			FROM local_music_source_tracks mapping WHERE mapping.source_id = source.id
+		) mapping_stats ON true
+		WHERE metadata.track_id = ANY($1::uuid[])`, identifiers)
+	if err != nil {
+		return nil, fmt.Errorf("query track metadata batch: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		metadata, scanErr := scanMetadataRow(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
-		if rootStatus != nil {
-			rootState = *rootStatus
-		}
-		if trackStatus != nil {
-			trackState = *trackStatus
-		}
-		eligibility := tagwriteback.Evaluate(tagwriteback.SourceContext{
-			HasSource: true, TrackStatus: trackState, RootMode: mode, RootEnabled: enabled,
-			RootStatus: rootState, SourceStatus: pointerValue(sourceStatus),
-			SourcePath: pointerValue(sourcePath), MappingCount: mappingCount, Cue: cue,
-		})
-		result.Source = &MetadataSource{
-			ID: *sourceID, RootID: rootID, RelativePath: pointerValue(sourcePath), Status: pointerValue(sourceStatus),
-			ChecksumSHA256: pointerValue(checksum), Mode: rootMode,
-			CanWriteBack: eligibility.CanWriteBack, WritebackBlockReason: eligibility.MessagePointer(),
-		}
+		result[metadata.TrackID] = metadata
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate track metadata batch: %w", err)
 	}
 	return result, nil
 }
@@ -1323,6 +1728,88 @@ func scanBatchJob(row pgx.Row) (BatchJobRecord, error) {
 
 type rowScanner interface{ Scan(...any) error }
 
+type trackMetadataRowValues struct {
+	trackID       string
+	rawJSON       []byte
+	overridesJSON []byte
+	version       int
+	lastScannedAt *time.Time
+	updatedBy     *string
+	createdAt     time.Time
+	updatedAt     time.Time
+	sourceID      *string
+	rootID        *string
+	sourcePath    *string
+	sourceStatus  *string
+	checksum      *string
+	rootMode      *string
+	rootEnabled   *bool
+	rootStatus    *string
+	trackStatus   *string
+	mappingCount  int
+	cue           bool
+}
+
+func (values *trackMetadataRowValues) scanTargets() []any {
+	return []any{
+		&values.trackID, &values.rawJSON, &values.overridesJSON, &values.version,
+		&values.lastScannedAt, &values.updatedBy, &values.createdAt, &values.updatedAt,
+		&values.sourceID, &values.rootID, &values.sourcePath, &values.sourceStatus, &values.checksum,
+		&values.rootMode, &values.rootEnabled, &values.rootStatus, &values.trackStatus,
+		&values.mappingCount, &values.cue,
+	}
+}
+
+func (values *trackMetadataRowValues) build() (TrackMetadata, error) {
+	raw, overrides, err := decodeMetadataDocuments(values.rawJSON, values.overridesJSON)
+	if err != nil {
+		return TrackMetadata{}, err
+	}
+	effective, err := applyOverrides(raw, overrides)
+	if err != nil {
+		return TrackMetadata{}, err
+	}
+	result := TrackMetadata{
+		TrackID: values.trackID, Raw: raw, Overrides: overrides, Effective: effective,
+		OverriddenFields: sortedMapKeys(overrides), TrackStatus: pointerValue(values.trackStatus),
+		LastScannedAt: optionalTimestamp(values.lastScannedAt),
+		CreatedAt:     formatTimestamp(values.createdAt), UpdatedAt: formatTimestamp(values.updatedAt),
+	}
+	if values.updatedBy != nil {
+		updatedBy := *values.updatedBy
+		result.UpdatedBy = &updatedBy
+	}
+	if values.sourceID != nil {
+		mode, rootState, trackState := "", "", ""
+		enabled := false
+		if values.rootMode != nil {
+			mode = *values.rootMode
+		}
+		if values.rootEnabled != nil {
+			enabled = *values.rootEnabled
+		}
+		if values.rootStatus != nil {
+			rootState = *values.rootStatus
+		}
+		if values.trackStatus != nil {
+			trackState = *values.trackStatus
+		}
+		eligibility := tagwriteback.Evaluate(tagwriteback.SourceContext{
+			HasSource: true, TrackStatus: trackState, RootMode: mode, RootEnabled: enabled,
+			RootStatus: rootState, SourceStatus: pointerValue(values.sourceStatus),
+			SourcePath: pointerValue(values.sourcePath), MappingCount: values.mappingCount, Cue: values.cue,
+		})
+		result.Source = &MetadataSource{
+			ID: *values.sourceID, RootID: values.rootID, RelativePath: pointerValue(values.sourcePath),
+			Status: pointerValue(values.sourceStatus), ChecksumSHA256: pointerValue(values.checksum),
+			Mode: values.rootMode, CanWriteBack: eligibility.CanWriteBack,
+			WritebackBlockReason: eligibility.MessagePointer(),
+		}
+	}
+	result.Version = values.version
+	return result, nil
+}
+
 func scanBatchItem(row rowScanner) (BatchItemRecord, error) {
 	var result BatchItemRecord
 	var status string
@@ -1330,7 +1817,8 @@ func scanBatchItem(row rowScanner) (BatchItemRecord, error) {
 	var source *string
 	err := row.Scan(
 		&result.ID, &result.JobID, &result.TrackID, &result.ExpectedVersion, &result.Position,
-		&status, &result.AttemptID, &result.LockedBy, &result.LockedUntil, &candidateJSON,
+		&status, &result.Attempts, &result.MaxAttempts, &result.NextAttemptAt,
+		&result.AttemptID, &result.LockedBy, &result.LockedUntil, &candidateJSON,
 		&source, &result.Message, &result.StartedAt, &result.CompletedAt, &result.CreatedAt, &result.UpdatedAt,
 	)
 	if err != nil {
@@ -1349,6 +1837,44 @@ func scanBatchItem(row rowScanner) (BatchItemRecord, error) {
 		result.Source = &value
 	}
 	return result, nil
+}
+
+func scanClaimedBatchItem(row rowScanner) (BatchItemRecord, *TrackMetadata, error) {
+	var result BatchItemRecord
+	var status string
+	var candidateJSON []byte
+	var source *string
+	var metadataValues trackMetadataRowValues
+	targets := []any{
+		&result.ID, &result.JobID, &result.TrackID, &result.ExpectedVersion, &result.Position,
+		&status, &result.Attempts, &result.MaxAttempts, &result.NextAttemptAt,
+		&result.AttemptID, &result.LockedBy, &result.LockedUntil, &candidateJSON,
+		&source, &result.Message, &result.StartedAt, &result.CompletedAt, &result.CreatedAt, &result.UpdatedAt,
+	}
+	targets = append(targets, metadataValues.scanTargets()...)
+	if err := row.Scan(targets...); err != nil {
+		return BatchItemRecord{}, nil, err
+	}
+	result.Status = ItemStatus(status)
+	if len(candidateJSON) > 0 {
+		var candidate Candidate
+		if err := json.Unmarshal(candidateJSON, &candidate); err != nil {
+			return BatchItemRecord{}, nil, fmt.Errorf("decode tag scraping candidate: %w", err)
+		}
+		result.Candidate = &candidate
+	}
+	if source != nil {
+		value := Source(*source)
+		result.Source = &value
+	}
+	if metadataValues.version == 0 {
+		return result, nil, nil
+	}
+	metadata, err := metadataValues.build()
+	if err != nil {
+		return BatchItemRecord{}, nil, err
+	}
+	return result, &metadata, nil
 }
 
 func scanWritebackJob(row pgx.Row) (WritebackJob, error) {
@@ -1556,6 +2082,28 @@ const batchJobSelect = `
 
 const batchItemSelect = `
 	SELECT id, job_id, track_id, expected_version, position, status::text,
-	       attempt_id, locked_by, locked_until, candidate, source, message,
+	       attempts, max_attempts, next_attempt_at, attempt_id, locked_by, locked_until, candidate, source, message,
 	       started_at, completed_at, created_at, updated_at
 	FROM tag_scraping_job_items`
+
+const claimedBatchItemSelect = `
+	SELECT item.id, item.job_id, item.track_id, item.expected_version, item.position, item.status::text,
+	       item.attempts, item.max_attempts, item.next_attempt_at,
+	       item.attempt_id, item.locked_by, item.locked_until, item.candidate, item.source, item.message,
+	       item.started_at, item.completed_at, item.created_at, item.updated_at,
+	       item.track_id, COALESCE(metadata.raw_tags, '{}'::jsonb), COALESCE(metadata.overrides, '{}'::jsonb),
+	       COALESCE(metadata.version, 0), metadata.last_scanned_at, metadata.updated_by,
+	       COALESCE(metadata.created_at, item.created_at), COALESCE(metadata.updated_at, item.updated_at),
+	       source.id, source.root_id, source.source_path, source.status, source.checksum_sha256,
+	       root.mode, root.enabled, root.status, track.status::text,
+	       COALESCE(mapping_stats.mapping_count, 0), COALESCE(mapping_stats.cue, false)
+	FROM tag_scraping_job_items item
+	JOIN tracks track ON track.id = item.track_id
+	LEFT JOIN track_metadata metadata ON metadata.track_id = item.track_id
+	LEFT JOIN local_music_sources source ON source.id = metadata.source_id
+	LEFT JOIN library_roots root ON root.id = source.root_id
+	LEFT JOIN LATERAL (
+		SELECT count(*)::int AS mapping_count,
+		       COALESCE(bool_or(mapping.cue_path IS NOT NULL), false) AS cue
+		FROM local_music_source_tracks mapping WHERE mapping.source_id = source.id
+	) mapping_stats ON true`

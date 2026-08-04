@@ -3,6 +3,7 @@ package admintagscraping
 import (
 	"context"
 	"net/url"
+	"strings"
 )
 
 func (platform *ProductionMusicPlatform) SearchArtists(
@@ -10,18 +11,34 @@ func (platform *ProductionMusicPlatform) SearchArtists(
 	source Source,
 	query string,
 ) ([]ArtistCandidate, error) {
-	var result []ArtistCandidate
-	var err error
-	switch source {
-	case SourceQMusic:
-		result, err = platform.searchQQArtists(ctx, query)
-	default:
-		return nil, artistSourceValidationError()
+	key := string(source) + "\x00" + strings.TrimSpace(query)
+	call, leader := platform.beginArtistSearch(key)
+	if !leader {
+		result, err := awaitArtistSearch(ctx, call)
+		if err != nil {
+			return nil, normalizeUpstreamError(err, ctx)
+		}
+		return result, nil
 	}
+	result, err := platform.searchArtistsUncached(ctx, source, query)
+	platform.finishArtistSearch(key, call, result, err)
 	if err != nil {
 		return nil, normalizeUpstreamError(err, ctx)
 	}
 	return result, nil
+}
+
+func (platform *ProductionMusicPlatform) searchArtistsUncached(
+	ctx context.Context,
+	source Source,
+	query string,
+) ([]ArtistCandidate, error) {
+	switch source {
+	case SourceQMusic:
+		return platform.searchQQArtists(ctx, query)
+	default:
+		return nil, artistSourceValidationError()
+	}
 }
 func (platform *ProductionMusicPlatform) searchQQArtists(
 	ctx context.Context,

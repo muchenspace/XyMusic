@@ -22,6 +22,9 @@ type ProductionOptions struct {
 	Heartbeat        time.Duration
 	CancellationPoll time.Duration
 	ProfileVersion   string
+	CodecBudget      ResourceBudget
+	ProbeBudget      ResourceBudget
+	StorageBudget    ResourceBudget
 }
 
 func NewProduction(options ProductionOptions) (*Worker, error) {
@@ -38,8 +41,13 @@ func NewProduction(options ProductionOptions) (*Worker, error) {
 	}
 	return New(Options{
 		Store: store, Storage: storage,
+		Workers:    options.Media.Workers,
 		FFmpegPath: options.Media.FFmpegPath, FFprobePath: options.Media.FFprobePath,
-		WorkerID: options.WorkerID, Logger: options.Logger, Clock: options.Clock,
+		ProbeWorkers: options.Media.ProbeWorkers, StorageWorkers: options.Media.StorageWorkers,
+		FFmpegThreads: options.Media.FFmpegThreads,
+		CodecBudget:   options.CodecBudget, ProbeBudget: options.ProbeBudget,
+		StorageBudget: options.StorageBudget,
+		WorkerID:      options.WorkerID, Logger: options.Logger, Clock: options.Clock,
 		Runner: options.Runner, TemporaryRoot: options.TemporaryRoot,
 		Lease: options.Lease, Heartbeat: options.Heartbeat,
 		CancellationPoll: options.CancellationPoll, ProfileVersion: options.ProfileVersion,

@@ -9,6 +9,8 @@ import (
 
 type Source string
 
+const maxTagScrapingBatchItems = 5_000
+
 const (
 	SourceSmart    Source = "smart"
 	SourceNetease  Source = "netease"
@@ -224,6 +226,9 @@ type BatchItemRecord struct {
 	ExpectedVersion int
 	Position        int
 	Status          ItemStatus
+	Attempts        int
+	MaxAttempts     int
+	NextAttemptAt   time.Time
 	AttemptID       *string
 	LockedBy        *string
 	LockedUntil     *time.Time
@@ -240,11 +245,28 @@ type ClaimedBatchItem struct {
 	Job       BatchJobRecord
 	Item      BatchItemRecord
 	AttemptID string
+	Metadata  *TrackMetadata
 }
 
 type ClaimResult struct {
 	Item        *ClaimedBatchItem
 	FinishJobID string
+}
+
+type BatchClaimResult struct {
+	Items       []ClaimedBatchItem
+	FinishJobID string
+}
+
+// BatchItemCompletion carries the result of one already-owned item into the
+// optional batched completion path. The repository still validates every
+// attempt and lease independently before applying it.
+type BatchItemCompletion struct {
+	ItemID    string
+	AttemptID string
+	Status    ItemStatus
+	Candidate *Candidate
+	Message   string
 }
 
 type BatchLeaseControl struct {

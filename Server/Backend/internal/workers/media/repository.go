@@ -16,6 +16,7 @@ import (
 type postgresDatabase interface {
 	Begin(context.Context) (pgx.Tx, error)
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	Query(context.Context, string, ...any) (pgx.Rows, error)
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
@@ -132,30 +133,51 @@ func (store *PostgresStore) FindReusableVariants(
 	trackID, sourceChecksum, profileVersion string,
 	profiles []AudioVariantProfile,
 ) ([]GeneratedVariant, error) {
-	result := make([]GeneratedVariant, 0, len(profiles))
+	if len(profiles) == 0 {
+		return nil, nil
+	}
+	qualities := make([]string, 0, len(profiles))
+	profilesByQuality := make(map[string]AudioVariantProfile, len(profiles))
 	for _, profile := range profiles {
-		var objectKey, checksum string
+		qualities = append(qualities, profile.Quality)
+		profilesByQuality[profile.Quality] = profile
+	}
+	rows, err := store.database.Query(ctx, `SELECT variant.quality,asset.object_key,asset.size_bytes,asset.checksum_sha256
+		FROM track_variants variant
+		JOIN media_assets asset ON asset.id=variant.asset_id
+		WHERE variant.track_id=$1 AND variant.quality=ANY($2::text[]) AND variant.status='READY'
+		AND asset.status='READY' AND asset.checksum_sha256 IS NOT NULL
+		AND variant.source_checksum_sha256=$3 AND variant.profile_version=$4`,
+		trackID, qualities, sourceChecksum, profileVersion)
+	if err != nil {
+		return nil, fmt.Errorf("find reusable media variants: %w", err)
+	}
+	defer rows.Close()
+	byQuality := make(map[string]GeneratedVariant, len(profiles))
+	for rows.Next() {
+		var quality, objectKey, checksum string
 		var sizeBytes int64
-		err := store.database.QueryRow(ctx, `SELECT asset.object_key,asset.size_bytes,asset.checksum_sha256
-			FROM track_variants variant
-			JOIN media_assets asset ON asset.id=variant.asset_id
-			WHERE variant.track_id=$1 AND variant.quality=$2 AND variant.status='READY'
-			AND asset.status='READY' AND asset.checksum_sha256 IS NOT NULL
-			AND variant.source_checksum_sha256=$3 AND variant.profile_version=$4`,
-			trackID, profile.Quality, sourceChecksum, profileVersion).Scan(
-			&objectKey, &sizeBytes, &checksum,
-		)
-		if errors.Is(err, pgx.ErrNoRows) {
+		if err := rows.Scan(&quality, &objectKey, &sizeBytes, &checksum); err != nil {
+			return nil, fmt.Errorf("scan reusable media variant: %w", err)
+		}
+		profile, exists := profilesByQuality[quality]
+		if !exists {
 			continue
 		}
-		if err != nil {
-			return nil, fmt.Errorf("find reusable media variant: %w", err)
-		}
-		result = append(result, GeneratedVariant{
+		byQuality[quality] = GeneratedVariant{
 			Profile: profile, ObjectKey: objectKey, ChecksumSHA256: checksum,
 			SizeBytes: sizeBytes, SourceChecksumSHA256: sourceChecksum,
 			ProfileVersion: profileVersion,
-		})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate reusable media variants: %w", err)
+	}
+	result := make([]GeneratedVariant, 0, len(byQuality))
+	for _, profile := range profiles {
+		if variant, exists := byQuality[profile.Quality]; exists {
+			result = append(result, variant)
+		}
 	}
 	return result, nil
 }
@@ -250,34 +272,11 @@ func (store *PostgresStore) CommitMediaJob(
 		}
 		rows.Close()
 	}
-	for _, output := range input.Generated {
-		if output.Reused {
-			continue
-		}
-		var assetID string
-		err := transaction.QueryRow(ctx, `INSERT INTO media_assets(
-			object_key,kind,mime_type,size_bytes,checksum_sha256,status
-		) VALUES($1,'AUDIO_VARIANT',$2,$3,$4,'READY') RETURNING id`,
-			output.ObjectKey, output.Profile.MIMEType, output.SizeBytes, output.ChecksumSHA256,
-		).Scan(&assetID)
-		if err != nil {
-			return nil, fmt.Errorf("create media variant asset: %w", err)
-		}
-		bitrate := EstimatedBitrate(output.SizeBytes, input.DurationMS)
-		_, err = transaction.Exec(ctx, `INSERT INTO track_variants(
-			track_id,asset_id,quality,mime_type,codec,container,bitrate,sample_rate,
-			source_checksum_sha256,profile_version,status
-		) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'READY')
-		ON CONFLICT(track_id,quality) DO UPDATE SET
-			asset_id=excluded.asset_id,mime_type=excluded.mime_type,codec=excluded.codec,
-			container=excluded.container,bitrate=excluded.bitrate,sample_rate=excluded.sample_rate,
-			source_checksum_sha256=excluded.source_checksum_sha256,profile_version=excluded.profile_version,
-			status='READY',updated_at=$11`, input.Job.TrackID, assetID, output.Profile.Quality,
-			output.Profile.MIMEType, output.Profile.Codec, output.Profile.Container, bitrate,
-			input.SampleRate, output.SourceChecksumSHA256, output.ProfileVersion, input.CompletedAt)
-		if err != nil {
-			return nil, fmt.Errorf("upsert media track variant: %w", err)
-		}
+	if err := insertGeneratedVariants(
+		ctx, transaction, input.Job.TrackID, input.Generated, input.DurationMS,
+		input.SampleRate, input.CompletedAt,
+	); err != nil {
+		return nil, err
 	}
 	updatedTrack, err := transaction.Exec(ctx, `UPDATE tracks SET duration_ms=$2,status='READY',
 		published_at=CASE WHEN $3 THEN $4 ELSE published_at END,version=version+1,updated_at=$4
@@ -318,6 +317,85 @@ func (store *PostgresStore) CommitMediaJob(
 		return nil, fmt.Errorf("complete mapped local media sources: %w", err)
 	}
 	return previousAssetIDs, nil
+}
+
+// insertGeneratedVariants keeps the asset and variant rows in one database
+// statement. A media job normally creates three or four variants, so issuing
+// one round trip per variant needlessly stretches the completion transaction.
+func insertGeneratedVariants(
+	ctx context.Context,
+	transaction pgx.Tx,
+	trackID string,
+	outputs []GeneratedVariant,
+	durationMS int64,
+	sampleRate *int,
+	completedAt time.Time,
+) error {
+	objectKeys := make([]string, 0, len(outputs))
+	mimeTypes := make([]string, 0, len(outputs))
+	sizes := make([]int64, 0, len(outputs))
+	checksums := make([]string, 0, len(outputs))
+	qualities := make([]string, 0, len(outputs))
+	codecs := make([]string, 0, len(outputs))
+	containers := make([]string, 0, len(outputs))
+	bitrates := make([]int32, 0, len(outputs))
+	sourceChecksums := make([]string, 0, len(outputs))
+	profileVersions := make([]string, 0, len(outputs))
+	for _, output := range outputs {
+		if output.Reused {
+			continue
+		}
+		objectKeys = append(objectKeys, output.ObjectKey)
+		mimeTypes = append(mimeTypes, output.Profile.MIMEType)
+		sizes = append(sizes, output.SizeBytes)
+		checksums = append(checksums, output.ChecksumSHA256)
+		qualities = append(qualities, output.Profile.Quality)
+		codecs = append(codecs, output.Profile.Codec)
+		containers = append(containers, output.Profile.Container)
+		bitrates = append(bitrates, int32(EstimatedBitrate(output.SizeBytes, durationMS)))
+		sourceChecksums = append(sourceChecksums, output.SourceChecksumSHA256)
+		profileVersions = append(profileVersions, output.ProfileVersion)
+	}
+	if len(objectKeys) == 0 {
+		return nil
+	}
+	rate := 0
+	if sampleRate != nil {
+		rate = *sampleRate
+	}
+	_, err := transaction.Exec(ctx, `WITH generated(
+		object_key,mime_type,size_bytes,checksum_sha256,quality,codec,container,
+		bitrate,source_checksum_sha256,profile_version
+	) AS (
+		SELECT * FROM unnest(
+			$1::text[],$2::text[],$3::bigint[],$4::text[],$5::text[],
+			$6::text[],$7::text[],$8::integer[],$9::text[],$10::text[]
+		)
+	), assets AS (
+		INSERT INTO media_assets(object_key,kind,mime_type,size_bytes,checksum_sha256,status)
+		SELECT object_key,'AUDIO_VARIANT'::asset_kind,mime_type,size_bytes,checksum_sha256,'READY'::asset_status
+		FROM generated
+		RETURNING id,object_key
+	)
+	INSERT INTO track_variants(
+		track_id,asset_id,quality,mime_type,codec,container,bitrate,sample_rate,
+		source_checksum_sha256,profile_version,status
+	)
+	SELECT $11::uuid,assets.id,generated.quality,generated.mime_type,generated.codec,
+		generated.container,generated.bitrate,NULLIF($12::integer,0),
+		generated.source_checksum_sha256,generated.profile_version,'READY'::asset_status
+	FROM assets JOIN generated USING(object_key)
+	ON CONFLICT(track_id,quality) DO UPDATE SET
+		asset_id=excluded.asset_id,mime_type=excluded.mime_type,codec=excluded.codec,
+		container=excluded.container,bitrate=excluded.bitrate,sample_rate=excluded.sample_rate,
+		source_checksum_sha256=excluded.source_checksum_sha256,profile_version=excluded.profile_version,
+		status='READY'::asset_status,updated_at=$13`,
+		objectKeys, mimeTypes, sizes, checksums, qualities, codecs, containers,
+		bitrates, sourceChecksums, profileVersions, trackID, rate, completedAt)
+	if err != nil {
+		return fmt.Errorf("store media variants: %w", err)
+	}
+	return nil
 }
 
 func (store *PostgresStore) FailMediaJob(
@@ -435,12 +513,12 @@ func (store *PostgresStore) ScheduleReplacedAssetCleanup(
 		return fmt.Errorf("iterate replaced media cleanup keys: %w", err)
 	}
 	rows.Close()
-	for _, key := range keys {
-		if _, err := transaction.Exec(ctx, `INSERT INTO object_cleanup_jobs(
-			object_key,reason,next_attempt_at,created_at,updated_at
-		) VALUES($1,'REPLACED_MEDIA_VARIANT',$2,$2,$2) ON CONFLICT(object_key) DO NOTHING`, key, now); err != nil {
-			return fmt.Errorf("enqueue replaced media cleanup: %w", err)
-		}
+	if _, err := transaction.Exec(ctx, `INSERT INTO object_cleanup_jobs(
+		object_key,reason,next_attempt_at,created_at,updated_at
+	) SELECT object_key,'REPLACED_MEDIA_VARIANT',$2,$2,$2
+	FROM unnest($1::text[]) AS objects(object_key)
+	ON CONFLICT(object_key) DO NOTHING`, keys, now); err != nil {
+		return fmt.Errorf("enqueue replaced media cleanup: %w", err)
 	}
 	return nil
 }

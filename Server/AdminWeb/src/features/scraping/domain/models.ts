@@ -67,7 +67,18 @@ export interface ApplyArtistArtworkResult {
 
 export type BatchJobStatus = "PENDING" | "RUNNING" | "COMPLETED" | "CANCELLED" | "FAILED";
 export type BatchItemStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "SKIPPED";
-export interface BatchItem { id: string; trackId: string; position: number; status: BatchItemStatus; source: string | null; message: string | null; candidate: TagCandidate | null }
+export interface BatchItem {
+  id: string;
+  trackId: string;
+  position: number;
+  status: BatchItemStatus;
+  attempts: number;
+  maxAttempts: number;
+  nextAttemptAt: string;
+  source: string | null;
+  message: string | null;
+  candidate: TagCandidate | null;
+}
 export interface TagScrapingBatch {
   id: string; status: BatchJobStatus; total: number; processed: number; succeeded: number; skipped: number; failed: number; unsuccessful: number;
   cancelRequested: boolean; items: BatchItem[]; createdAt: string; updatedAt: string; completedAt: string | null;

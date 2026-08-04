@@ -3,7 +3,10 @@ package adminsources
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -92,6 +95,105 @@ func TestProcessFileTouchesExistingSourceBeforeRecordingProcessingFailure(t *tes
 	}
 	if !database.trackFailed {
 		t.Fatal("mapped track was not marked failed")
+	}
+}
+
+func TestProcessPreparedFileSkipsCommitForReusableUnchangedSource(t *testing.T) {
+	path := t.TempDir() + string(os.PathSeparator) + "song.flac"
+	if err := os.WriteFile(path, []byte("stable audio"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	synchronizer := &ProductionSynchronizer{}
+	err = synchronizer.ProcessPreparedFile(context.Background(), "root", "run", DiscoveredFile{
+		AudioPath: path, RelativePath: "song.flac", FileInfo: metadata,
+	}, time.Now().UTC(), &preparedStandardFile{
+		Metadata: metadata, ExistingFound: true, UnchangedReady: true,
+	})
+	if err != nil {
+		t.Fatalf("reusable unchanged source commit = %v", err)
+	}
+}
+
+func TestProductionSynchronizerResourceGatesBoundStorageAndFFmpeg(t *testing.T) {
+	storage := &boundedSynchronizerStorage{}
+	runner := &boundedSynchronizerRunner{}
+	synchronizer := &ProductionSynchronizer{
+		storage:       storage,
+		runner:        runner,
+		ffmpegPath:    "ffmpeg",
+		storageGate:   make(chan struct{}, 2),
+		ffmpegGate:    make(chan struct{}, 1),
+		ffmpegThreads: 1,
+	}
+
+	var group sync.WaitGroup
+	for index := 0; index < 24; index++ {
+		group.Add(2)
+		go func() {
+			defer group.Done()
+			if _, err := synchronizer.uploadFile(context.Background(), "object", "path", "audio/flac", "checksum"); err != nil {
+				t.Errorf("uploadFile() error = %v", err)
+			}
+		}()
+		go func() {
+			defer group.Done()
+			if _, err := synchronizer.runFFmpeg(context.Background(), []string{"-i", "source"}, time.Second); err != nil {
+				t.Errorf("runFFmpeg() error = %v", err)
+			}
+		}()
+	}
+	group.Wait()
+	if got := storage.max.Load(); got > 2 {
+		t.Fatalf("storage concurrency = %d, want <= 2", got)
+	}
+	if got := runner.max.Load(); got > 1 {
+		t.Fatalf("ffmpeg concurrency = %d, want <= 1", got)
+	}
+	if storage.max.Load() == 0 || runner.max.Load() == 0 {
+		t.Fatal("resource operations did not run")
+	}
+}
+
+type boundedSynchronizerStorage struct {
+	active atomic.Int32
+	max    atomic.Int32
+}
+
+func (storage *boundedSynchronizerStorage) UploadFile(context.Context, string, string, string, string) (int64, error) {
+	current := storage.active.Add(1)
+	updateAtomicMaximum(&storage.max, current)
+	time.Sleep(time.Millisecond)
+	storage.active.Add(-1)
+	return 1, nil
+}
+
+func (*boundedSynchronizerStorage) StatObject(context.Context, string) (int64, string, bool, error) {
+	return 1, "checksum", true, nil
+}
+
+type boundedSynchronizerRunner struct {
+	active atomic.Int32
+	max    atomic.Int32
+}
+
+func (runner *boundedSynchronizerRunner) Run(context.Context, string, []string, time.Duration) (adminmetadata.ProcessResult, error) {
+	current := runner.active.Add(1)
+	updateAtomicMaximum(&runner.max, current)
+	time.Sleep(time.Millisecond)
+	runner.active.Add(-1)
+	return adminmetadata.ProcessResult{}, nil
+}
+
+func updateAtomicMaximum(maximum *atomic.Int32, value int32) {
+	for {
+		current := maximum.Load()
+		if value <= current || maximum.CompareAndSwap(current, value) {
+			return
+		}
 	}
 }
 
