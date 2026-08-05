@@ -423,7 +423,7 @@ class GrantResolvingDataSourceTest {
                 PlaybackGrant(
                     trackId = trackId,
                     variantId = "variant",
-                    selectedQuality = PreferredQuality.AUTO,
+                    selectedQuality = PreferredQuality.STANDARD,
                     signedUrl = SIGNED_URL,
                     expiresAtEpochMillis = Long.MAX_VALUE,
                     mimeType = "audio/mpeg",

@@ -70,6 +70,38 @@ func TestCreatePlaybackGrantRouteReturnsServiceGrant(t *testing.T) {
 	}
 }
 
+func TestCreatePlaybackGrantRouteRejectsAutoQuality(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	api := &playbackAPIStub{}
+	auth := &playbackAuthenticatorStub{}
+	routes, err := NewRoutes(api, auth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, err := httpserver.New(httpserver.Options{RegisterRoutes: func(engine *gin.Engine) {
+		routes.Register(engine)
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/tracks/00000000-0000-4000-8000-000000000001/playback",
+		strings.NewReader(`{"preferredQuality":"AUTO"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if api.calls != 0 || auth.calls != 0 {
+		t.Fatalf("invalid quality reached auth/service: auth=%d service=%d", auth.calls, api.calls)
+	}
+}
+
 type playbackAPIStub struct {
 	result  GrantDTO
 	calls   int

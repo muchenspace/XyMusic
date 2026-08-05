@@ -4,9 +4,18 @@ export interface AudioSnapshot {
   paused: boolean;
 }
 
+export interface AudioSourceMetadata {
+  bitrate?: number;
+}
+
+export interface AudioBandwidthSample {
+  bitsPerSecond: number;
+  durationMs: number;
+}
+
 export interface AudioPlayer {
-  load(url: string, signal?: AbortSignal): Promise<void>;
-  preload?(url: string, signal?: AbortSignal): Promise<void>;
+  load(url: string, signal?: AbortSignal, metadata?: AudioSourceMetadata): Promise<void>;
+  preload?(url: string, signal?: AbortSignal, metadata?: AudioSourceMetadata): Promise<void>;
   activatePreloaded?(fadeSeconds: number, onActivated?: () => void): Promise<boolean>;
   clearPreloaded?(): void;
   play(): Promise<void>;
@@ -18,4 +27,7 @@ export interface AudioPlayer {
   onUpdate(listener: (snapshot: AudioSnapshot) => void): () => void;
   onEnded(listener: () => void): () => void;
   onError(listener: (message: string) => void): () => void;
+  onBandwidthSample?(listener: (sample: AudioBandwidthSample) => void): () => void;
+  onBuffering?(listener: () => void): () => void;
+  onNetworkChange?(listener: () => void): () => void;
 }

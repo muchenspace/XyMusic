@@ -1,10 +1,10 @@
 import type { PlaybackRepository } from "../ports/PlaybackRepository";
-import type { PlaybackQuality } from "../../domain/music";
+import type { ConcretePlaybackQuality } from "../../domain/music";
 
 export class PlaybackUseCases {
   constructor(private readonly repository: PlaybackRepository) {}
 
-  grant(trackId: string, quality: PlaybackQuality, signal?: AbortSignal) {
+  grant(trackId: string, quality: ConcretePlaybackQuality, signal?: AbortSignal) {
     return this.repository.getPlaybackGrant(trackId, quality, signal);
   }
   record(...args: Parameters<PlaybackRepository["recordPlayback"]>) {

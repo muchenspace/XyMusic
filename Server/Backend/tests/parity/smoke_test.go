@@ -124,7 +124,7 @@ func TestLegacyAndGoPublicSmokeParity(t *testing.T) {
 		}
 	}
 	playbackPath := "/api/v1/tracks/00000000-0000-4000-8000-000000000001/playback"
-	playbackBody := []byte(`{"preferredQuality":"AUTO"}`)
+	playbackBody := []byte(`{"preferredQuality":"STANDARD"}`)
 	legacyPlayback := fetchRequest(t, client, http.MethodPost, strings.TrimRight(legacyBase, "/")+playbackPath, playbackBody)
 	goPlayback := fetchRequest(t, client, http.MethodPost, goServer.URL+playbackPath, playbackBody)
 	if legacyPlayback.status != goPlayback.status || !semanticJSONEqual(legacyPlayback.body, goPlayback.body) {

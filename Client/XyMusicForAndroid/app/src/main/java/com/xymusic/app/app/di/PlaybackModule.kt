@@ -22,7 +22,10 @@ import com.xymusic.app.feature.player.data.media.PlaybackCache
 import com.xymusic.app.feature.player.data.media.PlaybackGrantStore
 import com.xymusic.app.feature.player.data.media.PlaybackNetworkPolicy
 import com.xymusic.app.feature.player.data.media.playbackDataSourceFactory
+import com.xymusic.app.feature.player.data.quality.AutomaticPlaybackQualityController
+import com.xymusic.app.feature.player.data.quality.AutomaticQualityTransferListener
 import com.xymusic.app.feature.player.data.remote.HttpPlaybackGrantRepository
+import com.xymusic.app.feature.player.domain.AutomaticPlaybackQualityPolicy
 import com.xymusic.app.feature.player.domain.LyricsSource
 import com.xymusic.app.feature.player.domain.OfflineTrackRepository
 import com.xymusic.app.feature.player.domain.PlaybackEventSink
@@ -40,6 +43,12 @@ import okhttp3.OkHttpClient
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class PlaybackBindingModule {
+    @Binds
+    @Singleton
+    abstract fun bindAutomaticPlaybackQualityPolicy(
+        implementation: AutomaticPlaybackQualityController,
+    ): AutomaticPlaybackQualityPolicy
+
     @Binds
     @Singleton
     abstract fun bindPlayerRepository(implementation: Media3PlayerRepository): PlayerRepository
@@ -100,6 +109,7 @@ object PlaybackProviderModule {
         sessionProvider: AppSessionProvider,
         sessionIdentityProvider: SessionIdentityProvider,
         sessionMutationCoordinator: SessionMutationCoordinator,
+        automaticQualityTransferListener: AutomaticQualityTransferListener,
     ): DataSource.Factory = playbackDataSourceFactory(
         mediaHttpClient,
         playbackCache,
@@ -109,5 +119,6 @@ object PlaybackProviderModule {
         sessionProvider,
         sessionIdentityProvider,
         sessionMutationCoordinator,
+        automaticQualityTransferListener,
     )
 }

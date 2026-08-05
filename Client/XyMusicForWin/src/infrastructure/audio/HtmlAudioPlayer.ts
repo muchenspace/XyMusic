@@ -1,4 +1,9 @@
-import type { AudioPlayer, AudioSnapshot } from "../../application/ports/AudioPlayer";
+import type {
+  AudioBandwidthSample,
+  AudioPlayer,
+  AudioSnapshot,
+  AudioSourceMetadata,
+} from "../../application/ports/AudioPlayer";
 
 interface PendingLoad {
   id: number;
@@ -11,6 +16,16 @@ interface TransitionGains {
   nextAudio: HTMLAudioElement;
   previous: number;
   next: number;
+}
+
+interface NetworkMeasurement {
+  bitrate: number;
+  lastBufferedEnd: number;
+  lastMeasuredAt: number;
+}
+
+interface NavigatorWithConnection extends Navigator {
+  readonly connection?: EventTarget;
 }
 
 export class HtmlAudioPlayer implements AudioPlayer {
@@ -30,6 +45,9 @@ export class HtmlAudioPlayer implements AudioPlayer {
   private readonly updateListeners = new Set<(snapshot: AudioSnapshot) => void>();
   private readonly endedListeners = new Set<() => void>();
   private readonly errorListeners = new Set<(message: string) => void>();
+  private readonly bandwidthListeners = new Set<(sample: AudioBandwidthSample) => void>();
+  private readonly bufferingListeners = new Set<() => void>();
+  private readonly networkMeasurements = new WeakMap<HTMLAudioElement, NetworkMeasurement>();
   private readonly emitSnapshot = (): boolean => {
     const snapshot = this.snapshot();
     if (this.lastEmittedSnapshot
@@ -69,12 +87,21 @@ export class HtmlAudioPlayer implements AudioPlayer {
     const message = this.audio.error?.message || "音频播放失败";
     for (const listener of this.errorListeners) listener(message);
   };
+  private readonly measureNetworkProgress = (event: Event) => {
+    this.measureBufferedProgress(event.currentTarget as HTMLAudioElement);
+  };
+  private readonly emitBuffering = () => {
+    if (this.audio.paused || this.audio.currentTime < MIN_REBUFFER_POSITION_SECONDS || this.audio.readyState >= HAVE_FUTURE_DATA) return;
+    for (const listener of this.bufferingListeners) listener();
+  };
 
   constructor() {
+    this.audio.addEventListener("progress", this.measureNetworkProgress);
+    this.preloadAudio.addEventListener("progress", this.measureNetworkProgress);
     this.bindActiveAudio(this.audio);
   }
 
-  async load(url: string, signal?: AbortSignal): Promise<void> {
+  async load(url: string, signal?: AbortSignal, metadata?: AudioSourceMetadata): Promise<void> {
     if (!url.trim()) throw new Error("音频地址为空");
     if (signal?.aborted) throw signal.reason ?? abortError();
 
@@ -84,6 +111,7 @@ export class HtmlAudioPlayer implements AudioPlayer {
     this.audio.pause();
     this.stopUpdateLoop();
     this.audio.volume = this.configuredVolume;
+    this.startNetworkMeasurement(this.audio, metadata?.bitrate);
 
     await new Promise<void>((resolve, reject) => {
       let timeout: number | undefined;
@@ -134,6 +162,7 @@ export class HtmlAudioPlayer implements AudioPlayer {
         this.clearSource();
       }
     });
+    this.measureBufferedProgress(this.audio);
   }
 
   async play(): Promise<void> {
@@ -141,7 +170,7 @@ export class HtmlAudioPlayer implements AudioPlayer {
     this.startUpdateLoop();
   }
 
-  async preload(url: string, signal?: AbortSignal): Promise<void> {
+  async preload(url: string, signal?: AbortSignal, metadata?: AudioSourceMetadata): Promise<void> {
     if (!url.trim()) return;
     this.clearPreloaded();
     if (signal?.aborted) throw signal.reason ?? abortError();
@@ -149,8 +178,10 @@ export class HtmlAudioPlayer implements AudioPlayer {
     const forwardAbort = () => controller.abort(signal?.reason ?? abortError());
     signal?.addEventListener("abort", forwardAbort, { once: true });
     this.preloadController = controller;
+    this.startNetworkMeasurement(this.preloadAudio, metadata?.bitrate);
     try {
       await waitUntilPlayable(this.preloadAudio, url, controller.signal);
+      this.measureBufferedProgress(this.preloadAudio);
       if (this.preloadController !== controller || controller.signal.aborted) throw controller.signal.reason ?? abortError();
       this.preparedUrl = url;
     } finally {
@@ -298,6 +329,28 @@ export class HtmlAudioPlayer implements AudioPlayer {
     return () => this.errorListeners.delete(listener);
   }
 
+  onBandwidthSample(listener: (sample: AudioBandwidthSample) => void): () => void {
+    this.bandwidthListeners.add(listener);
+    return () => this.bandwidthListeners.delete(listener);
+  }
+
+  onBuffering(listener: () => void): () => void {
+    this.bufferingListeners.add(listener);
+    return () => this.bufferingListeners.delete(listener);
+  }
+
+  onNetworkChange(listener: () => void): () => void {
+    const connection = (navigator as NavigatorWithConnection).connection;
+    window.addEventListener("online", listener);
+    window.addEventListener("offline", listener);
+    connection?.addEventListener("change", listener);
+    return () => {
+      window.removeEventListener("online", listener);
+      window.removeEventListener("offline", listener);
+      connection?.removeEventListener("change", listener);
+    };
+  }
+
   private cancelPendingLoad(): void {
     const pending = this.pendingLoad;
     if (!pending) return;
@@ -327,6 +380,7 @@ export class HtmlAudioPlayer implements AudioPlayer {
     audio.addEventListener("pause", this.handlePause);
     audio.addEventListener("ended", this.emitEnded);
     audio.addEventListener("error", this.emitError);
+    audio.addEventListener("waiting", this.emitBuffering);
   }
 
   private unbindActiveAudio(audio: HTMLAudioElement): void {
@@ -336,6 +390,41 @@ export class HtmlAudioPlayer implements AudioPlayer {
     audio.removeEventListener("pause", this.handlePause);
     audio.removeEventListener("ended", this.emitEnded);
     audio.removeEventListener("error", this.emitError);
+    audio.removeEventListener("waiting", this.emitBuffering);
+  }
+
+  private startNetworkMeasurement(audio: HTMLAudioElement, bitrate: number | undefined): void {
+    if (!Number.isFinite(bitrate) || Number(bitrate) <= 0) {
+      this.networkMeasurements.delete(audio);
+      return;
+    }
+    this.networkMeasurements.set(audio, {
+      bitrate: Number(bitrate),
+      lastBufferedEnd: 0,
+      lastMeasuredAt: performance.now(),
+    });
+  }
+
+  private measureBufferedProgress(audio: HTMLAudioElement): void {
+    const measurement = this.networkMeasurements.get(audio);
+    if (!measurement) return;
+    const bufferedEnd = furthestBufferedEnd(audio);
+    if (bufferedEnd <= measurement.lastBufferedEnd) return;
+    const now = performance.now();
+    const durationMs = now - measurement.lastMeasuredAt;
+    if (durationMs > MAX_ACTIVE_TRANSFER_GAP_MS) {
+      measurement.lastBufferedEnd = bufferedEnd;
+      measurement.lastMeasuredAt = now;
+      return;
+    }
+    if (durationMs < MIN_TRANSFER_SAMPLE_MS) return;
+    const bufferedSeconds = bufferedEnd - measurement.lastBufferedEnd;
+    measurement.lastBufferedEnd = bufferedEnd;
+    measurement.lastMeasuredAt = now;
+    const bitsPerSecond = bufferedSeconds * measurement.bitrate / (durationMs / 1_000);
+    if (!Number.isFinite(bitsPerSecond) || bitsPerSecond <= 0) return;
+    const sample = { bitsPerSecond, durationMs };
+    for (const listener of this.bandwidthListeners) listener(sample);
   }
 
   private startUpdateLoop(): void {
@@ -385,6 +474,15 @@ function finiteValue(value: number): number {
   return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
+function furthestBufferedEnd(audio: HTMLAudioElement): number {
+  if (!audio.buffered.length) return 0;
+  try {
+    return finiteValue(audio.buffered.end(audio.buffered.length - 1));
+  } catch {
+    return 0;
+  }
+}
+
 function abortError(): DOMException {
   return new DOMException("音频加载已取消", "AbortError");
 }
@@ -392,6 +490,9 @@ function abortError(): DOMException {
 const HAVE_FUTURE_DATA = 3;
 const AUDIO_LOAD_TIMEOUT_MS = 30_000;
 const UPDATE_INTERVAL_MS = 1_000 / 15;
+const MIN_REBUFFER_POSITION_SECONDS = 3;
+const MIN_TRANSFER_SAMPLE_MS = 200;
+const MAX_ACTIVE_TRANSFER_GAP_MS = 5_000;
 
 async function waitUntilPlayable(audio: HTMLAudioElement, url: string, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) throw signal.reason ?? abortError();

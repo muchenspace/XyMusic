@@ -1,4 +1,5 @@
 export type PlaybackQuality = "AUTO" | "DATA_SAVER" | "STANDARD" | "HIGH" | "LOSSLESS";
+export type ConcretePlaybackQuality = Exclude<PlaybackQuality, "AUTO">;
 
 export interface Artwork { url: string; cacheKey: string }
 export interface UserProfile { id: string; username: string; displayName: string; avatarUrl?: string }
@@ -62,7 +63,13 @@ export interface Lyrics {
   timing: LyricTiming;
   translationSource?: string;
 }
-export interface PlaybackGrant { url: string; expiresAt: string; selectedQuality: string }
+export interface PlaybackGrant {
+  url: string;
+  expiresAt: string;
+  selectedQuality: ConcretePlaybackQuality;
+  bitrate?: number;
+  contentLength?: number;
+}
 
 export interface AppPreferences {
   serverUrl: string;

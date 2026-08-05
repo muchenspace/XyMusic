@@ -229,14 +229,14 @@ class LocalApi:
 
         if method == "POST" and re.fullmatch(r"/api/v1/tracks/track-\d+/playback", path):
             body = self._json_body(request, "playback grant")
-            if body.get("preferredQuality") != "AUTO" or body.get("acceptedCodecs") != ["aac", "mp3", "flac", "opus"]:
+            if body.get("preferredQuality") != "STANDARD" or body.get("acceptedCodecs") != ["aac", "mp3", "flac", "opus"]:
                 self.contract_failures.append("Playback grant request did not contain the expected quality and codecs")
             self._json(
                 route,
                 {
                     "url": "/api/v1/oss/perf.wav",
                     "expiresAt": "2099-01-01T00:00:00.000Z",
-                    "selectedQuality": "AUTO",
+                    "selectedQuality": "STANDARD",
                 },
             )
             return

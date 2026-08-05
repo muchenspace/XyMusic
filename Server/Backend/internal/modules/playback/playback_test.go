@@ -9,14 +9,17 @@ func TestSelectVariant(t *testing.T) {
 		{ID: "data", Quality: "DATA_SAVER", Bitrate: 64000},
 		{ID: "high", Quality: "HIGH", Bitrate: 320000},
 	}
-	if got := SelectVariant(variants, QualityAuto); got == nil || got.ID != "lossless" {
-		t.Fatalf("AUTO = %#v", got)
+	if got := SelectVariant(variants, QualityLossless); got == nil || got.ID != "lossless" {
+		t.Fatalf("LOSSLESS = %#v", got)
 	}
 	if got := SelectVariant(variants, QualityStandard); got == nil || got.ID != "standard" {
 		t.Fatalf("STANDARD = %#v", got)
 	}
 	if got := SelectVariant(variants[:1], QualityDataSaver); got == nil || got.ID != "lossless" {
 		t.Fatalf("fallback = %#v", got)
+	}
+	if got := SelectVariant(variants, PreferredQuality("AUTO")); got != nil {
+		t.Fatalf("invalid AUTO preference selected %#v", got)
 	}
 }
 

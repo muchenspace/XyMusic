@@ -17,6 +17,7 @@ import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.SessionIdentityProvider
 import com.xymusic.app.core.session.SessionMutationCoordinator
 import com.xymusic.app.domain.settings.AppSettingsRepository
+import com.xymusic.app.feature.player.data.quality.AutomaticQualityTransferListener
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.TreeSet
@@ -245,11 +246,13 @@ fun playbackDataSourceFactory(
     sessionProvider: AppSessionProvider,
     sessionIdentityProvider: SessionIdentityProvider,
     sessionMutationCoordinator: SessionMutationCoordinator,
+    automaticQualityTransferListener: AutomaticQualityTransferListener,
 ): DataSource.Factory {
     val networkFactory =
         PolicyEnforcingDataSourceFactory(
             OkHttpDataSource.Factory(mediaHttpClient),
             networkPolicy,
+            listOf(automaticQualityTransferListener),
         )
     val onlineFactory =
         deferredCacheDataSourceFactory(
