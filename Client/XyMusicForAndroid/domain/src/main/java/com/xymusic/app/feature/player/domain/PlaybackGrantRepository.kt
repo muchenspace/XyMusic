@@ -5,7 +5,7 @@ import com.xymusic.app.feature.player.domain.model.PreferredQuality
 interface PlaybackGrantRepository {
     suspend fun get(
         trackId: String,
-        preferredQuality: PreferredQuality = PreferredQuality.AUTO,
+        preferredQuality: PreferredQuality = PreferredQuality.STANDARD,
         acceptedCodecs: List<String> = emptyList(),
         forceRefresh: Boolean = false,
     ): PlayerResult<PlaybackGrant>

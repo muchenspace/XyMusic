@@ -1,10 +1,12 @@
-import type { PlaybackGrant, PlaybackQuality } from "../../domain/music";
+import type { ConcretePlaybackQuality, PlaybackGrant } from "../../domain/music";
 import type { PlaybackUseCases } from "../use-cases/PlaybackUseCases";
 
 interface CachedGrant {
   url: string;
   expiresAt: string;
-  selectedQuality: string;
+  selectedQuality: ConcretePlaybackQuality;
+  bitrate?: number;
+  contentLength?: number;
 }
 
 export interface PlaybackGrantResolution {
@@ -23,17 +25,17 @@ export class PlaybackGrantCache {
     if (!Number.isInteger(maxEntries) || maxEntries < 1) throw new Error("Playback grant cache size must be positive");
   }
 
-  async get(trackId: string, quality: PlaybackQuality, signal?: AbortSignal, force = false): Promise<CachedGrant> {
+  async get(trackId: string, quality: ConcretePlaybackQuality, signal?: AbortSignal, force = false): Promise<CachedGrant> {
     return (await this.resolve(trackId, quality, signal, force)).grant;
   }
 
-  async getForResume(trackId: string, quality: PlaybackQuality, signal?: AbortSignal): Promise<PlaybackGrantResolution> {
+  async getForResume(trackId: string, quality: ConcretePlaybackQuality, signal?: AbortSignal): Promise<PlaybackGrantResolution> {
     return this.resolve(trackId, quality, signal, false);
   }
 
   private async resolve(
     trackId: string,
-    quality: PlaybackQuality,
+    quality: ConcretePlaybackQuality,
     signal?: AbortSignal,
     force = false,
   ): Promise<PlaybackGrantResolution> {
@@ -57,7 +59,7 @@ export class PlaybackGrantCache {
     return { grant, refreshed: true };
   }
 
-  invalidate(trackId: string, quality: PlaybackQuality): void {
+  invalidate(trackId: string, quality: ConcretePlaybackQuality): void {
     this.grants.delete(cacheKey(trackId, quality));
   }
 
@@ -67,7 +69,7 @@ export class PlaybackGrantCache {
   }
 }
 
-function cacheKey(trackId: string, quality: PlaybackQuality): string {
+function cacheKey(trackId: string, quality: ConcretePlaybackQuality): string {
   return `${trackId}:${quality}`;
 }
 

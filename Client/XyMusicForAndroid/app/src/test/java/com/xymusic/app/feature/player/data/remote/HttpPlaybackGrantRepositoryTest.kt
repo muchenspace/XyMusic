@@ -11,6 +11,7 @@ import com.xymusic.app.domain.settings.AppSettings
 import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.feature.player.data.media.InMemoryPlaybackGrantStore
 import com.xymusic.app.feature.player.data.media.PlaybackGrantKey
+import com.xymusic.app.feature.player.data.quality.AutomaticPlaybackQualityController
 import com.xymusic.app.feature.player.domain.PlayerResult
 import com.xymusic.app.feature.player.domain.model.PreferredQuality
 import com.xymusic.app.support.InMemoryServerConfigRepository
@@ -34,6 +35,22 @@ import retrofit2.Response
 @OptIn(ExperimentalCoroutinesApi::class)
 class HttpPlaybackGrantRepositoryTest {
     @Test
+    fun defaultAutoQualityUsesStandardForTheFirstGrantRequest() = runTest {
+        val api = RecordingPlaybackApi()
+
+        val result =
+            repository(api).get(
+                "00000000-0000-0000-0000-000000000001",
+                PreferredQuality.LOSSLESS,
+                emptyList(),
+                forceRefresh = true,
+            )
+
+        assertThat(result).isInstanceOf(PlayerResult.Success::class.java)
+        assertThat(api.lastRequest?.preferredQuality).isEqualTo(PreferredQuality.STANDARD.name)
+    }
+
+    @Test
     fun configuredStreamingQualityOverridesCallerPreferenceInGrantRequest() = runTest {
         val api = RecordingPlaybackApi()
         val settings = FakeAppSettingsRepository().apply {
@@ -43,7 +60,7 @@ class HttpPlaybackGrantRepositoryTest {
         }
         val result = repository(api, settingsRepository = settings).get(
             "00000000-0000-0000-0000-000000000001",
-            PreferredQuality.AUTO,
+            PreferredQuality.STANDARD,
             emptyList(),
             forceRefresh = true,
         )
@@ -163,11 +180,11 @@ class HttpPlaybackGrantRepositoryTest {
 
         val first =
             async {
-                repository.get(firstTrackId, PreferredQuality.AUTO, emptyList(), forceRefresh = true)
+                repository.get(firstTrackId, PreferredQuality.STANDARD, emptyList(), forceRefresh = true)
             }
         val second =
             async {
-                repository.get(secondTrackId, PreferredQuality.AUTO, emptyList(), forceRefresh = true)
+                repository.get(secondTrackId, PreferredQuality.STANDARD, emptyList(), forceRefresh = true)
             }
         runCurrent()
 
@@ -185,7 +202,7 @@ class HttpPlaybackGrantRepositoryTest {
         val repository = repository(api, store)
         val request =
             async {
-                repository.get(trackId, PreferredQuality.AUTO, emptyList(), forceRefresh = true)
+                repository.get(trackId, PreferredQuality.STANDARD, emptyList(), forceRefresh = true)
             }
         runCurrent()
         assertThat(api.startedTrackIds).containsExactly(trackId)
@@ -197,7 +214,7 @@ class HttpPlaybackGrantRepositoryTest {
         val retry =
             repository.get(
                 trackId,
-                PreferredQuality.AUTO,
+                PreferredQuality.STANDARD,
                 emptyList(),
                 forceRefresh = false,
             )
@@ -213,7 +230,7 @@ class HttpPlaybackGrantRepositoryTest {
         val result =
             repository(api).get(
                 "00000000-0000-0000-0000-000000000001",
-                PreferredQuality.AUTO,
+                PreferredQuality.STANDARD,
                 emptyList(),
                 forceRefresh = true,
             )
@@ -229,7 +246,7 @@ class HttpPlaybackGrantRepositoryTest {
         val result =
             repository(api, serverBaseUrl = "http://music.example/").get(
                 "00000000-0000-0000-0000-000000000001",
-                PreferredQuality.AUTO,
+                PreferredQuality.STANDARD,
                 emptyList(),
                 forceRefresh = true,
             )
@@ -315,7 +332,7 @@ class HttpPlaybackGrantRepositoryTest {
         val repository = repository(api, sessionIdentityProvider = identities)
         val request =
             async {
-                repository.get(trackId, PreferredQuality.AUTO, emptyList(), forceRefresh = true)
+                repository.get(trackId, PreferredQuality.STANDARD, emptyList(), forceRefresh = true)
             }
         runCurrent()
 
@@ -327,7 +344,7 @@ class HttpPlaybackGrantRepositoryTest {
 
         assertThat(request.await()).isInstanceOf(PlayerResult.Failure::class.java)
         assertThat(
-            repository.get(trackId, PreferredQuality.AUTO, emptyList(), forceRefresh = false),
+            repository.get(trackId, PreferredQuality.STANDARD, emptyList(), forceRefresh = false),
         ).isInstanceOf(PlayerResult.Success::class.java)
         assertThat(api.startedTrackIds).containsExactly(trackId, trackId).inOrder()
     }
@@ -353,6 +370,7 @@ class HttpPlaybackGrantRepositoryTest {
         ),
         sessionIdentityProvider = sessionIdentityProvider,
         clock = clock,
+        automaticQualityController = AutomaticPlaybackQualityController(),
     )
 
     private fun grantStripe(trackId: String): Int {
@@ -362,7 +380,7 @@ class HttpPlaybackGrantRepositoryTest {
                 sessionId = TEST_IDENTITY.sessionId,
                 serverGeneration = TEST_IDENTITY.serverGeneration.value,
                 trackId = trackId,
-                preferredQuality = PreferredQuality.AUTO,
+                preferredQuality = PreferredQuality.STANDARD,
                 acceptedCodecs = emptyList(),
             )
         return (key.hashCode() and Int.MAX_VALUE) % 32
@@ -435,7 +453,7 @@ private class BlockingPlaybackApi(
                 } else {
                     "10000000-0000-0000-0000-000000000002"
                 },
-                selectedQuality = PreferredQuality.AUTO.name,
+                selectedQuality = request.preferredQuality,
                 url = "$grantUrlScheme://music.example/$trackId",
                 expiresAt = grantExpiresAt,
                 mimeType = "audio/mp4",

@@ -1,11 +1,11 @@
 import type { PlaybackEvent, PlaybackRepository } from "../../application/ports/PlaybackRepository";
-import type { PlaybackGrant, PlaybackQuality } from "../../domain/music";
+import type { ConcretePlaybackQuality, PlaybackGrant } from "../../domain/music";
 import { ApiClient } from "../http/ApiClient";
 
 export class HttpPlaybackRepository implements PlaybackRepository {
   constructor(private readonly api: ApiClient) {}
 
-  getPlaybackGrant(trackId: string, quality: PlaybackQuality, signal?: AbortSignal): Promise<PlaybackGrant> {
+  getPlaybackGrant(trackId: string, quality: ConcretePlaybackQuality, signal?: AbortSignal): Promise<PlaybackGrant> {
     return this.api.request(`api/v1/tracks/${encodeURIComponent(trackId)}/playback`, {
       method: "POST",
       body: JSON.stringify({ preferredQuality: quality, acceptedCodecs: ["aac", "mp3", "flac", "opus"] }),

@@ -83,7 +83,7 @@ internal fun isFlacDecoderRendererError(error: PlaybackException): Boolean {
         exoError.rendererFormat?.sampleMimeType == MimeTypes.AUDIO_FLAC
 }
 
-private fun MediaItem.playbackTrackId(): String? {
+internal fun MediaItem.playbackTrackId(): String? {
     val metadataTrackId =
         mediaMetadata.extras
             ?.getString(PlaybackMediaMetadata.EXTRA_TRACK_ID)

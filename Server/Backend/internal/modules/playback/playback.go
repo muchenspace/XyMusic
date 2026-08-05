@@ -17,7 +17,6 @@ import (
 type PreferredQuality string
 
 const (
-	QualityAuto      PreferredQuality = "AUTO"
 	QualityDataSaver PreferredQuality = "DATA_SAVER"
 	QualityStandard  PreferredQuality = "STANDARD"
 	QualityHigh      PreferredQuality = "HIGH"
@@ -193,10 +192,6 @@ func SelectVariant(variants []Variant, preferred PreferredQuality) *Variant {
 		}
 		return ordered[left].Bitrate < ordered[right].Bitrate
 	})
-	if preferred == QualityAuto {
-		selected := ordered[len(ordered)-1]
-		return &selected
-	}
 	maximum, ok := qualityRanks[preferred]
 	if !ok {
 		return nil
@@ -238,7 +233,7 @@ func qualityRank(value string) int {
 	return -1
 }
 
-var qualityRanks = map[PreferredQuality]int{QualityAuto: 4, QualityDataSaver: 0, QualityStandard: 1, QualityHigh: 2, QualityLossless: 3}
+var qualityRanks = map[PreferredQuality]int{QualityDataSaver: 0, QualityStandard: 1, QualityHigh: 2, QualityLossless: 3}
 
 func formatTime(value time.Time) string {
 	return value.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")

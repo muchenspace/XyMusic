@@ -323,7 +323,7 @@ class Media3OfflineTrackRepositoryTest {
         fun grant(trackId: String) = PlaybackGrant(
             trackId = trackId,
             variantId = "variant-$trackId",
-            selectedQuality = PreferredQuality.AUTO,
+            selectedQuality = PreferredQuality.STANDARD,
             signedUrl = "https://media.example/$trackId",
             expiresAtEpochMillis = Long.MAX_VALUE,
             mimeType = "audio/mpeg",

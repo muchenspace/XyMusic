@@ -11,6 +11,7 @@ import androidx.media3.datasource.TransferListener
 import com.xymusic.app.core.common.IoDispatcher
 import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.domain.settings.MobileDataPolicy
+import com.xymusic.app.feature.player.domain.AutomaticPlaybackQualityPolicy
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.IOException
 import javax.inject.Inject
@@ -19,7 +20,6 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 @Singleton
@@ -29,6 +29,7 @@ constructor(
     @ApplicationContext context: Context,
     settingsRepository: AppSettingsRepository,
     @IoDispatcher ioDispatcher: CoroutineDispatcher,
+    private val automaticQualityController: AutomaticPlaybackQualityPolicy,
 ) {
     private val connectivityManager =
         context.getSystemService(ConnectivityManager::class.java)
@@ -43,7 +44,11 @@ constructor(
     private val networkCallback =
         object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
+                val previousNetwork = activeNetworkState?.network
                 activeNetworkState = connectivityManager.snapshotNetwork(network)
+                if (previousNetwork != null && previousNetwork != network) {
+                    automaticQualityController.resetNetworkEstimate()
+                }
             }
 
             override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
@@ -59,6 +64,7 @@ constructor(
             override fun onLost(network: Network) {
                 if (activeNetworkState?.network == network) {
                     activeNetworkState = ActiveNetworkState(network = null, isMetered = true)
+                    automaticQualityController.resetNetworkEstimate()
                 }
             }
         }
@@ -67,9 +73,11 @@ constructor(
         connectivityManager.registerDefaultNetworkCallback(networkCallback)
         scope.launch {
             settingsRepository.settings
-                .map { settings -> settings.mobileDataPolicy }
                 .distinctUntilChanged()
-                .collect { policy -> mobileDataPolicy = policy }
+                .collect { settings ->
+                    mobileDataPolicy = settings.mobileDataPolicy
+                    automaticQualityController.updateStreamingPreference(settings.streamingQuality)
+                }
         }
     }
 
@@ -100,9 +108,10 @@ internal fun isStreamingAllowed(policy: MobileDataPolicy?, isActiveNetworkMetere
 class PolicyEnforcingDataSourceFactory(
     private val delegate: DataSource.Factory,
     private val networkPolicy: PlaybackNetworkPolicy,
+    private val transferListeners: List<TransferListener> = emptyList(),
 ) : DataSource.Factory {
     override fun createDataSource(): DataSource = PolicyEnforcingDataSource(
-        delegate.createDataSource(),
+        delegate.createDataSource().also { source -> transferListeners.forEach(source::addTransferListener) },
         networkPolicy::requireStreamingAllowed,
     )
 }

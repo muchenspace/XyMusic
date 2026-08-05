@@ -19,6 +19,7 @@ import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.domain.server.ServerConfigRepository
 import com.xymusic.app.feature.player.adapter.media3.PlaybackDataSourceFactory
 import com.xymusic.app.feature.player.adapter.media3.PlaybackSessionCommands
+import com.xymusic.app.feature.player.domain.AutomaticPlaybackQualityPolicy
 import com.xymusic.app.feature.player.domain.PlaybackEventSink
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
 import com.xymusic.app.feature.player.domain.PlaybackQueueStore
@@ -58,6 +59,9 @@ class PlaybackService : MediaSessionService() {
     @Inject
     lateinit var clock: Clock
 
+    @Inject
+    lateinit var automaticQualityController: AutomaticPlaybackQualityPolicy
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val initialSessionReady = CompletableDeferred<Unit>()
 
@@ -66,6 +70,7 @@ class PlaybackService : MediaSessionService() {
     private lateinit var persistenceController: PlaybackPersistenceController
     private lateinit var sleepTimerController: PlaybackSleepTimerController
     private lateinit var codecFallbackController: PlaybackCodecFallbackController
+    private lateinit var automaticQualityPlaybackController: AutomaticQualityPlaybackController
 
     override fun onCreate() {
         super.onCreate()
@@ -109,6 +114,13 @@ class PlaybackService : MediaSessionService() {
                 },
             )
         player.addListener(codecFallbackController)
+        automaticQualityPlaybackController =
+            AutomaticQualityPlaybackController(
+                player = player,
+                grantRepository = grantRepository,
+                qualityController = automaticQualityController,
+            )
+        player.addListener(automaticQualityPlaybackController)
 
         setMediaNotificationProvider(
             DefaultMediaNotificationProvider(this).apply {
@@ -149,6 +161,9 @@ class PlaybackService : MediaSessionService() {
         serviceScope.cancel()
         if (::codecFallbackController.isInitialized && ::player.isInitialized) {
             player.removeListener(codecFallbackController)
+        }
+        if (::automaticQualityPlaybackController.isInitialized && ::player.isInitialized) {
+            player.removeListener(automaticQualityPlaybackController)
         }
         if (::mediaSession.isInitialized) mediaSession.release()
         if (::player.isInitialized) player.release()
@@ -198,11 +213,13 @@ class PlaybackService : MediaSessionService() {
             AppSessionState.Loading -> Unit
             AppSessionState.SignedOut -> {
                 codecFallbackController.resetForAccountChange()
+                automaticQualityPlaybackController.resetForAccountChange()
                 persistenceController.clearForAccountChange(null)
             }
             is AppSessionState.SignedIn -> {
                 if (persistenceController.isActiveUser(state.userId)) return
                 codecFallbackController.resetForAccountChange()
+                automaticQualityPlaybackController.resetForAccountChange()
                 persistenceController.clearForAccountChange(state.userId)
                 persistenceController.restoreQueue()
             }

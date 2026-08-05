@@ -7,9 +7,9 @@ import com.xymusic.app.data.network.ProblemResponseParser
 import com.xymusic.app.domain.server.ServerConfigRepository
 import com.xymusic.app.domain.server.ServerProtocol
 import com.xymusic.app.domain.settings.AppSettingsRepository
-import com.xymusic.app.domain.settings.StreamingQuality
 import com.xymusic.app.feature.player.data.media.PlaybackGrantKey
 import com.xymusic.app.feature.player.data.media.PlaybackGrantStore
+import com.xymusic.app.feature.player.domain.AutomaticPlaybackQualityPolicy
 import com.xymusic.app.feature.player.domain.PlaybackGrant
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
 import com.xymusic.app.feature.player.domain.PlayerResult
@@ -38,6 +38,7 @@ constructor(
     private val serverConfigRepository: ServerConfigRepository,
     private val sessionIdentityProvider: SessionIdentityProvider,
     private val clock: ServerSynchronizedClock,
+    private val automaticQualityController: AutomaticPlaybackQualityPolicy,
 ) : PlaybackGrantRepository {
     private val grantMutexes = Array(GRANT_MUTEX_COUNT) { Mutex() }
     private val storeLock = Any()
@@ -64,13 +65,16 @@ constructor(
         acceptedCodecs: List<String>,
         forceRefresh: Boolean,
     ): PlayerResult<PlaybackGrant> {
-        val effectiveQuality = resolveEffectiveQuality(preferredQuality)
         var resolved: PlayerResult<PlaybackGrant>? = null
+        var effectiveQuality: PreferredQuality? = null
         while (resolved == null && isCurrentIdentity(identity) && prepareStoreFor(identity)) {
+            val quality = effectiveQuality ?: resolveEffectiveQuality(trackId, preferredQuality).also {
+                effectiveQuality = it
+            }
             val policy = requestPolicy(trackId, acceptedCodecs)
             val key =
                 runCatching {
-                    requestKey(identity, trackId, effectiveQuality, policy.acceptedCodecs)
+                    requestKey(identity, trackId, quality, policy.acceptedCodecs)
                 }.getOrNull()
             if (key == null) {
                 resolved = PlayerResult.Failure(PlayerFailure.PlaybackUnavailable)
@@ -87,7 +91,7 @@ constructor(
                             getLocked(
                                 identity = identity,
                                 trackId = trackId,
-                                effectiveQuality = effectiveQuality,
+                                effectiveQuality = quality,
                                 key = key,
                                 expectedGeneration = policy.generation,
                                 forceRefresh = forceRefresh,
@@ -98,15 +102,18 @@ constructor(
         return resolved ?: PlayerResult.Failure(PlayerFailure.PlaybackUnavailable)
     }
 
-    private suspend fun resolveEffectiveQuality(preferredQuality: PreferredQuality): PreferredQuality = try {
-        settingsRepository.settings
-            .first()
-            .streamingQuality
-            .toPreferredQuality()
+    private suspend fun resolveEffectiveQuality(
+        trackId: String,
+        preferredQuality: PreferredQuality,
+    ): PreferredQuality = try {
+        automaticQualityController.resolveTrackQuality(
+            trackId,
+            settingsRepository.settings.first().streamingQuality,
+        )
     } catch (failure: CancellationException) {
         throw failure
     } catch (_: Exception) {
-        preferredQuality
+        automaticQualityController.lockConcreteQuality(trackId, preferredQuality)
     }
 
     private suspend fun getLocked(
@@ -165,6 +172,7 @@ constructor(
                     serverConfigRepository.currentEndpoint()?.protocol ==
                         ServerProtocol.HTTP,
                 )
+            automaticQualityController.recordSelectedQuality(trackId, grant.selectedQuality)
             if (storeGrant(identity, key, grant, requestGeneration)) {
                 PlayerResult.Success(grant)
             } else {
@@ -219,10 +227,12 @@ constructor(
             compatibleCodecFallbackTrackIds.clear()
             store.clear()
         }
+        automaticQualityController.resetSession()
     }
 
     private fun prepareStoreFor(identity: ActiveSessionIdentity): Boolean {
-        synchronized(storeLock) {
+        var resetAutomaticQuality = false
+        val prepared = synchronized(storeLock) {
             if (!isCurrentIdentity(identity)) return false
             if (storeIdentity == identity) return true
             val previousIdentity = storeIdentity
@@ -230,8 +240,11 @@ constructor(
             storeIdentity = identity
             if (previousIdentity != null) compatibleCodecFallbackTrackIds.clear()
             store.clear()
-            return true
+            resetAutomaticQuality = true
+            true
         }
+        if (resetAutomaticQuality) automaticQualityController.resetSession()
+        return prepared
     }
 
     private fun requestPolicy(trackId: String, requestedCodecs: List<String>): PlaybackGrantRequestPolicy =
@@ -289,8 +302,6 @@ constructor(
 
     private fun isCurrentIdentity(expected: ActiveSessionIdentity): Boolean =
         sessionIdentityProvider.activeIdentity() == expected
-
-    private fun StreamingQuality.toPreferredQuality(): PreferredQuality = PreferredQuality.valueOf(name)
 
     private fun grantMutex(key: PlaybackGrantKey): Mutex =
         grantMutexes[(key.hashCode() and Int.MAX_VALUE) % grantMutexes.size]

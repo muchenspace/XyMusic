@@ -52,7 +52,6 @@ enum class RepeatMode {
 }
 
 enum class PreferredQuality {
-    AUTO,
     DATA_SAVER,
     STANDARD,
     HIGH,

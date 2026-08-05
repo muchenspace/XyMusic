@@ -66,7 +66,7 @@ func (routes *Routes) createGrant(c *gin.Context) error {
 }
 
 func validQuality(value PreferredQuality) bool {
-	return value == QualityAuto || value == QualityDataSaver || value == QualityStandard || value == QualityHigh || value == QualityLossless
+	return value == QualityDataSaver || value == QualityStandard || value == QualityHigh || value == QualityLossless
 }
 
 func routeValidationError() error { return apperror.Validation("请求参数不符合接口要求") }
