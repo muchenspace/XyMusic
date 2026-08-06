@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, inject, type Ref } from "vue";
+import { computed, inject, ref, type Ref, watch } from "vue";
 import type { LyricLine, LyricTiming } from "../../domain/music";
 import { resolveLyricWordProgress } from "../../domain/lyricsTimeline";
 import { lyricsPlaybackPositionKey } from "./lyricsPlaybackPosition";
 
 const props = defineProps<{
   activeState: Readonly<Ref<boolean>>;
+  outgoingState: Readonly<Ref<boolean>>;
   line: LyricLine;
   offset: number;
   showTranslation: boolean;
@@ -17,11 +18,30 @@ if (!playbackPosition) throw new Error("LyricsLineContent requires a playback po
 
 const EMPTY_WORD_PROGRESS: readonly number[] = [];
 const active = computed(() => props.activeState.value);
+const outgoing = computed(() => props.outgoingState.value);
+const outgoingWordProgresses = ref<readonly number[]>(EMPTY_WORD_PROGRESS);
+
+function wordProgressesAt(playbackTime: number): number[] {
+  return (props.line.words ?? []).map((word) => {
+    const progress = resolveLyricWordProgress(word, playbackTime);
+    if (progress === 0 && word.endTime === undefined && playbackTime > word.time) return 1;
+    return progress;
+  });
+}
+
+watch(outgoing, (isOutgoing) => {
+  outgoingWordProgresses.value = isOutgoing
+    ? wordProgressesAt(playbackPosition.value + props.offset)
+    : EMPTY_WORD_PROGRESS;
+}, { immediate: true });
 
 const wordProgresses = computed(() => {
-  if (!active.value || props.timing !== "WORD" || !props.line.words?.length) return EMPTY_WORD_PROGRESS;
-  const playbackTime = playbackPosition.value + props.offset;
-  return props.line.words.map((word) => resolveLyricWordProgress(word, playbackTime));
+  if (props.timing !== "WORD" || !props.line.words?.length) {
+    return EMPTY_WORD_PROGRESS;
+  }
+  if (outgoing.value && !active.value) return outgoingWordProgresses.value;
+  if (!active.value) return EMPTY_WORD_PROGRESS;
+  return wordProgressesAt(playbackPosition.value + props.offset);
 });
 </script>
 

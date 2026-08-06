@@ -21,7 +21,7 @@ const emit = defineEmits<{ favorite: [track: Track] }>();
 const lyricsStore = useLyricsStore();
 const displayedPlaybackTime = useSmoothLyricsPlaybackPosition({
   currentTime: () => player.currentTime,
-  isPlaying: () => player.isPlaying,
+  isPlaying: () => player.isPlaying && !player.loading,
   isActive: () => player.lyricsOpen,
   renderPlan: (positionSeconds) => {
     const plan = resolveLyricPlaybackRenderPlan(
@@ -43,6 +43,8 @@ const viewElement = ref<HTMLElement | null>(null);
 const lyricsScrollElement = ref<HTMLElement | null>(null);
 const lineElements = ref<Array<HTMLElement | undefined>>([]);
 const lineActiveStates: Ref<boolean>[] = [];
+const lineOutgoingStates: Ref<boolean>[] = [];
+const outgoingHighlightTimers: Array<number | undefined> = [];
 const lyricsMenuElement = ref<HTMLElement | null>(null);
 const lyricsMenu = ref({ open: false, x: 0, y: 0 });
 const activeIndex = ref(-1);
@@ -52,9 +54,12 @@ let lyricsMenuReturnFocus: HTMLElement | null = null;
 let autoFollowPaused = false;
 let autoFollowTimer = 0;
 let lastAutoFollowLineIndex: number | null = null;
-let lastAutoFollowAt = Number.NEGATIVE_INFINITY;
-let rapidAutoFollowTimer = 0;
-let pendingRapidAutoFollowIndex: number | null = null;
+let lyricFollowAnimationFrame: number | null = null;
+let lyricFollowAnimationGeneration = 0;
+let lyricFollowTargetTop: number | null = null;
+let lyricFollowLastFrameAt = 0;
+let pendingSeekAutoFollowSnap = false;
+let pendingSeekAutoFollowSnapTimer = 0;
 let scrollPointerId: number | null = null;
 let scrollPointerStartY = 0;
 let scrollPointerStartTop = 0;
@@ -84,8 +89,10 @@ function toggleMaximizeWindow(): void {
 function updateActivePosition(): void {
   const lyrics = lyricsStore.lyrics;
   if (lyrics !== activeLyrics) {
+    clearOutgoingHighlightTimers();
     lineElements.value = [];
     lineActiveStates.length = 0;
+    lineOutgoingStates.length = 0;
     activeLineIndex = -1;
     activeLyrics = lyrics;
   }
@@ -98,7 +105,12 @@ function updateActivePosition(): void {
 
   const previousActiveLineIndex = activeLineIndex;
   activeLineIndex = nextActiveLineIndex;
-  setLineActive(previousActiveLineIndex, false);
+  if (previousActiveLineIndex >= 0) {
+    setLineActive(previousActiveLineIndex, false);
+    setLineOutgoing(previousActiveLineIndex, true);
+    scheduleOutgoingHighlightClear(previousActiveLineIndex);
+  }
+  setLineOutgoing(nextActiveLineIndex, false);
   setLineActive(nextActiveLineIndex, true);
   setLineElementActivity(lineElements.value[previousActiveLineIndex], false);
   setLineElementActivity(lineElements.value[nextActiveLineIndex], true);
@@ -112,6 +124,15 @@ function activeStateForLine(index: number): Readonly<Ref<boolean>> {
     lineActiveStates[index] = activeState;
   }
   return activeState;
+}
+
+function outgoingStateForLine(index: number): Readonly<Ref<boolean>> {
+  let outgoingState = lineOutgoingStates[index];
+  if (!outgoingState) {
+    outgoingState = ref(false);
+    lineOutgoingStates[index] = outgoingState;
+  }
+  return outgoingState;
 }
 
 function setLineElement(index: number, element: unknown): void {
@@ -128,6 +149,40 @@ function setLineActive(index: number, active: boolean): void {
     lineActiveStates[index] = activeState;
   }
   activeState.value = active;
+}
+
+function setLineOutgoing(index: number, outgoing: boolean): void {
+  if (index < 0) return;
+  let outgoingState = lineOutgoingStates[index];
+  if (!outgoingState) {
+    outgoingState = ref(false);
+    lineOutgoingStates[index] = outgoingState;
+  }
+  outgoingState.value = outgoing;
+  if (!outgoing) clearOutgoingHighlightTimer(index);
+}
+
+function scheduleOutgoingHighlightClear(index: number): void {
+  clearOutgoingHighlightTimer(index);
+  outgoingHighlightTimers[index] = window.setTimeout(() => {
+    outgoingHighlightTimers[index] = undefined;
+    setLineOutgoing(index, false);
+  }, LYRIC_OUTGOING_HIGHLIGHT_DURATION_MS);
+}
+
+function clearOutgoingHighlightTimer(index: number): void {
+  const timer = outgoingHighlightTimers[index];
+  if (timer === undefined) return;
+  window.clearTimeout(timer);
+  outgoingHighlightTimers[index] = undefined;
+}
+
+function clearOutgoingHighlightTimers(): void {
+  outgoingHighlightTimers.forEach((timer, index) => {
+    if (timer !== undefined) window.clearTimeout(timer);
+    outgoingHighlightTimers[index] = undefined;
+  });
+  lineOutgoingStates.forEach((state) => { state.value = false; });
 }
 
 function setLineElementActivity(element: HTMLElement | undefined, active: boolean): void {
@@ -147,62 +202,119 @@ watch(
   { immediate: true },
 );
 
-async function scrollToActiveLine(index = activeIndex.value, forceInstant = false): Promise<void> {
+async function scrollToActiveLine(index = activeIndex.value): Promise<void> {
   if (!player.lyricsOpen || autoFollowPaused || index < 0) return;
   await nextTick();
   if (!player.lyricsOpen || autoFollowPaused || index !== activeIndex.value) return;
+  const scroll = lyricsScrollElement.value;
+  const lineElement = lineElements.value[index];
+  if (!scroll || !lineElement) return;
   const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
   const previousIndex = lastAutoFollowLineIndex;
   const previousTime = previousIndex === null ? null : lyricsStore.lyrics?.lines[previousIndex]?.time ?? null;
   const nextTime = lyricsStore.lyrics?.lines[index]?.time ?? null;
-  const adjacentTime = index > 0 ? lyricsStore.lyrics?.lines[index - 1]?.time ?? null : null;
-  const rapidTransition = previousIndex !== null
-    && previousIndex !== index
-    && previousTime !== null
+  const densePlaybackCatchUp = previousTime !== null
     && nextTime !== null
-    && Math.abs(nextTime - previousTime) < RAPID_AUTO_FOLLOW_LINE_INTERVAL_SECONDS;
-  // A throttled render can advance over several dense lyric lines at once.
-  // The adjacent timestamps retain that density signal after the last rendered
-  // active line is no longer close to the new one.
-  const rapidLineGroup = rapidTransition
-    || (adjacentTime !== null
-      && nextTime !== null
-      && Math.abs(nextTime - adjacentTime) < RAPID_AUTO_FOLLOW_LINE_INTERVAL_SECONDS);
-  const useInstantPositioning = forceInstant || rapidLineGroup;
-  if (rapidLineGroup && !forceInstant) {
-    const elapsed = Date.now() - lastAutoFollowAt;
-    if (elapsed < RAPID_AUTO_FOLLOW_MIN_INTERVAL_MS) {
-      // Dense timestamps can change several times per frame budget; scroll the
-      // newest active line once instead of forcing layout for each transition.
-      queueRapidAutoFollow(index, RAPID_AUTO_FOLLOW_MIN_INTERVAL_MS - elapsed);
-      return;
-    }
+    && Math.abs(nextTime - previousTime) <= DENSE_LYRIC_INTERVAL_SECONDS;
+  const skippedLines = previousIndex !== null && Math.abs(index - previousIndex) > 1;
+  const useInstantPositioning = reducedMotion
+    || previousIndex === null
+    || (skippedLines && !densePlaybackCatchUp)
+    || pendingSeekAutoFollowSnap;
+  const targetTop = centeredLyricScrollTop(scroll, lineElement);
+  clearPendingSeekAutoFollowSnap();
+  if (useInstantPositioning) {
+    cancelLyricFollowAnimation();
+    scroll.scrollTop = targetTop;
+  } else {
+    scheduleLyricFollow(targetTop);
   }
-  cancelRapidAutoFollow();
-  lineElements.value[index]?.scrollIntoView({
-    behavior: reducedMotion || useInstantPositioning ? "auto" : "smooth",
-    block: "center",
-  });
   lastAutoFollowLineIndex = index;
-  lastAutoFollowAt = Date.now();
 }
 
-function queueRapidAutoFollow(index: number, delay: number): void {
-  pendingRapidAutoFollowIndex = index;
-  if (rapidAutoFollowTimer) return;
-  rapidAutoFollowTimer = window.setTimeout(() => {
-    rapidAutoFollowTimer = 0;
-    const pendingIndex = pendingRapidAutoFollowIndex;
-    pendingRapidAutoFollowIndex = null;
-    if (pendingIndex === null || pendingIndex !== activeIndex.value) return;
-    void scrollToActiveLine(pendingIndex, true);
-  }, Math.max(1, Math.ceil(delay)));
+function centeredLyricScrollTop(scroll: HTMLElement, lineElement: HTMLElement): number {
+  const scrollRect = scroll.getBoundingClientRect();
+  const lineRect = lineElement.getBoundingClientRect();
+  const target = scroll.scrollTop
+    + (lineRect.top - scrollRect.top)
+    - (scroll.clientHeight - lineRect.height) / 2;
+  const maximum = Math.max(0, scroll.scrollHeight - scroll.clientHeight);
+  return Math.max(0, Math.min(maximum, target));
 }
 
-function cancelRapidAutoFollow(): void {
-  if (rapidAutoFollowTimer) window.clearTimeout(rapidAutoFollowTimer);
-  rapidAutoFollowTimer = 0;
-  pendingRapidAutoFollowIndex = null;
+function scheduleLyricFollow(targetTop: number): void {
+  lyricFollowTargetTop = targetTop;
+  if (lyricFollowAnimationFrame !== null) return;
+  const generation = ++lyricFollowAnimationGeneration;
+  lyricFollowLastFrameAt = 0;
+  lyricFollowAnimationFrame = requestLyricFollowFrame((timestamp) => {
+    runLyricFollowFrame(generation, timestamp);
+  });
+}
+
+function runLyricFollowFrame(generation: number, timestamp: number): void {
+  if (generation !== lyricFollowAnimationGeneration) return;
+  lyricFollowAnimationFrame = null;
+  const scroll = lyricsScrollElement.value;
+  const targetTop = lyricFollowTargetTop;
+  if (!scroll || targetTop === null) {
+    lyricFollowTargetTop = null;
+    lyricFollowLastFrameAt = 0;
+    return;
+  }
+
+  const elapsed = lyricFollowLastFrameAt === 0
+    ? LYRIC_FOLLOW_FRAME_INTERVAL_MS
+    : Math.min(50, Math.max(8, timestamp - lyricFollowLastFrameAt));
+  lyricFollowLastFrameAt = timestamp;
+  const remaining = targetTop - scroll.scrollTop;
+  if (Math.abs(remaining) <= LYRIC_FOLLOW_SETTLE_EPSILON_PX) {
+    scroll.scrollTop = targetTop;
+    lyricFollowTargetTop = null;
+    lyricFollowLastFrameAt = 0;
+    return;
+  }
+
+  const response = 1 - Math.exp(-elapsed / LYRIC_FOLLOW_RESPONSE_MS);
+  scroll.scrollTop += remaining * response;
+  lyricFollowAnimationFrame = requestLyricFollowFrame((nextTimestamp) => {
+    runLyricFollowFrame(generation, nextTimestamp);
+  });
+}
+
+function cancelLyricFollowAnimation(): void {
+  lyricFollowAnimationGeneration += 1;
+  if (lyricFollowAnimationFrame !== null) {
+    cancelLyricFollowFrame(lyricFollowAnimationFrame);
+    lyricFollowAnimationFrame = null;
+  }
+  lyricFollowTargetTop = null;
+  lyricFollowLastFrameAt = 0;
+}
+
+function requestLyricFollowFrame(callback: FrameRequestCallback): number {
+  if (typeof window.requestAnimationFrame === "function") return window.requestAnimationFrame(callback);
+  return window.setTimeout(() => callback(monotonicNow()), LYRIC_FOLLOW_FRAME_INTERVAL_MS);
+}
+
+function cancelLyricFollowFrame(handle: number): void {
+  if (typeof window.cancelAnimationFrame === "function") window.cancelAnimationFrame(handle);
+  else window.clearTimeout(handle);
+}
+
+function markSeekForAutoFollow(): void {
+  pendingSeekAutoFollowSnap = true;
+  window.clearTimeout(pendingSeekAutoFollowSnapTimer);
+  pendingSeekAutoFollowSnapTimer = window.setTimeout(() => {
+    pendingSeekAutoFollowSnap = false;
+    pendingSeekAutoFollowSnapTimer = 0;
+  }, SEEK_AUTO_FOLLOW_SNAP_EXPIRY_MS);
+}
+
+function clearPendingSeekAutoFollowSnap(): void {
+  pendingSeekAutoFollowSnap = false;
+  window.clearTimeout(pendingSeekAutoFollowSnapTimer);
+  pendingSeekAutoFollowSnapTimer = 0;
 }
 
 watch([activeIndex, () => player.lyricsOpen], ([index, open]) => {
@@ -230,7 +342,10 @@ function seek(line: LyricLine, event: MouseEvent) {
     event.stopPropagation();
     return;
   }
-  if (line.time !== null) player.seekTo(line.time - lyricsStore.offset);
+  if (line.time !== null) {
+    markSeekForAutoFollow();
+    player.seekTo(line.time - lyricsStore.offset);
+  }
 }
 
 function closeOnEscape(event: KeyboardEvent) {
@@ -313,7 +428,7 @@ function closeLyricsMenuOnResize(): void {
 function pauseAutoFollow(): void {
   autoFollowPaused = true;
   window.clearTimeout(autoFollowTimer);
-  cancelRapidAutoFollow();
+  cancelLyricFollowAnimation();
   autoFollowTimer = window.setTimeout(() => {
     autoFollowTimer = 0;
     autoFollowPaused = false;
@@ -334,7 +449,8 @@ function handleLyricsWheel(event: WheelEvent): void {
 function resetAutoFollow(): void {
   window.clearTimeout(autoFollowTimer);
   window.clearTimeout(suppressClickTimer);
-  cancelRapidAutoFollow();
+  cancelLyricFollowAnimation();
+  clearPendingSeekAutoFollowSnap();
   cancelPendingManualScrollFrame();
   detachManualScrollListeners();
   if (scrollPointerCaptured && scrollPointerId !== null) {
@@ -348,7 +464,6 @@ function resetAutoFollow(): void {
   suppressClickTimer = 0;
   autoFollowPaused = false;
   lastAutoFollowLineIndex = null;
-  lastAutoFollowAt = Number.NEGATIVE_INFINITY;
   scrollPointerId = null;
   scrollPointerMoved = false;
   scrollPointerCaptured = false;
@@ -451,13 +566,23 @@ onBeforeUnmount(() => {
   window.removeEventListener("pointerdown", closeLyricsMenuFromOutside);
   window.removeEventListener("resize", closeLyricsMenuOnResize);
   resetAutoFollow();
+  clearOutgoingHighlightTimers();
   previouslyFocused?.focus();
 });
 
 const AUTO_FOLLOW_RESUME_MS = 4_000;
 const DRAG_THRESHOLD_PX = 4;
-const RAPID_AUTO_FOLLOW_LINE_INTERVAL_SECONDS = 0.25;
-const RAPID_AUTO_FOLLOW_MIN_INTERVAL_MS = 160;
+const DENSE_LYRIC_INTERVAL_SECONDS = 0.45;
+const LYRIC_FOLLOW_FRAME_INTERVAL_MS = 16;
+const LYRIC_FOLLOW_RESPONSE_MS = 180;
+const LYRIC_FOLLOW_SETTLE_EPSILON_PX = 0.5;
+const LYRIC_OUTGOING_HIGHLIGHT_DURATION_MS = 240;
+const SEEK_AUTO_FOLLOW_SNAP_EXPIRY_MS = 1_000;
+
+function monotonicNow(): number {
+  const timestamp = typeof performance !== "undefined" ? performance.now() : Date.now();
+  return Number.isFinite(timestamp) ? timestamp : Date.now();
+}
 </script>
 
 <template>
@@ -504,6 +629,7 @@ const RAPID_AUTO_FOLLOW_MIN_INTERVAL_MS = 160;
           >
             <LyricsLineContent
               :active-state="activeStateForLine(index)"
+              :outgoing-state="outgoingStateForLine(index)"
               :line="line"
               :offset="lyricsStore.offset"
               :show-translation="lyricsStore.showTranslation"
