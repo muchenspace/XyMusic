@@ -258,7 +258,6 @@ constructor(
     override suspend fun setRepeatMode(mode: RepeatMode): PlayerResult<Unit> = withController {
         it.repeatMode =
             when (mode) {
-                RepeatMode.OFF -> Player.REPEAT_MODE_OFF
                 RepeatMode.ONE -> Player.REPEAT_MODE_ONE
                 RepeatMode.ALL -> Player.REPEAT_MODE_ALL
             }
@@ -413,8 +412,7 @@ constructor(
                 repeatMode =
                 when (player.repeatMode) {
                     Player.REPEAT_MODE_ONE -> RepeatMode.ONE
-                    Player.REPEAT_MODE_ALL -> RepeatMode.ALL
-                    else -> RepeatMode.OFF
+                    else -> RepeatMode.ALL
                 },
                 shuffleEnabled = player.shuffleModeEnabled,
                 playbackSpeed = player.playbackParameters.speed,

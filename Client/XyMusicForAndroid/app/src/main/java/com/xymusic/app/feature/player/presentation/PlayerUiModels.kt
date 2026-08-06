@@ -79,20 +79,18 @@ internal enum class PlayerPlaybackMode {
     RepeatOne,
 }
 
-internal val PlayerState.playbackMode: PlayerPlaybackMode?
+internal val PlayerState.playbackMode: PlayerPlaybackMode
     get() =
         when {
             shuffleEnabled -> PlayerPlaybackMode.Shuffle
-            repeatMode == RepeatMode.ALL -> PlayerPlaybackMode.RepeatAll
             repeatMode == RepeatMode.ONE -> PlayerPlaybackMode.RepeatOne
-            else -> null
+            else -> PlayerPlaybackMode.RepeatAll
         }
 
 internal fun PlayerState.nextPlaybackMode(): PlayerPlaybackMode = when (playbackMode) {
-    null -> PlayerPlaybackMode.Shuffle
-    PlayerPlaybackMode.Shuffle -> PlayerPlaybackMode.RepeatAll
     PlayerPlaybackMode.RepeatAll -> PlayerPlaybackMode.RepeatOne
     PlayerPlaybackMode.RepeatOne -> PlayerPlaybackMode.Shuffle
+    PlayerPlaybackMode.Shuffle -> PlayerPlaybackMode.RepeatAll
 }
 
 internal val PlayerPrimaryContent: Color

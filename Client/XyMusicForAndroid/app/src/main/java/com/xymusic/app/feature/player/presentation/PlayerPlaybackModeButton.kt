@@ -92,9 +92,12 @@ internal fun PlayerPlaybackModeButton(
 
 private data class PlaybackModeVisual(val icon: ImageVector, @StringRes val labelRes: Int)
 
-private fun playbackModeVisual(shuffleEnabled: Boolean, repeatMode: RepeatMode): PlaybackModeVisual = when {
-    shuffleEnabled -> PlaybackModeVisual(Icons.Default.Shuffle, R.string.player_shuffle)
-    repeatMode == RepeatMode.ONE -> PlaybackModeVisual(Icons.Default.RepeatOne, R.string.player_repeat_one)
-    repeatMode == RepeatMode.ALL -> PlaybackModeVisual(Icons.Default.Repeat, R.string.player_repeat_all)
-    else -> PlaybackModeVisual(Icons.Default.Repeat, R.string.player_repeat_off)
-}
+private fun playbackModeVisual(shuffleEnabled: Boolean, repeatMode: RepeatMode): PlaybackModeVisual =
+    if (shuffleEnabled) {
+        PlaybackModeVisual(Icons.Default.Shuffle, R.string.player_shuffle)
+    } else {
+        when (repeatMode) {
+            RepeatMode.ONE -> PlaybackModeVisual(Icons.Default.RepeatOne, R.string.player_repeat_one)
+            RepeatMode.ALL -> PlaybackModeVisual(Icons.Default.Repeat, R.string.player_repeat_all)
+        }
+    }

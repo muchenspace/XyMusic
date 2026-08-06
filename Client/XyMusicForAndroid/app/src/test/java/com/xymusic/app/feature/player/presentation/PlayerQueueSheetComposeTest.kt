@@ -87,7 +87,7 @@ class PlayerQueueSheetComposeTest {
                     ),
                     currentQueueItemId = "queue-1",
                     shuffleEnabled = false,
-                    repeatMode = RepeatMode.OFF,
+                    repeatMode = RepeatMode.ALL,
                     onCyclePlaybackMode = onCyclePlaybackMode,
                     onSelect = {},
                     onRemove = {},

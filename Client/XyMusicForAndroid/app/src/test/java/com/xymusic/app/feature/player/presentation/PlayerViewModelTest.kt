@@ -230,7 +230,7 @@ class PlayerViewModelTest {
     }
 
     @Test
-    fun playbackModeCyclesThroughShuffleRepeatAllAndRepeatOne() = runTest {
+    fun playbackModeCyclesThroughRepeatAllRepeatOneAndShuffle() = runTest {
         val player = FakePlayerRepository(PlayerState())
         val viewModel =
             PlayerViewModel(
@@ -242,13 +242,6 @@ class PlayerViewModelTest {
         backgroundScope.launch { viewModel.uiState.collect() }
         runCurrent()
 
-        viewModel.cyclePlaybackMode()
-        advanceUntilIdle()
-        assertThat(player.state.value.shuffleEnabled).isTrue()
-        assertThat(player.state.value.repeatMode).isEqualTo(RepeatMode.ALL)
-
-        viewModel.cyclePlaybackMode()
-        advanceUntilIdle()
         assertThat(player.state.value.shuffleEnabled).isFalse()
         assertThat(player.state.value.repeatMode).isEqualTo(RepeatMode.ALL)
 
@@ -260,6 +253,11 @@ class PlayerViewModelTest {
         viewModel.cyclePlaybackMode()
         advanceUntilIdle()
         assertThat(player.state.value.shuffleEnabled).isTrue()
+        assertThat(player.state.value.repeatMode).isEqualTo(RepeatMode.ALL)
+
+        viewModel.cyclePlaybackMode()
+        advanceUntilIdle()
+        assertThat(player.state.value.shuffleEnabled).isFalse()
         assertThat(player.state.value.repeatMode).isEqualTo(RepeatMode.ALL)
     }
 

@@ -33,7 +33,6 @@ import com.xymusic.app.R
 import com.xymusic.app.core.ui.component.XySlider
 import com.xymusic.app.feature.player.domain.model.PlaybackState
 import com.xymusic.app.feature.player.domain.model.PlayerState
-import com.xymusic.app.feature.player.domain.model.RepeatMode
 import java.util.Locale
 
 @Composable
@@ -158,15 +157,12 @@ internal fun rememberPlaybackControlAvailability(
             derivedStateOf {
                 val currentIndex = player.queue.indexOfFirst { it.queueItemId == player.currentQueueItemId }
                 val hasMultipleItems = player.queue.size > 1
-                val timelineCanWrap = player.shuffleEnabled || player.repeatMode != RepeatMode.OFF
                 val positionMs = playbackPosition?.value?.toLong() ?: player.positionMs
                 PlaybackControlAvailability(
                     canPrevious =
                     positionMs > 3_000L ||
-                        (hasMultipleItems && (currentIndex > 0 || timelineCanWrap)),
-                    canNext =
-                    hasMultipleItems &&
-                        (currentIndex in 0 until player.queue.lastIndex || timelineCanWrap),
+                        (hasMultipleItems && currentIndex >= 0),
+                    canNext = hasMultipleItems && currentIndex >= 0,
                 )
             }
         }

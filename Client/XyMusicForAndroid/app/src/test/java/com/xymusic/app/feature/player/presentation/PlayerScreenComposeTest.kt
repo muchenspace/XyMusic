@@ -646,7 +646,7 @@ class PlayerScreenComposeTest {
         queue: List<PlayerQueueItem> = listOf(queueItem()),
         positionMs: Long = 0,
         shuffleEnabled: Boolean = false,
-        repeatMode: RepeatMode = RepeatMode.OFF,
+        repeatMode: RepeatMode = RepeatMode.ALL,
     ) = PlayerState(
         playbackState = PlaybackState.READY,
         queue = queue,
