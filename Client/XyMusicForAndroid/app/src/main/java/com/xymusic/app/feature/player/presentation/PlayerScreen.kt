@@ -384,6 +384,7 @@ fun PlayerScreen(
                                                 uiState = uiState,
                                                 onSeek = onSeek,
                                                 playbackPosition = displayedPlaybackPosition,
+                                                centerActiveLine = true,
                                                 modifier = Modifier.fillMaxSize(),
                                             )
                                         PlayerContentTab.Queue ->

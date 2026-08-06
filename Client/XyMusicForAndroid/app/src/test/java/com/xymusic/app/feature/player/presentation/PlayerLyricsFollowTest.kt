@@ -37,6 +37,34 @@ class PlayerLyricsFollowTest {
     }
 
     @Test
+    fun denseTimestampJumpUsesAnimationWhileSparseTimestampJumpSnaps() {
+        assertThat(
+            lyricFollowScrollMode(
+                previousLyricIndex = 2,
+                lyricIndex = 5,
+                previousLyricTimeMs = 1_000,
+                lyricTimeMs = 1_450,
+            ),
+        ).isEqualTo(LyricFollowScrollMode.Animate)
+        assertThat(
+            lyricFollowScrollMode(
+                previousLyricIndex = 2,
+                lyricIndex = 5,
+                previousLyricTimeMs = 1_000,
+                lyricTimeMs = 1_451,
+            ),
+        ).isEqualTo(LyricFollowScrollMode.Snap)
+        assertThat(
+            lyricFollowScrollMode(
+                previousLyricIndex = 2,
+                lyricIndex = 5,
+                previousLyricTimeMs = 1_450,
+                lyricTimeMs = 1_000,
+            ),
+        ).isEqualTo(LyricFollowScrollMode.Snap)
+    }
+
+    @Test
     fun interruptedTransitionKeepsTheCurrentVisualPosition() {
         assertThat(
             lyricTransitionStartPosition(

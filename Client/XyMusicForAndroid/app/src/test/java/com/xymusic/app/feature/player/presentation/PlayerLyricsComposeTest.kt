@@ -104,6 +104,256 @@ class PlayerLyricsComposeTest {
     }
 
     @Test
+    @Config(qualifiers = "w360dp-h740dp-port")
+    fun portraitWrappedAdjacentLyricsMoveContinuouslyAndSettleAtCenter() {
+        val firstText = "Portrait first lyric wraps across a narrow screen\nwithout shifting its anchor"
+        val secondText = "Portrait second lyric wraps across a narrow screen\nduring the transition"
+        val uiState =
+            mutableStateOf(
+                PlayerUiState(
+                    player = PlayerState(positionMs = 0),
+                    lyrics =
+                    listOf(
+                        PlayerLyricLineUi(0, firstText),
+                        PlayerLyricLineUi(1_000, secondText),
+                        PlayerLyricLineUi(2_000, "Portrait final lyric"),
+                    ),
+                    synchronizedLyrics = true,
+                ),
+            )
+        composeRule.setContent {
+            XyMusicTheme(dynamicColor = false) {
+                Box(
+                    modifier =
+                    Modifier
+                        .size(width = 360.dp, height = 600.dp)
+                        .testTag(LYRICS_PANE_TAG),
+                ) {
+                    LyricsContent(
+                        uiState = uiState.value,
+                        onSeek = {},
+                        compact = false,
+                        centerActiveLine = true,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        val paneCenter = paneCenter()
+        assertThat(paneCenter).isGreaterThan(250f)
+        assertThat(abs(lineCenter(firstText) - paneCenter)).isLessThan(2f)
+        assertThat(lineBounds(firstText).height).isGreaterThan(60f)
+        val secondBeforeTransition = lineCenter(secondText)
+
+        composeRule.mainClock.autoAdvance = false
+        composeRule.runOnIdle {
+            uiState.value = uiState.value.copy(
+                player = uiState.value.player.copy(positionMs = 1_000),
+            )
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        val transitionStart = lineCenter(secondText)
+        assertThat(abs(transitionStart - secondBeforeTransition)).isLessThan(3f)
+        val frameCenters = buildList {
+            repeat(7) {
+                composeRule.mainClock.advanceTimeByFrame()
+                composeRule.waitForIdle()
+                add(lineCenter(secondText))
+            }
+        }
+        val largestFrameDelta = frameCenters
+            .zipWithNext()
+            .maxOfOrNull { (previous, current) -> abs(current - previous) }
+            ?: 0f
+        assertThat(largestFrameDelta).isLessThan(30f)
+        assertThat(frameCenters.last()).isLessThan(transitionStart - 2f)
+
+        composeRule.mainClock.advanceTimeBy(240)
+        composeRule.mainClock.autoAdvance = true
+        composeRule.waitForIdle()
+        assertThat(abs(lineCenter(secondText) - paneCenter)).isLessThan(2f)
+    }
+
+    @Test
+    @Config(qualifiers = "w360dp-h740dp-port")
+    fun portraitOffscreenAdjacentTargetEntersLayoutWithoutASnap() {
+        val firstText = (1..8).joinToString(separator = "\n") { line -> "Offscreen first lyric line $line" }
+        val secondText = "Offscreen second lyric first line\nOffscreen second lyric second line"
+        val uiState =
+            mutableStateOf(
+                PlayerUiState(
+                    player = PlayerState(positionMs = 0),
+                    lyrics =
+                    listOf(
+                        PlayerLyricLineUi(0, firstText),
+                        PlayerLyricLineUi(1_000, secondText),
+                        PlayerLyricLineUi(2_000, "Offscreen final lyric"),
+                    ),
+                    synchronizedLyrics = true,
+                ),
+            )
+        composeRule.setContent {
+            XyMusicTheme(dynamicColor = false) {
+                Box(
+                    modifier =
+                    Modifier
+                        .size(width = 360.dp, height = 320.dp)
+                        .testTag(LYRICS_PANE_TAG),
+                ) {
+                    LyricsContent(
+                        uiState = uiState.value,
+                        onSeek = {},
+                        compact = false,
+                        centerActiveLine = true,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        val paneCenter = paneCenter()
+        val firstLineCenters = mutableListOf(lineCenter(firstText))
+        composeRule.mainClock.autoAdvance = false
+        composeRule.runOnIdle {
+            uiState.value = uiState.value.copy(
+                player = uiState.value.player.copy(positionMs = 1_000),
+            )
+        }
+        repeat(6) {
+            composeRule.mainClock.advanceTimeByFrame()
+            composeRule.waitForIdle()
+            firstLineCenters += lineCenter(firstText)
+        }
+
+        val largestFrameDelta = firstLineCenters
+            .zipWithNext()
+            .maxOfOrNull { (previous, current) -> abs(current - previous) }
+            ?: 0f
+        assertThat(largestFrameDelta).isLessThan(55f)
+        assertThat(firstLineCenters.last()).isLessThan(firstLineCenters.first() - 2f)
+
+        composeRule.mainClock.advanceTimeBy(600)
+        composeRule.mainClock.autoAdvance = true
+        composeRule.waitForIdle()
+        assertThat(abs(lineCenter(secondText) - paneCenter)).isLessThan(2f)
+    }
+
+    @Test
+    fun denseLyricTargetsChaseTheLatestLineWithoutSnappingEachUpdate() {
+        val uiState =
+            mutableStateOf(
+                PlayerUiState(
+                    player = PlayerState(positionMs = 0),
+                    lyrics =
+                    listOf(
+                        PlayerLyricLineUi(0, "Dense first lyric"),
+                        PlayerLyricLineUi(1_000, "Dense second lyric"),
+                        PlayerLyricLineUi(2_000, "Dense third lyric"),
+                        PlayerLyricLineUi(3_000, "Dense fourth lyric"),
+                        PlayerLyricLineUi(4_000, "Dense fifth lyric"),
+                    ),
+                    synchronizedLyrics = true,
+                ),
+            )
+        composeRule.setContent {
+            XyMusicTheme(dynamicColor = false) {
+                Box(
+                    modifier =
+                    Modifier
+                        .size(width = 480.dp, height = 300.dp)
+                        .testTag(LYRICS_PANE_TAG),
+                ) {
+                    LyricsContent(
+                        uiState = uiState.value,
+                        onSeek = {},
+                        compact = true,
+                        centerActiveLine = true,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        val paneCenter = paneCenter()
+        composeRule.mainClock.autoAdvance = false
+        for (index in 1..3) {
+            composeRule.runOnIdle {
+                uiState.value = uiState.value.copy(
+                    player = uiState.value.player.copy(positionMs = index * 1_000L),
+                )
+            }
+            composeRule.mainClock.advanceTimeByFrame()
+            composeRule.waitForIdle()
+
+            assertThat(abs(lineCenter("Dense ${denseLyricName(index)} lyric") - paneCenter))
+                .isGreaterThan(2f)
+        }
+
+        composeRule.mainClock.advanceTimeBy(600)
+        composeRule.mainClock.autoAdvance = true
+        composeRule.waitForIdle()
+
+        assertThat(abs(lineCenter("Dense fourth lyric") - paneCenter)).isLessThan(2f)
+    }
+
+    @Test
+    fun denseTimestampJumpAnimatesWhenPlaybackSkipsSeveralLines() {
+        val uiState =
+            mutableStateOf(
+                PlayerUiState(
+                    player = PlayerState(positionMs = 0),
+                    lyrics =
+                    listOf(
+                        PlayerLyricLineUi(0, "Dense jump first lyric"),
+                        PlayerLyricLineUi(150, "Dense jump second lyric"),
+                        PlayerLyricLineUi(300, "Dense jump third lyric"),
+                        PlayerLyricLineUi(450, "Dense jump fourth lyric"),
+                        PlayerLyricLineUi(600, "Dense jump fifth lyric"),
+                    ),
+                    synchronizedLyrics = true,
+                ),
+            )
+        composeRule.setContent {
+            XyMusicTheme(dynamicColor = false) {
+                Box(
+                    modifier =
+                    Modifier
+                        .size(width = 480.dp, height = 300.dp)
+                        .testTag(LYRICS_PANE_TAG),
+                ) {
+                    LyricsContent(
+                        uiState = uiState.value,
+                        onSeek = {},
+                        compact = true,
+                        centerActiveLine = true,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        val paneCenter = paneCenter()
+        composeRule.mainClock.autoAdvance = false
+        composeRule.runOnIdle {
+            uiState.value = uiState.value.copy(
+                player = uiState.value.player.copy(positionMs = 450),
+            )
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        assertThat(abs(lineCenter("Dense jump fourth lyric") - paneCenter)).isGreaterThan(2f)
+
+        composeRule.mainClock.advanceTimeBy(240)
+        composeRule.mainClock.autoAdvance = true
+        composeRule.waitForIdle()
+        assertThat(abs(lineCenter("Dense jump fourth lyric") - paneCenter)).isLessThan(2f)
+    }
+
+    @Test
     fun portraitSeekUsesTheSettledTargetAsTheFirstFollowingTransitionBaseline() {
         val clickedText = "Portrait clicked lyric with a second visual line to exercise layout"
         val followingText = "Portrait following lyric"
@@ -516,6 +766,18 @@ class PlayerLyricsComposeTest {
         .fetchSemanticsNode()
         .boundsInRoot
         .center.y
+
+    private fun paneCenter(): Float = composeRule
+        .onNodeWithTag(LYRICS_PANE_TAG)
+        .fetchSemanticsNode()
+        .boundsInRoot
+        .center.y
+
+    private fun denseLyricName(index: Int): String = when (index) {
+        1 -> "second"
+        2 -> "third"
+        else -> "fourth"
+    }
 
     private fun lineBounds(text: String) = composeRule
         .onNodeWithText(text)

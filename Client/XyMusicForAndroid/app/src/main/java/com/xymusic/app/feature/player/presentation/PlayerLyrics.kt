@@ -3,7 +3,11 @@ package com.xymusic.app.feature.player.presentation
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
@@ -60,9 +64,11 @@ import androidx.compose.ui.unit.sp
 import com.xymusic.app.R
 import com.xymusic.app.core.model.media.LyricsTiming
 import kotlin.math.abs
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun LyricsContent(
@@ -133,6 +139,7 @@ internal fun LyricsContent(
         ) {
             activeLinePosition.snapTo(currentLyricIndex.toFloat())
             var settledLinePosition = currentLyricIndex.toFloat()
+            var transitionVelocity = 0f
             var previousLyricIndex: Int? = null
             var previousAutoFollow = autoFollow
             snapshotFlow {
@@ -151,6 +158,7 @@ internal fun LyricsContent(
                         previousLyricIndex = null
                         activeLinePosition.snapTo(-1f)
                         settledLinePosition = -1f
+                        transitionVelocity = 0f
                         return@collectLatest
                     }
                     snapshot.pendingSeek?.let { request ->
@@ -177,6 +185,7 @@ internal fun LyricsContent(
                         // emphasis and its scroll, instead of inheriting a pre-scroll position.
                         activeLinePosition.snapTo(baselineIndex.toFloat())
                         settledLinePosition = baselineIndex.toFloat()
+                        transitionVelocity = 0f
                         previousLyricIndex = baselineIndex
                         pendingLyricSeek = null
                         return@collectLatest
@@ -190,6 +199,7 @@ internal fun LyricsContent(
                             )
                             activeLinePosition.snapTo(lyricIndex.toFloat())
                             settledLinePosition = lyricIndex.toFloat()
+                            transitionVelocity = 0f
                         }
                         return@collectLatest
                     }
@@ -201,11 +211,16 @@ internal fun LyricsContent(
                         lyricFollowScrollMode(
                             previousLyricIndex = previousIndex,
                             lyricIndex = lyricIndex,
+                            previousLyricTimeMs = previousIndex?.let { index ->
+                                uiState.lyrics.getOrNull(index)?.timeMs
+                            },
+                            lyricTimeMs = uiState.lyrics.getOrNull(lyricIndex)?.timeMs,
                         )
                     when (scrollMode) {
                         LyricFollowScrollMode.Snap -> {
                             activeLinePosition.snapTo(lyricIndex.toFloat())
                             settledLinePosition = lyricIndex.toFloat()
+                            transitionVelocity = 0f
                             if (snapshot.autoFollow) {
                                 listState.followLyricLine(
                                     index = targetIndex,
@@ -215,6 +230,7 @@ internal fun LyricsContent(
                             }
                         }
                         LyricFollowScrollMode.Animate -> {
+                            var transitionCompleted = false
                             try {
                                 animateLyricLineTransition(
                                     activeLinePosition = activeLinePosition,
@@ -224,11 +240,17 @@ internal fun LyricsContent(
                                     targetIndex = targetIndex,
                                     centerActiveLine = centerActiveLine,
                                     autoFollow = snapshot.autoFollow,
+                                    initialVelocity = transitionVelocity,
+                                    preserveVelocity = previousIndex != null &&
+                                        abs(settledLinePosition - previousIndex.toFloat()) > 0.01f,
+                                    onFrame = { transitionVelocity = it },
                                 )
+                                transitionCompleted = true
                             } finally {
                                 // A new seek or playback sample may cancel this transition. Keep
-                                // the exact frame reached by the shared clock as the next baseline.
+                                // the exact frame and velocity reached by the shared clock as the next baseline.
                                 settledLinePosition = activeLinePosition.value
+                                if (transitionCompleted) transitionVelocity = 0f
                             }
                             settledLinePosition = lyricIndex.toFloat()
                         }
@@ -357,13 +379,26 @@ internal enum class LyricFollowScrollMode {
     Animate,
 }
 
-internal fun lyricFollowScrollMode(previousLyricIndex: Int?, lyricIndex: Int): LyricFollowScrollMode = if (
-    previousLyricIndex == null ||
-    abs(lyricIndex - previousLyricIndex) > 1
-) {
-    LyricFollowScrollMode.Snap
-} else {
-    LyricFollowScrollMode.Animate
+internal fun lyricFollowScrollMode(
+    previousLyricIndex: Int?,
+    lyricIndex: Int,
+    previousLyricTimeMs: Long? = null,
+    lyricTimeMs: Long? = null,
+): LyricFollowScrollMode {
+    val indexGap =
+        previousLyricIndex?.let { previous ->
+            abs(lyricIndex - previous)
+        } ?: return LyricFollowScrollMode.Snap
+    val denseNaturalAdvance =
+        previousLyricTimeMs != null &&
+            lyricTimeMs != null &&
+            lyricTimeMs >= previousLyricTimeMs &&
+            lyricTimeMs - previousLyricTimeMs <= LyricAnimationConstants.DENSE_LYRIC_TIME_GAP_MILLIS
+    return if (indexGap > 1 && !denseNaturalAdvance) {
+        LyricFollowScrollMode.Snap
+    } else {
+        LyricFollowScrollMode.Animate
+    }
 }
 
 internal fun lyricTransitionStartPosition(activeLinePosition: Float): Float = activeLinePosition
@@ -439,8 +474,10 @@ private suspend fun animateLyricLineTransition(
     targetIndex: Int,
     centerActiveLine: Boolean,
     autoFollow: Boolean,
+    initialVelocity: Float,
+    preserveVelocity: Boolean,
+    onFrame: (Float) -> Unit,
 ) {
-    activeLinePosition.snapTo(startLinePosition)
     if (autoFollow) {
         awaitLyricItemLayout(listState, targetIndex)
     }
@@ -454,42 +491,57 @@ private suspend fun animateLyricLineTransition(
         } else {
             null
         }
+    val animationSpec: FiniteAnimationSpec<Float> = if (preserveVelocity) {
+        spring()
+    } else {
+        tween(
+            durationMillis = LyricAnimationConstants.HIGHLIGHT_TRANSITION_DURATION_MILLIS,
+            easing = FastOutSlowInEasing,
+        )
+    }
 
     if (autoFollow && initialScrollDelta == null) {
-        listState.followLyricLine(
-            index = targetIndex,
-            centerActiveLine = centerActiveLine,
-            scrollMode = LyricFollowScrollMode.Snap,
-        )
-        activeLinePosition.snapTo(lyricIndex.toFloat())
+        coroutineScope {
+            launch {
+                activeLinePosition.animateTo(
+                    targetValue = lyricIndex.toFloat(),
+                    animationSpec = animationSpec,
+                    initialVelocity = initialVelocity,
+                ) {
+                    onFrame(velocity)
+                }
+                onFrame(0f)
+            }
+            launch {
+                listState.animateLyricLineIntoLayout(
+                    index = targetIndex,
+                    centerActiveLine = centerActiveLine,
+                )
+            }
+        }
         return
     }
 
     val scrollDistance = initialScrollDelta ?: 0f
-    val startTimeNanos = withFrameNanos { it }
     var appliedScroll = 0f
-    var firstFrame = true
-    while (true) {
-        val frameTimeNanos = if (firstFrame) {
-            firstFrame = false
-            startTimeNanos
-        } else {
-            withFrameNanos { it }
-        }
-        val elapsedNanos = frameTimeNanos - startTimeNanos
+    val lineDistance = lyricIndex - startLinePosition
+    activeLinePosition.animateTo(
+        targetValue = lyricIndex.toFloat(),
+        animationSpec = animationSpec,
+        initialVelocity = initialVelocity,
+    ) {
+        onFrame(velocity)
         val progress =
-            (elapsedNanos / (LyricAnimationConstants.HIGHLIGHT_TRANSITION_DURATION_MILLIS * 1_000_000L).toFloat())
-                .coerceIn(0f, 1f)
-        val easedProgress = FastOutSlowInEasing.transform(progress)
-        val nextLinePosition =
-            startLinePosition + (lyricIndex - startLinePosition) * easedProgress
-        val nextScroll = scrollDistance * easedProgress
+            if (abs(lineDistance) <= 0.01f) {
+                1f
+            } else {
+                ((value - startLinePosition) / lineDistance).coerceIn(0f, 1f)
+            }
+        val nextScroll = scrollDistance * progress
         val scrollDelta = nextScroll - appliedScroll
         if (abs(scrollDelta) > 0.01f) {
-            appliedScroll += listState.scrollBy(scrollDelta)
+            appliedScroll += listState.dispatchRawDelta(scrollDelta)
         }
-        activeLinePosition.snapTo(nextLinePosition)
-        if (progress >= 1f) break
     }
     if (abs(scrollDistance - appliedScroll) > 0.01f) {
         listState.scrollBy(scrollDistance - appliedScroll)
@@ -497,6 +549,29 @@ private suspend fun animateLyricLineTransition(
     if (autoFollow && centerActiveLine) {
         listState.centeredItemDelta(targetIndex)?.let { residual ->
             if (abs(residual) > 0.5f) listState.scrollBy(residual)
+        }
+    }
+}
+
+private suspend fun LazyListState.animateLyricLineIntoLayout(index: Int, centerActiveLine: Boolean) {
+    animateScrollToItem(index)
+    withFrameNanos {}
+    val delta =
+        if (centerActiveLine) {
+            centeredItemDelta(index)
+        } else {
+            alignedItemDelta(index)
+        }
+    if (delta != null && abs(delta) > 0.5f) {
+        animateScrollBy(
+            value = delta,
+            animationSpec = spring(),
+        )
+    }
+    if (centerActiveLine) {
+        withFrameNanos {}
+        centeredItemDelta(index)?.let { residual ->
+            if (abs(residual) > 0.5f) scrollBy(residual)
         }
     }
 }
@@ -518,7 +593,7 @@ private fun lyricLineStyle(compact: Boolean): LyricLineStyle = if (compact) {
     LyricLineStyle(
         fontSize = 28.sp,
         lineHeight = 39.sp,
-        activeScale = 1.08f,
+        activeScale = 1.025f,
     )
 }
 
@@ -593,6 +668,7 @@ private data class LyricLineStyle(val fontSize: TextUnit, val lineHeight: TextUn
 
 private object LyricAnimationConstants {
     const val HIGHLIGHT_TRANSITION_DURATION_MILLIS = 200
+    const val DENSE_LYRIC_TIME_GAP_MILLIS = 450L
     const val BASELINE_MAX_FRAME_COUNT = 8
     const val REQUIRED_STABLE_FRAMES = 2
     const val ITEM_LAYOUT_MAX_FRAME_COUNT = 2

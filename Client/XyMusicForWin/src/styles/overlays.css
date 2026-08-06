@@ -94,12 +94,11 @@
 .lyrics-scroll.dragging, .lyrics-scroll.dragging .lyric-line { cursor: grabbing; }
 .lyrics-scroll::-webkit-scrollbar { display: none; }
 .lyrics-scroll.plain { padding-top: var(--titlebar-height); padding-bottom: 80px; }
-.lyric-line { display: block; width: 100%; min-height: 60px; padding: 12px 0; border: 0; color: var(--playback-lyric-text); background: transparent; cursor: grab; text-align: left; opacity: 0.5; transition: color 240ms, opacity 240ms; }
+.lyric-line { display: block; width: 100%; min-height: 60px; padding: 12px 0; border: 0; color: var(--playback-lyric-text); background: transparent; cursor: grab; text-align: left; opacity: 0.5; transition: color 160ms ease, opacity 160ms ease; }
 .lyric-line:disabled { cursor: default; opacity: 1; }
 .lyric-line:hover { opacity: 0.76; }
-.lyric-line strong { display: block; font-size: calc(24px * var(--lyric-scale)); font-weight: 560; line-height: 1.42; letter-spacing: 0; }
+.lyric-line strong { display: block; font-size: calc(24px * var(--lyric-scale)); font-weight: 600; line-height: 1.42; letter-spacing: 0; }
 .lyric-line.active { color: var(--playback-lyric-highlight); opacity: 1; }
-.lyric-line.active strong { font-weight: 680; }
 .lyric-line-words { max-width: 100%; color: var(--playback-lyric-text); white-space: normal; }
 .lyric-word {
   color: transparent;
@@ -112,7 +111,7 @@
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
-.lyric-translation { display: block; margin-top: 4px; color: var(--playback-lyric-text); font-size: calc(14px * var(--lyric-scale)); font-weight: 400; }
+.lyric-translation { display: block; margin-top: 4px; color: var(--playback-lyric-text); font-size: calc(14px * var(--lyric-scale)); font-weight: 400; transition: color 160ms ease; }
 .lyric-line.active .lyric-translation { color: var(--playback-lyric-highlight); }
 .lyrics-loading { display: grid; align-content: center; justify-items: center; gap: 15px; padding-inline: var(--lyrics-loading-padding); }
 .lyrics-loading span { height: 18px; border-radius: var(--radius-sm); background: var(--surface-raised); animation: skeleton-breathe 1.2s ease-in-out infinite alternate; }

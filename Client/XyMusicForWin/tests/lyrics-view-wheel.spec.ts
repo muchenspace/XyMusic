@@ -93,38 +93,13 @@ describe("playback lyrics wheel controls", () => {
     }
   });
 
-  it("uses instant positioning for rapid lyric transitions", async () => {
-    vi.useFakeTimers();
-    const mounted = await mountLyricsView({
-      timing: "LINE",
-      lines: [
-        { time: 0, text: "first line" },
-        { time: 0.1, text: "second line" },
-        { time: 0.2, text: "third line" },
-      ],
+  it("smoothly chases adjacent and dense lyric targets without native scrolling", async () => {
+    const animationFrames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
     });
-    try {
-      await nextTick();
-      await nextTick();
-      scrollIntoView.mockClear();
-
-      mounted.playbackSession.update({ currentTime: 0.1 });
-      await nextTick();
-      await nextTick();
-      await nextTick();
-
-      expect(scrollIntoView).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(160);
-      await nextTick();
-
-      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "auto", block: "center" });
-    } finally {
-      mounted.wrapper.unmount();
-    }
-  });
-
-  it("keeps skipped dense lyric transitions instant after auto-follow coalescing", async () => {
-    vi.useFakeTimers();
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
     const mounted = await mountLyricsView({
       timing: "LINE",
       lines: [
@@ -137,26 +112,78 @@ describe("playback lyrics wheel controls", () => {
     try {
       await nextTick();
       await nextTick();
+      const scroll = installScrollMetrics(mounted.wrapper);
       scrollIntoView.mockClear();
 
-      // A delayed timer can leave the last rendered line at 0 while playback
-      // has already advanced through several tightly-spaced lyric lines.
-      mounted.playbackSession.update({ currentTime: 0.3 });
+      mounted.playbackSession.update({ currentTime: 0.1 });
       await nextTick();
       await nextTick();
       await nextTick();
 
       expect(scrollIntoView).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(160);
-      await nextTick();
+      expect(animationFrames).toHaveLength(1);
+      animationFrames.shift()?.(16);
+      const firstFrameTop = scroll.scrollTop;
+      expect(firstFrameTop).toBeGreaterThan(0);
+      expect(firstFrameTop).toBeLessThan(70);
 
-      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "auto", block: "center" });
+      mounted.playbackSession.update({ currentTime: 0.2 });
+      await nextTick();
+      await nextTick();
+      animationFrames.shift()?.(32);
+      expect(scroll.scrollTop).toBeGreaterThan(firstFrameTop);
+      expect(scroll.scrollTop).toBeLessThan(150);
+
+      for (let index = 0; index < 120 && animationFrames.length; index += 1) {
+        animationFrames.shift()?.(48 + index * 16);
+      }
+      expect(scroll.scrollTop).toBeCloseTo(150, 1);
+
+      mounted.playbackSession.update({ currentTime: 0.3 });
+      await nextTick();
+      await nextTick();
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      expect(animationFrames).toHaveLength(1);
     } finally {
       mounted.wrapper.unmount();
     }
   });
 
-  it("restores auto-follow when lyrics reload at the same active line", async () => {
+  it("snaps only for a non-dense line jump", async () => {
+    const animationFrames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const mounted = await mountLyricsView({
+      timing: "LINE",
+      lines: [
+        { time: 0, text: "first line" },
+        { time: 1, text: "second line" },
+        { time: 5, text: "third line" },
+        { time: 6, text: "fourth line" },
+      ],
+    });
+    try {
+      await nextTick();
+      await nextTick();
+      installScrollMetrics(mounted.wrapper);
+      scrollIntoView.mockClear();
+
+      mounted.playbackSession.update({ currentTime: 5 });
+      await nextTick();
+      await nextTick();
+      await nextTick();
+
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      expect(animationFrames).toHaveLength(0);
+    } finally {
+      mounted.wrapper.unmount();
+    }
+  });
+
+  it("restores auto-follow without using browser smooth scrolling when lyrics reload", async () => {
     const mounted = await mountLyricsView({ timing: "LINE" });
     try {
       const reloadedLyrics = mounted.lyrics.lyrics;
@@ -169,7 +196,7 @@ describe("playback lyrics wheel controls", () => {
       await nextTick();
       await nextTick();
 
-      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
+      expect(scrollIntoView).not.toHaveBeenCalled();
     } finally {
       mounted.wrapper.unmount();
     }
@@ -198,7 +225,7 @@ describe("playback lyrics wheel controls", () => {
       await nextTick();
       await nextTick();
 
-      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
+      expect(scrollIntoView).not.toHaveBeenCalled();
     } finally {
       mounted.wrapper.unmount();
     }
@@ -304,7 +331,8 @@ describe("playback lyrics wheel controls", () => {
     }
   });
 
-  it("does not reuse the active word progress for inactive lines while paused", async () => {
+  it("fades outgoing word progress instead of clearing it at the line boundary", async () => {
+    vi.useFakeTimers();
     const mounted = await mountLyricsView({
       timing: "WORD",
       currentTime: 1.2,
@@ -333,8 +361,12 @@ describe("playback lyrics wheel controls", () => {
       await nextTick();
 
       const updatedLines = mounted.wrapper.findAll(".lyric-line");
-      expect(updatedLines[0]?.findAll(".lyric-word.is-sung")).toHaveLength(0);
+      expect(updatedLines[0]?.findAll(".lyric-word.is-sung")).toHaveLength(2);
       expect(updatedLines[1]?.findAll(".lyric-word.is-sung")).toHaveLength(1);
+
+      await vi.advanceTimersByTimeAsync(240);
+      await nextTick();
+      expect(updatedLines[0]?.findAll(".lyric-word.is-sung")).toHaveLength(0);
       expect(updatedLines[0]?.findAll(".lyric-word").every((word) => word.attributes("style").includes("--lyric-word-progress: 0%;"))).toBe(true);
     } finally {
       mounted.wrapper.unmount();
@@ -453,4 +485,29 @@ function pointerEvent(type: string, options: { pointerId: number; clientY: numbe
 
 function listenerCalls(spy: ReturnType<typeof vi.spyOn>, type: string): unknown[][] {
   return spy.mock.calls.filter(([eventType]) => eventType === type);
+}
+
+function installScrollMetrics(wrapper: VueWrapper): HTMLElement {
+  const scroll = wrapper.get(".lyrics-scroll").element as HTMLElement;
+  Object.defineProperty(scroll, "clientHeight", { configurable: true, value: 100 });
+  Object.defineProperty(scroll, "scrollHeight", { configurable: true, value: 1_000 });
+  scroll.getBoundingClientRect = () => rect(0, 100);
+  wrapper.findAll(".lyric-line").forEach((line, index) => {
+    line.element.getBoundingClientRect = () => rect(index * 80 - scroll.scrollTop, 80);
+  });
+  return scroll;
+}
+
+function rect(top: number, height: number): DOMRect {
+  return {
+    x: 0,
+    y: top,
+    width: 240,
+    height,
+    top,
+    right: 240,
+    bottom: top + height,
+    left: 0,
+    toJSON: () => ({}),
+  } as DOMRect;
 }
