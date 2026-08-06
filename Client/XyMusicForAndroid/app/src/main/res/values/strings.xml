@@ -251,7 +251,6 @@
     <string name="player_shuffle_off">随机播放已关闭</string>
     <string name="player_playback_mode">切换播放模式</string>
     <string name="player_repeat">循环模式</string>
-    <string name="player_repeat_off">循环已关闭</string>
     <string name="player_repeat_all">列表循环</string>
     <string name="player_repeat_one">单曲循环</string>
     <string name="player_queue">播放队列</string>

@@ -22,7 +22,7 @@ data class PlayerState(
     val positionDiscontinuitySequence: Long = 0,
     val bufferedPositionMs: Long = 0,
     val durationMs: Long = 0,
-    val repeatMode: RepeatMode = RepeatMode.OFF,
+    val repeatMode: RepeatMode = RepeatMode.ALL,
     val shuffleEnabled: Boolean = false,
     val playbackSpeed: Float = 1f,
     val sleepTimerRemainingMs: Long? = null,
@@ -46,7 +46,6 @@ enum class PlaybackState {
 }
 
 enum class RepeatMode {
-    OFF,
     ONE,
     ALL,
 }
