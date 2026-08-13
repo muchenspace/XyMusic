@@ -216,7 +216,7 @@ private fun CompactLandscapeTrackActionsContent(
 
 @Composable
 private fun TrackActionsProgress(uiState: TrackActionsUiState) {
-    if (uiState.isMutating || uiState.isDownloading) {
+    if (uiState.isMutating || uiState.isFavoriteMutating || uiState.isDownloading) {
         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
     }
 }

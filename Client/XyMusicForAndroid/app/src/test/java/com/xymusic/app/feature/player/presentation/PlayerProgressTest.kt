@@ -188,7 +188,7 @@ class PlayerProgressTest {
     }
 
     @Test
-    fun ordinaryCorrectionsNeverMoveTheRenderedPositionBackward() {
+    fun monotonicPositionClampsBackwardCandidates() {
         assertThat(monotonicPlaybackPosition(previousPositionMs = 1_040f, candidatePositionMs = 1_020f))
             .isEqualTo(1_040f)
         assertThat(monotonicPlaybackPosition(previousPositionMs = 1_040f, candidatePositionMs = 1_060f))
@@ -196,19 +196,11 @@ class PlayerProgressTest {
     }
 
     @Test
-    fun backwardCorrectionsConvergeToTheSeekTarget() {
+    fun renderedPositionClampsOrdinaryBackwardCorrections() {
         assertThat(
             renderedPlaybackPosition(
                 previousPositionMs = 1_040f,
                 candidatePositionMs = 1_020f,
-                correctionOffsetMs = 20f,
-            ),
-        ).isEqualTo(1_020f)
-        assertThat(
-            renderedPlaybackPosition(
-                previousPositionMs = 1_040f,
-                candidatePositionMs = 1_020f,
-                correctionOffsetMs = -20f,
             ),
         ).isEqualTo(1_040f)
     }

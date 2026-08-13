@@ -6,7 +6,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import com.xymusic.app.core.model.media.LyricsTiming
 import com.xymusic.app.feature.player.domain.model.PlayerQueueItem
 import com.xymusic.app.feature.player.domain.model.PlayerState
@@ -93,46 +92,29 @@ internal fun PlayerState.nextPlaybackMode(): PlayerPlaybackMode = when (playback
     PlayerPlaybackMode.Shuffle -> PlayerPlaybackMode.RepeatAll
 }
 
+// The player uses the current theme's foreground so light and dark modes keep
+// their intended contrast over the themed backdrop.
 internal val PlayerPrimaryContent: Color
     @Composable
     @ReadOnlyComposable
-    get() = if (isDarkPlayerTheme()) Color.White else Color(0xFF1C1C1E)
+    get() = MaterialTheme.colorScheme.onBackground
 
 internal val PlayerSecondaryContent: Color
     @Composable
     @ReadOnlyComposable
-    get() =
-        if (isDarkPlayerTheme()) {
-            Color.White.copy(alpha = 0.72f)
-        } else {
-            Color(0xFF636366)
-        }
+    get() = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.72f)
 
 internal val PlayerMutedContent: Color
     @Composable
     @ReadOnlyComposable
-    get() =
-        if (isDarkPlayerTheme()) {
-            Color.White.copy(alpha = 0.42f)
-        } else {
-            Color(0xFF8E8E93)
-        }
+    get() = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.38f)
 
 internal val PlayerSubtleContent: Color
     @Composable
     @ReadOnlyComposable
-    get() =
-        if (isDarkPlayerTheme()) {
-            Color.White.copy(alpha = 0.18f)
-        } else {
-            Color.Black.copy(alpha = 0.12f)
-        }
+    get() = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.16f)
 
 internal val PlayerInverseContent: Color
     @Composable
     @ReadOnlyComposable
-    get() = if (isDarkPlayerTheme()) Color.Black else Color.White
-
-@Composable
-@ReadOnlyComposable
-private fun isDarkPlayerTheme(): Boolean = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    get() = MaterialTheme.colorScheme.surface
