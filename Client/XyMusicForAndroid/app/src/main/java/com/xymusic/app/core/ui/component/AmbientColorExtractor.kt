@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.res.Resources
 import android.util.LruCache
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.graphics.Color
@@ -19,12 +20,19 @@ import com.xymusic.app.core.common.runCatchingPreservingCancellation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+@Immutable
+data class ArtworkAmbientPalette(val primary: Color, val secondary: Color, val highlight: Color)
+
 @Composable
-fun rememberArtworkAmbientColor(artworkUrl: String?, cacheKey: String?): Color? {
+fun rememberArtworkAmbientColor(artworkUrl: String?, cacheKey: String?): Color? =
+    rememberArtworkAmbientPalette(artworkUrl, cacheKey)?.primary
+
+@Composable
+fun rememberArtworkAmbientPalette(artworkUrl: String?, cacheKey: String?): ArtworkAmbientPalette? {
     val context = LocalContext.current
     val resources = LocalResources.current
     val state =
-        produceState<Color?>(
+        produceState<ArtworkAmbientPalette?>(
             initialValue = null,
             key1 = artworkUrl,
             key2 = cacheKey,
@@ -35,7 +43,7 @@ fun rememberArtworkAmbientColor(artworkUrl: String?, cacheKey: String?): Color? 
                     null
                 } else {
                     val artworkIdentity = stableArtworkCacheKey(cacheKey) ?: artworkUrl
-                    cachedArtworkAmbientColor(artworkIdentity)
+                    cachedArtworkAmbientPalette(artworkIdentity)
                         ?: run {
                             // Let the first player frame use the fallback background while artwork loads.
                             withFrameNanos { }
@@ -58,7 +66,7 @@ private suspend fun extractArtworkAmbientColor(
     artworkIdentity: String,
     context: Context,
     resources: Resources,
-): Color? = runCatchingPreservingCancellation {
+): ArtworkAmbientPalette? = runCatchingPreservingCancellation {
     val bitmap =
         withContext(Dispatchers.IO) {
             val loader = SingletonImageLoader.get(context)
@@ -80,27 +88,44 @@ private suspend fun extractArtworkAmbientColor(
     bitmap?.let { artworkBitmap ->
         withContext(Dispatchers.Default) {
             val palette = Palette.from(artworkBitmap).generate()
-            val swatch =
-                palette.darkVibrantSwatch
-                    ?: palette.darkMutedSwatch
+            val primarySwatch =
+                palette.dominantSwatch
                     ?: palette.vibrantSwatch
-                    ?: palette.dominantSwatch
-            swatch?.rgb
-                ?.also { color -> cacheArtworkAmbientColor(artworkIdentity, color) }
-                ?.let(::Color)
+                    ?: palette.darkVibrantSwatch
+                    ?: palette.darkMutedSwatch
+                    ?: palette.mutedSwatch
+            val secondarySwatch =
+                palette.vibrantSwatch
+                    ?: palette.darkVibrantSwatch
+                    ?: palette.lightVibrantSwatch
+                    ?: palette.mutedSwatch
+                    ?: primarySwatch
+            val highlightSwatch =
+                palette.lightVibrantSwatch
+                    ?: palette.lightMutedSwatch
+                    ?: palette.vibrantSwatch
+                    ?: secondarySwatch
+            primarySwatch?.let {
+                ArtworkAmbientPalette(
+                    primary = Color(it.rgb),
+                    secondary = Color(secondarySwatch?.rgb ?: it.rgb),
+                    highlight = Color(highlightSwatch?.rgb ?: it.rgb),
+                ).also { colors -> cacheArtworkAmbientPalette(artworkIdentity, colors) }
+            }
         }
     }
 }.getOrNull()
 
-private val artworkAmbientColorCache = LruCache<String, Int>(64)
+private val artworkAmbientPaletteCache = LruCache<String, ArtworkAmbientPalette>(64)
 
-private fun cachedArtworkAmbientColor(key: String): Color? = synchronized(artworkAmbientColorCache) {
-    artworkAmbientColorCache[key]?.let(::Color)
-}
+private fun cachedArtworkAmbientPalette(key: String): ArtworkAmbientPalette? =
+    synchronized(artworkAmbientPaletteCache) {
+        artworkAmbientPaletteCache[key]
+    }
 
-private fun cacheArtworkAmbientColor(key: String, color: Int) {
-    synchronized(artworkAmbientColorCache) {
-        artworkAmbientColorCache.put(key, color)
+private fun cacheArtworkAmbientPalette(key: String, colors: ArtworkAmbientPalette) {
+    synchronized(artworkAmbientPaletteCache) {
+        artworkAmbientPaletteCache.put(key, colors)
     }
 }
 

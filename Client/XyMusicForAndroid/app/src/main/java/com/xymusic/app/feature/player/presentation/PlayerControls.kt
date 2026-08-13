@@ -1,6 +1,6 @@
 package com.xymusic.app.feature.player.presentation
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,12 +17,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,16 +51,16 @@ internal fun PlaybackControls(
             null
         }
     val availability = rememberPlaybackControlAvailability(uiState.player, interactionPosition)
-    val horizontalPadding = if (compact) 22.dp else 28.dp
-    val skipSize = if (compact) 54.dp else 64.dp
-    val playSize = if (compact) 64.dp else 76.dp
+    val horizontalPadding = if (compact) 22.dp else 30.dp
+    val skipSize = if (compact) 58.dp else 68.dp
+    val playSize = if (compact) 70.dp else 82.dp
 
     Column(
         modifier =
         Modifier
             .fillMaxWidth()
             .padding(horizontal = horizontalPadding)
-            .padding(top = 4.dp, bottom = if (compact) 2.dp else 6.dp),
+            .padding(top = 8.dp, bottom = if (compact) 4.dp else 10.dp),
     ) {
         PlaybackTimeline(
             player = uiState.player,
@@ -74,67 +71,80 @@ internal fun PlaybackControls(
             playbackPosition = playbackPosition,
             interactionPosition = interactionPosition,
         )
-        Spacer(modifier = Modifier.height(if (compact) 2.dp else 6.dp))
+        Spacer(modifier = Modifier.height(if (compact) 8.dp else 14.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(
-                onClick = onPrevious,
-                enabled = availability.canPrevious,
-                modifier = Modifier.size(skipSize),
-                colors =
-                IconButtonDefaults.iconButtonColors(
-                    contentColor = PlayerPrimaryContent,
-                    disabledContentColor = PlayerMutedContent,
-                ),
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.CenterStart,
             ) {
-                Icon(
-                    imageVector = Icons.Default.SkipPrevious,
-                    contentDescription = stringResource(R.string.player_previous),
-                    modifier = Modifier.size(if (compact) 35.dp else 40.dp),
-                )
-            }
-            Spacer(modifier = Modifier.weight(0.22f))
-            IconButton(
-                onClick = onTogglePlayback,
-                modifier = Modifier.size(playSize).testTag(PlayerTestTags.TogglePlayback),
-                colors = IconButtonDefaults.iconButtonColors(contentColor = PlayerPrimaryContent),
-            ) {
-                if (uiState.player.playbackState == PlaybackState.BUFFERING) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(if (compact) 32.dp else 38.dp),
-                        color = PlayerPrimaryContent,
-                        strokeWidth = 3.dp,
-                    )
-                } else {
+                IconButton(
+                    onClick = onPrevious,
+                    enabled = availability.canPrevious,
+                    modifier = Modifier.size(skipSize),
+                    colors =
+                    IconButtonDefaults.iconButtonColors(
+                        contentColor = PlayerPrimaryContent,
+                        disabledContentColor = PlayerMutedContent,
+                    ),
+                ) {
                     Icon(
-                        imageVector = if (uiState.player.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = stringResource(
-                            if (uiState.player.isPlaying) R.string.player_pause else R.string.player_play,
-                        ),
-                        modifier = Modifier.size(if (compact) 45.dp else 52.dp),
-                        tint = PlayerPrimaryContent,
+                        imageVector = Icons.Default.SkipPrevious,
+                        contentDescription = stringResource(R.string.player_previous),
+                        modifier = Modifier.size(if (compact) 35.dp else 42.dp),
                     )
                 }
             }
-            Spacer(modifier = Modifier.weight(0.22f))
-            IconButton(
-                onClick = onNext,
-                enabled = availability.canNext,
-                modifier = Modifier.size(skipSize),
-                colors =
-                IconButtonDefaults.iconButtonColors(
-                    contentColor = PlayerPrimaryContent,
-                    disabledContentColor = PlayerMutedContent,
-                ),
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    imageVector = Icons.Default.SkipNext,
-                    contentDescription = stringResource(R.string.player_next),
-                    modifier = Modifier.size(if (compact) 35.dp else 40.dp),
-                )
+                IconButton(
+                    onClick = onTogglePlayback,
+                    modifier = Modifier.size(playSize).testTag(PlayerTestTags.TogglePlayback),
+                    colors = IconButtonDefaults.iconButtonColors(contentColor = PlayerPrimaryContent),
+                ) {
+                    if (uiState.player.playbackState == PlaybackState.BUFFERING) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(if (compact) 32.dp else 38.dp),
+                            color = PlayerPrimaryContent,
+                            strokeWidth = 3.dp,
+                        )
+                    } else {
+                        Icon(
+                            imageVector =
+                            if (uiState.player.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = stringResource(
+                                if (uiState.player.isPlaying) R.string.player_pause else R.string.player_play,
+                            ),
+                            modifier = Modifier.size(if (compact) 46.dp else 56.dp),
+                            tint = PlayerPrimaryContent,
+                        )
+                    }
+                }
+            }
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.CenterEnd,
+            ) {
+                IconButton(
+                    onClick = onNext,
+                    enabled = availability.canNext,
+                    modifier = Modifier.size(skipSize),
+                    colors =
+                    IconButtonDefaults.iconButtonColors(
+                        contentColor = PlayerPrimaryContent,
+                        disabledContentColor = PlayerMutedContent,
+                    ),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.SkipNext,
+                        contentDescription = stringResource(R.string.player_next),
+                        modifier = Modifier.size(if (compact) 35.dp else 42.dp),
+                    )
+                }
             }
         }
     }
@@ -194,11 +204,6 @@ private fun PlaybackTimeline(
         onPositionChangeFinished = onPositionChangeFinished,
         compact = compact,
     )
-    PlaybackTimeLabels(
-        durationMs = duration,
-        positionState = compositionPosition,
-        draggedPosition = draggedPosition,
-    )
 }
 
 @Composable
@@ -225,39 +230,6 @@ private fun PlaybackTimelineSlider(
         inactiveColor = PlayerSubtleContent,
         visualValue = draggedPosition?.let { null } ?: visualPosition,
     )
-}
-
-@Composable
-private fun PlaybackTimeLabels(durationMs: Long, positionState: State<Float>, draggedPosition: Float?) {
-    val elapsedSecond by remember(positionState, draggedPosition) {
-        derivedStateOf {
-            (draggedPosition ?: positionState.value).toLong().coerceAtLeast(0L) / 1_000L
-        }
-    }
-    val remainingSecond by remember(positionState, draggedPosition, durationMs) {
-        derivedStateOf {
-            (durationMs - (draggedPosition ?: positionState.value).toLong()).coerceAtLeast(0L) / 1_000L
-        }
-    }
-    val elapsedText = remember(elapsedSecond) { formatPlaybackTime(elapsedSecond * 1_000L) }
-    val remainingText =
-        remember(remainingSecond, durationMs) {
-            if (durationMs > 0L) "-${formatPlaybackTime(remainingSecond * 1_000L)}" else "0:00"
-        }
-
-    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp)) {
-        Text(
-            text = elapsedText,
-            color = PlayerSecondaryContent,
-            style = MaterialTheme.typography.labelSmall,
-        )
-        Spacer(modifier = Modifier.weight(1f))
-        Text(
-            text = remainingText,
-            color = PlayerSecondaryContent,
-            style = MaterialTheme.typography.labelSmall,
-        )
-    }
 }
 
 internal fun formatPlaybackTime(durationMs: Long): String {

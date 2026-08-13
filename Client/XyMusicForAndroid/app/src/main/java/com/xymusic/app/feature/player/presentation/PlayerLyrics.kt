@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
@@ -11,6 +12,7 @@ import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
@@ -44,6 +46,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
@@ -58,6 +61,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -109,7 +113,7 @@ internal fun LyricsContent(
             TextStyle(
                 fontSize = lyricLineStyle.fontSize,
                 lineHeight = lyricLineStyle.lineHeight,
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = FontWeight.Bold,
                 letterSpacing = 0.sp,
             ),
         )
@@ -180,9 +184,6 @@ internal fun LyricsContent(
                                 centerActiveLine = centerActiveLine,
                             )
                         }
-                        // Commit the visual baseline after the seek scroll has produced a stable
-                        // layout. The next line then starts from the same frame for both its
-                        // emphasis and its scroll, instead of inheriting a pre-scroll position.
                         activeLinePosition.snapTo(baselineIndex.toFloat())
                         settledLinePosition = baselineIndex.toFloat()
                         transitionVelocity = 0f
@@ -205,8 +206,7 @@ internal fun LyricsContent(
                     }
                     val previousIndex = previousLyricIndex
                     previousLyricIndex = lyricIndex
-                    val targetIndex =
-                        centeredLyricTargetIndex(lyricIndex, centerActiveLine)
+                    val targetIndex = centeredLyricTargetIndex(lyricIndex, centerActiveLine)
                     val scrollMode =
                         lyricFollowScrollMode(
                             previousLyricIndex = previousIndex,
@@ -247,8 +247,6 @@ internal fun LyricsContent(
                                 )
                                 transitionCompleted = true
                             } finally {
-                                // A new seek or playback sample may cancel this transition. Keep
-                                // the exact frame and velocity reached by the shared clock as the next baseline.
                                 settledLinePosition = activeLinePosition.value
                                 if (transitionCompleted) transitionVelocity = 0f
                             }
@@ -269,10 +267,11 @@ internal fun LyricsContent(
                 state = listState,
                 modifier = Modifier
                     .fillMaxSize()
+                    .clipToBounds()
                     .testTag(PlayerTestTags.LyricsList),
                 contentPadding =
                 PaddingValues(
-                    horizontal = if (compact) 0.dp else 28.dp,
+                    horizontal = if (compact) 8.dp else 16.dp,
                     vertical =
                     when {
                         centerActiveLine -> maxHeight / 2
@@ -292,16 +291,23 @@ internal fun LyricsContent(
                         derivedStateOf { lyricLineEmphasis(activeLinePositionState.value, index) }
                     }
                     val interactionSource = remember { MutableInteractionSource() }
+                    val isPressed by interactionSource.collectIsPressedAsState()
+                    val pressScale by animateFloatAsState(
+                        targetValue = if (isPressed) 0.965f else 1f,
+                        animationSpec = tween(
+                            durationMillis = LyricAnimationConstants.PRESS_ANIMATION_DURATION_MILLIS,
+                            easing = FastOutSlowInEasing,
+                        ),
+                        label = "lyricLinePressScale",
+                    )
                     val lineModifier =
                         Modifier
                             .fillMaxWidth()
                             .testTag(PlayerTestTags.lyricLine(index))
                             .graphicsLayer {
                                 transformOrigin = TransformOrigin(0f, 0.5f)
-                                val emphasis = lineEmphasis.value
-                                val scale = 1f + (lyricLineStyle.activeScale - 1f) * emphasis
-                                scaleX = scale
-                                scaleY = scale
+                                scaleX = pressScale
+                                scaleY = pressScale
                             }
                             .clickable(
                                 interactionSource = interactionSource,
@@ -309,12 +315,15 @@ internal fun LyricsContent(
                                 enabled = uiState.synchronizedLyrics && line.timeMs != null,
                                 role = Role.Button,
                                 onClick = {
-                                    pendingLyricSeek = LyricSeekRequest(
-                                        sourceIndex = currentLyricIndex,
-                                        targetIndex = index,
-                                    )
-                                    line.timeMs?.let(onSeek)
-                                    autoFollow = true
+                                    line.timeMs?.let { timestamp ->
+                                        pendingLyricSeek = LyricSeekRequest(
+                                            sourceIndex = currentLyricIndex.takeIf { it >= 0 }
+                                                ?: index,
+                                            targetIndex = index,
+                                        )
+                                        autoFollow = true
+                                        onSeek(timestamp)
+                                    }
                                 },
                             ).semantics {
                                 if (uiState.synchronizedLyrics) selected = active
@@ -325,7 +334,6 @@ internal fun LyricsContent(
                             words = line.words,
                             playbackPosition = displayPosition,
                             isActive = active,
-                            lineEmphasis = lineEmphasis,
                             modifier = lineModifier,
                             baseColor = PlayerMutedContent,
                             highlightColor = PlayerPrimaryContent,
@@ -346,6 +354,9 @@ internal fun LyricsContent(
                             modifier = lineModifier,
                             color = PlayerPrimaryContent.copy(alpha = 0.88f),
                             style = lineTextStyle,
+                            softWrap = true,
+                            overflow = TextOverflow.Clip,
+                            maxLines = Int.MAX_VALUE,
                         )
                     }
                 }
@@ -353,7 +364,10 @@ internal fun LyricsContent(
         }
         if (!autoFollow && uiState.synchronizedLyrics) {
             FilledTonalButton(
-                onClick = { autoFollow = true },
+                onClick = {
+                    autoFollow = true
+                    pendingLyricSeek = null
+                },
                 modifier =
                 Modifier
                     .align(Alignment.BottomCenter)
@@ -403,6 +417,19 @@ internal fun lyricFollowScrollMode(
 
 internal fun lyricTransitionStartPosition(activeLinePosition: Float): Float = activeLinePosition
 
+internal fun lyricTransitionDurationMillis(lineDistance: Float, scrollDistance: Float): Int {
+    val visualDistancePx = maxOf(
+        abs(lineDistance) * LyricAnimationConstants.TRANSITION_LINE_DISTANCE_PX,
+        abs(scrollDistance),
+    )
+    return (visualDistancePx / LyricAnimationConstants.TRANSITION_PIXELS_PER_SECOND * 1_000f)
+        .toInt()
+        .coerceIn(
+            LyricAnimationConstants.TRANSITION_MIN_DURATION_MILLIS,
+            LyricAnimationConstants.TRANSITION_MAX_DURATION_MILLIS,
+        )
+}
+
 private suspend fun LazyListState.followLyricLine(
     index: Int,
     centerActiveLine: Boolean,
@@ -429,6 +456,22 @@ private suspend fun LazyListState.snapScrollToCenteredItem(index: Int) {
     if (abs(residual) > 0.5f) scrollBy(residual)
 }
 
+internal fun lyricLayoutDeltaHasSettled(previousDelta: Float?, currentDelta: Float?): Boolean = previousDelta != null &&
+    currentDelta != null &&
+    abs(currentDelta - previousDelta) <= LyricAnimationConstants.LAYOUT_STABILITY_EPSILON_PX
+
+private fun LazyListState.centeredItemDelta(index: Int): Float? {
+    val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return null
+    val viewportCenter = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2f
+    val itemCenter = item.offset + item.size / 2f
+    return itemCenter - viewportCenter
+}
+
+private fun LazyListState.alignedItemDelta(index: Int): Float? {
+    val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return null
+    return (item.offset - layoutInfo.viewportStartOffset).toFloat()
+}
+
 private suspend fun awaitLyricLayoutStabilization(listState: LazyListState, index: Int, centerActiveLine: Boolean) {
     var previousDelta: Float? = null
     var stableFrameCount = 0
@@ -448,22 +491,6 @@ private suspend fun awaitLyricLayoutStabilization(listState: LazyListState, inde
         }
         previousDelta = currentDelta
     }
-}
-
-internal fun lyricLayoutDeltaHasSettled(previousDelta: Float?, currentDelta: Float?): Boolean = previousDelta != null &&
-    currentDelta != null &&
-    abs(currentDelta - previousDelta) <= LyricAnimationConstants.LAYOUT_STABILITY_EPSILON_PX
-
-private fun LazyListState.centeredItemDelta(index: Int): Float? {
-    val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return null
-    val viewportCenter = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2f
-    val itemCenter = item.offset + item.size / 2f
-    return itemCenter - viewportCenter
-}
-
-private fun LazyListState.alignedItemDelta(index: Int): Float? {
-    val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return null
-    return (item.offset - layoutInfo.viewportStartOffset).toFloat()
 }
 
 private suspend fun animateLyricLineTransition(
@@ -491,11 +518,17 @@ private suspend fun animateLyricLineTransition(
         } else {
             null
         }
+    val lineDistance = lyricIndex - startLinePosition
+    val scrollDistance = initialScrollDelta ?: 0f
+    val transitionDurationMillis = lyricTransitionDurationMillis(
+        lineDistance = lineDistance,
+        scrollDistance = scrollDistance,
+    )
     val animationSpec: FiniteAnimationSpec<Float> = if (preserveVelocity) {
         spring()
     } else {
         tween(
-            durationMillis = LyricAnimationConstants.HIGHLIGHT_TRANSITION_DURATION_MILLIS,
+            durationMillis = transitionDurationMillis,
             easing = FastOutSlowInEasing,
         )
     }
@@ -516,15 +549,14 @@ private suspend fun animateLyricLineTransition(
                 listState.animateLyricLineIntoLayout(
                     index = targetIndex,
                     centerActiveLine = centerActiveLine,
+                    correctionDurationMillis = transitionDurationMillis,
                 )
             }
         }
         return
     }
 
-    val scrollDistance = initialScrollDelta ?: 0f
     var appliedScroll = 0f
-    val lineDistance = lyricIndex - startLinePosition
     activeLinePosition.animateTo(
         targetValue = lyricIndex.toFloat(),
         animationSpec = animationSpec,
@@ -553,26 +585,27 @@ private suspend fun animateLyricLineTransition(
     }
 }
 
-private suspend fun LazyListState.animateLyricLineIntoLayout(index: Int, centerActiveLine: Boolean) {
+private suspend fun LazyListState.animateLyricLineIntoLayout(
+    index: Int,
+    centerActiveLine: Boolean,
+    correctionDurationMillis: Int,
+) {
     animateScrollToItem(index)
-    withFrameNanos {}
-    val delta =
-        if (centerActiveLine) {
-            centeredItemDelta(index)
-        } else {
-            alignedItemDelta(index)
-        }
+    awaitLyricItemLayout(listState = this, index = index)
+    val delta = if (centerActiveLine) centeredItemDelta(index) else alignedItemDelta(index)
     if (delta != null && abs(delta) > 0.5f) {
         animateScrollBy(
             value = delta,
-            animationSpec = spring(),
+            animationSpec = tween(
+                durationMillis = correctionDurationMillis,
+                easing = FastOutSlowInEasing,
+            ),
         )
     }
-    if (centerActiveLine) {
+    repeat(LyricAnimationConstants.LAYOUT_CORRECTION_PASS_COUNT) {
         withFrameNanos {}
-        centeredItemDelta(index)?.let { residual ->
-            if (abs(residual) > 0.5f) scrollBy(residual)
-        }
+        val residual = if (centerActiveLine) centeredItemDelta(index) else alignedItemDelta(index)
+        if (residual != null && abs(residual) > 0.5f) scrollBy(residual)
     }
 }
 
@@ -585,15 +618,13 @@ private suspend fun awaitLyricItemLayout(listState: LazyListState, index: Int) {
 
 private fun lyricLineStyle(compact: Boolean): LyricLineStyle = if (compact) {
     LyricLineStyle(
-        fontSize = 24.sp,
-        lineHeight = 34.sp,
-        activeScale = 1.1f,
+        fontSize = 30.sp,
+        lineHeight = 42.sp,
     )
 } else {
     LyricLineStyle(
-        fontSize = 28.sp,
-        lineHeight = 39.sp,
-        activeScale = 1.025f,
+        fontSize = 36.sp,
+        lineHeight = 50.sp,
     )
 }
 
@@ -603,10 +634,21 @@ private fun lyricLineEmphasis(animatedLinePosition: Float, lineIndex: Int): Floa
     (1f - abs(animatedLinePosition - lineIndex)).coerceIn(0f, 1f)
 }
 
+internal fun lyricWordHighlightEmphasis(isActive: Boolean, lineEmphasis: Float): Float =
+    if (isActive && lineEmphasis >= LYRIC_LINE_SETTLED_EMPHASIS) 1f else 0f
+
+private const val LYRIC_LINE_SETTLED_EMPHASIS = 0.999f
+
 private fun centeredLyricTargetIndex(index: Int, centerActiveLine: Boolean): Int =
     if (centerActiveLine) index else (index - 2).coerceAtLeast(0)
 
 private data class LyricSeekRequest(val sourceIndex: Int, val targetIndex: Int)
+
+private data class LyricPlaybackSnapshot(
+    val lyricIndex: Int,
+    val pendingSeek: LyricSeekRequest?,
+    val autoFollow: Boolean,
+)
 
 internal fun lyricSeekBaselineIndex(sourceIndex: Int, targetIndex: Int, currentIndex: Int): Int? = when {
     currentIndex == targetIndex -> targetIndex
@@ -614,12 +656,6 @@ internal fun lyricSeekBaselineIndex(sourceIndex: Int, targetIndex: Int, currentI
     targetIndex < sourceIndex && currentIndex < targetIndex -> targetIndex
     else -> null
 }
-
-private data class LyricPlaybackSnapshot(
-    val lyricIndex: Int,
-    val pendingSeek: LyricSeekRequest?,
-    val autoFollow: Boolean,
-)
 
 @Composable
 private fun AnimatedLyricLineText(
@@ -643,6 +679,9 @@ private fun AnimatedLyricLineText(
         },
         style = style,
         color = baseColor,
+        softWrap = true,
+        overflow = TextOverflow.Clip,
+        maxLines = Int.MAX_VALUE,
         onTextLayout = drawCache::updateLayout,
     )
 }
@@ -664,13 +703,18 @@ private class LyricLineDrawCache {
     }
 }
 
-private data class LyricLineStyle(val fontSize: TextUnit, val lineHeight: TextUnit, val activeScale: Float)
+private data class LyricLineStyle(val fontSize: TextUnit, val lineHeight: TextUnit)
 
 private object LyricAnimationConstants {
-    const val HIGHLIGHT_TRANSITION_DURATION_MILLIS = 200
+    const val TRANSITION_MIN_DURATION_MILLIS = 300
+    const val TRANSITION_MAX_DURATION_MILLIS = 520
+    const val TRANSITION_LINE_DISTANCE_PX = 56f
+    const val TRANSITION_PIXELS_PER_SECOND = 185f
+    const val PRESS_ANIMATION_DURATION_MILLIS = 180
     const val DENSE_LYRIC_TIME_GAP_MILLIS = 450L
     const val BASELINE_MAX_FRAME_COUNT = 8
     const val REQUIRED_STABLE_FRAMES = 2
-    const val ITEM_LAYOUT_MAX_FRAME_COUNT = 2
+    const val ITEM_LAYOUT_MAX_FRAME_COUNT = 6
+    const val LAYOUT_CORRECTION_PASS_COUNT = 3
     const val LAYOUT_STABILITY_EPSILON_PX = 0.5f
 }

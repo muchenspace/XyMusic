@@ -12,6 +12,16 @@ class PlayerWordByWordLyricTextTest {
         )
 
     @Test
+    fun explicitTransitionEmphasisControlsWordHighlight() {
+        assertThat(wordByWordHighlightEmphasis(isActive = true, lineEmphasis = 0f))
+            .isEqualTo(0f)
+        assertThat(wordByWordHighlightEmphasis(isActive = true, lineEmphasis = 1f))
+            .isEqualTo(1f)
+        assertThat(wordByWordHighlightEmphasis(isActive = true, lineEmphasis = null))
+            .isEqualTo(1f)
+    }
+
+    @Test
     fun beforeFirstWordHasNoHighlight() {
         assertThat(calculateWordTimedHighlightProgress(words, 999))
             .isEqualTo(WordTimedHighlightProgress(completedCount = 0, currentFraction = 0f))
@@ -101,5 +111,45 @@ class PlayerWordByWordLyricTextTest {
                 words = listOf(PlayerLyricWordUi(0, "first")),
             ),
         ).isEmpty()
+    }
+
+    @Test
+    fun characterFragmentsKeepSurrogatePairsAndCombiningMarksTogether() {
+        val text = "A👋e\u0301B"
+
+        assertThat(characterFragmentOffsets(text, 0, text.length))
+            .containsExactly(0 to 1, 1 to 3, 3 to 5, 5 to 6)
+            .inOrder()
+    }
+
+    @Test
+    fun characterFragmentsClampToTheTimedWordRange() {
+        assertThat(characterFragmentOffsets("一二三四", 1, 3))
+            .containsExactly(1 to 2, 2 to 3)
+            .inOrder()
+    }
+
+    @Test
+    fun lineFragmentsUseLayoutLineEndAtSoftWrapBoundary() {
+        assertThat(
+            lineFragmentOffsets(
+                startOffset = 0,
+                endOffset = 10,
+                lineForOffset = { offset -> if (offset < 5) 0 else 1 },
+                lineEnd = { line -> if (line == 0) 5 else 10 },
+            ),
+        ).containsExactly(0 to 5, 5 to 10).inOrder()
+    }
+
+    @Test
+    fun lineFragmentsClampTheLastLineToTheWordRange() {
+        assertThat(
+            lineFragmentOffsets(
+                startOffset = 2,
+                endOffset = 7,
+                lineForOffset = { offset -> if (offset < 5) 0 else 1 },
+                lineEnd = { line -> if (line == 0) 5 else 10 },
+            ),
+        ).containsExactly(2 to 5, 5 to 7).inOrder()
     }
 }

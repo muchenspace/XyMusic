@@ -18,15 +18,19 @@ import com.xymusic.app.feature.playlist.domain.model.PlaylistSummary
 import com.xymusic.app.feature.playlist.domain.model.PlaylistVisibility
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class TrackActionsUiState(
@@ -36,6 +40,7 @@ data class TrackActionsUiState(
     val playerIsFavorite: Boolean = false,
     val playlists: List<PlaylistSummary> = emptyList(),
     val isMutating: Boolean = false,
+    val isFavoriteMutating: Boolean = false,
     val selectedIsDownloaded: Boolean = false,
     val isDownloading: Boolean = false,
 )
@@ -56,6 +61,10 @@ constructor(
     private val selectedTrackId = MutableStateFlow<String?>(null)
     private val playerTrackId = MutableStateFlow<String?>(null)
     private val isMutating = MutableStateFlow(false)
+    private val favoriteIntents = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    private val favoriteOverrides = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    private val favoriteMutatingTrackIds = MutableStateFlow<Set<String>>(emptySet())
+    private val favoriteMutationJobs = mutableMapOf<String, Job>()
     private val downloadingTrackId = MutableStateFlow<String?>(null)
     private val mutableEffects = MutableSharedFlow<TrackActionsUiEffect>(extraBufferCapacity = 1)
     val effects = mutableEffects.asSharedFlow()
@@ -86,10 +95,12 @@ constructor(
             },
             selectedIsDownloaded,
             downloadingTrackId,
-        ) { state, downloaded, downloading ->
+            favoriteMutatingTrackIds,
+        ) { state, downloaded, downloading, favoriteMutating ->
             state.copy(
                 selectedIsDownloaded = downloaded,
                 isDownloading = state.selectedTrackId != null && state.selectedTrackId == downloading,
+                isFavoriteMutating = favoriteMutating.isNotEmpty(),
             )
         }
 
@@ -117,12 +128,12 @@ constructor(
 
     fun toggleSelectedFavorite() {
         val trackId = selectedTrackId.value ?: return
-        setFavorite(trackId, !selectedIsFavorite.value)
+        toggleFavorite(trackId, selectedIsFavorite.value)
     }
 
     fun togglePlayerFavorite() {
         val trackId = playerTrackId.value ?: return
-        setFavorite(trackId, !playerIsFavorite.value)
+        toggleFavorite(trackId, playerIsFavorite.value)
     }
 
     fun downloadSelected() {
@@ -171,15 +182,64 @@ constructor(
         }
     }
 
-    private fun setFavorite(trackId: String, favorite: Boolean) {
-        mutate {
-            when (libraryUseCases.setFavorite(trackId, favorite)) {
-                is LibraryResult.Success ->
-                    show(
-                        if (favorite) R.string.library_favorite_added else R.string.library_favorite_removed,
-                    )
-                is LibraryResult.Failure -> show(R.string.library_favorite_update_failed)
+    private fun toggleFavorite(trackId: String, persistedFavorite: Boolean) {
+        val currentFavorite = favoriteOverrides.value[trackId] ?: persistedFavorite
+        requestFavorite(trackId, !currentFavorite)
+    }
+
+    private fun requestFavorite(trackId: String, favorite: Boolean) {
+        favoriteIntents.update { intents -> intents + (trackId to favorite) }
+        favoriteOverrides.update { overrides -> overrides + (trackId to favorite) }
+        if (favoriteMutationJobs[trackId]?.isActive != true) {
+            favoriteMutatingTrackIds.update { trackIds -> trackIds + trackId }
+            favoriteMutationJobs[trackId] = viewModelScope.launch {
+                drainFavoriteIntents(trackId)
             }
+        }
+    }
+
+    private suspend fun drainFavoriteIntents(trackId: String) {
+        try {
+            while (true) {
+                val favorite = favoriteIntents.value[trackId] ?: return
+                val result =
+                    try {
+                        libraryUseCases.setFavorite(trackId, favorite)
+                    } catch (failure: CancellationException) {
+                        throw failure
+                    } catch (_: Exception) {
+                        clearFavoriteIntent(trackId, favorite)
+                        show(R.string.library_favorite_update_failed)
+                        continue
+                    }
+                when (result) {
+                    is LibraryResult.Success -> {
+                        show(
+                            if (favorite) R.string.library_favorite_added else R.string.library_favorite_removed,
+                        )
+                        if (favoriteIntents.value[trackId] == favorite) {
+                            libraryUseCases.observeIsFavorite(trackId).first { it == favorite }
+                            clearFavoriteIntent(trackId, favorite)
+                        }
+                    }
+                    is LibraryResult.Failure -> {
+                        clearFavoriteIntent(trackId, favorite)
+                        show(R.string.library_favorite_update_failed)
+                    }
+                }
+            }
+        } finally {
+            favoriteMutatingTrackIds.update { trackIds -> trackIds - trackId }
+            favoriteMutationJobs.remove(trackId)
+        }
+    }
+
+    private fun clearFavoriteIntent(trackId: String, favorite: Boolean) {
+        favoriteIntents.update { intents ->
+            if (intents[trackId] == favorite) intents - trackId else intents
+        }
+        favoriteOverrides.update { overrides ->
+            if (overrides[trackId] == favorite) overrides - trackId else overrides
         }
     }
 
@@ -238,6 +298,10 @@ constructor(
     }
 
     private fun MutableStateFlow<String?>.favoriteState() = flatMapLatest { trackId ->
-        trackId?.let(libraryUseCases::observeIsFavorite) ?: flowOf(false)
+        trackId?.let { id ->
+            combine(libraryUseCases.observeIsFavorite(id), favoriteOverrides) { persisted, overrides ->
+                overrides[id] ?: persisted
+            }
+        } ?: flowOf(false)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 }

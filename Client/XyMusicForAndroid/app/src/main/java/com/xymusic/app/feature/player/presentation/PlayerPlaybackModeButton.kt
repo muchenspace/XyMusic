@@ -74,15 +74,20 @@ internal fun PlayerPlaybackModeButton(
         }
     } else {
         IconButton(
-            onClick = onClick,
+            onClick = {
+                onClick()
+            },
             modifier =
             modifier
                 .size(44.dp)
-                .semantics { stateDescription = modeDescription },
+                .semantics {
+                    contentDescription = actionDescription
+                    stateDescription = modeDescription
+                },
         ) {
             Icon(
                 imageVector = visual.icon,
-                contentDescription = actionDescription,
+                contentDescription = null,
                 tint = PlayerPrimaryContent,
                 modifier = Modifier.size(24.dp),
             )

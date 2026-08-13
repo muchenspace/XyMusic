@@ -7,6 +7,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -32,12 +33,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
@@ -47,8 +49,12 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.xymusic.app.R
-import com.xymusic.app.core.ui.component.rememberArtworkAmbientColor
+import com.xymusic.app.core.ui.component.ArtworkAmbientPalette
+import com.xymusic.app.core.ui.component.MediaArtwork
+import com.xymusic.app.core.ui.component.rememberArtworkAmbientPalette
+import com.xymusic.app.feature.player.domain.model.PlayerQueueItem
 import com.xymusic.app.ui.theme.XyMotion
+import com.xymusic.app.ui.theme.xyColors
 import kotlinx.coroutines.launch
 
 @Composable
@@ -90,39 +96,23 @@ fun PlayerScreen(
         playbackPosition ?: rememberPlaybackPositionSnapshotState(uiState.player)
     val queueUiState = remember(uiState.player.queue) { PlayerQueueUiState(uiState.player.queue) }
     var draggedPosition by remember(current?.queueItemId) { mutableStateOf<Float?>(null) }
-    val colorScheme = MaterialTheme.colorScheme
-    val darkPlayer = colorScheme.background.luminance() < 0.5f
-    val ambientColor = rememberArtworkAmbientColor(current?.artworkUrl, current?.artworkCacheKey)
-    val targetBase =
-        if (darkPlayer) {
-            ambientColor ?: Color(0xFF443A3B)
-        } else {
-            colorScheme.primaryContainer
-        }
-    val animatedBase = animateColorAsState(
-        targetValue = targetBase,
+    val targetPalette = rememberArtworkAmbientPalette(current?.artworkUrl, current?.artworkCacheKey)
+        ?: PlayerFallbackAmbientPalette
+    val animatedPrimary = animateColorAsState(
+        targetValue = targetPalette.primary,
         animationSpec = tween(XyMotion.Emphasized),
-        label = "playerAmbientColor",
+        label = "playerAmbientPrimary",
     )
-    val backgroundModifier =
-        Modifier.drawWithCache {
-            val currentBase = animatedBase.value
-            val backgroundBrush =
-                if (darkPlayer) {
-                    Brush.verticalGradient(
-                        0f to lerp(currentBase, Color.Black, 0.30f),
-                        0.48f to lerp(currentBase, Color.Black, 0.54f),
-                        1f to lerp(currentBase, Color.Black, 0.82f),
-                    )
-                } else {
-                    Brush.verticalGradient(
-                        0f to currentBase,
-                        0.46f to colorScheme.surface,
-                        1f to colorScheme.background,
-                    )
-                }
-            onDrawBehind { drawRect(backgroundBrush) }
-        }
+    val animatedSecondary = animateColorAsState(
+        targetValue = targetPalette.secondary,
+        animationSpec = tween(XyMotion.Emphasized),
+        label = "playerAmbientSecondary",
+    )
+    val animatedHighlight = animateColorAsState(
+        targetValue = targetPalette.highlight,
+        animationSpec = tween(XyMotion.Emphasized),
+        label = "playerAmbientHighlight",
+    )
 
     val density = LocalDensity.current
     val dismissThreshold = with(density) { 180.dp.toPx() }
@@ -287,8 +277,18 @@ fun PlayerScreen(
                     } else {
                         Modifier
                     },
-                ).then(backgroundModifier),
+                ),
         ) {
+            PlayerAmbientBackdrop(
+                item = current,
+                ambientPalette =
+                ArtworkAmbientPalette(
+                    primary = animatedPrimary.value,
+                    secondary = animatedSecondary.value,
+                    highlight = animatedHighlight.value,
+                ),
+                modifier = Modifier.fillMaxSize(),
+            )
             if (isLandscape) {
                 if (current == null) {
                     EmptyPlayer(
@@ -344,7 +344,12 @@ fun PlayerScreen(
                         .windowInsetsPadding(WindowInsets.systemBars),
                 ) {
                     PlayerTopBar(
+                        item = current,
+                        showTrackInfo = portraitPagerState.currentPage != PlayerContentTab.Artwork.ordinal,
+                        isFavorite = isFavorite,
                         onDismiss = { dismissPlayer(0f) },
+                        onToggleFavorite = onToggleFavorite,
+                        onAddToPlaylist = onAddToPlaylist,
                         playbackSpeed = uiState.player.playbackSpeed,
                         sleepTimerRemainingMs = uiState.sleepTimerRemainingMs,
                         onShowSpeed = { showSpeedDialog = true },
@@ -370,10 +375,8 @@ fun PlayerScreen(
                                         PlayerContentTab.Artwork ->
                                             NowPlayingContent(
                                                 item = current,
-                                                isFavorite = isFavorite,
                                                 shuffleEnabled = uiState.player.shuffleEnabled,
                                                 repeatMode = uiState.player.repeatMode,
-                                                onToggleFavorite = onToggleFavorite,
                                                 onCyclePlaybackMode = onCyclePlaybackMode,
                                                 onAddToPlaylist = onAddToPlaylist,
                                                 wideLayout = wideLayout,
@@ -470,3 +473,61 @@ private fun LandscapeKeepScreenOnEffect(enabled: Boolean) {
         }
     }
 }
+
+@Composable
+private fun PlayerAmbientBackdrop(
+    item: PlayerQueueItem?,
+    ambientPalette: ArtworkAmbientPalette,
+    modifier: Modifier = Modifier,
+) {
+    val themeColors = MaterialTheme.xyColors
+    val backdropColors = resolvePlayerBackdropColors(themeColors, ambientPalette)
+    Box(
+        modifier = modifier.background(themeColors.nowPlayingBg),
+    ) {
+        item?.let { currentItem ->
+            MediaArtwork(
+                url = currentItem.artworkUrl,
+                cacheKey = currentItem.artworkCacheKey,
+                contentDescription = null,
+                fallbackImageRes = R.drawable.xymusic_compact,
+                modifier =
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        alpha = 0.38f
+                        scaleX = 1.24f
+                        scaleY = 1.24f
+                    }
+                    .blur(72.dp),
+                shape = RectangleShape,
+            )
+        }
+        Box(
+            modifier =
+            Modifier
+                .fillMaxSize()
+                .drawWithCache {
+                    val background =
+                        Brush.linearGradient(
+                            colorStops =
+                            arrayOf(
+                                0f to backdropColors.start.copy(alpha = 0.82f),
+                                0.40f to backdropColors.center.copy(alpha = 0.72f),
+                                0.72f to backdropColors.highlight.copy(alpha = 0.68f),
+                                1f to backdropColors.end.copy(alpha = 0.86f),
+                            ),
+                            start = Offset(0f, 0f),
+                            end = Offset(size.width, size.height),
+                        )
+                    onDrawBehind { drawRect(background) }
+                },
+        )
+    }
+}
+
+private val PlayerFallbackAmbientPalette = ArtworkAmbientPalette(
+    primary = Color(0xFF684032),
+    secondary = Color(0xFF344B50),
+    highlight = Color(0xFF563950),
+)

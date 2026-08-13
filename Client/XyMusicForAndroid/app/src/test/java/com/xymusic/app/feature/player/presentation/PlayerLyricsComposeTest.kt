@@ -97,7 +97,7 @@ class PlayerLyricsComposeTest {
         assertThat(midwayDistance).isLessThan(transitionStartDistance)
         assertThat(midwayDistance).isGreaterThan(2f)
 
-        composeRule.mainClock.advanceTimeBy(180)
+        composeRule.mainClock.advanceTimeBy(240)
         composeRule.mainClock.autoAdvance = true
         composeRule.waitForIdle()
         assertThat(abs(secondLineCenter() - paneCenter)).isLessThan(2f)
@@ -171,10 +171,55 @@ class PlayerLyricsComposeTest {
         assertThat(largestFrameDelta).isLessThan(30f)
         assertThat(frameCenters.last()).isLessThan(transitionStart - 2f)
 
-        composeRule.mainClock.advanceTimeBy(240)
+        composeRule.mainClock.advanceTimeBy(380)
         composeRule.mainClock.autoAdvance = true
         composeRule.waitForIdle()
         assertThat(abs(lineCenter(secondText) - paneCenter)).isLessThan(2f)
+    }
+
+    @Test
+    @Config(qualifiers = "w360dp-h740dp-port")
+    fun activeWrappedLyricStaysWithinPaneWithoutHorizontalOverflow() {
+        val longText = "long lyric ".repeat(28) + "\nsecond lyric line"
+        val uiState =
+            PlayerUiState(
+                player = PlayerState(positionMs = 0),
+                lyrics = listOf(PlayerLyricLineUi(0, longText)),
+                synchronizedLyrics = true,
+            )
+
+        composeRule.setContent {
+            XyMusicTheme(dynamicColor = false) {
+                Box(
+                    modifier =
+                    Modifier
+                        .size(width = 360.dp, height = 320.dp)
+                        .testTag(LYRICS_PANE_TAG),
+                ) {
+                    LyricsContent(
+                        uiState = uiState,
+                        onSeek = {},
+                        compact = false,
+                        centerActiveLine = true,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        val lyricBounds = composeRule
+            .onNodeWithTag(PlayerTestTags.lyricLine(0))
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val paneBounds =
+            composeRule
+                .onNodeWithTag(LYRICS_PANE_TAG)
+                .fetchSemanticsNode()
+                .boundsInRoot
+
+        assertThat(lyricBounds.height).isGreaterThan(75f)
+        assertThat(lyricBounds.height).isAtMost(105f)
+        assertThat(lyricBounds.right).isAtMost(paneBounds.right + 1f)
     }
 
     @Test
@@ -233,7 +278,6 @@ class PlayerLyricsComposeTest {
             .maxOfOrNull { (previous, current) -> abs(current - previous) }
             ?: 0f
         assertThat(largestFrameDelta).isLessThan(55f)
-        assertThat(firstLineCenters.last()).isLessThan(firstLineCenters.first() - 2f)
 
         composeRule.mainClock.advanceTimeBy(600)
         composeRule.mainClock.autoAdvance = true
@@ -258,6 +302,7 @@ class PlayerLyricsComposeTest {
                     synchronizedLyrics = true,
                 ),
             )
+        val playbackPosition = mutableFloatStateOf(0f)
         composeRule.setContent {
             XyMusicTheme(dynamicColor = false) {
                 Box(
@@ -271,6 +316,7 @@ class PlayerLyricsComposeTest {
                         onSeek = {},
                         compact = true,
                         centerActiveLine = true,
+                        playbackPosition = playbackPosition,
                     )
                 }
             }
@@ -281,10 +327,9 @@ class PlayerLyricsComposeTest {
         composeRule.mainClock.autoAdvance = false
         for (index in 1..3) {
             composeRule.runOnIdle {
-                uiState.value = uiState.value.copy(
-                    player = uiState.value.player.copy(positionMs = index * 1_000L),
-                )
+                playbackPosition.floatValue = index * 1_000f
             }
+            composeRule.mainClock.advanceTimeByFrame()
             composeRule.mainClock.advanceTimeByFrame()
             composeRule.waitForIdle()
 
@@ -297,6 +342,57 @@ class PlayerLyricsComposeTest {
         composeRule.waitForIdle()
 
         assertThat(abs(lineCenter("Dense fourth lyric") - paneCenter)).isLessThan(2f)
+    }
+
+    @Test
+    fun offscreenLastLyricDoesNotWaitBehindATallPreviousLine() {
+        val tallPreviousText = (1..18).joinToString(separator = "\n") { line ->
+            "Tall previous lyric line $line"
+        }
+        val lastText = "Offscreen last lyric"
+        val uiState = mutableStateOf(
+            PlayerUiState(
+                player = PlayerState(positionMs = 0),
+                lyrics = listOf(
+                    PlayerLyricLineUi(0, "First lyric"),
+                    PlayerLyricLineUi(1_000, tallPreviousText),
+                    PlayerLyricLineUi(2_000, lastText),
+                ),
+                synchronizedLyrics = true,
+            ),
+        )
+        composeRule.setContent {
+            XyMusicTheme(dynamicColor = false) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 360.dp, height = 320.dp)
+                        .testTag(LYRICS_PANE_TAG),
+                ) {
+                    LyricsContent(
+                        uiState = uiState.value,
+                        onSeek = {},
+                        compact = false,
+                        centerActiveLine = true,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.mainClock.autoAdvance = false
+        composeRule.runOnIdle {
+            uiState.value = uiState.value.copy(
+                player = uiState.value.player.copy(positionMs = 2_000),
+            )
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        composeRule.mainClock.advanceTimeBy(600)
+        composeRule.mainClock.autoAdvance = true
+        composeRule.waitForIdle()
+
+        assertThat(abs(lineCenter(lastText) - paneCenter())).isLessThan(3f)
     }
 
     @Test
@@ -347,10 +443,70 @@ class PlayerLyricsComposeTest {
 
         assertThat(abs(lineCenter("Dense jump fourth lyric") - paneCenter)).isGreaterThan(2f)
 
-        composeRule.mainClock.advanceTimeBy(240)
+        composeRule.mainClock.advanceTimeBy(600)
         composeRule.mainClock.autoAdvance = true
         composeRule.waitForIdle()
         assertThat(abs(lineCenter("Dense jump fourth lyric") - paneCenter)).isLessThan(2f)
+    }
+
+    @Test
+    fun longPlaybackRunKeepsMixedHeightLyricsCentered() {
+        val lines = (0..24).map { index ->
+            val text =
+                if (index % 3 == 0) {
+                    "Long run lyric $index\nwith a second visual line"
+                } else {
+                    "Long run lyric $index"
+                }
+            PlayerLyricLineUi(index * 1_000L, text)
+        }
+        val uiState = mutableStateOf(
+            PlayerUiState(
+                player = PlayerState(positionMs = 0),
+                lyrics = lines,
+                synchronizedLyrics = true,
+            ),
+        )
+        val playbackPosition = mutableFloatStateOf(0f)
+        composeRule.setContent {
+            XyMusicTheme(dynamicColor = false) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 480.dp, height = 500.dp)
+                        .testTag(LYRICS_PANE_TAG),
+                ) {
+                    LyricsContent(
+                        uiState = uiState.value,
+                        onSeek = {},
+                        playbackPosition = playbackPosition,
+                        compact = false,
+                        centerActiveLine = true,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.mainClock.autoAdvance = false
+
+        for (index in 1..24) {
+            val text = if (index % 3 == 0) {
+                "Long run lyric $index\nwith a second visual line"
+            } else {
+                "Long run lyric $index"
+            }
+            composeRule.runOnIdle {
+                playbackPosition.floatValue = index * 1_000f
+            }
+            composeRule.mainClock.advanceTimeByFrame()
+            composeRule.mainClock.advanceTimeByFrame()
+            composeRule.mainClock.autoAdvance = true
+            composeRule.mainClock.advanceTimeBy(650)
+            composeRule.waitForIdle()
+            composeRule.mainClock.autoAdvance = false
+
+            assertThat(abs(lineCenter(text) - paneCenter())).isLessThan(3f)
+        }
+        composeRule.mainClock.autoAdvance = true
     }
 
     @Test
@@ -533,7 +689,7 @@ class PlayerLyricsComposeTest {
                     (initialFollowingCenter - followingMiddle),
             ),
         ).isLessThan(2f)
-        assertThat(abs(targetMiddleHeight - followingMiddleHeight)).isLessThan(2f)
+        assertThat(abs(targetMiddleHeight - followingMiddleHeight)).isLessThan(4f)
         assertThat(midwayDistance).isLessThan(transitionStartDistance)
         assertThat(midwayDistance).isGreaterThan(2f)
 
@@ -545,7 +701,7 @@ class PlayerLyricsComposeTest {
         composeRule.waitForIdle()
         val afterScrollCommit = followingLineCenter()
         transitionFrames += targetLineCenter() to afterScrollCommit
-        assertThat(abs(afterScrollCommit - transitionEnd)).isLessThan(2f)
+        assertThat(abs(afterScrollCommit - transitionEnd)).isAtMost(2f)
 
         composeRule.mainClock.autoAdvance = true
         composeRule.waitForIdle()

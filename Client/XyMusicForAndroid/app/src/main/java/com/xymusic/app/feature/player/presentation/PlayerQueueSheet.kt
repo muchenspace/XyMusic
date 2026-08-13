@@ -81,6 +81,7 @@ internal fun QueueContent(
     ) {
         val wideLandscape = isWideLandscape(maxWidth, maxHeight)
         val compactLandscape = isCompactLandscape(maxWidth, maxHeight)
+        val shortPortraitPlayer = !wideLandscape && maxHeight < 520.dp
         Column(
             modifier =
             (
@@ -94,13 +95,14 @@ internal fun QueueContent(
                 }
                 ).testTag(PlayerQueueTestTags.ContentPane),
         ) {
-            if (compactLandscape) {
+            if (compactLandscape || shortPortraitPlayer) {
                 CompactLandscapeQueueHeader(
                     queueIsNotEmpty = queueItems.isNotEmpty(),
                     shuffleEnabled = shuffleEnabled,
                     repeatMode = repeatMode,
                     onCyclePlaybackMode = onCyclePlaybackMode,
                     onClear = onClear,
+                    showModeLabel = shortPortraitPlayer,
                 )
             } else {
                 QueueModeControls(
@@ -123,11 +125,11 @@ internal fun QueueContent(
                     modifier = Modifier.fillMaxSize().testTag(PlayerQueueTestTags.List),
                     contentPadding =
                     PaddingValues(
-                        start = 12.dp,
-                        end = 8.dp,
+                        start = 16.dp,
+                        end = 12.dp,
                         bottom = if (compactLandscape) 12.dp else 24.dp,
                     ),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     itemsIndexed(
                         items = queueItems,
@@ -156,14 +158,14 @@ private fun QueueHeader(queueIsNotEmpty: Boolean, onClear: () -> Unit) {
         modifier =
         Modifier
             .fillMaxWidth()
-            .padding(start = 24.dp, end = 14.dp, top = 12.dp, bottom = 6.dp),
+            .padding(start = 24.dp, end = 14.dp, top = 14.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = stringResource(R.string.player_up_next),
                 color = PlayerPrimaryContent,
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
             )
             Text(
@@ -183,6 +185,7 @@ private fun CompactLandscapeQueueHeader(
     repeatMode: RepeatMode,
     onCyclePlaybackMode: () -> Unit,
     onClear: () -> Unit,
+    showModeLabel: Boolean = false,
 ) {
     Row(
         modifier =
@@ -204,7 +207,7 @@ private fun CompactLandscapeQueueHeader(
             shuffleEnabled = shuffleEnabled,
             repeatMode = repeatMode,
             onClick = onCyclePlaybackMode,
-            showLabel = false,
+            showLabel = showModeLabel,
             modifier = Modifier.testTag(PlayerQueueTestTags.CompactPlaybackMode),
         )
         QueueClearButton(
@@ -228,7 +231,7 @@ private fun QueueClearButton(queueIsNotEmpty: Boolean, onClear: () -> Unit, modi
 @Composable
 private fun QueueModeControls(shuffleEnabled: Boolean, repeatMode: RepeatMode, onCyclePlaybackMode: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 6.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.Start,
     ) {
         PlayerPlaybackModeButton(
@@ -278,17 +281,17 @@ private fun QueueItem(
         modifier =
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(16.dp))
             .background(
                 if (isCurrent) {
                     PlayerPrimaryContent.copy(
-                        alpha = 0.10f,
+                        alpha = 0.13f,
                     )
                 } else {
-                    androidx.compose.ui.graphics.Color.Transparent
+                    PlayerPrimaryContent.copy(alpha = 0.055f)
                 },
             ).clickable(onClick = onSelect)
-            .padding(start = 10.dp, end = 2.dp, top = 7.dp, bottom = 7.dp)
+            .padding(start = 10.dp, end = 2.dp, top = 6.dp, bottom = 6.dp)
             .semantics {
                 selected = isCurrent
                 if (isCurrent) stateDescription = currentDescription
@@ -301,14 +304,14 @@ private fun QueueItem(
                 cacheKey = item.artworkCacheKey,
                 contentDescription = null,
                 fallbackImageRes = R.drawable.xymusic_compact,
-                modifier = Modifier.size(44.dp).clip(RoundedCornerShape(7.dp)),
+                modifier = Modifier.size(46.dp).clip(RoundedCornerShape(9.dp)),
             )
             if (isCurrent) {
                 Box(
                     modifier =
                     Modifier
                         .size(
-                            22.dp,
+                            24.dp,
                         ).clip(CircleShape)
                         .background(PlayerPrimaryContent.copy(alpha = 0.88f)),
                     contentAlignment = Alignment.Center,
@@ -316,7 +319,7 @@ private fun QueueItem(
                     Icon(
                         Icons.Default.GraphicEq,
                         contentDescription = null,
-                        modifier = Modifier.size(13.dp),
+                        modifier = Modifier.size(14.dp),
                         tint = PlayerInverseContent,
                     )
                 }

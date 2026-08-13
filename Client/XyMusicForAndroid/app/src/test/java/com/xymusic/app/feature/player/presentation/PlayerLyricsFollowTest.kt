@@ -5,6 +5,19 @@ import org.junit.Test
 
 class PlayerLyricsFollowTest {
     @Test
+    fun wordHighlightStartsOnlyAfterTheActiveLineSettles() {
+        assertThat(
+            lyricWordHighlightEmphasis(isActive = true, lineEmphasis = 0.998f),
+        ).isEqualTo(0f)
+        assertThat(
+            lyricWordHighlightEmphasis(isActive = true, lineEmphasis = 1f),
+        ).isEqualTo(1f)
+        assertThat(
+            lyricWordHighlightEmphasis(isActive = false, lineEmphasis = 1f),
+        ).isEqualTo(0f)
+    }
+
+    @Test
     fun adjacentVisibleLyricsUseContinuousScrolling() {
         assertThat(
             lyricFollowScrollMode(
@@ -71,6 +84,19 @@ class PlayerLyricsFollowTest {
                 activeLinePosition = 19.35f,
             ),
         ).isEqualTo(19.35f)
+    }
+
+    @Test
+    fun transitionDurationScalesWithDistanceInsteadOfRunningTooFast() {
+        assertThat(
+            lyricTransitionDurationMillis(lineDistance = 1f, scrollDistance = 56f),
+        ).isAtLeast(300)
+        assertThat(
+            lyricTransitionDurationMillis(lineDistance = 1f, scrollDistance = 56f),
+        ).isAtMost(340)
+        assertThat(
+            lyricTransitionDurationMillis(lineDistance = 8f, scrollDistance = 448f),
+        ).isEqualTo(520)
     }
 
     @Test

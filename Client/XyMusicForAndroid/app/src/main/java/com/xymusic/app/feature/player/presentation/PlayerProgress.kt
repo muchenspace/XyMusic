@@ -134,7 +134,6 @@ private class PlaybackPositionClock {
                         previousPositionMs = position.floatValue,
                         candidatePositionMs =
                         correctedPosition.clampPlaybackPosition(durationMs = framePlayer.durationMs),
-                        correctionOffsetMs = correction?.offsetMs,
                     )
             }
         }
@@ -191,18 +190,11 @@ internal fun monotonicPlaybackPosition(previousPositionMs: Float, candidatePosit
     maxOf(previousPositionMs, candidatePositionMs)
 
 /**
- * Keeps ordinary samples monotonic while allowing a deliberate backward
- * correction to converge to the player's seek target.
+ * Keeps the visual clock monotonic. Explicit seeks are applied before the
+ * frame update when the player reports a discontinuity.
  */
-internal fun renderedPlaybackPosition(
-    previousPositionMs: Float,
-    candidatePositionMs: Float,
-    correctionOffsetMs: Float?,
-): Float = if (correctionOffsetMs != null && correctionOffsetMs > 0f) {
-    candidatePositionMs
-} else {
+internal fun renderedPlaybackPosition(previousPositionMs: Float, candidatePositionMs: Float): Float =
     monotonicPlaybackPosition(previousPositionMs, candidatePositionMs)
-}
 
 internal fun playbackLyricIndex(lines: List<PlayerLyricLineUi>, positionMs: Long): Int {
     var low = 0
