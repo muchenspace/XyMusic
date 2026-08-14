@@ -144,7 +144,7 @@ internal fun LyricsContent(
             activeLinePosition.snapTo(currentLyricIndex.toFloat())
             var settledLinePosition = currentLyricIndex.toFloat()
             var transitionVelocity = 0f
-            var previousLyricIndex: Int? = null
+            var previousLyricIndexCollected: Int? = null
             var previousAutoFollow = autoFollow
             snapshotFlow {
                 LyricPlaybackSnapshot(
@@ -159,7 +159,7 @@ internal fun LyricsContent(
                     val resumedAutoFollow = snapshot.autoFollow && !previousAutoFollow
                     previousAutoFollow = snapshot.autoFollow
                     if (lyricIndex < 0) {
-                        previousLyricIndex = null
+                        previousLyricIndexCollected = null
                         activeLinePosition.snapTo(-1f)
                         settledLinePosition = -1f
                         transitionVelocity = 0f
@@ -187,11 +187,11 @@ internal fun LyricsContent(
                         activeLinePosition.snapTo(baselineIndex.toFloat())
                         settledLinePosition = baselineIndex.toFloat()
                         transitionVelocity = 0f
-                        previousLyricIndex = baselineIndex
+                        previousLyricIndexCollected = baselineIndex
                         pendingLyricSeek = null
                         return@collectLatest
                     }
-                    if (lyricIndex == previousLyricIndex) {
+                    if (lyricIndex == previousLyricIndexCollected) {
                         if (resumedAutoFollow) {
                             listState.followLyricLine(
                                 index = centeredLyricTargetIndex(lyricIndex, centerActiveLine),
@@ -204,8 +204,8 @@ internal fun LyricsContent(
                         }
                         return@collectLatest
                     }
-                    val previousIndex = previousLyricIndex
-                    previousLyricIndex = lyricIndex
+                    val previousIndex = previousLyricIndexCollected
+                    previousLyricIndexCollected = lyricIndex
                     val targetIndex = centeredLyricTargetIndex(lyricIndex, centerActiveLine)
                     val scrollMode =
                         lyricFollowScrollMode(
@@ -292,22 +292,31 @@ internal fun LyricsContent(
                     }
                     val interactionSource = remember { MutableInteractionSource() }
                     val isPressed by interactionSource.collectIsPressedAsState()
-                    val pressScale by animateFloatAsState(
-                        targetValue = if (isPressed) 0.965f else 1f,
-                        animationSpec = tween(
-                            durationMillis = LyricAnimationConstants.PRESS_ANIMATION_DURATION_MILLIS,
-                            easing = FastOutSlowInEasing,
-                        ),
-                        label = "lyricLinePressScale",
-                    )
+                    val animatedScale = remember(lineEmphasis, isPressed) {
+                        derivedStateOf {
+                            val baseScale = if (isPressed) 0.965f else 1f
+                            val focusScale = 1f + 0.035f * lineEmphasis.value
+                            baseScale * focusScale
+                        }
+                    }
+                    val animatedAlpha = remember(lineEmphasis, uiState.synchronizedLyrics) {
+                        derivedStateOf {
+                            if (uiState.synchronizedLyrics) {
+                                0.55f + 0.45f * lineEmphasis.value
+                            } else {
+                                0.88f
+                            }
+                        }
+                    }
                     val lineModifier =
                         Modifier
                             .fillMaxWidth()
                             .testTag(PlayerTestTags.lyricLine(index))
                             .graphicsLayer {
                                 transformOrigin = TransformOrigin(0f, 0.5f)
-                                scaleX = pressScale
-                                scaleY = pressScale
+                                scaleX = animatedScale.value
+                                scaleY = animatedScale.value
+                                alpha = animatedAlpha.value
                             }
                             .clickable(
                                 interactionSource = interactionSource,
@@ -334,6 +343,9 @@ internal fun LyricsContent(
                             words = line.words,
                             playbackPosition = displayPosition,
                             isActive = active,
+                            lineIndex = index,
+                            currentLyricIndex = currentLyricIndex,
+                            lineEmphasis = lineEmphasis,
                             modifier = lineModifier,
                             baseColor = PlayerMutedContent,
                             highlightColor = PlayerPrimaryContent,
@@ -575,14 +587,6 @@ private suspend fun animateLyricLineTransition(
             appliedScroll += listState.dispatchRawDelta(scrollDelta)
         }
     }
-    if (abs(scrollDistance - appliedScroll) > 0.01f) {
-        listState.scrollBy(scrollDistance - appliedScroll)
-    }
-    if (autoFollow && centerActiveLine) {
-        listState.centeredItemDelta(targetIndex)?.let { residual ->
-            if (abs(residual) > 0.5f) listState.scrollBy(residual)
-        }
-    }
 }
 
 private suspend fun LazyListState.animateLyricLineIntoLayout(
@@ -601,11 +605,6 @@ private suspend fun LazyListState.animateLyricLineIntoLayout(
                 easing = FastOutSlowInEasing,
             ),
         )
-    }
-    repeat(LyricAnimationConstants.LAYOUT_CORRECTION_PASS_COUNT) {
-        withFrameNanos {}
-        val residual = if (centerActiveLine) centeredItemDelta(index) else alignedItemDelta(index)
-        if (residual != null && abs(residual) > 0.5f) scrollBy(residual)
     }
 }
 
@@ -632,6 +631,24 @@ private fun lyricLineEmphasis(animatedLinePosition: Float, lineIndex: Int): Floa
     0f
 } else {
     (1f - abs(animatedLinePosition - lineIndex)).coerceIn(0f, 1f)
+}
+
+internal fun lyricLineHighlightPhase(
+    lineIndex: Int,
+    currentLyricIndex: Int,
+    animatedLinePosition: Float,
+): LyricWordHighlightPhase {
+    if (currentLyricIndex < 0 || animatedLinePosition < 0f) {
+        return LyricWordHighlightPhase.Hidden
+    }
+    if (lineIndex == currentLyricIndex) {
+        return LyricWordHighlightPhase.Current
+    }
+    val distance = animatedLinePosition - lineIndex
+    if (distance in 0.001f..0.999f && lineIndex < currentLyricIndex) {
+        return LyricWordHighlightPhase.Outgoing
+    }
+    return LyricWordHighlightPhase.Hidden
 }
 
 internal fun lyricWordHighlightEmphasis(isActive: Boolean, lineEmphasis: Float): Float =

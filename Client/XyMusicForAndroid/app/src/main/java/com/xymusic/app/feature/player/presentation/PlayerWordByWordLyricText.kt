@@ -28,6 +28,8 @@ internal fun WordByWordLyricText(
     playbackPosition: State<Float>,
     modifier: Modifier = Modifier,
     isActive: Boolean = true,
+    lineIndex: Int = if (isActive) 0 else 1,
+    currentLyricIndex: Int = 0,
     lineEmphasis: State<Float>? = null,
     baseColor: Color,
     highlightColor: Color,
@@ -43,16 +45,20 @@ internal fun WordByWordLyricText(
             modifier = Modifier
                 .drawWithContent {
                     drawContent()
-                    val emphasis = wordByWordHighlightEmphasis(
-                        isActive = isActive,
-                        lineEmphasis = lineEmphasis?.value,
-                    )
-                    if (emphasis > 0f) {
+                    val emphasis = lineEmphasis?.value ?: if (lineIndex == currentLyricIndex) 1f else 0f
+                    if (lineIndex == currentLyricIndex) {
                         drawCache.drawHighlight(
                             drawScope = this,
                             playbackPositionMs = playbackPosition.value,
                             highlightColor = highlightColor,
-                            alpha = emphasis,
+                            alpha = 1f,
+                        )
+                    } else if (lineIndex < currentLyricIndex && emphasis > 0f) {
+                        drawCache.drawHighlight(
+                            drawScope = this,
+                            playbackPositionMs = Float.MAX_VALUE,
+                            highlightColor = highlightColor,
+                            alpha = emphasis.coerceIn(0f, 1f),
                         )
                     }
                 },
@@ -66,8 +72,20 @@ internal fun WordByWordLyricText(
     }
 }
 
+internal enum class LyricWordHighlightPhase {
+    Hidden,
+    Outgoing,
+    Current,
+}
+
 internal fun wordByWordHighlightEmphasis(isActive: Boolean, lineEmphasis: Float?): Float =
     lineEmphasis ?: if (isActive) 1f else 0f
+
+internal fun wordByWordHighlightEmphasis(highlightPhase: LyricWordHighlightPhase, lineEmphasis: Float?): Float = when {
+    highlightPhase == LyricWordHighlightPhase.Current -> 1f
+    highlightPhase == LyricWordHighlightPhase.Outgoing -> lineEmphasis?.coerceIn(0f, 1f) ?: 1f
+    else -> 0f
+}
 
 internal data class WordTimedHighlightProgress(val completedCount: Int, val currentFraction: Float)
 
@@ -167,14 +185,13 @@ private class WordByWordLyricDrawCache(private val words: List<TimedWordLayout>)
     }
 
     fun drawHighlight(drawScope: ContentDrawScope, playbackPositionMs: Float, highlightColor: Color, alpha: Float) {
+        if (alpha <= 0f) return
         timingIndex.progressInto(playbackPositionMs, progress)
         with(drawScope) {
             val layout = layoutResult ?: return@with
             val completedCount = progress.completedCount.coerceIn(0, wordPaths.size)
-            if (completedCount >= wordPaths.size && wordPaths.isNotEmpty()) {
-                drawText(layout, color = highlightColor, alpha = alpha)
-            } else {
-                drawCompletedHighlight(layout, completedCount, highlightColor, alpha)
+            drawCompletedHighlight(layout, completedCount, highlightColor, alpha)
+            if (completedCount < wordPaths.size) {
                 drawCurrentHighlight(
                     layout = layout,
                     word = wordPaths.getOrNull(completedCount),

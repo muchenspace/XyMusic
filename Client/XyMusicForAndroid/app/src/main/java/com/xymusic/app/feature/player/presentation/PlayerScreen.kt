@@ -6,6 +6,7 @@ import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
@@ -149,13 +150,22 @@ fun PlayerScreen(
                 dismissScope.launch {
                     dismissOffset.snapTo(startingOffset)
                     isDraggingToDismiss = false
+                    val animationSpec: AnimationSpec<Float> =
+                        if (startingOffset > 0f || releaseVelocity > 0f) {
+                            XyMotion.SnapSpring
+                        } else {
+                            tween(
+                                durationMillis = XyMotion.Standard,
+                                easing = XyMotion.EmphasizedEasing,
+                            )
+                        }
                     dismissOffset.animateTo(
                         targetValue = dismissTargetOffset,
-                        animationSpec = XyMotion.SnapSpring,
+                        animationSpec = animationSpec,
                         initialVelocity = releaseVelocity.coerceAtLeast(0f),
                     )
+                    onBack()
                 }
-                onBack()
             }
         }
         val dismissGestureState =
@@ -216,7 +226,7 @@ fun PlayerScreen(
             enabled =
             !isDismissing && !confirmClearQueue && !showSpeedDialog && !showSleepTimerDialog,
         ) {
-            dismissPlayer(0f)
+            onBack()
         }
         val isLandscape = maxWidth > maxHeight
         LandscapeStatusBarEffect(hidden = isLandscape)
@@ -347,7 +357,7 @@ fun PlayerScreen(
                         item = current,
                         showTrackInfo = portraitPagerState.currentPage != PlayerContentTab.Artwork.ordinal,
                         isFavorite = isFavorite,
-                        onDismiss = { dismissPlayer(0f) },
+                        onDismiss = onBack,
                         onToggleFavorite = onToggleFavorite,
                         onAddToPlaylist = onAddToPlaylist,
                         playbackSpeed = uiState.player.playbackSpeed,
