@@ -299,13 +299,9 @@ internal fun LyricsContent(
                             baseScale * focusScale
                         }
                     }
-                    val animatedAlpha = remember(lineEmphasis, uiState.synchronizedLyrics) {
+                    val animatedAlpha = remember(uiState.synchronizedLyrics) {
                         derivedStateOf {
-                            if (uiState.synchronizedLyrics) {
-                                0.55f + 0.45f * lineEmphasis.value
-                            } else {
-                                0.88f
-                            }
+                            if (uiState.synchronizedLyrics) 1f else 0.88f
                         }
                     }
                     val lineModifier =

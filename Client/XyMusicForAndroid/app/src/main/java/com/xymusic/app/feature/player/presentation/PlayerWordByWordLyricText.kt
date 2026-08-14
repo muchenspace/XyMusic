@@ -190,15 +190,19 @@ private class WordByWordLyricDrawCache(private val words: List<TimedWordLayout>)
         with(drawScope) {
             val layout = layoutResult ?: return@with
             val completedCount = progress.completedCount.coerceIn(0, wordPaths.size)
-            drawCompletedHighlight(layout, completedCount, highlightColor, alpha)
-            if (completedCount < wordPaths.size) {
-                drawCurrentHighlight(
-                    layout = layout,
-                    word = wordPaths.getOrNull(completedCount),
-                    fraction = progress.currentFraction,
-                    highlightColor = highlightColor,
-                    alpha = alpha,
-                )
+            if (completedCount >= wordPaths.size && wordPaths.isNotEmpty()) {
+                drawText(layout, color = highlightColor, alpha = alpha.coerceIn(0f, 1f))
+            } else {
+                drawCompletedHighlight(layout, completedCount, highlightColor, alpha)
+                if (completedCount < wordPaths.size) {
+                    drawCurrentHighlight(
+                        layout = layout,
+                        word = wordPaths.getOrNull(completedCount),
+                        fraction = progress.currentFraction,
+                        highlightColor = highlightColor,
+                        alpha = alpha,
+                    )
+                }
             }
         }
     }

@@ -2,6 +2,7 @@ package com.xymusic.app.app.navigation
 
 import androidx.compose.animation.core.animateDp
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.layout.Box
@@ -140,10 +141,14 @@ private fun rememberMainNavigationChromeMotion(
     val miniPlayerBottomOffset =
         chromeTransition.animateDp(
             transitionSpec = {
-                tween(
-                    durationMillis = chromeTransitionDuration(initialState, targetState),
-                    easing = XyMotion.NavigationEasing,
-                )
+                if (initialState.isPlayerDestination || targetState.isPlayerDestination) {
+                    snap()
+                } else {
+                    tween(
+                        durationMillis = chromeTransitionDuration(initialState, targetState),
+                        easing = XyMotion.NavigationEasing,
+                    )
+                }
             },
             label = "miniPlayerBottomOffset",
         ) { state ->
@@ -350,9 +355,6 @@ private fun mainNavigationChromeVisibility(
     targetState: MainNavigationChromeAnimationState,
 ): MainNavigationChromeVisibility {
     val mainNavigationVisible = currentState.showMainNavigation || targetState.showMainNavigation
-    // The player is full-screen. Keeping the outgoing mini player composed here
-    // duplicates its artwork and progress drawing during the most expensive
-    // part of the route transition.
     val miniPlayerVisible =
         if (targetState.isPlayerDestination) {
             targetState.showMiniPlayer

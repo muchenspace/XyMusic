@@ -6,6 +6,7 @@ import android.util.LruCache
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -31,31 +32,32 @@ fun rememberArtworkAmbientColor(artworkUrl: String?, cacheKey: String?): Color? 
 fun rememberArtworkAmbientPalette(artworkUrl: String?, cacheKey: String?): ArtworkAmbientPalette? {
     val context = LocalContext.current
     val resources = LocalResources.current
+    val artworkIdentity = remember(artworkUrl, cacheKey) {
+        if (artworkUrl.isNullOrBlank()) null else (stableArtworkCacheKey(cacheKey) ?: artworkUrl)
+    }
+    val initialCached = remember(artworkIdentity) {
+        artworkIdentity?.let { cachedArtworkAmbientPalette(it) }
+    }
     val state =
         produceState<ArtworkAmbientPalette?>(
-            initialValue = null,
+            initialValue = initialCached,
             key1 = artworkUrl,
             key2 = cacheKey,
             key3 = resources,
         ) {
-            value =
-                if (artworkUrl.isNullOrBlank()) {
-                    null
-                } else {
-                    val artworkIdentity = stableArtworkCacheKey(cacheKey) ?: artworkUrl
-                    cachedArtworkAmbientPalette(artworkIdentity)
-                        ?: run {
-                            // Let the first player frame use the fallback background while artwork loads.
-                            withFrameNanos { }
-                            extractArtworkAmbientColor(
-                                artworkUrl = artworkUrl,
-                                cacheKey = cacheKey,
-                                artworkIdentity = artworkIdentity,
-                                context = context,
-                                resources = resources,
-                            )
-                        }
-                }
+            if (artworkUrl.isNullOrBlank()) {
+                value = null
+            } else if (value == null) {
+                val identity = stableArtworkCacheKey(cacheKey) ?: artworkUrl
+                value = cachedArtworkAmbientPalette(identity)
+                    ?: extractArtworkAmbientColor(
+                        artworkUrl = artworkUrl,
+                        cacheKey = cacheKey,
+                        artworkIdentity = identity,
+                        context = context,
+                        resources = resources,
+                    )
+            }
         }
     return state.value
 }

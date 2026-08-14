@@ -150,20 +150,13 @@ fun PlayerScreen(
                 dismissScope.launch {
                     dismissOffset.snapTo(startingOffset)
                     isDraggingToDismiss = false
-                    val animationSpec: AnimationSpec<Float> =
-                        if (startingOffset > 0f || releaseVelocity > 0f) {
-                            XyMotion.SnapSpring
-                        } else {
-                            tween(
-                                durationMillis = XyMotion.Standard,
-                                easing = XyMotion.EmphasizedEasing,
-                            )
-                        }
-                    dismissOffset.animateTo(
-                        targetValue = dismissTargetOffset,
-                        animationSpec = animationSpec,
-                        initialVelocity = releaseVelocity.coerceAtLeast(0f),
-                    )
+                    if (startingOffset > 0f) {
+                        dismissOffset.animateTo(
+                            targetValue = dismissTargetOffset,
+                            animationSpec = XyMotion.SnapSpring,
+                            initialVelocity = releaseVelocity.coerceAtLeast(0f),
+                        )
+                    }
                     onBack()
                 }
             }
@@ -226,7 +219,7 @@ fun PlayerScreen(
             enabled =
             !isDismissing && !confirmClearQueue && !showSpeedDialog && !showSleepTimerDialog,
         ) {
-            onBack()
+            dismissPlayer(0f)
         }
         val isLandscape = maxWidth > maxHeight
         LandscapeStatusBarEffect(hidden = isLandscape)
@@ -357,7 +350,7 @@ fun PlayerScreen(
                         item = current,
                         showTrackInfo = portraitPagerState.currentPage != PlayerContentTab.Artwork.ordinal,
                         isFavorite = isFavorite,
-                        onDismiss = onBack,
+                        onDismiss = { dismissPlayer(0f) },
                         onToggleFavorite = onToggleFavorite,
                         onAddToPlaylist = onAddToPlaylist,
                         playbackSpeed = uiState.player.playbackSpeed,
@@ -493,47 +486,25 @@ private fun PlayerAmbientBackdrop(
     val themeColors = MaterialTheme.xyColors
     val backdropColors = resolvePlayerBackdropColors(themeColors, ambientPalette)
     Box(
-        modifier = modifier.background(themeColors.nowPlayingBg),
-    ) {
-        item?.let { currentItem ->
-            MediaArtwork(
-                url = currentItem.artworkUrl,
-                cacheKey = currentItem.artworkCacheKey,
-                contentDescription = null,
-                fallbackImageRes = R.drawable.xymusic_compact,
-                modifier =
-                Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        alpha = 0.38f
-                        scaleX = 1.24f
-                        scaleY = 1.24f
-                    }
-                    .blur(72.dp),
-                shape = RectangleShape,
-            )
-        }
-        Box(
-            modifier =
-            Modifier
-                .fillMaxSize()
-                .drawWithCache {
-                    val background =
-                        Brush.linearGradient(
-                            colorStops =
-                            arrayOf(
-                                0f to backdropColors.start.copy(alpha = 0.82f),
-                                0.40f to backdropColors.center.copy(alpha = 0.72f),
-                                0.72f to backdropColors.highlight.copy(alpha = 0.68f),
-                                1f to backdropColors.end.copy(alpha = 0.86f),
-                            ),
-                            start = Offset(0f, 0f),
-                            end = Offset(size.width, size.height),
-                        )
-                    onDrawBehind { drawRect(background) }
-                },
-        )
-    }
+        modifier =
+        modifier
+            .background(themeColors.nowPlayingBg)
+            .drawWithCache {
+                val background =
+                    Brush.linearGradient(
+                        colorStops =
+                        arrayOf(
+                            0f to backdropColors.start.copy(alpha = 0.88f),
+                            0.38f to backdropColors.center.copy(alpha = 0.78f),
+                            0.70f to backdropColors.highlight.copy(alpha = 0.74f),
+                            1f to backdropColors.end.copy(alpha = 0.90f),
+                        ),
+                        start = Offset(0f, 0f),
+                        end = Offset(size.width, size.height),
+                    )
+                onDrawBehind { drawRect(background) }
+            },
+    )
 }
 
 private val PlayerFallbackAmbientPalette = ArtworkAmbientPalette(
