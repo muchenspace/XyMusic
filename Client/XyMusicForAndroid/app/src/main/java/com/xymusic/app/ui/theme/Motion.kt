@@ -90,11 +90,15 @@ fun AnimatedContentTransitionScope<*>.playerSlideInto() =
     slideIntoContainer(
         towards = AnimatedContentTransitionScope.SlideDirection.Up,
         animationSpec = tween(XyMotion.Emphasized, easing = XyMotion.EmphasizedDecel),
+    ) + fadeIn(
+        animationSpec = tween(XyMotion.Quick, easing = XyMotion.EmphasizedDecel),
     )
 
 fun AnimatedContentTransitionScope<*>.playerSlideOutOf() =
     slideOutOfContainer(
         towards = AnimatedContentTransitionScope.SlideDirection.Down,
+        animationSpec = tween(XyMotion.Standard, easing = XyMotion.EmphasizedEasing),
+    ) + fadeOut(
         animationSpec = tween(XyMotion.Standard, easing = XyMotion.EmphasizedEasing),
     )
 
