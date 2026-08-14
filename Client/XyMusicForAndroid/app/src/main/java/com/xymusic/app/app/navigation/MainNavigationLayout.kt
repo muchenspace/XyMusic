@@ -86,28 +86,16 @@ internal fun MainNavigationLayout(
     content: @Composable (MainNavigationChromeInsets) -> Unit,
 ) {
     val chromeMotion = rememberMainNavigationChromeMotion(config, chromeState)
-    val chromeZIndex =
-        chromeZIndex(
-            playerEntryStillVisible = playerEntryStillVisible,
-            chromeIsExitingForPlayer = chromeMotion.isExitingForPlayer,
-        )
 
     Box(modifier = modifier.fillMaxSize()) {
+        content(chromeMotion.insets)
         MainNavigationChrome(
             motion = chromeMotion,
-            chromeZIndex = chromeZIndex,
+            chromeZIndex = INTERACTIVE_CHROME_Z_INDEX,
             navigationRail = navigationRail,
             bottomNavigation = bottomNavigation,
             miniPlayer = miniPlayer,
         )
-        Box(
-            modifier =
-            Modifier
-                .fillMaxSize()
-                .zIndex(NAVIGATION_CONTENT_Z_INDEX),
-        ) {
-            content(chromeMotion.insets)
-        }
         MainNavigationSnackbar(
             snackbarHostState = snackbarHostState,
             insets = chromeMotion.insets,
@@ -287,10 +275,18 @@ internal fun MainNavigationRouteLayout(
             MainNavigationContentLayout.FullScreen -> Modifier
         }
 
+    val routeZIndex =
+        if (layout == MainNavigationContentLayout.FullScreen) {
+            FULLSCREEN_PLAYER_Z_INDEX
+        } else {
+            PRIMARY_CONTENT_Z_INDEX
+        }
+
     Box(
         modifier =
         modifier
             .fillMaxSize()
+            .zIndex(routeZIndex)
             .then(layoutModifier),
     ) {
         content()
@@ -332,16 +328,9 @@ private fun chromeTransitionDuration(
     targetState: MainNavigationChromeAnimationState,
 ): Int = when {
     targetState.isPlayerDestination -> XyMotion.Emphasized
-    initialState.isPlayerDestination -> XyMotion.Slow
+    initialState.isPlayerDestination -> XyMotion.Standard
     else -> XyMotion.Standard
 }
-
-private fun chromeZIndex(playerEntryStillVisible: Boolean, chromeIsExitingForPlayer: Boolean): Float =
-    if (playerEntryStillVisible && !chromeIsExitingForPlayer) {
-        CHROME_BEHIND_CONTENT_Z_INDEX
-    } else {
-        INTERACTIVE_CHROME_Z_INDEX
-    }
 
 private fun MainNavigationChromeState.primaryNavigationBottomPadding(config: MainNavigationLayoutConfig): Dp =
     if (!config.useNavigationRail && showMainNavigation) MainNavigationBarHeight else 0.dp
@@ -403,7 +392,7 @@ private data class MainNavigationChromeVisibility(
     val isExitingForPlayer: Boolean,
 )
 
-private const val CHROME_BEHIND_CONTENT_Z_INDEX = 0f
-private const val NAVIGATION_CONTENT_Z_INDEX = 1f
+private const val PRIMARY_CONTENT_Z_INDEX = 1f
 private const val INTERACTIVE_CHROME_Z_INDEX = 2f
-private const val SNACKBAR_Z_INDEX = 3f
+private const val FULLSCREEN_PLAYER_Z_INDEX = 3f
+private const val SNACKBAR_Z_INDEX = 4f

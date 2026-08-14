@@ -86,10 +86,19 @@ fun AnimatedContentTransitionScope<*>.fadeBackOutOf() = fadeOut(
     animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
 )
 
-fun AnimatedContentTransitionScope<*>.playerFadeInto() = fadeIn(
-    animationSpec = tween(XyMotion.Emphasized, easing = XyMotion.NavigationEasing),
-)
+fun AnimatedContentTransitionScope<*>.playerSlideInto() =
+    slideIntoContainer(
+        towards = AnimatedContentTransitionScope.SlideDirection.Up,
+        animationSpec = tween(XyMotion.Emphasized, easing = XyMotion.EmphasizedDecel),
+    )
 
-fun AnimatedContentTransitionScope<*>.playerReturnInto() = fadeIn(
-    animationSpec = tween(XyMotion.Slow, easing = XyMotion.NavigationEasing),
-)
+fun AnimatedContentTransitionScope<*>.playerSlideOutOf() =
+    slideOutOfContainer(
+        towards = AnimatedContentTransitionScope.SlideDirection.Down,
+        animationSpec = tween(XyMotion.Standard, easing = XyMotion.EmphasizedEasing),
+    )
+
+fun AnimatedContentTransitionScope<*>.playerFadeInto() = playerSlideInto()
+
+fun AnimatedContentTransitionScope<*>.playerFadeOutOf() = playerSlideOutOf()
+

@@ -1,5 +1,6 @@
 package com.xymusic.app.app.navigation
 
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
@@ -28,8 +29,8 @@ import com.xymusic.app.ui.theme.fadeBackInto
 import com.xymusic.app.ui.theme.fadeBackOutOf
 import com.xymusic.app.ui.theme.fadeInto
 import com.xymusic.app.ui.theme.fadeOutOf
-import com.xymusic.app.ui.theme.playerFadeInto
-import com.xymusic.app.ui.theme.playerReturnInto
+import com.xymusic.app.ui.theme.playerSlideInto
+import com.xymusic.app.ui.theme.playerSlideOutOf
 
 private const val LIBRARY_TAB_ARGUMENT = "libraryTab"
 private val LIBRARY_ROUTE =
@@ -59,7 +60,7 @@ internal fun MainNavHost(
         modifier = modifier,
         enterTransition = {
             if (targetState.destination.route == PlayerDestination.NowPlaying.route) {
-                playerFadeInto()
+                playerSlideInto()
             } else {
                 fadeInto()
             }
@@ -73,14 +74,14 @@ internal fun MainNavHost(
         },
         popEnterTransition = {
             when {
-                targetState.destination.route == PlayerDestination.NowPlaying.route -> playerFadeInto()
-                initialState.destination.route == PlayerDestination.NowPlaying.route -> playerReturnInto()
+                targetState.destination.route == PlayerDestination.NowPlaying.route -> playerSlideInto()
+                initialState.destination.route == PlayerDestination.NowPlaying.route -> EnterTransition.None
                 else -> fadeBackInto()
             }
         },
         popExitTransition = {
             if (initialState.destination.route == PlayerDestination.NowPlaying.route) {
-                ExitTransition.KeepUntilTransitionsFinished
+                playerSlideOutOf()
             } else {
                 fadeBackOutOf()
             }

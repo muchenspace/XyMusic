@@ -1,5 +1,6 @@
 package com.xymusic.app.app.navigation
 
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -40,8 +41,8 @@ import com.xymusic.app.ui.theme.fadeBackInto
 import com.xymusic.app.ui.theme.fadeBackOutOf
 import com.xymusic.app.ui.theme.fadeInto
 import com.xymusic.app.ui.theme.fadeOutOf
-import com.xymusic.app.ui.theme.playerFadeInto
-import com.xymusic.app.ui.theme.playerReturnInto
+import com.xymusic.app.ui.theme.playerSlideInto
+import com.xymusic.app.ui.theme.playerSlideOutOf
 import kotlin.math.roundToInt
 import org.junit.Rule
 import org.junit.Test
@@ -102,12 +103,49 @@ class MainNavigationLayoutComposeTest {
         composeRule.onNodeWithTag(PLAYER_TAG).assertExists()
         composeRule.onNodeWithTag(HOME_TAG).assertExists()
 
-        composeRule.mainClock.advanceTimeBy(XyMotion.Slow + TRANSITION_SETTLE_MILLIS)
+        composeRule.mainClock.advanceTimeBy(XyMotion.Standard + TRANSITION_SETTLE_MILLIS)
         composeRule.mainClock.autoAdvance = true
         composeRule.waitForIdle()
 
         composeRule.onNodeWithTag(PLAYER_TAG).assertDoesNotExist()
         composeRule.onNodeWithTag(HOME_TAG).assertExists()
+    }
+
+    @Test
+    @Config(qualifiers = PHONE_QUALIFIERS)
+    fun playerPopKeepsBottomChromeBehindPlayerUntilReturnCompletes() {
+        val config =
+            MainNavigationLayoutConfig(
+                useNavigationRail = false,
+                compactPlayerBar = false,
+                hasPlayerItem = true,
+            )
+        val fixture = setFixture(config)
+
+        composeRule.mainClock.autoAdvance = false
+        composeRule.runOnIdle {
+            fixture.navController.navigate(PlayerDestination.NowPlaying.route)
+        }
+        composeRule.mainClock.advanceTimeBy(XyMotion.Emphasized + TRANSITION_SETTLE_MILLIS)
+        composeRule.waitForIdle()
+
+        composeRule.runOnIdle { fixture.navController.navigateUp() }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag(PLAYER_TAG).assertExists()
+        composeRule.onNodeWithTag(HOME_TAG).assertExists()
+
+        composeRule.mainClock.advanceTimeBy(XyMotion.Standard + TRANSITION_SETTLE_MILLIS)
+        composeRule.mainClock.autoAdvance = true
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag(PLAYER_TAG).assertDoesNotExist()
+        composeRule.onNodeWithTag(HOME_TAG).assertExists()
+        composeRule.onNodeWithTag(BOTTOM_NAVIGATION_TAG).assertExists()
+        composeRule.onNodeWithTag(MINI_PLAYER_TAG).assertExists()
     }
 
     @Test
@@ -544,7 +582,7 @@ private fun FixtureNavHost(
             .testTag(NAVIGATION_HOST_TAG),
         enterTransition = {
             if (targetState.destination.route == PlayerDestination.NowPlaying.route) {
-                playerFadeInto()
+                playerSlideInto()
             } else {
                 fadeInto()
             }
@@ -558,14 +596,14 @@ private fun FixtureNavHost(
         },
         popEnterTransition = {
             when {
-                targetState.destination.route == PlayerDestination.NowPlaying.route -> playerFadeInto()
-                initialState.destination.route == PlayerDestination.NowPlaying.route -> playerReturnInto()
+                targetState.destination.route == PlayerDestination.NowPlaying.route -> playerSlideInto()
+                initialState.destination.route == PlayerDestination.NowPlaying.route -> EnterTransition.None
                 else -> fadeBackInto()
             }
         },
         popExitTransition = {
             if (initialState.destination.route == PlayerDestination.NowPlaying.route) {
-                ExitTransition.KeepUntilTransitionsFinished
+                playerSlideOutOf()
             } else {
                 fadeBackOutOf()
             }
