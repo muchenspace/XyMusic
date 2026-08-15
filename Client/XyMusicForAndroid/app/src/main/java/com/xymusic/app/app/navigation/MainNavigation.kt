@@ -6,9 +6,11 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalResources
@@ -26,7 +28,9 @@ import com.xymusic.app.app.trackactions.TrackActionsUiState
 import com.xymusic.app.app.trackactions.TrackActionsViewModel
 import com.xymusic.app.core.ui.layout.isCompactLandscape
 import com.xymusic.app.domain.server.ServerEndpoint
+import com.xymusic.app.feature.player.presentation.PlayerScreen
 import com.xymusic.app.feature.player.presentation.PlayerUiEffect
+import com.xymusic.app.feature.player.presentation.PlayerUiState
 import com.xymusic.app.feature.player.presentation.PlayerViewModel
 import com.xymusic.app.feature.player.presentation.rememberPlaybackPositionState
 import kotlinx.coroutines.flow.Flow
@@ -56,10 +60,10 @@ fun MainNavigation(
     val trackActionsViewModel: TrackActionsViewModel = hiltViewModel()
     val playerUiState by playerViewModel.structuralUiState.collectAsStateWithLifecycle()
     val playbackPosition = rememberPlaybackPositionState(playerViewModel.playbackState)
-    val visibleEntries by navController.visibleEntries.collectAsStateWithLifecycle()
     val trackActionsUiState by trackActionsViewModel.uiState.collectAsStateWithLifecycle()
     val playerIsFavorite = trackActionsUiState.playerIsFavorite
     val hasPlayerItem = playerUiState.player.currentItem != null
+    var playerPresented by rememberSaveable { mutableStateOf(false) }
 
     PlayerEffectSnackbar(playerViewModel.effects, snackbarHostState)
     LaunchedEffect(trackActionsViewModel, snackbarHostState, resources) {
@@ -86,8 +90,6 @@ fun MainNavigation(
                 compactPlayerBar = compactLandscape,
                 hasPlayerItem = hasPlayerItem,
             )
-        val playerEntryStillVisible =
-            visibleEntries.any { entry -> entry.destination.route == PlayerDestination.NowPlaying.route }
         val chromeState =
             mainNavigationChromeState(
                 config = layoutConfig,
@@ -101,7 +103,6 @@ fun MainNavigation(
         MainNavigationLayout(
             config = layoutConfig,
             chromeState = chromeState,
-            playerEntryStillVisible = playerEntryStillVisible,
             snackbarHostState = snackbarHostState,
             navigationRail = {
                 MainNavigationRail(
@@ -120,9 +121,7 @@ fun MainNavigation(
                     uiState = playerUiState,
                     playbackPosition = playbackPosition,
                     onOpenPlayer = {
-                        navController.navigate(PlayerDestination.NowPlaying.route) {
-                            launchSingleTop = true
-                        }
+                        playerPresented = true
                     },
                     onTogglePlayback = playerViewModel::togglePlayback,
                     onNext = playerViewModel::skipToNext,
@@ -133,15 +132,10 @@ fun MainNavigation(
         ) { chromeInsets ->
             MainNavHost(
                 navController = navController,
-                playerViewModel = playerViewModel,
                 onTrackPlay = { tracks, track ->
                     catalogPlaybackViewModel.playQueue(tracks = tracks, startTrack = track)
                 },
-                playerUiState = playerUiState,
-                playbackPosition = playbackPosition,
-                playerIsFavorite = playerIsFavorite,
                 onTrackMore = trackActionsViewModel::open,
-                onTogglePlayerFavorite = trackActionsViewModel::togglePlayerFavorite,
                 dynamicColorEnabled = dynamicColorEnabled,
                 onDynamicColorChanged = onDynamicColorChanged,
                 serverEndpoint = serverEndpoint,
@@ -149,6 +143,23 @@ fun MainNavigation(
                 layoutConfig = layoutConfig,
                 chromeInsets = chromeInsets,
                 modifier = Modifier.fillMaxSize(),
+            )
+        }
+        PlayerTransitionOverlay(
+            visible = playerPresented,
+            onDismissRequest = { playerPresented = false },
+            modifier = Modifier.fillMaxSize(),
+        ) { onDismiss, dismissGestureModifier, immersiveLandscape ->
+            PlayerOverlayContent(
+                uiState = playerUiState,
+                playerViewModel = playerViewModel,
+                playbackPosition = playbackPosition,
+                onBack = onDismiss,
+                isFavorite = playerIsFavorite,
+                onToggleFavorite = trackActionsViewModel::togglePlayerFavorite,
+                onAddToPlaylist = trackActionsViewModel::open,
+                dismissGestureModifier = dismissGestureModifier,
+                immersiveLandscape = immersiveLandscape,
             )
         }
     }
@@ -179,6 +190,45 @@ internal fun NavHostController.navigateMain(route: String, restoreState: Boolean
         launchSingleTop = true
         this.restoreState = restoreState
     }
+}
+
+@Composable
+private fun PlayerOverlayContent(
+    uiState: PlayerUiState,
+    playerViewModel: PlayerViewModel,
+    playbackPosition: State<Float>,
+    onBack: () -> Unit,
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
+    onAddToPlaylist: (String) -> Unit,
+    dismissGestureModifier: Modifier,
+    immersiveLandscape: Boolean,
+) {
+    PlayerScreen(
+        uiState = uiState,
+        onBack = onBack,
+        onTogglePlayback = playerViewModel::togglePlayback,
+        onSeek = playerViewModel::seekTo,
+        onPrevious = playerViewModel::skipToPrevious,
+        onNext = playerViewModel::skipToNext,
+        onCyclePlaybackMode = playerViewModel::cyclePlaybackMode,
+        onSelectQueueItem = playerViewModel::selectQueueItem,
+        onRemoveQueueItem = playerViewModel::removeQueueItem,
+        onMoveQueueItem = playerViewModel::moveQueueItem,
+        onClearQueue = playerViewModel::clearQueue,
+        onPlaybackSpeedChange = playerViewModel::setPlaybackSpeed,
+        onSleepTimerChange = playerViewModel::setSleepTimer,
+        isFavorite = isFavorite,
+        onToggleFavorite = onToggleFavorite,
+        onAddToPlaylist = {
+            uiState.player.currentItem
+                ?.trackId
+                ?.let(onAddToPlaylist)
+        },
+        playbackPosition = playbackPosition,
+        dismissGestureModifier = dismissGestureModifier,
+        immersiveLandscape = immersiveLandscape,
+    )
 }
 
 @Composable

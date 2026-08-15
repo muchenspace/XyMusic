@@ -60,10 +60,6 @@ sealed class CatalogDestination(val route: String, val argumentName: String) {
     }
 }
 
-sealed class PlayerDestination(val route: String) {
-    data object NowPlaying : PlayerDestination("player/now-playing")
-}
-
 sealed class PlaylistDestination(val route: String) {
     data object Detail : PlaylistDestination(
         "playlist/{${PlaylistRouteArgs.PlaylistId}}",

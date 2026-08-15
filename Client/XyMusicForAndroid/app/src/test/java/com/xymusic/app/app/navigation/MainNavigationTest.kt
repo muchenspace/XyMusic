@@ -13,7 +13,6 @@ class MainNavigationTest {
             assertThat(shouldShowMainBottomBar(destination.route)).isFalse()
         }
         assertThat(shouldShowMainBottomBar("main/library?libraryTab=History")).isFalse()
-        assertThat(shouldShowMainBottomBar(PlayerDestination.NowPlaying.route)).isFalse()
         assertThat(shouldShowMainBottomBar(PlaylistDestination.Detail.route)).isFalse()
         assertThat(shouldShowMainBottomBar(CatalogDestination.AlbumDetail.route)).isFalse()
         assertThat(shouldShowMainBottomBar(CatalogDestination.ArtistDetail.route)).isFalse()
@@ -26,8 +25,6 @@ class MainNavigationTest {
             .isEqualTo(MainNavigationContentLayout.Primary)
         assertThat(mainNavigationContentLayout(MainDestination.Mine.route))
             .isEqualTo(MainNavigationContentLayout.Primary)
-        assertThat(mainNavigationContentLayout(PlayerDestination.NowPlaying.route))
-            .isEqualTo(MainNavigationContentLayout.FullScreen)
         assertThat(mainNavigationContentLayout(PlaylistDestination.Detail.route))
             .isEqualTo(MainNavigationContentLayout.EdgeToEdge)
         assertThat(mainNavigationContentLayout(MainSecondaryDestination.Search.route))
@@ -50,20 +47,6 @@ class MainNavigationTest {
         assertThat(
             mainNavigationChromeState(
                 config = config,
-                currentRoute = PlayerDestination.NowPlaying.route,
-                lastSelectedMainDestination = MainDestination.Home,
-            ),
-        ).isEqualTo(
-            MainNavigationChromeState(
-                showMainNavigation = false,
-                showMiniPlayer = false,
-                selectedMainDestination = MainDestination.Home,
-                isPlayerDestination = true,
-            ),
-        )
-        assertThat(
-            mainNavigationChromeState(
-                config = config,
                 currentRoute = PlaylistDestination.Detail.route,
                 lastSelectedMainDestination = MainDestination.Home,
             ),
@@ -72,7 +55,6 @@ class MainNavigationTest {
                 showMainNavigation = false,
                 showMiniPlayer = true,
                 selectedMainDestination = MainDestination.Home,
-                isPlayerDestination = false,
             ),
         )
         assertThat(
@@ -86,7 +68,6 @@ class MainNavigationTest {
                 showMainNavigation = true,
                 showMiniPlayer = true,
                 selectedMainDestination = MainDestination.Mine,
-                isPlayerDestination = false,
             ),
         )
     }

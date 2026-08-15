@@ -9,14 +9,13 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 
 object XyMotion {
     const val Instant = 0
     const val Fast = 100
     const val Quick = 180
     const val Standard = 260
-    const val Emphasized = 340
+    const val Emphasized = 380
     const val Slow = 460
 
     val EaseOutQuart: Easing = CubicBezierEasing(0.25f, 1f, 0.5f, 1f)
@@ -39,6 +38,12 @@ object XyMotion {
             stiffness = Spring.StiffnessMedium,
         )
 
+    val SheetDismissSpring =
+        spring<Float>(
+            dampingRatio = 0.88f,
+            stiffness = Spring.StiffnessMediumLow,
+        )
+
     val PillNavSpring =
         spring<Dp>(
             dampingRatio = Spring.DampingRatioMediumBouncy,
@@ -48,13 +53,7 @@ object XyMotion {
     val PressSpring =
         spring<Float>(
             dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessHigh,
-        )
-
-    val SharedElementSpring =
-        spring<IntOffset>(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessMediumLow,
+            stiffness = Spring.StiffnessMedium,
         )
 
     fun snapTo() = tween<Float>(durationMillis = Emphasized, easing = EaseOutExp)
@@ -64,9 +63,6 @@ object XyMotion {
     fun slideIn(duration: Int = Emphasized) = tween<Float>(durationMillis = duration, easing = EaseOutExp)
 
     val ShimmerSpec = tween<Float>(durationMillis = 1400, easing = EaseInOutQuart)
-
-    const val SharedElementArtworkKey = "player-artwork"
-    const val SharedElementMiniBarKey = "mini-bar"
 }
 
 // Route transitions stay alpha-only so navigation never remeasures the active page per frame.
@@ -85,24 +81,3 @@ fun AnimatedContentTransitionScope<*>.fadeBackInto() = fadeIn(
 fun AnimatedContentTransitionScope<*>.fadeBackOutOf() = fadeOut(
     animationSpec = tween(XyMotion.Quick, easing = XyMotion.NavigationEasing),
 )
-
-fun AnimatedContentTransitionScope<*>.playerSlideInto() =
-    slideIntoContainer(
-        towards = AnimatedContentTransitionScope.SlideDirection.Up,
-        animationSpec = tween(XyMotion.Emphasized, easing = XyMotion.EmphasizedDecel),
-    ) + fadeIn(
-        animationSpec = tween(XyMotion.Quick, easing = XyMotion.EmphasizedDecel),
-    )
-
-fun AnimatedContentTransitionScope<*>.playerSlideOutOf() =
-    slideOutOfContainer(
-        towards = AnimatedContentTransitionScope.SlideDirection.Down,
-        animationSpec = tween(XyMotion.Standard, easing = XyMotion.EmphasizedEasing),
-    ) + fadeOut(
-        animationSpec = tween(XyMotion.Standard, easing = XyMotion.EmphasizedEasing),
-    )
-
-fun AnimatedContentTransitionScope<*>.playerFadeInto() = playerSlideInto()
-
-fun AnimatedContentTransitionScope<*>.playerFadeOutOf() = playerSlideOutOf()
-

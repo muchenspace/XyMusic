@@ -5,13 +5,8 @@ package com.xymusic.app.feature.player.presentation
 import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -27,21 +22,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -51,12 +40,10 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.xymusic.app.R
 import com.xymusic.app.core.ui.component.ArtworkAmbientPalette
-import com.xymusic.app.core.ui.component.MediaArtwork
 import com.xymusic.app.core.ui.component.rememberArtworkAmbientPalette
 import com.xymusic.app.feature.player.domain.model.PlayerQueueItem
 import com.xymusic.app.ui.theme.XyMotion
 import com.xymusic.app.ui.theme.xyColors
-import kotlinx.coroutines.launch
 
 @Composable
 fun PlayerScreen(
@@ -78,6 +65,8 @@ fun PlayerScreen(
     modifier: Modifier = Modifier,
     playbackPosition: State<Float>? = null,
     isFavorite: Boolean = false,
+    dismissGestureModifier: Modifier = Modifier,
+    immersiveLandscape: Boolean = true,
 ) {
     val portraitPagerState =
         rememberPagerState(
@@ -115,15 +104,6 @@ fun PlayerScreen(
         label = "playerAmbientHighlight",
     )
 
-    val density = LocalDensity.current
-    val dismissThreshold = with(density) { 180.dp.toPx() }
-    val dismissVelocityThreshold = with(density) { 1_000.dp.toPx() }
-    val dismissOffset = remember { Animatable(0f) }
-    var dragDismissOffset by remember { mutableFloatStateOf(0f) }
-    var isDraggingToDismiss by remember { mutableStateOf(false) }
-    var isDismissing by remember { mutableStateOf(false) }
-    val dismissScope = rememberCoroutineScope()
-
     if (confirmClearQueue) {
         PlayerAlertDialog(
             onDismissRequest = { confirmClearQueue = false },
@@ -137,92 +117,13 @@ fun PlayerScreen(
         )
     }
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val dismissTargetOffset = with(density) { maxHeight.toPx() }.coerceAtLeast(dismissThreshold)
-        val dismissPlayer: (Float) -> Unit = { releaseVelocity ->
-            if (!isDismissing) {
-                isDismissing = true
-                val startingOffset =
-                    if (isDraggingToDismiss) {
-                        dragDismissOffset
-                    } else {
-                        dismissOffset.value
-                    }
-                dismissScope.launch {
-                    dismissOffset.snapTo(startingOffset)
-                    isDraggingToDismiss = false
-                    if (startingOffset > 0f) {
-                        dismissOffset.animateTo(
-                            targetValue = dismissTargetOffset,
-                            animationSpec = XyMotion.SnapSpring,
-                            initialVelocity = releaseVelocity.coerceAtLeast(0f),
-                        )
-                    }
-                    onBack()
-                }
-            }
-        }
-        val dismissGestureState =
-            rememberDraggableState { dragDelta ->
-                if (!isDismissing && isDraggingToDismiss) {
-                    dragDismissOffset =
-                        updatePlayerDismissOffset(
-                            currentOffsetPx = dragDismissOffset,
-                            dragDeltaPx = dragDelta,
-                            maxOffsetPx = dismissTargetOffset,
-                        )
-                }
-            }
-        val dismissGestureModifier =
-            Modifier.draggable(
-                state = dismissGestureState,
-                orientation = Orientation.Vertical,
-                enabled = !isDismissing,
-                startDragImmediately = dismissOffset.isRunning,
-                onDragStarted = {
-                    val currentOffset =
-                        if (isDraggingToDismiss) {
-                            dragDismissOffset
-                        } else {
-                            dismissOffset.value
-                        }
-                    dragDismissOffset = currentOffset.coerceIn(0f, dismissTargetOffset)
-                    isDraggingToDismiss = true
-                    dismissScope.launch { dismissOffset.stop() }
-                },
-                onDragStopped = { releaseVelocity ->
-                    if (!isDismissing) {
-                        val releaseOffset = dragDismissOffset
-                        when (
-                            resolvePlayerDismissTarget(
-                                offsetPx = releaseOffset,
-                                releaseVelocityPxPerSecond = releaseVelocity,
-                                distanceThresholdPx = dismissThreshold,
-                                velocityThresholdPxPerSecond = dismissVelocityThreshold,
-                            )
-                        ) {
-                            PlayerDismissTarget.Dismiss -> dismissPlayer(releaseVelocity)
-                            PlayerDismissTarget.Restore ->
-                                dismissScope.launch {
-                                    dismissOffset.snapTo(releaseOffset)
-                                    isDraggingToDismiss = false
-                                    dismissOffset.animateTo(
-                                        targetValue = 0f,
-                                        animationSpec = XyMotion.SnapSpring,
-                                        initialVelocity = releaseVelocity,
-                                    )
-                                }
-                        }
-                    }
-                },
-            )
         BackHandler(
-            enabled =
-            !isDismissing && !confirmClearQueue && !showSpeedDialog && !showSleepTimerDialog,
+            enabled = !confirmClearQueue && !showSpeedDialog && !showSleepTimerDialog,
         ) {
-            dismissPlayer(0f)
+            onBack()
         }
         val isLandscape = maxWidth > maxHeight
-        LandscapeStatusBarEffect(hidden = isLandscape)
+        LandscapeStatusBarEffect(hidden = isLandscape && immersiveLandscape)
         LandscapeKeepScreenOnEffect(enabled = isLandscape)
         if (!isLandscape && showSpeedDialog) {
             PlayerChoiceDialog(
@@ -265,14 +166,7 @@ fun PlayerScreen(
             modifier =
             Modifier
                 .fillMaxSize()
-                .graphicsLayer {
-                    translationY =
-                        if (isDraggingToDismiss) {
-                            dragDismissOffset
-                        } else {
-                            dismissOffset.value
-                        }
-                }.then(
+                .then(
                     if (!isLandscape &&
                         portraitPagerState.currentPage == PlayerContentTab.Artwork.ordinal
                     ) {
@@ -350,7 +244,7 @@ fun PlayerScreen(
                         item = current,
                         showTrackInfo = portraitPagerState.currentPage != PlayerContentTab.Artwork.ordinal,
                         isFavorite = isFavorite,
-                        onDismiss = { dismissPlayer(0f) },
+                        onDismiss = onBack,
                         onToggleFavorite = onToggleFavorite,
                         onAddToPlaylist = onAddToPlaylist,
                         playbackSpeed = uiState.player.playbackSpeed,
