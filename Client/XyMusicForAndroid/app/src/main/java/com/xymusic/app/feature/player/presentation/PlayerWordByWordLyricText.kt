@@ -45,20 +45,28 @@ internal fun WordByWordLyricText(
             modifier = Modifier
                 .drawWithContent {
                     drawContent()
-                    val emphasis = lineEmphasis?.value ?: if (lineIndex == currentLyricIndex) 1f else 0f
-                    if (lineIndex == currentLyricIndex) {
-                        drawCache.drawHighlight(
-                            drawScope = this,
-                            playbackPositionMs = playbackPosition.value,
-                            highlightColor = highlightColor,
-                            alpha = 1f,
+                    // The line clock is also the visibility gate.  Starting a word overlay at
+                    // the exact timestamp makes a newly-entering wrapped line flash before its
+                    // scroll transition has settled.  Reading the state from the draw phase keeps
+                    // this high-frequency update out of composition and layout.
+                    val emphasis =
+                        wordByWordHighlightEmphasis(
+                            isActive = lineIndex == currentLyricIndex,
+                            lineEmphasis = lineEmphasis?.value,
                         )
-                    } else if (lineIndex < currentLyricIndex && emphasis > 0f) {
+                            .smoothLyricEmphasis()
+                    val highlightPosition =
+                        wordByWordHighlightPlaybackPosition(
+                            lineIndex = lineIndex,
+                            currentLyricIndex = currentLyricIndex,
+                            playbackPositionMs = playbackPosition.value,
+                        )
+                    if (highlightPosition != null && emphasis > 0f) {
                         drawCache.drawHighlight(
                             drawScope = this,
-                            playbackPositionMs = Float.MAX_VALUE,
+                            playbackPositionMs = highlightPosition,
                             highlightColor = highlightColor,
-                            alpha = emphasis.coerceIn(0f, 1f),
+                            alpha = emphasis,
                         )
                     }
                 },
@@ -72,61 +80,43 @@ internal fun WordByWordLyricText(
     }
 }
 
-internal enum class LyricWordHighlightPhase {
-    Hidden,
-    Outgoing,
-    Current,
+/**
+ * Converts the line-position interpolation into a gentle alpha curve.  A cubic smoothstep has
+ * zero slope at both ends, so a line never appears as a one-frame flash when a frame lands exactly
+ * on a lyric boundary.  The function is intentionally allocation-free and is called from draw.
+ */
+private fun Float.smoothLyricEmphasis(): Float {
+    val value = coerceIn(0f, 1f)
+    return value * value * (3f - 2f * value)
 }
 
 internal fun wordByWordHighlightEmphasis(isActive: Boolean, lineEmphasis: Float?): Float =
     lineEmphasis ?: if (isActive) 1f else 0f
 
-internal fun wordByWordHighlightEmphasis(highlightPhase: LyricWordHighlightPhase, lineEmphasis: Float?): Float = when {
-    highlightPhase == LyricWordHighlightPhase.Current -> 1f
-    highlightPhase == LyricWordHighlightPhase.Outgoing -> lineEmphasis?.coerceIn(0f, 1f) ?: 1f
-    else -> 0f
-}
+internal fun wordByWordHighlightPlaybackPosition(
+    lineIndex: Int,
+    currentLyricIndex: Int,
+    playbackPositionMs: Float,
+): Float? = playbackPositionMs.takeIf { lineIndex <= currentLyricIndex }
 
 internal data class WordTimedHighlightProgress(val completedCount: Int, val currentFraction: Float)
 
 internal fun calculateWordTimedHighlightProgress(
     words: List<PlayerLyricWordUi>,
     playbackPositionMs: Long,
-): WordTimedHighlightProgress = calculateWordTimedHighlightProgressByTimes(
-    wordTimes = words.map { word -> WordTiming(word.timeMs, word.endTimeMs) },
-    playbackPositionMs = playbackPositionMs.toFloat(),
-)
-
-private fun calculateWordTimedHighlightProgressByTimes(
-    wordTimes: List<WordTiming>,
-    playbackPositionMs: Float,
 ): WordTimedHighlightProgress {
-    if (wordTimes.isEmpty() || playbackPositionMs.isNaN()) {
-        return WordTimedHighlightProgress(completedCount = 0, currentFraction = 0f)
+    val indexedWords = words.mapIndexed { index, word ->
+        TimedWordLayout(
+            timeMs = word.timeMs,
+            endTimeMs = word.effectiveEndTimeMs(words.getOrNull(index + 1)?.timeMs),
+            startOffset = 0,
+            endOffset = 0,
+        )
     }
-    var completedCount = 0
-    for (word in wordTimes) {
-        if (playbackPositionMs < word.timeMs) {
-            return WordTimedHighlightProgress(completedCount, 0f)
-        }
-        val endTimeMs = word.endTimeMs
-        if (endTimeMs == null) {
-            return WordTimedHighlightProgress(completedCount, 1f)
-        }
-        if (endTimeMs <= word.timeMs || playbackPositionMs >= endTimeMs) {
-            completedCount += 1
-            continue
-        }
-        val fraction =
-            ((playbackPositionMs - word.timeMs).toDouble() / (endTimeMs - word.timeMs))
-                .toFloat()
-                .coerceIn(0f, 1f)
-        return WordTimedHighlightProgress(completedCount, fraction)
-    }
-    return WordTimedHighlightProgress(completedCount, 0f)
+    val output = MutableWordTimedHighlightProgress()
+    WordTimingIndex(indexedWords).progressInto(playbackPositionMs.toFloat(), output)
+    return WordTimedHighlightProgress(output.completedCount, output.currentFraction)
 }
-
-private data class WordTiming(val timeMs: Long, val endTimeMs: Long?)
 
 internal data class TimedWordLayout(val timeMs: Long, val endTimeMs: Long?, val startOffset: Int, val endOffset: Int)
 
@@ -136,14 +126,21 @@ internal data class TimedWordLayout(val timeMs: Long, val endTimeMs: Long?, val 
  * surrogate pairs, or combining characters.
  */
 internal fun normalizedTimedWordLayouts(text: String, words: List<PlayerLyricWordUi>): List<TimedWordLayout> {
+    val validBoundaries = BooleanArray(text.length + 1)
+    validBoundaries[0] = true
+    characterFragmentOffsets(text, 0, text.length).forEach { (_, endOffset) ->
+        validBoundaries[endOffset] = true
+    }
     var startOffset = 0
-    val layouts = words.mapNotNull { word ->
+    val layouts = words.mapIndexedNotNull { index, word ->
         if (word.text.isEmpty()) {
             null
         } else {
             val endOffset = startOffset + word.text.length
             if (
                 endOffset > text.length ||
+                !validBoundaries[startOffset] ||
+                !validBoundaries[endOffset] ||
                 !text.regionMatches(
                     thisOffset = startOffset,
                     other = word.text,
@@ -155,7 +152,7 @@ internal fun normalizedTimedWordLayouts(text: String, words: List<PlayerLyricWor
             }
             TimedWordLayout(
                 timeMs = word.timeMs,
-                endTimeMs = word.endTimeMs,
+                endTimeMs = word.effectiveEndTimeMs(words.getOrNull(index + 1)?.timeMs),
                 startOffset = startOffset,
                 endOffset = endOffset,
             ).also { startOffset = endOffset }
@@ -166,6 +163,7 @@ internal fun normalizedTimedWordLayouts(text: String, words: List<PlayerLyricWor
 
 private class WordByWordLyricDrawCache(private val words: List<TimedWordLayout>) {
     private val completedPath = Path()
+    private val frameHighlightPath = Path()
     private val timingIndex = WordTimingIndex(words)
     private val progress = MutableWordTimedHighlightProgress()
     private var layoutResult: TextLayoutResult? = null
@@ -193,49 +191,80 @@ private class WordByWordLyricDrawCache(private val words: List<TimedWordLayout>)
             if (completedCount >= wordPaths.size && wordPaths.isNotEmpty()) {
                 drawText(layout, color = highlightColor, alpha = alpha.coerceIn(0f, 1f))
             } else {
-                drawCompletedHighlight(layout, completedCount, highlightColor, alpha)
-                if (completedCount < wordPaths.size) {
-                    drawCurrentHighlight(
-                        layout = layout,
-                        word = wordPaths.getOrNull(completedCount),
-                        fraction = progress.currentFraction,
-                        highlightColor = highlightColor,
-                        alpha = alpha,
-                    )
-                }
+                drawPartialHighlight(
+                    layout = layout,
+                    completedCount = completedCount,
+                    word = wordPaths.getOrNull(completedCount),
+                    fraction = progress.currentFraction,
+                    highlightColor = highlightColor,
+                    alpha = alpha,
+                )
             }
         }
     }
 
-    private fun ContentDrawScope.drawCompletedHighlight(
+    private fun ContentDrawScope.drawPartialHighlight(
         layout: TextLayoutResult,
         completedCount: Int,
-        highlightColor: Color,
-        alpha: Float,
-    ) {
-        if (completedCount <= 0) return
-        ensureCompletedPath(completedCount)
-        clipPath(completedPath) {
-            drawText(layout, color = highlightColor, alpha = alpha)
-        }
-    }
-
-    private fun ContentDrawScope.drawCurrentHighlight(
-        layout: TextLayoutResult,
         word: WordHighlightPath?,
         fraction: Float,
         highlightColor: Color,
         alpha: Float,
     ) {
-        val currentWord = word ?: return
+        ensureCompletedPath(completedCount)
+        frameHighlightPath.reset()
+        var hasCompleteFragments = completedCount > 0
+        if (hasCompleteFragments) frameHighlightPath.addPath(completedPath)
+        val currentWord = word
+        if (currentWord == null) {
+            if (hasCompleteFragments) {
+                clipPath(frameHighlightPath) {
+                    drawText(layout, color = highlightColor, alpha = alpha.coerceIn(0f, 1f))
+                }
+            }
+            return
+        }
         val clampedFraction = fraction.coerceIn(0f, 1f)
-        if (clampedFraction <= 0f) return
+        if (clampedFraction <= 0f) {
+            if (hasCompleteFragments) {
+                clipPath(frameHighlightPath) {
+                    drawText(layout, color = highlightColor, alpha = alpha.coerceIn(0f, 1f))
+                }
+            }
+            return
+        }
         val totalAdvance = currentWord.totalAdvance
-        if (totalAdvance <= 0f) return
+        if (totalAdvance <= 0f) {
+            if (hasCompleteFragments) {
+                clipPath(frameHighlightPath) {
+                    drawText(layout, color = highlightColor, alpha = alpha.coerceIn(0f, 1f))
+                }
+            }
+            return
+        }
         var remainingAdvance = totalAdvance * clampedFraction
-        currentWord.fragments.forEach { fragment ->
-            drawFragmentHighlight(layout, fragment, remainingAdvance, highlightColor, alpha)
-            remainingAdvance -= fragment.advanceWidth
+        var partialFragment: WordHighlightFragment? = null
+        var partialAdvance = 0f
+        for (fragment in currentWord.fragments) {
+            if (remainingAdvance >= fragment.advanceWidth) {
+                frameHighlightPath.addPath(fragment.path)
+                hasCompleteFragments = true
+                remainingAdvance -= fragment.advanceWidth
+            } else {
+                if (remainingAdvance > 0f) {
+                    partialFragment = fragment
+                    partialAdvance = remainingAdvance
+                }
+                break
+            }
+        }
+        if (hasCompleteFragments) {
+            clipPath(frameHighlightPath) {
+                drawText(layout, color = highlightColor, alpha = alpha.coerceIn(0f, 1f))
+            }
+        }
+        partialFragment?.let { fragment ->
+            drawFragmentHighlight(layout, fragment, partialAdvance, highlightColor, alpha)
         }
     }
 
@@ -327,12 +356,7 @@ private class WordByWordLyricDrawCache(private val words: List<TimedWordLayout>)
         return maxOf(abs(endPosition - startPosition), bounds.width)
     }
 
-    private fun characterBounds(
-        layoutResult: TextLayoutResult,
-        startOffset: Int,
-        endOffset: Int,
-        path: Path,
-    ): Rect {
+    private fun characterBounds(layoutResult: TextLayoutResult, startOffset: Int, endOffset: Int, path: Path): Rect {
         var bounds: Rect? = null
         var offset = startOffset
         while (offset < endOffset) {
@@ -354,24 +378,12 @@ private class WordByWordLyricDrawCache(private val words: List<TimedWordLayout>)
 }
 
 /** Keeps a timed word's visual fragments inside its own UTF-16 range, even when it soft-wraps. */
-internal fun characterFragmentOffsets(
-    text: String,
-    startOffset: Int,
-    endOffset: Int,
-): List<Pair<Int, Int>> {
-    if (startOffset >= endOffset || startOffset < 0 || endOffset > text.length) return emptyList()
+internal fun characterFragmentOffsets(text: String, startOffset: Int, endOffset: Int): List<Pair<Int, Int>> {
+    if (!text.hasValidFragmentRange(startOffset, endOffset)) return emptyList()
     val fragments = mutableListOf<Pair<Int, Int>>()
     var fragmentStart = startOffset
     while (fragmentStart < endOffset) {
-        var fragmentEnd =
-            (fragmentStart + Character.charCount(text.codePointAt(fragmentStart))).coerceAtMost(endOffset)
-        var previousWasJoiner = false
-        while (fragmentEnd < endOffset) {
-            val codePoint = text.codePointAt(fragmentEnd)
-            if (!isCharacterContinuation(codePoint) && !previousWasJoiner) break
-            fragmentEnd = (fragmentEnd + Character.charCount(codePoint)).coerceAtMost(endOffset)
-            previousWasJoiner = codePoint == ZERO_WIDTH_JOINER
-        }
+        val fragmentEnd = text.nextLyricCharacterFragmentEnd(fragmentStart, endOffset)
         if (fragmentEnd <= fragmentStart) break
         fragments += fragmentStart to fragmentEnd
         fragmentStart = fragmentEnd
@@ -379,21 +391,14 @@ internal fun characterFragmentOffsets(
     return fragments
 }
 
-private fun isCharacterContinuation(codePoint: Int): Boolean {
-    val type = Character.getType(codePoint)
-    return type == Character.NON_SPACING_MARK.toInt() ||
-        type == Character.COMBINING_SPACING_MARK.toInt() ||
-        type == Character.ENCLOSING_MARK.toInt() ||
-        codePoint == ZERO_WIDTH_JOINER ||
-        codePoint in VARIATION_SELECTOR_START..VARIATION_SELECTOR_END ||
-        codePoint in EMOJI_MODIFIER_START..EMOJI_MODIFIER_END
-}
+private fun String.hasValidFragmentRange(startOffset: Int, endOffset: Int): Boolean = startOffset < endOffset &&
+    startOffset >= 0 &&
+    endOffset <= length &&
+    isUtf16Boundary(startOffset) &&
+    isUtf16Boundary(endOffset)
 
-private const val ZERO_WIDTH_JOINER = 0x200D
-private const val VARIATION_SELECTOR_START = 0xFE00
-private const val VARIATION_SELECTOR_END = 0xFE0F
-private const val EMOJI_MODIFIER_START = 0x1F3FB
-private const val EMOJI_MODIFIER_END = 0x1F3FF
+private fun String.isUtf16Boundary(offset: Int): Boolean = offset in 0..length &&
+    !(offset > 0 && offset < length && this[offset - 1].isHighSurrogate() && this[offset].isLowSurrogate())
 
 /** Uses the text layout's line boundaries so a wrap never splits the last character of a line. */
 internal fun lineFragmentOffsets(

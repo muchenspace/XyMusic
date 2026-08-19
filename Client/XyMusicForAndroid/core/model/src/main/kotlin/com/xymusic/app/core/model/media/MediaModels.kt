@@ -47,6 +47,7 @@ data class Lyrics(
     val content: String,
     val trackVersion: Long,
     val updatedAtEpochMillis: Long,
+    val isDefault: Boolean = false,
 )
 
 data class TrackDetail(val track: Track, val lyrics: List<Lyrics>)

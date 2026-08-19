@@ -244,6 +244,7 @@ internal fun TrackDetailReadModel.toDomain(): TrackDetail = TrackDetail(
             content = lyric.content,
             trackVersion = lyric.trackVersion,
             updatedAtEpochMillis = lyric.updatedAtEpochMs,
+            isDefault = lyric.isDefault,
         )
     },
 )

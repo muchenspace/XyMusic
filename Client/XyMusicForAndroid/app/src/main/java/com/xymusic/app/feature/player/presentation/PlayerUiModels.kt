@@ -14,6 +14,69 @@ import com.xymusic.app.feature.player.domain.model.RepeatMode
 @Immutable
 data class PlayerLyricWordUi(val timeMs: Long, val text: String, val endTimeMs: Long? = null)
 
+internal fun PlayerLyricWordUi.effectiveEndTimeMs(nextWordStartMs: Long? = null): Long {
+    endTimeMs?.let { return it }
+    nextWordStartMs?.let { nextStart -> return nextStart.coerceAtLeast(timeMs) }
+    val characterCount = text.lyricCharacterFragmentCount().coerceAtLeast(1)
+    val revealDurationMs =
+        (characterCount * UNTERMINATED_WORD_MILLIS_PER_CHARACTER)
+            .coerceIn(UNTERMINATED_WORD_MIN_MILLIS, UNTERMINATED_WORD_MAX_MILLIS)
+    return timeMs.coerceAtMost(Long.MAX_VALUE - revealDurationMs) + revealDurationMs
+}
+
+internal fun String.lyricCharacterFragmentCount(): Int {
+    var count = 0
+    var fragmentStart = 0
+    while (fragmentStart < length) {
+        val fragmentEnd = nextLyricCharacterFragmentEnd(fragmentStart, length)
+        if (fragmentEnd <= fragmentStart) break
+        count += 1
+        fragmentStart = fragmentEnd
+    }
+    return count
+}
+
+internal fun String.nextLyricCharacterFragmentEnd(startOffset: Int, rangeEnd: Int): Int {
+    val firstCodePoint = codePointAt(startOffset)
+    var fragmentEnd = (startOffset + Character.charCount(firstCodePoint)).coerceAtMost(rangeEnd)
+    if (firstCodePoint.isRegionalIndicator() && fragmentEnd < rangeEnd) {
+        val nextCodePoint = codePointAt(fragmentEnd)
+        if (nextCodePoint.isRegionalIndicator()) {
+            fragmentEnd = (fragmentEnd + Character.charCount(nextCodePoint)).coerceAtMost(rangeEnd)
+        }
+    }
+    while (fragmentEnd < rangeEnd) {
+        val codePoint = codePointAt(fragmentEnd)
+        fragmentEnd =
+            when {
+                isCharacterContinuation(codePoint) ->
+                    (fragmentEnd + Character.charCount(codePoint)).coerceAtMost(rangeEnd)
+                codePoint == ZERO_WIDTH_JOINER -> joinedCharacterEnd(fragmentEnd, rangeEnd)
+                else -> break
+            }
+    }
+    return fragmentEnd
+}
+
+private fun String.joinedCharacterEnd(joinerOffset: Int, rangeEnd: Int): Int {
+    val afterJoiner = joinerOffset + Character.charCount(codePointAt(joinerOffset))
+    if (afterJoiner >= rangeEnd) return afterJoiner.coerceAtMost(rangeEnd)
+    return (afterJoiner + Character.charCount(codePointAt(afterJoiner))).coerceAtMost(rangeEnd)
+}
+
+private fun isCharacterContinuation(codePoint: Int): Boolean {
+    val type = Character.getType(codePoint)
+    return type == Character.NON_SPACING_MARK.toInt() ||
+        type == Character.COMBINING_SPACING_MARK.toInt() ||
+        type == Character.ENCLOSING_MARK.toInt() ||
+        codePoint in VARIATION_SELECTOR_START..VARIATION_SELECTOR_END ||
+        codePoint in SUPPLEMENTARY_VARIATION_SELECTOR_START..SUPPLEMENTARY_VARIATION_SELECTOR_END ||
+        codePoint in EMOJI_MODIFIER_START..EMOJI_MODIFIER_END ||
+        codePoint in EMOJI_TAG_START..EMOJI_TAG_END
+}
+
+private fun Int.isRegionalIndicator(): Boolean = this in REGIONAL_INDICATOR_START..REGIONAL_INDICATOR_END
+
 @Immutable
 data class PlayerLyricLineUi(val timeMs: Long?, val text: String, val words: List<PlayerLyricWordUi> = emptyList())
 
@@ -118,3 +181,18 @@ internal val PlayerInverseContent: Color
     @Composable
     @ReadOnlyComposable
     get() = MaterialTheme.colorScheme.surface
+
+private const val UNTERMINATED_WORD_MILLIS_PER_CHARACTER = 90L
+private const val UNTERMINATED_WORD_MIN_MILLIS = 240L
+private const val UNTERMINATED_WORD_MAX_MILLIS = 900L
+private const val ZERO_WIDTH_JOINER = 0x200D
+private const val VARIATION_SELECTOR_START = 0xFE00
+private const val VARIATION_SELECTOR_END = 0xFE0F
+private const val SUPPLEMENTARY_VARIATION_SELECTOR_START = 0xE0100
+private const val SUPPLEMENTARY_VARIATION_SELECTOR_END = 0xE01EF
+private const val EMOJI_MODIFIER_START = 0x1F3FB
+private const val EMOJI_MODIFIER_END = 0x1F3FF
+private const val EMOJI_TAG_START = 0xE0020
+private const val EMOJI_TAG_END = 0xE007F
+private const val REGIONAL_INDICATOR_START = 0x1F1E6
+private const val REGIONAL_INDICATOR_END = 0x1F1FF

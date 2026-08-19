@@ -22,6 +22,24 @@ class PlayerWordByWordLyricTextTest {
     }
 
     @Test
+    fun outgoingLineKeepsTheLivePlaybackClockInsteadOfFlashingToComplete() {
+        assertThat(
+            wordByWordHighlightPlaybackPosition(
+                lineIndex = 5,
+                currentLyricIndex = 6,
+                playbackPositionMs = 1_250f,
+            ),
+        ).isEqualTo(1_250f)
+        assertThat(
+            wordByWordHighlightPlaybackPosition(
+                lineIndex = 7,
+                currentLyricIndex = 6,
+                playbackPositionMs = 1_250f,
+            ),
+        ).isNull()
+    }
+
+    @Test
     fun beforeFirstWordHasNoHighlight() {
         assertThat(calculateWordTimedHighlightProgress(words, 999))
             .isEqualTo(WordTimedHighlightProgress(completedCount = 0, currentFraction = 0f))
@@ -49,13 +67,59 @@ class PlayerWordByWordLyricTextTest {
     }
 
     @Test
-    fun finalWordWithoutAnExplicitEndIsFullyHighlightedAfterItStarts() {
+    fun finalWordWithoutAnExplicitEndUsesASmoothBoundedReveal() {
         val unterminatedWords = listOf(PlayerLyricWordUi(1_000, "final"))
 
         assertThat(calculateWordTimedHighlightProgress(unterminatedWords, 999))
             .isEqualTo(WordTimedHighlightProgress(completedCount = 0, currentFraction = 0f))
         assertThat(calculateWordTimedHighlightProgress(unterminatedWords, 1_000))
-            .isEqualTo(WordTimedHighlightProgress(completedCount = 0, currentFraction = 1f))
+            .isEqualTo(WordTimedHighlightProgress(completedCount = 0, currentFraction = 0f))
+        assertThat(calculateWordTimedHighlightProgress(unterminatedWords, 1_225))
+            .isEqualTo(WordTimedHighlightProgress(completedCount = 0, currentFraction = 0.5f))
+        assertThat(calculateWordTimedHighlightProgress(unterminatedWords, 1_450))
+            .isEqualTo(WordTimedHighlightProgress(completedCount = 1, currentFraction = 0f))
+    }
+
+    @Test
+    fun explicitEndRemainsAuthoritativeWhenTheNextWordStartsEarlier() {
+        val word = PlayerLyricWordUi(timeMs = 2_000L, text = "word", endTimeMs = 3_000L)
+
+        assertThat(word.effectiveEndTimeMs(nextWordStartMs = 1_000L)).isEqualTo(3_000L)
+    }
+
+    @Test
+    fun equalNextWordStartCompletesTheCurrentWordImmediately() {
+        val equalStartWords =
+            listOf(
+                PlayerLyricWordUi(timeMs = 1_000L, text = "first"),
+                PlayerLyricWordUi(timeMs = 1_000L, text = "second"),
+            )
+
+        assertThat(equalStartWords.first().effectiveEndTimeMs(nextWordStartMs = 1_000L)).isEqualTo(1_000L)
+        assertThat(calculateWordTimedHighlightProgress(equalStartWords, playbackPositionMs = 1_000L))
+            .isEqualTo(WordTimedHighlightProgress(completedCount = 1, currentFraction = 0f))
+    }
+
+    @Test
+    fun inferredDurationUsesTheSameExtendedGraphemeUnitsAsDrawing() {
+        val graphemes =
+            listOf(
+                "\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67\u200D\uD83D\uDC66",
+                "e\u0301",
+                "\uD83C\uDDFA\uD83C\uDDF8",
+                "\u2764\uFE0F",
+                "\uD83D\uDC4B\uD83C\uDFFD",
+                "\uD83C\uDFF4\uDB40\uDC65\uDB40\uDC6E\uDB40\uDC67\uDB40\uDC6C" +
+                    "\uDB40\uDC61\uDB40\uDC6E\uDB40\uDC64\uDB40\uDC7F",
+            )
+
+        graphemes.forEach { grapheme ->
+            assertThat(grapheme.lyricCharacterFragmentCount()).isEqualTo(1)
+            assertThat(characterFragmentOffsets(grapheme, 0, grapheme.length))
+                .containsExactly(0 to grapheme.length)
+        }
+        val word = PlayerLyricWordUi(timeMs = 1_000L, text = graphemes.joinToString(separator = ""))
+        assertThat(word.effectiveEndTimeMs()).isEqualTo(1_540L)
     }
 
     @Test

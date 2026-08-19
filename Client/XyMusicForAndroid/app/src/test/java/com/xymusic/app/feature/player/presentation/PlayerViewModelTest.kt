@@ -103,7 +103,7 @@ class PlayerViewModelTest {
         assertThat(viewModel.uiState.value.lyrics.first().words)
             .containsExactly(
                 PlayerLyricWordUi(0, "First ", endTimeMs = 500),
-                PlayerLyricWordUi(500, "line"),
+                PlayerLyricWordUi(500, "line", endTimeMs = 860),
             ).inOrder()
     }
 
@@ -161,6 +161,68 @@ class PlayerViewModelTest {
                 .map(PlayerLyricLineUi::text),
         ).containsExactly("Cached line")
         catalog.allowRefreshToFinish.complete(Unit)
+    }
+
+    @Test
+    fun switchingTracksNeverPairsTheNewPlayerWithThePreviousTracksLyrics() = runTest {
+        val first = queueItem("track-first")
+        val second = queueItem("track-second")
+        val secondLyrics = MutableStateFlow<Lyrics?>(null)
+        val player =
+            FakePlayerRepository(
+                PlayerState(
+                    queue = listOf(first, second),
+                    currentQueueItemId = first.queueItemId,
+                ),
+            )
+        val source = object : LyricsSource {
+            override fun observe(trackId: String): Flow<Lyrics?> = if (trackId == first.trackId) {
+                flowOf(
+                    Lyrics(
+                        id = "lyrics-first",
+                        trackId = first.trackId,
+                        language = "und",
+                        format = LyricsFormat.PLAIN,
+                        timing = LyricsTiming.LINE,
+                        content = "First track lyric",
+                        trackVersion = 1,
+                        updatedAtEpochMillis = 1,
+                    ),
+                )
+            } else {
+                secondLyrics
+            }
+
+            override suspend fun refresh(trackId: String) = Unit
+        }
+        val viewModel =
+            PlayerViewModel(
+                PlayerUseCases(player),
+                source,
+                PlaybackQueueUseCases(EmptyPlaybackQueueStore),
+                mainDispatcherRule.dispatcher,
+            )
+        backgroundScope.launch { viewModel.uiState.collect() }
+
+        advanceUntilIdle()
+        assertThat(viewModel.uiState.value.lyrics.single().text).isEqualTo("First track lyric")
+
+        player.switchCurrent(second.queueItemId)
+        runCurrent()
+        assertThat(viewModel.uiState.value.lyrics).isEmpty()
+
+        secondLyrics.value = Lyrics(
+            id = "lyrics-second",
+            trackId = second.trackId,
+            language = "und",
+            format = LyricsFormat.PLAIN,
+            timing = LyricsTiming.LINE,
+            content = "Second track lyric",
+            trackVersion = 1,
+            updatedAtEpochMillis = 1,
+        )
+        advanceUntilIdle()
+        assertThat(viewModel.uiState.value.lyrics.single().text).isEqualTo("Second track lyric")
     }
 
     @Test
@@ -617,6 +679,13 @@ private class FakePlayerRepository(initialState: PlayerState) : PlayerRepository
 
     fun updatePosition(positionMs: Long) {
         mutableState.value = mutableState.value.copy(positionMs = positionMs)
+    }
+
+    fun switchCurrent(queueItemId: String) {
+        mutableState.value = mutableState.value.copy(
+            currentQueueItemId = queueItemId,
+            positionMs = 0L,
+        )
     }
 
     fun updateFailure(failure: PlayerFailure?) {
