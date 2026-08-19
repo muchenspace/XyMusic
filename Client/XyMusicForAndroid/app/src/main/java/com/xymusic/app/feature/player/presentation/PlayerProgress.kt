@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -47,8 +47,8 @@ internal fun rememberPlaybackInteractionPositionState(playbackPosition: State<Fl
  * coroutine alive and multiple consumers do not create independent tickers.
  */
 @Composable
-internal fun rememberPlaybackPositionState(playerFlow: Flow<PlayerState>): State<Float> {
-    val clock = remember(playerFlow) { PlaybackPositionClock() }
+internal fun rememberPlaybackPositionState(playerFlow: StateFlow<PlayerState>): State<Float> {
+    val clock = remember(playerFlow) { PlaybackPositionClock(playerFlow.value) }
     LaunchedEffect(playerFlow, clock) {
         var ticker: Job? = null
         try {
@@ -71,12 +71,25 @@ internal fun rememberPlaybackPositionState(playerFlow: Flow<PlayerState>): State
     return clock.position
 }
 
-private class PlaybackPositionClock {
-    val position = mutableFloatStateOf(0f)
-    private val latestPlayer = AtomicReference(PlayerState())
+private class PlaybackPositionClock(initialPlayer: PlayerState) {
+    val position = mutableFloatStateOf(
+        initialPlaybackPositionMs(initialPlayer, SystemClock.elapsedRealtimeNanos()),
+    )
+    private val latestPlayer = AtomicReference(initialPlayer)
+    private var hasPlayerSample = true
 
     fun update(player: PlayerState) {
-        latestPlayer.set(player)
+        val previous = latestPlayer.getAndSet(player)
+        val discontinuity =
+            !hasPlayerSample ||
+                previous.currentQueueItemId != player.currentQueueItemId ||
+                previous.positionDiscontinuitySequence != player.positionDiscontinuitySequence
+        hasPlayerSample = true
+        // Publish a queue/seek boundary immediately.  Waiting for the next frame leaves the new
+        // lyric document paired with the previous track's position for one visible frame.
+        if (discontinuity || !player.isPlaying) {
+            position.floatValue = player.positionMs.toFloat()
+        }
     }
 
     fun syncToLatestPlayer() {
@@ -116,6 +129,7 @@ private class PlaybackPositionClock {
                             displayedPositionMs = position.floatValue,
                             targetPositionMs = targetPosition,
                             startElapsedRealtimeMs = nowElapsedRealtimeMs,
+                            generation = PlaybackPositionGeneration.from(currentPlayer),
                         )
                     }
                 if (shouldSnap) position.floatValue = targetPosition
@@ -124,20 +138,56 @@ private class PlaybackPositionClock {
                 lastPositionMs = currentPlayer.positionMs
             }
             withFrameNanos {
-                val framePlayer = latestPlayer.get()
-                val frameElapsedRealtimeMs = SystemClock.elapsedRealtime()
-                val basePosition = anchoredPlaybackPositionMs(framePlayer, frameElapsedRealtimeMs)
+                val latestFramePlayer = latestPlayer.get()
+                if (hasPlaybackSampleDiscontinuity(currentPlayer, latestFramePlayer)) {
+                    correction = null
+                    position.floatValue =
+                        anchoredPlaybackPositionMsPrecise(latestFramePlayer, SystemClock.elapsedRealtimeNanos())
+                    return@withFrameNanos
+                }
+                // elapsedRealtime() is millisecond based.  At 120/144 Hz that quantises a
+                // frame's movement into visible 1 ms steps, especially at slower playback
+                // speeds.  Keep the public millisecond helper for deterministic callers, but
+                // use the nanosecond clock for the actual frame projection.
+                val frameElapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+                // Keep this frame on the sample captured before suspension. A routine anchor
+                // update that arrives while awaiting VSync is picked up at the top of the next
+                // loop, where its correction can be calculated instead of becoming a one-frame
+                // jump. Queue/seek discontinuities still take the immediate branch above.
+                val basePosition = anchoredPlaybackPositionMsPrecise(currentPlayer, frameElapsedRealtimeNanos)
+                val frameGeneration = PlaybackPositionGeneration.from(currentPlayer)
+                val frameCorrection = correction?.takeIf { it.generation == frameGeneration }
+                if (frameCorrection == null && correction != null) {
+                    correction = null
+                    position.floatValue = basePosition
+                }
                 val correctedPosition =
-                    basePosition + (correction?.remainingOffset(frameElapsedRealtimeMs) ?: 0f)
+                    basePosition +
+                        (frameCorrection?.remainingOffset(frameElapsedRealtimeNanos / NANOS_PER_MILLISECOND) ?: 0f)
                 position.floatValue =
                     renderedPlaybackPosition(
                         previousPositionMs = position.floatValue,
                         candidatePositionMs =
-                        correctedPosition.clampPlaybackPosition(durationMs = framePlayer.durationMs),
+                        correctedPosition.clampPlaybackPosition(durationMs = currentPlayer.durationMs),
                     )
             }
         }
     }
+}
+
+internal fun initialPlaybackPositionMs(player: PlayerState, nowElapsedRealtimeNanos: Long): Float =
+    anchoredPlaybackPositionMsPrecise(player, nowElapsedRealtimeNanos)
+
+internal fun anchoredPlaybackPositionMsPrecise(player: PlayerState, nowElapsedRealtimeNanos: Long): Float {
+    val anchorElapsedRealtimeMs = player.positionAnchorElapsedRealtimeMs
+    if (!player.isPlaying || anchorElapsedRealtimeMs == null) return player.positionMs.toFloat()
+    val anchorElapsedRealtimeNanos = anchorElapsedRealtimeMs * NANOS_PER_MILLISECOND
+    val elapsedMs =
+        ((nowElapsedRealtimeNanos - anchorElapsedRealtimeNanos).coerceAtLeast(0L)).toDouble() /
+            NANOS_PER_MILLISECOND.toDouble()
+    return (player.positionMs.toDouble() + elapsedMs * player.playbackSpeed.coerceAtLeast(0f))
+        .toFloat()
+        .clampPlaybackPosition(player.durationMs)
 }
 
 internal fun normalizedPlaybackProgress(positionMs: Float, durationMs: Long): Float = if (durationMs > 0L) {
@@ -171,6 +221,9 @@ internal data class PlaybackPositionClockSample(
         )
     }
 }
+
+internal fun hasPlaybackSampleDiscontinuity(current: PlayerState, latest: PlayerState): Boolean =
+    PlaybackPositionClockSample.from(current) != PlaybackPositionClockSample.from(latest)
 
 internal fun shouldSnapPlaybackPosition(
     previousSample: PlaybackPositionClockSample?,
@@ -213,7 +266,31 @@ internal fun playbackLyricIndex(lines: List<PlayerLyricLineUi>, positionMs: Long
     return result
 }
 
-private data class PlaybackPositionCorrection(val offsetMs: Float, val startElapsedRealtimeMs: Long) {
+private data class PlaybackPositionGeneration(
+    val currentQueueItemId: String?,
+    val discontinuitySequence: Long,
+    val positionMs: Long,
+    val positionAnchorElapsedRealtimeMs: Long?,
+    val playbackSpeed: Float,
+    val isPlaying: Boolean,
+) {
+    companion object {
+        fun from(player: PlayerState) = PlaybackPositionGeneration(
+            currentQueueItemId = player.currentQueueItemId,
+            discontinuitySequence = player.positionDiscontinuitySequence,
+            positionMs = player.positionMs,
+            positionAnchorElapsedRealtimeMs = player.positionAnchorElapsedRealtimeMs,
+            playbackSpeed = player.playbackSpeed,
+            isPlaying = player.isPlaying,
+        )
+    }
+}
+
+private data class PlaybackPositionCorrection(
+    val offsetMs: Float,
+    val startElapsedRealtimeMs: Long,
+    val generation: PlaybackPositionGeneration,
+) {
     fun remainingOffset(nowElapsedRealtimeMs: Long): Float {
         val progress =
             ((nowElapsedRealtimeMs - startElapsedRealtimeMs).toFloat() / PLAYBACK_POSITION_CORRECTION_MS)
@@ -226,12 +303,14 @@ private fun playbackPositionCorrection(
     displayedPositionMs: Float,
     targetPositionMs: Float,
     startElapsedRealtimeMs: Long,
+    generation: PlaybackPositionGeneration,
 ): PlaybackPositionCorrection? {
     val offsetMs = displayedPositionMs - targetPositionMs
     return if (abs(offsetMs) > PLAYBACK_POSITION_CORRECTION_EPSILON_MS) {
         PlaybackPositionCorrection(
             offsetMs = offsetMs,
             startElapsedRealtimeMs = startElapsedRealtimeMs,
+            generation = generation,
         )
     } else {
         null
@@ -244,3 +323,4 @@ private fun Float.clampPlaybackPosition(durationMs: Long): Float =
 private const val PLAYBACK_POSITION_CORRECTION_MS = 120f
 private const val PLAYBACK_POSITION_CORRECTION_EPSILON_MS = 0.5f
 private const val PLAYBACK_POSITION_SNAP_THRESHOLD_MS = 250f
+private const val NANOS_PER_MILLISECOND = 1_000_000L

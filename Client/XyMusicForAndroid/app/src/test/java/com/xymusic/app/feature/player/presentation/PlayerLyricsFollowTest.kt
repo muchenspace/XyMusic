@@ -5,19 +5,6 @@ import org.junit.Test
 
 class PlayerLyricsFollowTest {
     @Test
-    fun wordHighlightStartsOnlyAfterTheActiveLineSettles() {
-        assertThat(
-            lyricWordHighlightEmphasis(isActive = true, lineEmphasis = 0.998f),
-        ).isEqualTo(0f)
-        assertThat(
-            lyricWordHighlightEmphasis(isActive = true, lineEmphasis = 1f),
-        ).isEqualTo(1f)
-        assertThat(
-            lyricWordHighlightEmphasis(isActive = false, lineEmphasis = 1f),
-        ).isEqualTo(0f)
-    }
-
-    @Test
     fun adjacentVisibleLyricsUseContinuousScrolling() {
         assertThat(
             lyricFollowScrollMode(
@@ -116,6 +103,19 @@ class PlayerLyricsFollowTest {
         assertThat(
             lyricSeekBaselineIndex(sourceIndex = 20, targetIndex = 4, currentIndex = 3),
         ).isEqualTo(4)
+    }
+
+    @Test
+    fun duplicateTimestampSeekUsesTheSameCanonicalLineAsPlayback() {
+        val lines = listOf(
+            PlayerLyricLineUi(1_000L, "first"),
+            PlayerLyricLineUi(1_000L, "second"),
+            PlayerLyricLineUi(2_000L, "third"),
+        )
+
+        assertThat(canonicalLyricTargetIndex(lines, requestedIndex = 0)).isEqualTo(1)
+        assertThat(canonicalLyricTargetIndex(lines, requestedIndex = 1)).isEqualTo(1)
+        assertThat(canonicalLyricTargetIndex(lines, requestedIndex = 2)).isEqualTo(2)
     }
 
     @Test

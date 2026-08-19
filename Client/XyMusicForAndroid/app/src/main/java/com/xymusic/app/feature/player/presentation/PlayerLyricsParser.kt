@@ -23,14 +23,18 @@ internal fun parsePlayerLyrics(
     timing: LyricsTiming,
     language: String?,
 ): ParsedPlayerLyrics {
-    requireValidLyricsDocument(format, timing, content)
+    val normalizedContent = content
+        .replace("\r\n", "\n")
+        .replace('\r', '\n')
+        .removePrefix(BYTE_ORDER_MARK)
+    requireValidLyricsDocument(format, timing, normalizedContent)
     val parsed =
         when (format) {
             LyricsFormat.PLAIN -> {
                 require(timing == LyricsTiming.LINE) { "Plain lyrics must use line timing" }
-                ParsedLrcLyrics(parsePlainLyrics(content), timing)
+                ParsedLrcLyrics(parsePlainLyrics(normalizedContent), timing)
             }
-            LyricsFormat.LRC -> parseLrcLyrics(content, timing)
+            LyricsFormat.LRC -> parseLrcLyrics(normalizedContent, timing)
         }
     return ParsedPlayerLyrics(
         lines = parsed.lines,
@@ -52,14 +56,24 @@ private fun parsePlainLyrics(content: String): List<PlayerLyricLineUi> = content
     .toList()
 
 private fun parseLrcLyrics(content: String, timing: LyricsTiming): ParsedLrcLyrics {
+    val offsetMs = parseLrcOffsetMs(content)
     val lines =
         content
             .lineSequence()
             .flatMap { rawLine ->
-                val lineTimes = LRC_TIMESTAMP_REGEX.findAll(rawLine).mapNotNull { it.toTimeMs() }.toList()
+                val timestampPrefix = LRC_TIMESTAMP_PREFIX_REGEX.find(rawLine) ?: return@flatMap emptySequence()
+                val lineTimes =
+                    LRC_TIMESTAMP_REGEX
+                        .findAll(timestampPrefix.value)
+                        .mapNotNull { it.toTimeMs() }
+                        .toList()
                 if (lineTimes.isEmpty()) return@flatMap emptySequence()
 
-                val lineContent = LRC_LINE_TAG_REGEX.replace(rawLine, "")
+                val lineContent =
+                    LRC_LINE_TAG_REGEX.replace(
+                        rawLine.substring(timestampPrefix.range.last + 1),
+                        "",
+                    )
                 val wordContent =
                     if (timing == LyricsTiming.WORD) {
                         parseWordContent(lineContent)
@@ -67,12 +81,21 @@ private fun parseLrcLyrics(content: String, timing: LyricsTiming): ParsedLrcLyri
                         ParsedWordContent(stripEnhancedTimestamps(lineContent), emptyList())
                     }
                 if (wordContent.text.isBlank()) return@flatMap emptySequence()
+                val baseLineTimeMs = lineTimes.first()
 
                 lineTimes.asSequence().map { timeMs ->
+                    val lineShiftMs = timeMs - baseLineTimeMs
                     PlayerLyricLineUi(
-                        timeMs = timeMs,
+                        timeMs = applyLrcOffset(timeMs, offsetMs),
                         text = wordContent.text,
-                        words = wordContent.words,
+                        words = wordContent.words.map { word ->
+                            word.copy(
+                                timeMs = applyLrcTiming(word.timeMs, lineShiftMs, offsetMs),
+                                endTimeMs = word.endTimeMs?.let { endTime ->
+                                    applyLrcTiming(endTime, lineShiftMs, offsetMs)
+                                },
+                            )
+                        },
                     )
                 }
             }.sortedBy(PlayerLyricLineUi::timeMs)
@@ -81,7 +104,22 @@ private fun parseLrcLyrics(content: String, timing: LyricsTiming): ParsedLrcLyri
         timing != LyricsTiming.WORD ||
             (lines.isNotEmpty() && lines.all { line -> line.words.isNotEmpty() }),
     ) { "Word-timed lyrics must contain word timestamps for every line" }
-    return ParsedLrcLyrics(lines, timing)
+    return ParsedLrcLyrics(lines.withInferredFinalWordEnds(), timing)
+}
+
+private fun List<PlayerLyricLineUi>.withInferredFinalWordEnds(): List<PlayerLyricLineUi> = mapIndexed { index, line ->
+    if (line.words.isEmpty() || line.words.last().endTimeMs != null) return@mapIndexed line
+    val lastWord = line.words.last()
+    val inferredEndTimeMs = lastWord.effectiveEndTimeMs()
+    val nextLineTimeMs = getOrNull(index + 1)?.timeMs
+    val boundedEndTimeMs =
+        nextLineTimeMs?.let { nextTime ->
+            minOf(inferredEndTimeMs, nextTime.coerceAtLeast(lastWord.timeMs))
+        }
+            ?: inferredEndTimeMs
+    line.copy(
+        words = line.words.dropLast(1) + lastWord.copy(endTimeMs = boundedEndTimeMs),
+    )
 }
 
 private fun parseWordContent(lineContent: String): ParsedWordContent {
@@ -119,6 +157,26 @@ private fun parseWordContent(lineContent: String): ParsedWordContent {
     }
 }
 
+private fun parseLrcOffsetMs(content: String): Long {
+    val value = content.lineSequence()
+        .filter(LRC_METADATA_ONLY_LINE_REGEX::matches)
+        .flatMap { line -> LRC_OFFSET_TAG_REGEX.findAll(line) }
+        .mapNotNull { match -> match.groupValues.getOrNull(1) }
+        .firstOrNull()
+        ?.toLongOrNull()
+    return value ?: 0L
+}
+
+private fun applyLrcOffset(timeMs: Long, offsetMs: Long): Long = when {
+    offsetMs > 0L -> timeMs.coerceAtMost(Long.MAX_VALUE - offsetMs) + offsetMs
+    offsetMs == Long.MIN_VALUE -> 0L
+    offsetMs < 0L -> (timeMs + offsetMs).coerceAtLeast(0L)
+    else -> timeMs
+}
+
+private fun applyLrcTiming(timeMs: Long, lineShiftMs: Long, offsetMs: Long): Long =
+    applyLrcOffset((timeMs + lineShiftMs).coerceAtLeast(0L), offsetMs)
+
 private fun stripEnhancedTimestamps(content: String): String = ENHANCED_LRC_TIMESTAMP_REGEX.replace(content, "").trim()
 
 private fun MatchResult.toTimeMs(): Long? = timestampToTimeMs(
@@ -141,7 +199,13 @@ private fun timestampToTimeMs(minutes: String, seconds: String, fraction: String
     return (minuteValue * 60 + secondValue) * 1_000 + fractionMs
 }
 
-private val LRC_TIMESTAMP_REGEX = Regex("\\[(\\d{1,3}):(\\d{2})(?:[.:](\\d{1,3}))?]")
+private val LRC_TIMESTAMP_PREFIX_REGEX =
+    Regex("^\\s*(?:\\[\\d{1,3}:[0-5]\\d(?:[.:]\\d{1,3})?]\\s*)+")
+private val LRC_TIMESTAMP_REGEX = Regex("\\[(\\d{1,3}):([0-5]\\d)(?:[.:](\\d{1,3}))?]")
 private val LRC_LINE_TAG_REGEX = Regex("\\[[^]\\r\\n]*]")
+private val LRC_METADATA_ONLY_LINE_REGEX =
+    Regex("^\\s*(?:\\[[A-Za-z][A-Za-z0-9_-]*:[^\\[\\]\\r\\n]*]\\s*)+$")
+private val LRC_OFFSET_TAG_REGEX = Regex("\\[offset:([+-]?\\d+)]", RegexOption.IGNORE_CASE)
 private val ENHANCED_LRC_TIMESTAMP_REGEX = Regex("<\\d{1,3}:\\d{2}(?:[.:]\\d{1,3})?>")
 private val WORD_TIMESTAMP_REGEX = Regex("<(\\d{1,3}):(\\d{2})(?:[.:](\\d{1,3}))?>")
+private const val BYTE_ORDER_MARK = "\uFEFF"

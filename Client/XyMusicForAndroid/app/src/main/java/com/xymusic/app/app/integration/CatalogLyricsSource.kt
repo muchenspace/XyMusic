@@ -11,12 +11,17 @@ class CatalogLyricsSource
 @Inject
 constructor(private val catalogUseCases: CatalogUseCases) : LyricsSource {
     override fun observe(trackId: String): Flow<Lyrics?> = catalogUseCases.observeTrack(trackId).map { detail ->
-        val lyrics = detail?.lyrics.orEmpty()
-        require(lyrics.size <= 1) { "Cached track contains multiple lyric resources" }
-        lyrics.singleOrNull()
+        selectPlaybackLyrics(detail?.lyrics.orEmpty())
     }
 
     override suspend fun refresh(trackId: String) {
         catalogUseCases.refreshTrack(trackId)
     }
 }
+
+internal fun selectPlaybackLyrics(lyrics: List<Lyrics>): Lyrics? = lyrics.minWithOrNull(LYRIC_SELECTION_ORDER)
+
+private val LYRIC_SELECTION_ORDER =
+    compareByDescending<Lyrics>(Lyrics::isDefault)
+        .thenBy(Lyrics::language)
+        .thenBy(Lyrics::id)

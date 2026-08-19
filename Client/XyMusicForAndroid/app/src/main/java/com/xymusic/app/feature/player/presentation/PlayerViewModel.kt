@@ -37,6 +37,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 @HiltViewModel
@@ -50,6 +52,7 @@ constructor(
     @DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
     private val mutableEffects = MutableSharedFlow<PlayerUiEffect>(extraBufferCapacity = 1)
+    private val lyricsRefreshMutex = Mutex()
     val effects = mutableEffects.asSharedFlow()
 
     private val selectedLyrics =
@@ -64,7 +67,7 @@ constructor(
                         coroutineScope {
                             launch {
                                 runCatchingPreservingCancellation {
-                                    lyricsSource.refresh(trackId)
+                                    refreshLyricsForTrack(trackId)
                                 }
                             }
                             this@flow.emitAll(
@@ -79,25 +82,36 @@ constructor(
         selectedLyrics
             .map { lyrics ->
                 lyrics?.let {
-                    SelectedLyricsContent(it.language, it.format, it.timing, it.content)
+                    SelectedLyricsContent(
+                        trackId = it.trackId,
+                        language = it.language,
+                        format = it.format,
+                        timing = it.timing,
+                        content = it.content,
+                    )
                 }
             }.distinctUntilChanged()
             .mapLatest { lyrics ->
                 withContext(defaultDispatcher) {
                     lyrics?.let {
-                        parsePlayerLyrics(
-                            content = it.content,
-                            format = it.format,
-                            timing = it.timing,
-                            language = it.language,
+                        ParsedLyricsForTrack(
+                            trackId = it.trackId,
+                            lyrics = runCatchingPreservingCancellation {
+                                parsePlayerLyrics(
+                                    content = it.content,
+                                    format = it.format,
+                                    timing = it.timing,
+                                    language = it.language,
+                                )
+                            }.getOrDefault(ParsedPlayerLyrics.Empty),
                         )
-                    } ?: ParsedPlayerLyrics.Empty
+                    } ?: ParsedLyricsForTrack.Empty
                 }
             }
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
-                initialValue = ParsedPlayerLyrics.Empty,
+                initialValue = ParsedLyricsForTrack.Empty,
             )
 
     private val structuralPlayerState =
@@ -222,8 +236,14 @@ constructor(
         val trackId = playerUseCases.state.value.currentItem?.trackId ?: return
         viewModelScope.launch {
             runCatchingPreservingCancellation {
-                lyricsSource.refresh(trackId)
+                refreshLyricsForTrack(trackId)
             }
+        }
+    }
+
+    private suspend fun refreshLyricsForTrack(trackId: String) {
+        lyricsRefreshMutex.withLock {
+            lyricsSource.refresh(trackId)
         }
     }
 
@@ -254,14 +274,21 @@ constructor(
     }
 }
 
-private fun buildPlayerUiState(player: PlayerState, lyrics: ParsedPlayerLyrics): PlayerUiState = PlayerUiState(
-    player = player,
-    lyrics = lyrics.lines,
-    lyricsLanguage = lyrics.language,
-    synchronizedLyrics = lyrics.synchronized,
-    lyricsTiming = lyrics.timing,
-    sleepTimerRemainingMs = player.sleepTimerRemainingMs,
-)
+private fun buildPlayerUiState(player: PlayerState, parsedLyrics: ParsedLyricsForTrack): PlayerUiState {
+    val lyrics =
+        parsedLyrics.lyrics.takeIf {
+            parsedLyrics.trackId != null && parsedLyrics.trackId == player.currentItem?.trackId
+        }
+            ?: ParsedPlayerLyrics.Empty
+    return PlayerUiState(
+        player = player,
+        lyrics = lyrics.lines,
+        lyricsLanguage = lyrics.language,
+        synchronizedLyrics = lyrics.synchronized,
+        lyricsTiming = lyrics.timing,
+        sleepTimerRemainingMs = player.sleepTimerRemainingMs,
+    )
+}
 
 private fun PlayerFailure.messageRes(): Int = when (this) {
     PlayerFailure.ConnectionUnavailable -> R.string.player_connection_unavailable
@@ -273,8 +300,15 @@ private fun PlayerFailure.messageRes(): Int = when (this) {
 internal const val PLAYER_FAILURE_MESSAGE_DELAY_MS = 300L
 
 private data class SelectedLyricsContent(
+    val trackId: String,
     val language: String,
     val format: LyricsFormat,
     val timing: LyricsTiming,
     val content: String,
 )
+
+private data class ParsedLyricsForTrack(val trackId: String?, val lyrics: ParsedPlayerLyrics) {
+    companion object {
+        val Empty = ParsedLyricsForTrack(trackId = null, lyrics = ParsedPlayerLyrics.Empty)
+    }
+}
