@@ -317,6 +317,102 @@ describe("playback session", () => {
     harness.session.dispose();
   });
 
+  it("keeps the latest seek made against an unloaded restored track for first playback", async () => {
+    const restoredTrack = track("restored");
+    const harness = createHarness({
+      restore: () => ({
+        ownerKey: "server|user",
+        queue: [restoredTrack],
+        currentIndex: 0,
+        position: 42,
+        shuffled: false,
+        repeat: false,
+        repeatMode: "off",
+        quality: "AUTO",
+        crossfadeSeconds: 0,
+        savedAt: "2026-08-01T00:00:00.000Z",
+      }),
+    });
+
+    expect(harness.session.restoreState("server|user")).toBe(true);
+    harness.audio.setPlaybackDuration(0);
+    const initialVersion = harness.session.state().positionDiscontinuityVersion;
+
+    harness.session.seekTo(75);
+    expect(harness.session.state()).toMatchObject({
+      currentTime: 75,
+      progress: 75 / 180 * 100,
+      positionDiscontinuityVersion: initialVersion + 1,
+    });
+    harness.session.seekTo(179);
+    expect(harness.session.state()).toMatchObject({
+      currentTime: 179,
+      progress: 179 / 180 * 100,
+      positionDiscontinuityVersion: initialVersion + 2,
+    });
+    expect(harness.audio.seek).not.toHaveBeenCalled();
+
+    harness.audio.setPlaybackPosition(0);
+    expect(harness.session.state()).toMatchObject({
+      currentTime: 179,
+      progress: 179 / 180 * 100,
+      positionDiscontinuityVersion: initialVersion + 2,
+    });
+
+    const resumed = harness.session.toggle();
+    harness.audio.setPlaybackDuration(180);
+    await resumed;
+
+    expect(harness.audio.load).toHaveBeenCalledWith(
+      "https://example.test/restored.mp3",
+      expect.any(AbortSignal),
+    );
+    expect(harness.audio.seek).toHaveBeenCalledOnce();
+    expect(harness.audio.seek).toHaveBeenCalledWith(179);
+    expect(harness.audio.play).toHaveBeenCalledOnce();
+    expect(harness.session.state()).toMatchObject({ currentTime: 179, isPlaying: true, loading: false });
+
+    harness.session.dispose();
+  });
+
+  it("clears an unloaded restored seek when playback is stopped", async () => {
+    const restoredTrack = track("restored");
+    const harness = createHarness({
+      restore: () => ({
+        ownerKey: "server|user",
+        queue: [restoredTrack],
+        currentIndex: 0,
+        position: 42,
+        shuffled: false,
+        repeat: false,
+        repeatMode: "off",
+        quality: "AUTO",
+        crossfadeSeconds: 0,
+        savedAt: "2026-08-01T00:00:00.000Z",
+      }),
+    });
+
+    expect(harness.session.restoreState("server|user")).toBe(true);
+    harness.audio.setPlaybackDuration(0);
+    harness.session.seekTo(75);
+    const seekVersion = harness.session.state().positionDiscontinuityVersion;
+
+    harness.session.stopPlayback(null);
+    expect(harness.session.state()).toMatchObject({
+      currentTime: 0,
+      progress: 0,
+      positionDiscontinuityVersion: seekVersion + 1,
+    });
+
+    const restarted = harness.session.toggle();
+    harness.audio.setPlaybackDuration(180);
+    await restarted;
+    expect(harness.audio.seek).not.toHaveBeenCalled();
+    expect(harness.session.state()).toMatchObject({ currentTime: 0, isPlaying: true, loading: false });
+
+    harness.session.dispose();
+  });
+
   it("does not checkpoint the stopped old track while replacing it", async () => {
     const harness = createHarness();
     const tracks = [track("one"), track("two")];
@@ -602,6 +698,10 @@ class FakeAudioPlayer implements AudioPlayer {
   setPlaybackPosition(currentTime: number): void {
     this.snapshotValue = { ...this.snapshotValue, currentTime };
     this.emitUpdate();
+  }
+
+  setPlaybackDuration(duration: number): void {
+    this.snapshotValue = { ...this.snapshotValue, duration };
   }
 
   setLoadResult(result: Promise<void>): void {

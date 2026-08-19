@@ -152,6 +152,13 @@ internal fun LyricsContent(
     ) {
         mutableStateOf<LyricSeekRequest?>(null)
     }
+    var activeLyricSeek by remember(
+        uiState.player.currentQueueItemId,
+        uiState.player.currentItem?.trackId,
+        uiState.lyrics,
+    ) {
+        mutableStateOf<LyricSeekRequest?>(null)
+    }
     var emphasisTransition by remember(
         uiState.player.currentQueueItemId,
         uiState.lyrics,
@@ -161,7 +168,11 @@ internal fun LyricsContent(
     }
 
     LaunchedEffect(isDragged) {
-        if (isDragged) autoFollow = false
+        if (isDragged) {
+            autoFollow = false
+            pendingLyricSeek = null
+            activeLyricSeek = null
+        }
     }
     LaunchedEffect(pendingLyricSeek) {
         val request = pendingLyricSeek ?: return@LaunchedEffect
@@ -260,9 +271,15 @@ internal fun LyricsContent(
             }
 
             snapshotFlow {
+                val explicitSeek = activeLyricSeek
                 LyricPlaybackSnapshot(
-                    lyricIndex = currentLyricIndex,
+                    // While an explicit seek is animating, playback may advance through later
+                    // timestamps. Keep those samples out of this collector so they cannot cancel
+                    // and restart the user-visible transition. The real index is picked up after
+                    // the request is released.
+                    lyricIndex = explicitSeek?.targetIndex ?: currentLyricIndex,
                     pendingSeek = pendingLyricSeek,
+                    activeSeek = explicitSeek,
                     autoFollow = autoFollow,
                 )
             }
@@ -271,15 +288,6 @@ internal fun LyricsContent(
                     val lyricIndex = snapshot.lyricIndex
                     val resumedAutoFollow = snapshot.autoFollow && !previousAutoFollow
                     previousAutoFollow = snapshot.autoFollow
-                    if (lyricIndex < 0) {
-                        previousLyricIndexCollected = null
-                        emphasisTransition = LyricEmphasisTransition.Empty
-                        emphasisPhase.snapTo(0f)
-                        activeLinePosition = -1f
-                        settledLinePosition = -1f
-                        transitionPhaseVelocity = 0f
-                        return@collectLatest
-                    }
                     snapshot.pendingSeek?.let { request ->
                         val baselineIndex =
                             lyricSeekBaselineIndex(
@@ -288,25 +296,8 @@ internal fun LyricsContent(
                                 currentIndex = lyricIndex,
                             )
                         if (baselineIndex != null) {
-                            activeLinePosition = baselineIndex.toFloat()
-                            settledLinePosition = activeLinePosition
-                            emphasisTransition = LyricEmphasisTransition.settled(baselineIndex)
-                            emphasisPhase.snapTo(0f)
-                            transitionPhaseVelocity = 0f
-                            previousLyricIndexCollected = baselineIndex
-                            if (snapshot.autoFollow) {
-                                listState.followLyricLine(
-                                    index = centeredLyricTargetIndex(baselineIndex, centerActiveLine),
-                                    centerActiveLine = centerActiveLine,
-                                    scrollMode = LyricFollowScrollMode.Snap,
-                                )
-                                awaitLyricLayoutStabilization(
-                                    listState = listState,
-                                    index = centeredLyricTargetIndex(baselineIndex, centerActiveLine),
-                                    centerActiveLine = centerActiveLine,
-                                )
-                            }
                             pendingLyricSeek = null
+                            activeLyricSeek = request.copy(targetIndex = baselineIndex)
                             return@collectLatest
                         }
                         if (!request.isExpired(SystemClock.elapsedRealtime())) return@collectLatest
@@ -314,6 +305,72 @@ internal fun LyricsContent(
                         // transition.  Continue from the position actually acknowledged by the
                         // player once the pending request has aged out.
                         pendingLyricSeek = null
+                    }
+                    snapshot.activeSeek?.let { request ->
+                        val targetIndex = request.targetIndex
+                        val scrollTargetIndex = centeredLyricTargetIndex(targetIndex, centerActiveLine)
+                        if (snapshot.autoFollow) {
+                            awaitLyricLayoutStabilization(
+                                listState = listState,
+                                index = scrollTargetIndex,
+                                centerActiveLine = centerActiveLine,
+                            )
+                        }
+
+                        val transitionStartPosition = lyricTransitionStartPosition(settledLinePosition)
+                        emphasisTransition =
+                            emphasisTransition.retarget(
+                                emphasisPhase = emphasisPhase.value,
+                                targetLineIndex = targetIndex,
+                            )
+                        val startEmphasisPhase = emphasisTransition.startPhase
+                        val targetEmphasisPhase = emphasisTransition.endPhase
+                        var transitionCompleted = false
+                        try {
+                            animateLyricLineTransition(
+                                emphasisPhase = emphasisPhase,
+                                startEmphasisPhase = startEmphasisPhase,
+                                targetEmphasisPhase = targetEmphasisPhase,
+                                listState = listState,
+                                startLinePosition = transitionStartPosition,
+                                lyricIndex = targetIndex,
+                                targetIndex = scrollTargetIndex,
+                                centerActiveLine = centerActiveLine,
+                                autoFollow = snapshot.autoFollow,
+                                initialPhaseVelocity = transitionPhaseVelocity,
+                                preserveVelocity =
+                                abs(transitionStartPosition - request.sourceIndex.toFloat()) >
+                                    LYRIC_POSITION_EPSILON,
+                                onFrame = { linePosition, phaseVelocity ->
+                                    activeLinePosition = linePosition
+                                    transitionPhaseVelocity = phaseVelocity
+                                },
+                            )
+                            transitionCompleted = true
+                        } finally {
+                            settledLinePosition = activeLinePosition
+                            if (transitionCompleted) {
+                                emphasisTransition = LyricEmphasisTransition.settled(targetIndex)
+                                emphasisPhase.snapTo(0f)
+                                activeLinePosition = targetIndex.toFloat()
+                                settledLinePosition = activeLinePosition
+                                transitionPhaseVelocity = 0f
+                            }
+                        }
+                        if (transitionCompleted) {
+                            previousLyricIndexCollected = targetIndex
+                            activeLyricSeek = null
+                        }
+                        return@collectLatest
+                    }
+                    if (lyricIndex < 0) {
+                        previousLyricIndexCollected = null
+                        emphasisTransition = LyricEmphasisTransition.Empty
+                        emphasisPhase.snapTo(0f)
+                        activeLinePosition = -1f
+                        settledLinePosition = -1f
+                        transitionPhaseVelocity = 0f
+                        return@collectLatest
                     }
                     if (lyricIndex == previousLyricIndexCollected) {
                         if (resumedAutoFollow) {
@@ -479,6 +536,7 @@ internal fun LyricsContent(
                                 onClick = {
                                     line.timeMs?.let { timestamp ->
                                         val targetIndex = canonicalLyricTargetIndex(uiState.lyrics, index)
+                                        activeLyricSeek = null
                                         pendingLyricSeek = LyricSeekRequest(
                                             sourceIndex = currentLyricIndex.takeIf { it >= 0 }
                                                 ?: index,
@@ -534,6 +592,7 @@ internal fun LyricsContent(
                 onClick = {
                     autoFollow = true
                     pendingLyricSeek = null
+                    activeLyricSeek = null
                 },
                 modifier =
                 Modifier
@@ -917,10 +976,12 @@ private data class LyricSeekRequest(
 private data class LyricPlaybackSnapshot(
     val lyricIndex: Int,
     val pendingSeek: LyricSeekRequest?,
+    val activeSeek: LyricSeekRequest?,
     val autoFollow: Boolean,
 )
 
 internal fun lyricSeekBaselineIndex(sourceIndex: Int, targetIndex: Int, currentIndex: Int): Int? = when {
+    currentIndex < 0 -> null
     currentIndex == targetIndex -> targetIndex
     targetIndex > sourceIndex && currentIndex > targetIndex -> targetIndex
     targetIndex < sourceIndex && currentIndex < targetIndex -> targetIndex

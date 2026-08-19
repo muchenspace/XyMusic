@@ -177,6 +177,7 @@ export function lyricSeekBaselineIndex(
   targetIndex: number,
   currentIndex: number,
 ): number | null {
+  if (currentIndex < 0) return null;
   if (currentIndex === targetIndex) return targetIndex;
   if (targetIndex > sourceIndex && currentIndex > targetIndex) return targetIndex;
   if (targetIndex < sourceIndex && currentIndex < targetIndex) return targetIndex;

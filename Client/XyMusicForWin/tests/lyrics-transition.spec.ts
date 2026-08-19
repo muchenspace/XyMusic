@@ -68,6 +68,7 @@ describe("Android-compatible lyric transitions", () => {
       { time: 2, text: "last" },
     ];
     expect(canonicalLyricTargetIndex(lines, 0)).toBe(1);
+    expect(lyricSeekBaselineIndex(2, 0, -1)).toBeNull();
     expect(lyricSeekBaselineIndex(0, 8, 7)).toBeNull();
     expect(lyricSeekBaselineIndex(0, 8, 8)).toBe(8);
     expect(lyricSeekBaselineIndex(0, 8, 9)).toBe(8);

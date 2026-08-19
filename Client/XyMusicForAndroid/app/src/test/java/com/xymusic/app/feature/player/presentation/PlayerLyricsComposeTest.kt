@@ -605,11 +605,12 @@ class PlayerLyricsComposeTest {
     }
 
     @Test
-    fun lyricSeekSnapsBeforeFirstFollowingLineUsesTheNormalTransition() {
+    fun coldStartPausedLyricSeekAnimatesFromTheCurrentLineToTheTarget() {
+        var requestedPositionMs: Long? = null
         val uiState =
             mutableStateOf(
                 PlayerUiState(
-                    player = PlayerState(positionMs = 0),
+                    player = PlayerState(positionMs = 0, isPlaying = false),
                     lyrics =
                     listOf(
                         PlayerLyricLineUi(0, "Seek first lyric"),
@@ -631,11 +632,7 @@ class PlayerLyricsComposeTest {
                 ) {
                     LyricsContent(
                         uiState = uiState.value,
-                        onSeek = { position ->
-                            uiState.value = uiState.value.copy(
-                                player = uiState.value.player.copy(positionMs = position),
-                            )
-                        },
+                        onSeek = { position -> requestedPositionMs = position },
                         compact = true,
                         centerActiveLine = true,
                     )
@@ -644,79 +641,56 @@ class PlayerLyricsComposeTest {
         }
         composeRule.waitForIdle()
 
+        val paneCenter = paneCenter()
+        val sourceCenter = lineCenter("Seek first lyric")
+        val targetCenterBeforeSeek = targetLineCenter()
+        assertThat(abs(sourceCenter - paneCenter)).isLessThan(2f)
+        assertThat(targetCenterBeforeSeek).isGreaterThan(paneCenter + 2f)
+
+        composeRule.mainClock.autoAdvance = false
         composeRule.onNodeWithText("Seek target lyric").performClick()
         composeRule.waitForIdle()
 
-        val paneCenter =
-            composeRule
-                .onNodeWithTag(LYRICS_PANE_TAG)
-                .fetchSemanticsNode()
-                .boundsInRoot
-                .center.y
-        assertThat(abs(targetLineCenter() - paneCenter)).isLessThan(2f)
-        composeRule.onNodeWithText("Seek target lyric").assertIsSelected()
+        assertThat(requestedPositionMs).isEqualTo(2_000L)
+        assertThat(abs(lineCenter("Seek first lyric") - sourceCenter)).isLessThan(2f)
+        assertThat(abs(targetLineCenter() - targetCenterBeforeSeek)).isLessThan(2f)
+        composeRule.onNodeWithText("Seek first lyric").assertIsSelected()
+        composeRule.onNodeWithText("Seek target lyric").assertIsNotSelected()
 
-        composeRule.mainClock.autoAdvance = false
-        val initialTargetCenter = targetLineCenter()
-        val initialFollowingCenter = followingLineCenter()
-        val initialFollowingDistance = abs(followingLineCenter() - paneCenter)
+        // Simulate the player acknowledging the seek while it remains paused.
         composeRule.runOnIdle {
             uiState.value = uiState.value.copy(
-                player = uiState.value.player.copy(positionMs = 3_000),
+                player = uiState.value.player.copy(positionMs = requestedPositionMs!!),
             )
         }
         composeRule.mainClock.advanceTimeByFrame()
         composeRule.waitForIdle()
 
-        assertThat(abs(targetLineCenter() - initialTargetCenter)).isLessThan(2f)
-        val transitionStartDistance = abs(followingLineCenter() - paneCenter)
-        assertThat(transitionStartDistance).isGreaterThan(initialFollowingDistance * 0.7f)
+        assertThat(abs(targetLineCenter() - targetCenterBeforeSeek)).isLessThan(2f)
 
-        val transitionFrames = mutableListOf(initialTargetCenter to initialFollowingCenter)
-        transitionFrames += targetLineCenter() to followingLineCenter()
-
-        composeRule.mainClock.advanceTimeBy(100)
+        // Layout stabilization consumes a few frames before the shared scroll/emphasis clock starts.
+        repeat(4) {
+            composeRule.mainClock.advanceTimeByFrame()
+            composeRule.waitForIdle()
+        }
+        composeRule.mainClock.advanceTimeBy(180)
         composeRule.waitForIdle()
-        val targetMiddle = targetLineCenter()
-        val midwayDistance = abs(followingLineCenter() - paneCenter)
-        val followingMiddle = followingLineCenter()
-        transitionFrames += targetMiddle to followingMiddle
-        val targetMiddleHeight = lineBounds("Seek target lyric").height
-        val followingMiddleHeight = lineBounds("Seek following lyric").height
-        assertThat(
-            abs(
-                (initialTargetCenter - targetMiddle) -
-                    (initialFollowingCenter - followingMiddle),
-            ),
-        ).isLessThan(2f)
-        assertThat(abs(targetMiddleHeight - followingMiddleHeight)).isLessThan(4f)
-        assertThat(midwayDistance).isLessThan(transitionStartDistance)
-        assertThat(midwayDistance).isGreaterThan(2f)
+        val targetCenterDuringAnimation = targetLineCenter()
+        assertThat(targetCenterDuringAnimation).isLessThan(targetCenterBeforeSeek - 2f)
+        assertThat(targetCenterDuringAnimation).isGreaterThan(paneCenter + 2f)
+        composeRule.onNodeWithText("Seek target lyric").assertIsSelected()
+        composeRule.runOnIdle {
+            assertThat(uiState.value.player.isPlaying).isFalse()
+        }
 
-        composeRule.mainClock.advanceTimeBy(100)
-        composeRule.waitForIdle()
-        val transitionEnd = followingLineCenter()
-        transitionFrames += targetLineCenter() to transitionEnd
-        composeRule.mainClock.advanceTimeByFrame()
-        composeRule.waitForIdle()
-        val afterScrollCommit = followingLineCenter()
-        transitionFrames += targetLineCenter() to afterScrollCommit
-        assertThat(abs(afterScrollCommit - transitionEnd)).isAtMost(2f)
-
+        composeRule.mainClock.advanceTimeBy(900)
         composeRule.mainClock.autoAdvance = true
         composeRule.waitForIdle()
-        transitionFrames += targetLineCenter() to followingLineCenter()
-        val largestRelativeMovementDelta =
-            transitionFrames
-                .zipWithNext()
-                .maxOfOrNull { (previous, current) ->
-                    abs(
-                        (current.first - previous.first) -
-                            (current.second - previous.second),
-                    )
-                } ?: 0f
-        assertThat(largestRelativeMovementDelta).isLessThan(2f)
-        assertThat(abs(followingLineCenter() - paneCenter)).isLessThan(2f)
+        assertThat(abs(targetLineCenter() - paneCenter)).isLessThan(2f)
+        composeRule.runOnIdle {
+            assertThat(uiState.value.player.positionMs).isEqualTo(2_000L)
+            assertThat(uiState.value.player.isPlaying).isFalse()
+        }
     }
 
     @Test
@@ -942,12 +916,6 @@ class PlayerLyricsComposeTest {
 
     private fun targetLineCenter(): Float = composeRule
         .onNodeWithText("Seek target lyric")
-        .fetchSemanticsNode()
-        .boundsInRoot
-        .center.y
-
-    private fun followingLineCenter(): Float = composeRule
-        .onNodeWithText("Seek following lyric")
         .fetchSemanticsNode()
         .boundsInRoot
         .center.y

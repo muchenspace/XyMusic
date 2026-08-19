@@ -83,6 +83,42 @@ class Media3PlayerRepositoryTest {
     }
 
     @Test
+    fun coldStartSeekPublishesTheTargetBeforeTheControllerTimelineIsRestored() {
+        val previous =
+            PlayerState(
+                connectionState = PlayerConnectionState.CONNECTED,
+                currentQueueItemId = "queue-1",
+                positionMs = 1_000,
+                positionDiscontinuitySequence = 3,
+                bufferedPositionMs = 2_000,
+                durationMs = 10_000,
+            )
+        val emptyControllerState =
+            PlayerState(
+                connectionState = PlayerConnectionState.CONNECTED,
+                positionMs = 0,
+                bufferedPositionMs = 0,
+                durationMs = 0,
+            )
+
+        val published =
+            playerStateWithPublishedPosition(
+                previous = previous,
+                controllerState = emptyControllerState,
+                publishedPositionMs = 8_000,
+                sampledAtElapsedRealtimeMs = 20_000,
+                positionDiscontinuity = true,
+            )
+
+        assertThat(published.currentQueueItemId).isEqualTo("queue-1")
+        assertThat(published.positionMs).isEqualTo(8_000)
+        assertThat(published.positionAnchorElapsedRealtimeMs).isEqualTo(20_000)
+        assertThat(published.positionDiscontinuitySequence).isEqualTo(4)
+        assertThat(published.bufferedPositionMs).isEqualTo(2_000)
+        assertThat(published.durationMs).isEqualTo(10_000)
+    }
+
+    @Test
     fun positionDiscontinuitySequenceChangesOnlyForTimelineDiscontinuities() {
         val previous =
             PlayerState(
@@ -141,6 +177,47 @@ class Media3PlayerRepositoryTest {
                 didChangePosition = true,
             ),
         ).isTrue()
+    }
+
+    @Test
+    fun coldStartSeekWaitsForTheFirstRestoredMediaItem() {
+        val pendingSeek = PendingRestoredMediaItemSeek()
+
+        pendingSeek.defer(expectedQueueItemId = null, positionMs = 12_345)
+
+        assertThat(pendingSeek.takeForRestoredItem(queueItemId = null)).isNull()
+        assertThat(pendingSeek.takeForRestoredItem(queueItemId = "queue-1")).isEqualTo(12_345)
+        assertThat(pendingSeek.takeForRestoredItem(queueItemId = "queue-1")).isNull()
+    }
+
+    @Test
+    fun consecutiveColdStartSeeksOnlyApplyTheLatestPosition() {
+        val pendingSeek = PendingRestoredMediaItemSeek()
+
+        pendingSeek.defer(expectedQueueItemId = null, positionMs = 1_000)
+        pendingSeek.defer(expectedQueueItemId = null, positionMs = 9_000)
+
+        assertThat(pendingSeek.takeForRestoredItem(queueItemId = "queue-1")).isEqualTo(9_000)
+    }
+
+    @Test
+    fun coldStartSeekCannotLeakOntoADifferentRestoredQueueItem() {
+        val pendingSeek = PendingRestoredMediaItemSeek()
+
+        pendingSeek.defer(expectedQueueItemId = "queue-1", positionMs = 8_000)
+
+        assertThat(pendingSeek.takeForRestoredItem(queueItemId = "queue-2")).isNull()
+        assertThat(pendingSeek.takeForRestoredItem(queueItemId = "queue-1")).isNull()
+    }
+
+    @Test
+    fun explicitQueueActionCancelsAColdStartSeek() {
+        val pendingSeek = PendingRestoredMediaItemSeek()
+
+        pendingSeek.defer(expectedQueueItemId = null, positionMs = 8_000)
+        pendingSeek.cancel()
+
+        assertThat(pendingSeek.takeForRestoredItem(queueItemId = "queue-1")).isNull()
     }
 
     @Test
