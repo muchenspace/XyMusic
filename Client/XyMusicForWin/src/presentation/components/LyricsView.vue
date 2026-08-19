@@ -14,15 +14,36 @@ import LyricsLineContent from "./LyricsLineContent.vue";
 import LyricsPlayerControls from "./LyricsPlayerControls.vue";
 import ArtworkImage from "./ui/ArtworkImage.vue";
 import { lyricsPlaybackPositionKey } from "./lyricsPlaybackPosition";
+import {
+  LYRIC_BASELINE_MAX_FRAME_COUNT,
+  LYRIC_LAYOUT_STABILITY_EPSILON_PX,
+  LYRIC_REQUIRED_STABLE_FRAMES,
+  LYRIC_SEEK_ACK_TIMEOUT_MS,
+  canonicalLyricTargetIndex,
+  correctionDurationMs,
+  fastOutSlowIn,
+  lyricLayoutDeltaHasSettled,
+  lyricLineTransitionEmphasis,
+  lyricSeekBaselineIndex,
+  lyricTransitionDurationMs,
+  lyricTransitionMode,
+  noBounceSpring,
+  retargetLyricEmphasis,
+  settledLyricEmphasis,
+  type LyricEmphasisTransition,
+  type LyricTransitionMode,
+} from "./lyricsTransition";
 
 const player = usePlayerStore();
 const props = withDefaults(defineProps<{ fullscreen?: boolean }>(), { fullscreen: false });
 const emit = defineEmits<{ favorite: [track: Track] }>();
 const lyricsStore = useLyricsStore();
+const lineTransitionActive = ref(false);
 const displayedPlaybackTime = useSmoothLyricsPlaybackPosition({
   currentTime: () => player.currentTime,
   isPlaying: () => player.isPlaying && !player.loading,
   isActive: () => player.lyricsOpen,
+  discontinuityToken: () => `${player.positionDiscontinuityVersion}:${player.currentTrack?.id ?? ""}`,
   renderPlan: (positionSeconds) => {
     const plan = resolveLyricPlaybackRenderPlan(
       lyricsStore.lyrics,
@@ -30,12 +51,13 @@ const displayedPlaybackTime = useSmoothLyricsPlaybackPosition({
     );
     return {
       ...plan,
+      requiresAnimationFrame: plan.requiresAnimationFrame || lineTransitionActive.value,
       nextChangeAtSeconds: plan.nextChangeAtSeconds === null
         ? null
         : plan.nextChangeAtSeconds - lyricsStore.offset,
     };
   },
-  renderPlanDependencies: () => [lyricsStore.lyrics, lyricsStore.offset],
+  renderPlanDependencies: () => [lyricsStore.lyrics, lyricsStore.offset, lineTransitionActive.value],
 });
 provide(lyricsPlaybackPositionKey, displayedPlaybackTime);
 const windowControls = useDesktopWindowStore();
@@ -44,7 +66,7 @@ const lyricsScrollElement = ref<HTMLElement | null>(null);
 const lineElements = ref<Array<HTMLElement | undefined>>([]);
 const lineActiveStates: Ref<boolean>[] = [];
 const lineOutgoingStates: Ref<boolean>[] = [];
-const outgoingHighlightTimers: Array<number | undefined> = [];
+const lineEmphasisStates: Ref<number>[] = [];
 const lyricsMenuElement = ref<HTMLElement | null>(null);
 const lyricsMenu = ref({ open: false, x: 0, y: 0 });
 const activeIndex = ref(-1);
@@ -56,10 +78,12 @@ let autoFollowTimer = 0;
 let lastAutoFollowLineIndex: number | null = null;
 let lyricFollowAnimationFrame: number | null = null;
 let lyricFollowAnimationGeneration = 0;
-let lyricFollowTargetTop: number | null = null;
-let lyricFollowLastFrameAt = 0;
+let lyricLayoutStabilizationFrame: number | null = null;
+let lyricLayoutStabilizationGeneration = 0;
+let lyricLayoutStabilization: LyricLayoutStabilization | null = null;
 let pendingSeekAutoFollowSnap = false;
-let pendingSeekAutoFollowSnapTimer = 0;
+let pendingLyricSeek: PendingLyricSeek | null = null;
+let pendingLyricSeekTimer = 0;
 let scrollPointerId: number | null = null;
 let scrollPointerStartY = 0;
 let scrollPointerStartTop = 0;
@@ -70,8 +94,58 @@ let pendingManualScrollTop: number | null = null;
 let manualScrollListenersAttached = false;
 let suppressLyricClick = false;
 let suppressClickTimer = 0;
+let observedLineIndex = -1;
 let activeLineIndex = -1;
 let activeLyrics = lyricsStore.lyrics;
+let emphasisTransition: LyricEmphasisTransition = settledLyricEmphasis(-1);
+let emphasisPhase = 0;
+let animatedLinePosition = -1;
+let settledLinePosition = -1;
+let transitionPhaseVelocity = 0;
+let transitionPreviousProgress = 0;
+let sharedTransition: SharedLineTransition | null = null;
+let alignmentCorrection: AlignmentCorrection | null = null;
+const emphasizedLineIndices = new Set<number>();
+
+interface SharedLineTransition {
+  generation: number;
+  startedAt: number | null;
+  lastFrameAt: number | null;
+  durationMs: number;
+  startEmphasisPhase: number;
+  targetEmphasisPhase: number;
+  startLinePosition: number;
+  targetLineIndex: number;
+  startScrollTop: number;
+  targetScrollTop: number;
+  preserveVelocity: boolean;
+  initialPhaseVelocity: number;
+}
+
+interface AlignmentCorrection {
+  generation: number;
+  targetLineIndex: number;
+  startedAt: number | null;
+  durationMs: number;
+  startScrollTop: number;
+  targetScrollTop: number;
+  pass: number;
+}
+
+interface LyricLayoutStabilization {
+  generation: number;
+  targetLineIndex: number;
+  frameCount: number;
+  stableFrameCount: number;
+  previousDelta: number | null;
+}
+
+interface PendingLyricSeek {
+  sourceIndex: number;
+  targetIndex: number;
+  requestedAtMs: number;
+}
+
 const focusableSelector = [
   "button:not([disabled])",
   "input:not([disabled])",
@@ -89,32 +163,66 @@ function toggleMaximizeWindow(): void {
 function updateActivePosition(): void {
   const lyrics = lyricsStore.lyrics;
   if (lyrics !== activeLyrics) {
-    clearOutgoingHighlightTimers();
+    resetLineTransitionState();
     lineElements.value = [];
     lineActiveStates.length = 0;
     lineOutgoingStates.length = 0;
+    lineEmphasisStates.length = 0;
+    observedLineIndex = -1;
     activeLineIndex = -1;
     activeLyrics = lyrics;
   }
   const playbackTime = displayedPlaybackTime.value + lyricsStore.offset;
-  const nextActiveLineIndex = resolveLyricPlaybackPosition(lyrics, playbackTime).lineIndex;
-  if (nextActiveLineIndex === activeLineIndex) {
-    if (activeIndex.value !== nextActiveLineIndex) activeIndex.value = nextActiveLineIndex;
-    return;
+  const nextObservedLineIndex = resolveLyricPlaybackPosition(lyrics, playbackTime).lineIndex;
+  observedLineIndex = nextObservedLineIndex;
+  if (lyricLayoutStabilization) return;
+  const hadPendingSeek = pendingLyricSeek !== null;
+  const visualIndex = visualIndexAfterPendingSeek(nextObservedLineIndex);
+  if (visualIndex === null) return;
+  const activeIndexChanged = commitActiveLineIndex(visualIndex);
+  if (hadPendingSeek && !pendingLyricSeek && pendingSeekAutoFollowSnap && !activeIndexChanged) {
+    void scrollToActiveLine(visualIndex);
   }
+  if (visualIndex !== nextObservedLineIndex && !pendingLyricSeek && !lyricLayoutStabilization) {
+    void nextTick(() => {
+      if (!pendingLyricSeek && !lyricLayoutStabilization && observedLineIndex === nextObservedLineIndex) {
+        commitActiveLineIndex(nextObservedLineIndex);
+      }
+    });
+  }
+}
 
+function commitActiveLineIndex(nextActiveLineIndex: number): boolean {
   const previousActiveLineIndex = activeLineIndex;
-  activeLineIndex = nextActiveLineIndex;
-  if (previousActiveLineIndex >= 0) {
-    setLineActive(previousActiveLineIndex, false);
-    setLineOutgoing(previousActiveLineIndex, true);
-    scheduleOutgoingHighlightClear(previousActiveLineIndex);
+  if (nextActiveLineIndex !== previousActiveLineIndex) {
+    activeLineIndex = nextActiveLineIndex;
+    if (previousActiveLineIndex >= 0) {
+      setLineActive(previousActiveLineIndex, false);
+      setLineOutgoing(previousActiveLineIndex, true);
+    }
+    setLineOutgoing(nextActiveLineIndex, false);
+    setLineActive(nextActiveLineIndex, true);
+    setLineElementActivity(lineElements.value[previousActiveLineIndex], false);
+    setLineElementActivity(lineElements.value[nextActiveLineIndex], true);
   }
-  setLineOutgoing(nextActiveLineIndex, false);
-  setLineActive(nextActiveLineIndex, true);
-  setLineElementActivity(lineElements.value[previousActiveLineIndex], false);
-  setLineElementActivity(lineElements.value[nextActiveLineIndex], true);
+  if (activeIndex.value === nextActiveLineIndex) return false;
   activeIndex.value = nextActiveLineIndex;
+  return true;
+}
+
+function visualIndexAfterPendingSeek(currentIndex: number): number | null {
+  const request = pendingLyricSeek;
+  if (!request) return currentIndex;
+  const baselineIndex = lyricSeekBaselineIndex(request.sourceIndex, request.targetIndex, currentIndex);
+  if (baselineIndex !== null) {
+    clearPendingLyricSeek();
+    if (!autoFollowPaused) prepareLyricLayoutStabilization(baselineIndex);
+    pendingSeekAutoFollowSnap = true;
+    return baselineIndex;
+  }
+  if (monotonicNow() - request.requestedAtMs < LYRIC_SEEK_ACK_TIMEOUT_MS) return null;
+  clearPendingLyricSeek();
+  return currentIndex;
 }
 
 function activeStateForLine(index: number): Readonly<Ref<boolean>> {
@@ -135,10 +243,22 @@ function outgoingStateForLine(index: number): Readonly<Ref<boolean>> {
   return outgoingState;
 }
 
+function emphasisStateForLine(index: number): Readonly<Ref<number>> {
+  let emphasisState = lineEmphasisStates[index];
+  if (!emphasisState) {
+    emphasisState = ref(lyricLineTransitionEmphasis(emphasisPhase, index, emphasisTransition));
+    lineEmphasisStates[index] = emphasisState;
+  }
+  return emphasisState;
+}
+
 function setLineElement(index: number, element: unknown): void {
   const lineElement = element instanceof HTMLElement ? element : undefined;
   lineElements.value[index] = lineElement;
-  if (lineElement) setLineElementActivity(lineElement, index === activeLineIndex);
+  if (lineElement) {
+    setLineElementActivity(lineElement, index === activeLineIndex);
+    applyLineElementEmphasis(lineElement, emphasisStateForLine(index).value);
+  }
 }
 
 function setLineActive(index: number, active: boolean): void {
@@ -159,30 +279,6 @@ function setLineOutgoing(index: number, outgoing: boolean): void {
     lineOutgoingStates[index] = outgoingState;
   }
   outgoingState.value = outgoing;
-  if (!outgoing) clearOutgoingHighlightTimer(index);
-}
-
-function scheduleOutgoingHighlightClear(index: number): void {
-  clearOutgoingHighlightTimer(index);
-  outgoingHighlightTimers[index] = window.setTimeout(() => {
-    outgoingHighlightTimers[index] = undefined;
-    setLineOutgoing(index, false);
-  }, LYRIC_OUTGOING_HIGHLIGHT_DURATION_MS);
-}
-
-function clearOutgoingHighlightTimer(index: number): void {
-  const timer = outgoingHighlightTimers[index];
-  if (timer === undefined) return;
-  window.clearTimeout(timer);
-  outgoingHighlightTimers[index] = undefined;
-}
-
-function clearOutgoingHighlightTimers(): void {
-  outgoingHighlightTimers.forEach((timer, index) => {
-    if (timer !== undefined) window.clearTimeout(timer);
-    outgoingHighlightTimers[index] = undefined;
-  });
-  lineOutgoingStates.forEach((state) => { state.value = false; });
 }
 
 function setLineElementActivity(element: HTMLElement | undefined, active: boolean): void {
@@ -190,6 +286,31 @@ function setLineElementActivity(element: HTMLElement | undefined, active: boolea
   element.classList.toggle("active", active);
   if (active) element.setAttribute("aria-current", "true");
   else element.removeAttribute("aria-current");
+}
+
+function setLineEmphasis(index: number, emphasis: number): void {
+  if (index < 0) return;
+  const value = Math.max(0, Math.min(1, Number.isFinite(emphasis) ? emphasis : 0));
+  let state = lineEmphasisStates[index];
+  if (!state) {
+    state = ref(value);
+    lineEmphasisStates[index] = state;
+  } else if (Math.abs(state.value - value) > 0.0001) {
+    state.value = value;
+  }
+  const element = lineElements.value[index];
+  if (element) applyLineElementEmphasis(element, value);
+  if (value > 1 / 1_024) {
+    emphasizedLineIndices.add(index);
+    if (index !== activeLineIndex) setLineOutgoing(index, true);
+  } else {
+    emphasizedLineIndices.delete(index);
+    if (index !== activeLineIndex) setLineOutgoing(index, false);
+  }
+}
+
+function applyLineElementEmphasis(element: HTMLElement, emphasis: number): void {
+  element.style.setProperty("--lyric-line-emphasis", String(emphasis));
 }
 
 watch(
@@ -203,31 +324,37 @@ watch(
 );
 
 async function scrollToActiveLine(index = activeIndex.value): Promise<void> {
-  if (!player.lyricsOpen || autoFollowPaused || index < 0) return;
+  if (!player.lyricsOpen || index < 0) return;
   await nextTick();
-  if (!player.lyricsOpen || autoFollowPaused || index !== activeIndex.value) return;
+  if (!player.lyricsOpen || index !== activeIndex.value) return;
+  const stabilization = lyricLayoutStabilization;
+  const isSeekBaselineSnap = pendingSeekAutoFollowSnap
+    && stabilization?.targetLineIndex === index;
+  if (stabilization && !isSeekBaselineSnap) return;
   const scroll = lyricsScrollElement.value;
   const lineElement = lineElements.value[index];
-  if (!scroll || !lineElement) return;
+  if (!scroll || !lineElement) {
+    snapLineTransition(index, null);
+    if (isSeekBaselineSnap && !autoFollowPaused) {
+      clearPendingSeekAutoFollowSnap();
+      startLyricLayoutStabilization(stabilization);
+    }
+    return;
+  }
   const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
   const previousIndex = lastAutoFollowLineIndex;
   const previousTime = previousIndex === null ? null : lyricsStore.lyrics?.lines[previousIndex]?.time ?? null;
   const nextTime = lyricsStore.lyrics?.lines[index]?.time ?? null;
-  const densePlaybackCatchUp = previousTime !== null
-    && nextTime !== null
-    && Math.abs(nextTime - previousTime) <= DENSE_LYRIC_INTERVAL_SECONDS;
-  const skippedLines = previousIndex !== null && Math.abs(index - previousIndex) > 1;
-  const useInstantPositioning = reducedMotion
-    || previousIndex === null
-    || (skippedLines && !densePlaybackCatchUp)
-    || pendingSeekAutoFollowSnap;
+  const mode: LyricTransitionMode = reducedMotion || pendingSeekAutoFollowSnap
+    ? "snap"
+    : lyricTransitionMode(previousIndex, index, previousTime, nextTime);
   const targetTop = centeredLyricScrollTop(scroll, lineElement);
   clearPendingSeekAutoFollowSnap();
-  if (useInstantPositioning) {
-    cancelLyricFollowAnimation();
-    scroll.scrollTop = targetTop;
+  if (mode === "snap") {
+    snapLineTransition(index, autoFollowPaused ? null : targetTop);
+    if (isSeekBaselineSnap && !autoFollowPaused) startLyricLayoutStabilization(stabilization);
   } else {
-    scheduleLyricFollow(targetTop);
+    scheduleLyricLineTransition(index, autoFollowPaused ? null : targetTop);
   }
   lastAutoFollowLineIndex = index;
 }
@@ -242,54 +369,283 @@ function centeredLyricScrollTop(scroll: HTMLElement, lineElement: HTMLElement): 
   return Math.max(0, Math.min(maximum, target));
 }
 
-function scheduleLyricFollow(targetTop: number): void {
-  lyricFollowTargetTop = targetTop;
-  if (lyricFollowAnimationFrame !== null) return;
-  const generation = ++lyricFollowAnimationGeneration;
-  lyricFollowLastFrameAt = 0;
-  lyricFollowAnimationFrame = requestLyricFollowFrame((timestamp) => {
-    runLyricFollowFrame(generation, timestamp);
-  });
+function snapLineTransition(index: number, targetTop: number | null): void {
+  cancelLyricFollowFrameOnly();
+  sharedTransition = null;
+  alignmentCorrection = null;
+  emphasisTransition = settledLyricEmphasis(index);
+  emphasisPhase = 0;
+  animatedLinePosition = index;
+  settledLinePosition = index;
+  transitionPhaseVelocity = 0;
+  transitionPreviousProgress = 0;
+  if (targetTop !== null && lyricsScrollElement.value) lyricsScrollElement.value.scrollTop = targetTop;
+  applyTransitionEmphasis(index);
+  refreshLineTransitionActivity();
 }
 
-function runLyricFollowFrame(generation: number, timestamp: number): void {
+function scheduleLyricLineTransition(index: number, targetTop: number | null): void {
+  if (lyricLayoutStabilization) return;
+  const scroll = lyricsScrollElement.value;
+  if (!scroll) {
+    snapLineTransition(index, null);
+    return;
+  }
+  lineTransitionActive.value = true;
+  const startLinePosition = Number.isFinite(animatedLinePosition)
+    ? animatedLinePosition
+    : index;
+  const wasInterrupted = sharedTransition !== null
+    || Math.abs(settledLinePosition - startLinePosition) > 0.01;
+  emphasisTransition = retargetLyricEmphasis(emphasisTransition, emphasisPhase, index);
+  const startScrollTop = scroll.scrollTop;
+  const resolvedTargetTop = targetTop ?? startScrollTop;
+  const durationMs = lyricTransitionDurationMs(index - startLinePosition, resolvedTargetTop - startScrollTop);
+  const generation = ++lyricFollowAnimationGeneration;
+  cancelLyricFollowFrameOnly();
+  alignmentCorrection = null;
+  sharedTransition = {
+    generation,
+    startedAt: null,
+    lastFrameAt: null,
+    durationMs,
+    startEmphasisPhase: emphasisTransition.startPhase,
+    targetEmphasisPhase: emphasisTransition.endPhase,
+    startLinePosition,
+    targetLineIndex: index,
+    startScrollTop,
+    targetScrollTop: resolvedTargetTop,
+    preserveVelocity: wasInterrupted,
+    initialPhaseVelocity: transitionPhaseVelocity,
+  };
+  transitionPreviousProgress = 0;
+  requestSharedTransitionFrame(generation);
+}
+
+function requestSharedTransitionFrame(generation: number): void {
+  if (lyricFollowAnimationFrame !== null) return;
+  lyricFollowAnimationFrame = requestLyricFollowFrame((timestamp) => runSharedTransitionFrame(generation, timestamp));
+}
+
+function runSharedTransitionFrame(generation: number, timestamp: number): void {
   if (generation !== lyricFollowAnimationGeneration) return;
   lyricFollowAnimationFrame = null;
-  const scroll = lyricsScrollElement.value;
-  const targetTop = lyricFollowTargetTop;
-  if (!scroll || targetTop === null) {
-    lyricFollowTargetTop = null;
-    lyricFollowLastFrameAt = 0;
-    return;
+  if (sharedTransition) {
+    runLineTransitionFrame(sharedTransition, timestamp);
+  } else if (alignmentCorrection) {
+    runAlignmentCorrectionFrame(alignmentCorrection, timestamp);
   }
+}
 
-  const elapsed = lyricFollowLastFrameAt === 0
+function runLineTransitionFrame(transition: SharedLineTransition, timestamp: number): void {
+  if (transition.generation !== lyricFollowAnimationGeneration || sharedTransition !== transition) return;
+  if (transition.startedAt === null) transition.startedAt = timestamp - LYRIC_FOLLOW_FRAME_INTERVAL_MS;
+  const frameDeltaMs = transition.lastFrameAt === null
     ? LYRIC_FOLLOW_FRAME_INTERVAL_MS
-    : Math.min(50, Math.max(8, timestamp - lyricFollowLastFrameAt));
-  lyricFollowLastFrameAt = timestamp;
-  const remaining = targetTop - scroll.scrollTop;
-  if (Math.abs(remaining) <= LYRIC_FOLLOW_SETTLE_EPSILON_PX) {
-    scroll.scrollTop = targetTop;
-    lyricFollowTargetTop = null;
-    lyricFollowLastFrameAt = 0;
+    : Math.min(50, Math.max(1, timestamp - transition.lastFrameAt));
+  transition.lastFrameAt = timestamp;
+  const elapsedMs = Math.max(0, timestamp - transition.startedAt);
+  const rawProgress = Math.min(1, elapsedMs / transition.durationMs);
+  const easedProgress = transition.preserveVelocity
+    ? noBounceSpring(elapsedMs / 1_000, transition.initialPhaseVelocity)
+    : fastOutSlowIn(rawProgress);
+  const previousProgress = transitionPreviousProgress;
+  transitionPreviousProgress = easedProgress;
+  transitionPhaseVelocity = Math.max(0, easedProgress - previousProgress)
+    / Math.max(frameDeltaMs / 1_000, 0.001);
+  emphasisPhase = transition.startEmphasisPhase
+    + (transition.targetEmphasisPhase - transition.startEmphasisPhase) * easedProgress;
+  animatedLinePosition = transition.startLinePosition
+    + (transition.targetLineIndex - transition.startLinePosition) * easedProgress;
+  applyTransitionEmphasis(transition.targetLineIndex);
+
+  const scroll = lyricsScrollElement.value;
+  if (scroll && !autoFollowPaused) {
+    scroll.scrollTop = transition.startScrollTop
+      + (transition.targetScrollTop - transition.startScrollTop) * easedProgress;
+  }
+  const completed = transition.preserveVelocity
+    ? (elapsedMs >= 300 && 1 - easedProgress <= 0.001) || elapsedMs >= 1_000
+    : rawProgress >= 1;
+  if (!completed) {
+    requestSharedTransitionFrame(transition.generation);
     return;
   }
 
-  const response = 1 - Math.exp(-elapsed / LYRIC_FOLLOW_RESPONSE_MS);
-  scroll.scrollTop += remaining * response;
-  lyricFollowAnimationFrame = requestLyricFollowFrame((nextTimestamp) => {
-    runLyricFollowFrame(generation, nextTimestamp);
+  const targetIndex = transition.targetLineIndex;
+  sharedTransition = null;
+  emphasisTransition = settledLyricEmphasis(targetIndex);
+  emphasisPhase = 0;
+  animatedLinePosition = targetIndex;
+  settledLinePosition = targetIndex;
+  transitionPhaseVelocity = 0;
+  transitionPreviousProgress = 0;
+  applyTransitionEmphasis(targetIndex);
+  if (!autoFollowPaused) startAlignmentCorrection(targetIndex, transition.durationMs, transition.generation);
+}
+
+function applyTransitionEmphasis(targetIndex: number): void {
+  const candidates = new Set<number>([
+    ...emphasizedLineIndices,
+    ...emphasisTransition.startEmphasis.keys(),
+    emphasisTransition.targetLineIndex,
+    targetIndex,
+  ]);
+  candidates.forEach((index) => {
+    if (index >= 0) setLineEmphasis(index, lyricLineTransitionEmphasis(emphasisPhase, index, emphasisTransition));
   });
 }
 
-function cancelLyricFollowAnimation(): void {
-  lyricFollowAnimationGeneration += 1;
+function startAlignmentCorrection(targetIndex: number, transitionDuration: number, generation: number, pass = 0): void {
+  const scroll = lyricsScrollElement.value;
+  const line = lineElements.value[targetIndex];
+  if (!scroll || !line || autoFollowPaused || pass >= LYRIC_LAYOUT_CORRECTION_MAX_PASSES) {
+    refreshLineTransitionActivity();
+    return;
+  }
+  const targetTop = centeredLyricScrollTop(scroll, line);
+  if (Math.abs(targetTop - scroll.scrollTop) <= LYRIC_LAYOUT_STABILITY_EPSILON_PX) {
+    scroll.scrollTop = targetTop;
+    refreshLineTransitionActivity();
+    return;
+  }
+  alignmentCorrection = {
+    generation,
+    targetLineIndex: targetIndex,
+    startedAt: null,
+    durationMs: correctionDurationMs(transitionDuration),
+    startScrollTop: scroll.scrollTop,
+    targetScrollTop: targetTop,
+    pass,
+  };
+  requestSharedTransitionFrame(generation);
+  refreshLineTransitionActivity();
+}
+
+function runAlignmentCorrectionFrame(correction: AlignmentCorrection, timestamp: number): void {
+  if (correction.generation !== lyricFollowAnimationGeneration || alignmentCorrection !== correction) return;
+  const scroll = lyricsScrollElement.value;
+  if (!scroll || autoFollowPaused) {
+    alignmentCorrection = null;
+    refreshLineTransitionActivity();
+    return;
+  }
+  if (correction.startedAt === null) correction.startedAt = timestamp - LYRIC_FOLLOW_FRAME_INTERVAL_MS;
+  const progress = Math.min(1, Math.max(0, timestamp - correction.startedAt) / correction.durationMs);
+  scroll.scrollTop = correction.startScrollTop
+    + (correction.targetScrollTop - correction.startScrollTop) * fastOutSlowIn(progress);
+  if (progress < 1) {
+    requestSharedTransitionFrame(correction.generation);
+    return;
+  }
+  scroll.scrollTop = correction.targetScrollTop;
+  alignmentCorrection = null;
+  startAlignmentCorrection(
+    correction.targetLineIndex,
+    correction.durationMs,
+    correction.generation,
+    correction.pass + 1,
+  );
+}
+
+function cancelLyricFollowFrameOnly(): void {
   if (lyricFollowAnimationFrame !== null) {
     cancelLyricFollowFrame(lyricFollowAnimationFrame);
     lyricFollowAnimationFrame = null;
   }
-  lyricFollowTargetTop = null;
-  lyricFollowLastFrameAt = 0;
+}
+
+function cancelLyricFollowAnimation(): void {
+  lyricFollowAnimationGeneration += 1;
+  cancelLyricFollowFrameOnly();
+  sharedTransition = null;
+  alignmentCorrection = null;
+  transitionPreviousProgress = 0;
+  refreshLineTransitionActivity();
+}
+
+function prepareLyricLayoutStabilization(targetLineIndex: number): void {
+  cancelLyricLayoutStabilization();
+  lyricLayoutStabilization = {
+    generation: lyricLayoutStabilizationGeneration,
+    targetLineIndex,
+    frameCount: 0,
+    stableFrameCount: 0,
+    previousDelta: null,
+  };
+  refreshLineTransitionActivity();
+}
+
+function startLyricLayoutStabilization(stabilization: LyricLayoutStabilization): void {
+  if (lyricLayoutStabilization !== stabilization) return;
+  requestLyricLayoutStabilizationFrame(stabilization);
+}
+
+function requestLyricLayoutStabilizationFrame(stabilization: LyricLayoutStabilization): void {
+  if (lyricLayoutStabilizationFrame !== null || lyricLayoutStabilization !== stabilization) return;
+  const generation = stabilization.generation;
+  lyricLayoutStabilizationFrame = requestLyricFollowFrame(() => {
+    if (
+      generation !== lyricLayoutStabilizationGeneration
+      || lyricLayoutStabilization !== stabilization
+    ) return;
+    lyricLayoutStabilizationFrame = null;
+    runLyricLayoutStabilizationFrame(stabilization);
+  });
+}
+
+function runLyricLayoutStabilizationFrame(stabilization: LyricLayoutStabilization): void {
+  const currentDelta = centeredLyricDelta(stabilization.targetLineIndex);
+  stabilization.frameCount += 1;
+  if (lyricLayoutDeltaHasSettled(stabilization.previousDelta, currentDelta)) {
+    stabilization.stableFrameCount += 1;
+  } else {
+    stabilization.stableFrameCount = 0;
+  }
+  stabilization.previousDelta = currentDelta;
+  if (
+    stabilization.stableFrameCount >= LYRIC_REQUIRED_STABLE_FRAMES
+    || stabilization.frameCount >= LYRIC_BASELINE_MAX_FRAME_COUNT
+  ) {
+    finishLyricLayoutStabilization(stabilization);
+    return;
+  }
+  requestLyricLayoutStabilizationFrame(stabilization);
+}
+
+function centeredLyricDelta(targetLineIndex: number): number | null {
+  const scroll = lyricsScrollElement.value;
+  const line = lineElements.value[targetLineIndex];
+  if (!scroll || !line) return null;
+  const scrollRect = scroll.getBoundingClientRect();
+  const lineRect = line.getBoundingClientRect();
+  const delta = lineRect.top + lineRect.height / 2
+    - (scrollRect.top + scroll.clientHeight / 2);
+  return Number.isFinite(delta) ? delta : null;
+}
+
+function finishLyricLayoutStabilization(stabilization: LyricLayoutStabilization): void {
+  if (lyricLayoutStabilization !== stabilization) return;
+  lyricLayoutStabilization = null;
+  lyricLayoutStabilizationFrame = null;
+  refreshLineTransitionActivity();
+  updateActivePosition();
+}
+
+function cancelLyricLayoutStabilization(): void {
+  lyricLayoutStabilizationGeneration += 1;
+  if (lyricLayoutStabilizationFrame !== null) {
+    cancelLyricFollowFrame(lyricLayoutStabilizationFrame);
+    lyricLayoutStabilizationFrame = null;
+  }
+  lyricLayoutStabilization = null;
+  refreshLineTransitionActivity();
+}
+
+function refreshLineTransitionActivity(): void {
+  lineTransitionActive.value = sharedTransition !== null
+    || alignmentCorrection !== null
+    || lyricLayoutStabilization !== null;
 }
 
 function requestLyricFollowFrame(callback: FrameRequestCallback): number {
@@ -302,19 +658,30 @@ function cancelLyricFollowFrame(handle: number): void {
   else window.clearTimeout(handle);
 }
 
-function markSeekForAutoFollow(): void {
-  pendingSeekAutoFollowSnap = true;
-  window.clearTimeout(pendingSeekAutoFollowSnapTimer);
-  pendingSeekAutoFollowSnapTimer = window.setTimeout(() => {
-    pendingSeekAutoFollowSnap = false;
-    pendingSeekAutoFollowSnapTimer = 0;
-  }, SEEK_AUTO_FOLLOW_SNAP_EXPIRY_MS);
+function markSeekForAutoFollow(targetIndex: number): void {
+  cancelLyricLayoutStabilization();
+  clearPendingLyricSeek();
+  pendingLyricSeek = {
+    sourceIndex: activeLineIndex >= 0 ? activeLineIndex : targetIndex,
+    targetIndex,
+    requestedAtMs: monotonicNow(),
+  };
+  pendingLyricSeekTimer = window.setTimeout(() => {
+    pendingLyricSeekTimer = 0;
+    if (!pendingLyricSeek) return;
+    pendingLyricSeek = null;
+    if (observedLineIndex >= 0) commitActiveLineIndex(observedLineIndex);
+  }, LYRIC_SEEK_ACK_TIMEOUT_MS);
 }
 
 function clearPendingSeekAutoFollowSnap(): void {
   pendingSeekAutoFollowSnap = false;
-  window.clearTimeout(pendingSeekAutoFollowSnapTimer);
-  pendingSeekAutoFollowSnapTimer = 0;
+}
+
+function clearPendingLyricSeek(): void {
+  pendingLyricSeek = null;
+  if (pendingLyricSeekTimer !== 0) window.clearTimeout(pendingLyricSeekTimer);
+  pendingLyricSeekTimer = 0;
 }
 
 watch([activeIndex, () => player.lyricsOpen], ([index, open]) => {
@@ -336,14 +703,17 @@ watch(() => player.lyricsOpen, async (open) => {
   }
 });
 
-function seek(line: LyricLine, event: MouseEvent) {
+function seek(line: LyricLine, index: number, event: MouseEvent) {
   if (suppressLyricClick) {
     event.preventDefault();
     event.stopPropagation();
     return;
   }
   if (line.time !== null) {
-    markSeekForAutoFollow();
+    const targetIndex = canonicalLyricTargetIndex(lyricsStore.lyrics?.lines ?? [], index);
+    markSeekForAutoFollow(targetIndex);
+    autoFollowPaused = false;
+    window.clearTimeout(autoFollowTimer);
     player.seekTo(line.time - lyricsStore.offset);
   }
 }
@@ -428,12 +798,26 @@ function closeLyricsMenuOnResize(): void {
 function pauseAutoFollow(): void {
   autoFollowPaused = true;
   window.clearTimeout(autoFollowTimer);
-  cancelLyricFollowAnimation();
+  cancelLyricLayoutStabilization();
+  if (alignmentCorrection) {
+    alignmentCorrection = null;
+    cancelLyricFollowFrameOnly();
+  }
   autoFollowTimer = window.setTimeout(() => {
     autoFollowTimer = 0;
     autoFollowPaused = false;
-    void scrollToActiveLine();
+    void snapAutoFollowToActiveLine();
   }, AUTO_FOLLOW_RESUME_MS);
+}
+
+async function snapAutoFollowToActiveLine(): Promise<void> {
+  const index = activeIndex.value;
+  if (!player.lyricsOpen || index < 0) return;
+  await nextTick();
+  const scroll = lyricsScrollElement.value;
+  const line = lineElements.value[index];
+  if (scroll && line) scroll.scrollTop = centeredLyricScrollTop(scroll, line);
+  lastAutoFollowLineIndex = index;
 }
 
 function handleLyricsWheel(event: WheelEvent): void {
@@ -450,7 +834,9 @@ function resetAutoFollow(): void {
   window.clearTimeout(autoFollowTimer);
   window.clearTimeout(suppressClickTimer);
   cancelLyricFollowAnimation();
+  cancelLyricLayoutStabilization();
   clearPendingSeekAutoFollowSnap();
+  clearPendingLyricSeek();
   cancelPendingManualScrollFrame();
   detachManualScrollListeners();
   if (scrollPointerCaptured && scrollPointerId !== null) {
@@ -469,6 +855,25 @@ function resetAutoFollow(): void {
   scrollPointerCaptured = false;
   suppressLyricClick = false;
   draggingLyrics.value = false;
+  if (activeLineIndex >= 0) snapLineTransition(activeLineIndex, null);
+}
+
+function resetLineTransitionState(): void {
+  cancelLyricFollowAnimation();
+  cancelLyricLayoutStabilization();
+  clearPendingLyricSeek();
+  clearPendingSeekAutoFollowSnap();
+  [...emphasizedLineIndices].forEach((index) => setLineEmphasis(index, 0));
+  emphasizedLineIndices.clear();
+  lineOutgoingStates.forEach((state) => { state.value = false; });
+  emphasisTransition = settledLyricEmphasis(-1);
+  emphasisPhase = 0;
+  animatedLinePosition = -1;
+  settledLinePosition = -1;
+  observedLineIndex = -1;
+  transitionPhaseVelocity = 0;
+  transitionPreviousProgress = 0;
+  lastAutoFollowLineIndex = null;
 }
 
 function beginManualScroll(event: PointerEvent): void {
@@ -566,18 +971,14 @@ onBeforeUnmount(() => {
   window.removeEventListener("pointerdown", closeLyricsMenuFromOutside);
   window.removeEventListener("resize", closeLyricsMenuOnResize);
   resetAutoFollow();
-  clearOutgoingHighlightTimers();
+  resetLineTransitionState();
   previouslyFocused?.focus();
 });
 
 const AUTO_FOLLOW_RESUME_MS = 4_000;
 const DRAG_THRESHOLD_PX = 4;
-const DENSE_LYRIC_INTERVAL_SECONDS = 0.45;
 const LYRIC_FOLLOW_FRAME_INTERVAL_MS = 16;
-const LYRIC_FOLLOW_RESPONSE_MS = 180;
-const LYRIC_FOLLOW_SETTLE_EPSILON_PX = 0.5;
-const LYRIC_OUTGOING_HIGHLIGHT_DURATION_MS = 240;
-const SEEK_AUTO_FOLLOW_SNAP_EXPIRY_MS = 1_000;
+const LYRIC_LAYOUT_CORRECTION_MAX_PASSES = 4;
 
 function monotonicNow(): number {
   const timestamp = typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -625,12 +1026,14 @@ function monotonicNow(): number {
             class="lyric-line"
             :disabled="line.time === null"
             :aria-label="line.time === null ? line.text : `${line.text}，跳转到${formatTime(line.time)}`"
-            @click="seek(line, $event)"
+            @click="seek(line, index, $event)"
           >
             <LyricsLineContent
               :active-state="activeStateForLine(index)"
               :outgoing-state="outgoingStateForLine(index)"
+              :line-emphasis-state="emphasisStateForLine(index)"
               :line="line"
+              :next-line-time="lyricsStore.lyrics.lines[index + 1]?.time"
               :offset="lyricsStore.offset"
               :show-translation="lyricsStore.showTranslation"
               :timing="lyricsStore.lyrics.timing"

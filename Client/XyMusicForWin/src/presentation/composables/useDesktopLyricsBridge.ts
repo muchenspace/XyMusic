@@ -17,6 +17,7 @@ export function useDesktopLyricsBridge(): void {
   let lastClockPosition = -1;
   let lastClockTrackId: string | null = null;
   let lastClockPlaying = false;
+  let lastClockDiscontinuityVersion = -1;
   // 初始化为时间戳，避免主窗口 F5 刷新后 revision 从 0 重新计数，
   // 导致歌词窗口（未刷新）保留的旧 revision 比新 revision 大而丢弃新快照。
   let snapshotSending = false;
@@ -55,12 +56,19 @@ export function useDesktopLyricsBridge(): void {
 
   watch(
     () => desktopLyrics.actuallyVisible
-      ? [player.currentTrack?.id ?? null, player.currentTime, player.isPlaying] as const
+      ? [
+        player.currentTrack?.id ?? null,
+        player.currentTime,
+        player.isPlaying,
+        player.positionDiscontinuityVersion,
+      ] as const
       : null,
     (visiblePlayback) => {
       if (!visiblePlayback) return;
       const clock = createClock();
-      const stateChanged = clock.trackId !== lastClockTrackId || clock.isPlaying !== lastClockPlaying;
+      const stateChanged = clock.trackId !== lastClockTrackId
+        || clock.isPlaying !== lastClockPlaying
+        || clock.positionDiscontinuityVersion !== lastClockDiscontinuityVersion;
       const jumped = Math.abs(clock.positionSeconds - lastClockPosition) >= CLOCK_JUMP_SECONDS;
       if (stateChanged || jumped || !clock.isPlaying || clock.anchoredAtMs - lastClockAt >= CLOCK_INTERVAL_MS) {
         void sendClock(clock);
@@ -121,6 +129,7 @@ export function useDesktopLyricsBridge(): void {
       renderActive: desktopLyrics.actuallyVisible,
       positionSeconds: finitePosition(player.currentTime),
       anchoredAtMs: Date.now(),
+      positionDiscontinuityVersion: player.positionDiscontinuityVersion,
       offsetSeconds: lyricsStore.offset,
       showTranslation: lyricsStore.showTranslation,
       locked: desktopLyrics.locked,
@@ -144,6 +153,7 @@ export function useDesktopLyricsBridge(): void {
       isPlaying: player.isPlaying,
       positionSeconds: finitePosition(player.currentTime),
       anchoredAtMs: Date.now(),
+      positionDiscontinuityVersion: player.positionDiscontinuityVersion,
     };
   }
 
@@ -160,6 +170,7 @@ export function useDesktopLyricsBridge(): void {
         lastClockPosition = nextClock.positionSeconds;
         lastClockTrackId = nextClock.trackId;
         lastClockPlaying = nextClock.isPlaying;
+        lastClockDiscontinuityVersion = nextClock.positionDiscontinuityVersion ?? -1;
         try {
           await controller.sendClock(nextClock);
         } catch {

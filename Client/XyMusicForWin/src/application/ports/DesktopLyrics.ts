@@ -24,6 +24,8 @@ export interface DesktopLyricsSnapshot {
   renderActive?: boolean;
   positionSeconds: number;
   anchoredAtMs: number;
+  /** Mirrors the playback session's explicit seek/item discontinuity generation. */
+  positionDiscontinuityVersion?: number;
   offsetSeconds: number;
   showTranslation: boolean;
   locked: boolean;
@@ -42,6 +44,7 @@ export interface DesktopLyricsClock {
   isPlaying: boolean;
   positionSeconds: number;
   anchoredAtMs: number;
+  positionDiscontinuityVersion?: number;
 }
 
 interface DesktopLyricsActionBase {

@@ -33,6 +33,7 @@ export class FakePlaybackSession implements PlaybackSession {
       queue: [],
       queueVersion: 0,
       playbackIntentVersion: 0,
+      positionDiscontinuityVersion: 0,
       currentIndex: -1,
       isPlaying: false,
       loading: false,
@@ -84,7 +85,10 @@ export class FakePlaybackSession implements PlaybackSession {
 
   async playAt(index: number): Promise<void> {
     if (index < 0 || index >= this.stateValue.queue.length) return;
-    this.update({ currentIndex: index });
+    this.update({
+      currentIndex: index,
+      positionDiscontinuityVersion: this.stateValue.positionDiscontinuityVersion + 1,
+    });
   }
 
   async playFromIndex(tracks: Track[], index: number, terminalEvent?: PlaybackTerminalEvent | null): Promise<void> {
@@ -94,7 +98,12 @@ export class FakePlaybackSession implements PlaybackSession {
   startQueue(tracks: Track[], index: number): QueueStart | null {
     if (index < 0 || index >= tracks.length) return null;
     const revision = this.stateValue.queueVersion + 1;
-    this.update({ queue: [...tracks], queueVersion: revision, currentIndex: index });
+    this.update({
+      queue: [...tracks],
+      queueVersion: revision,
+      currentIndex: index,
+      positionDiscontinuityVersion: this.stateValue.positionDiscontinuityVersion + 1,
+    });
     return { revision, playback: Promise.resolve(true) };
   }
 
@@ -114,6 +123,7 @@ export class FakePlaybackSession implements PlaybackSession {
     this.update({
       currentTime,
       progress: this.stateValue.duration > 0 ? currentTime / this.stateValue.duration * 100 : 0,
+      positionDiscontinuityVersion: this.stateValue.positionDiscontinuityVersion + 1,
     });
   }
 
@@ -136,6 +146,7 @@ export class FakePlaybackSession implements PlaybackSession {
     this.update({
       queue: [],
       queueVersion: this.stateValue.queueVersion + 1,
+      positionDiscontinuityVersion: this.stateValue.positionDiscontinuityVersion + 1,
       currentIndex: -1,
       isPlaying: false,
       currentTime: 0,

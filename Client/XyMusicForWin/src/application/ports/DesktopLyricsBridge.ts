@@ -40,6 +40,7 @@ export function clockFromState(state: DesktopLyricsStatePayload): DesktopLyricsC
     isPlaying: state.isPlaying,
     positionSeconds: state.positionSeconds,
     anchoredAtMs: state.anchoredAtMs,
+    positionDiscontinuityVersion: state.positionDiscontinuityVersion,
   };
 }
 

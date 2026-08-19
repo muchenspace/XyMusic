@@ -130,7 +130,11 @@ describe("playback lyrics wheel controls", () => {
       mounted.playbackSession.update({ currentTime: 0.2 });
       await nextTick();
       await nextTick();
-      animationFrames.shift()?.(32);
+      // A browser may still deliver a cancelled callback selected before the retarget. The
+      // generation guard ignores it; the next live frame continues from the visible position.
+      for (let index = 0; index < 2 && scroll.scrollTop <= firstFrameTop; index += 1) {
+        animationFrames.shift()?.(32);
+      }
       expect(scroll.scrollTop).toBeGreaterThan(firstFrameTop);
       expect(scroll.scrollTop).toBeLessThan(150);
 
@@ -331,8 +335,13 @@ describe("playback lyrics wheel controls", () => {
     }
   });
 
-  it("fades outgoing word progress instead of clearing it at the line boundary", async () => {
-    vi.useFakeTimers();
+  it("keeps outgoing word progress on the shared line-transition clock", async () => {
+    const animationFrames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
     const mounted = await mountLyricsView({
       timing: "WORD",
       currentTime: 1.2,
@@ -362,14 +371,195 @@ describe("playback lyrics wheel controls", () => {
 
       const updatedLines = mounted.wrapper.findAll(".lyric-line");
       expect(updatedLines[0]?.findAll(".lyric-word.is-sung")).toHaveLength(2);
+      expect(updatedLines[1]?.findAll(".lyric-word.is-sung")).toHaveLength(0);
+
+      animationFrames.shift()?.(16);
+      await nextTick();
       expect(updatedLines[1]?.findAll(".lyric-word.is-sung")).toHaveLength(1);
 
-      await vi.advanceTimersByTimeAsync(240);
+      for (let frame = 0; frame < 80 && animationFrames.length; frame += 1) {
+        animationFrames.shift()?.(32 + frame * 16);
+        await nextTick();
+      }
       await nextTick();
       expect(updatedLines[0]?.findAll(".lyric-word.is-sung")).toHaveLength(0);
       expect(updatedLines[0]?.findAll(".lyric-word").every((word) => word.attributes("style").includes("--lyric-word-progress: 0%;"))).toBe(true);
     } finally {
       mounted.wrapper.unmount();
+    }
+  });
+
+  it("keeps the committed highlight while a lyric seek waits for its target acknowledgement", async () => {
+    const mounted = await mountLyricsView({
+      timing: "LINE",
+      lines: [
+        { time: 0, text: "first line" },
+        { time: 1, text: "intermediate line" },
+        { time: 2, text: "third line" },
+        { time: 3, text: "target line" },
+      ],
+    });
+    const seekTo = vi.spyOn(mounted.playbackSession, "seekTo").mockImplementation(() => undefined);
+    try {
+      expect(mounted.wrapper.findAll(".lyric-line")[0]?.classes()).toContain("active");
+      await mounted.wrapper.findAll(".lyric-line")[3]!.trigger("click");
+
+      mounted.playbackSession.update({ currentTime: 1.1 });
+      await nextTick();
+      await nextTick();
+
+      const waitingLines = mounted.wrapper.findAll(".lyric-line");
+      expect(waitingLines[0]?.classes()).toContain("active");
+      expect(waitingLines[1]?.classes()).not.toContain("active");
+
+      mounted.playbackSession.update({ currentTime: 3.1 });
+      await nextTick();
+      await nextTick();
+
+      expect(mounted.wrapper.findAll(".lyric-line")[3]?.classes()).toContain("active");
+    } finally {
+      seekTo.mockRestore();
+      mounted.wrapper.unmount();
+    }
+  });
+
+  it("holds later lyric commits until the seek baseline is stable for two frames", async () => {
+    const animationFrames: FrameRequestCallback[] = [];
+    let nextFrameHandle = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      animationFrames.push(callback);
+      nextFrameHandle += 1;
+      return nextFrameHandle;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const mounted = await mountLyricsView({
+      timing: "LINE",
+      lines: [
+        { time: 0, text: "source line" },
+        { time: 1, text: "seek target" },
+        { time: 1.1, text: "next dense line" },
+      ],
+    });
+    const seekTo = vi.spyOn(mounted.playbackSession, "seekTo").mockImplementation(() => undefined);
+    try {
+      installScrollMetrics(mounted.wrapper);
+      await mounted.wrapper.findAll(".lyric-line")[1]!.trigger("click");
+      mounted.playbackSession.update({ currentTime: 1.01 });
+      await nextTick();
+      await nextTick();
+
+      expect(mounted.wrapper.findAll(".lyric-line")[1]?.classes()).toContain("active");
+      expect(animationFrames).toHaveLength(1);
+
+      mounted.playbackSession.update({ currentTime: 1.11 });
+      await nextTick();
+      await nextTick();
+      expect(mounted.wrapper.findAll(".lyric-line")[1]?.classes()).toContain("active");
+
+      animationFrames.shift()?.(16);
+      animationFrames.shift()?.(32);
+      expect(mounted.wrapper.findAll(".lyric-line")[1]?.classes()).toContain("active");
+
+      animationFrames.shift()?.(48);
+      await nextTick();
+      await nextTick();
+      expect(mounted.wrapper.findAll(".lyric-line")[2]?.classes()).toContain("active");
+      expect(animationFrames).toHaveLength(1);
+    } finally {
+      seekTo.mockRestore();
+      mounted.wrapper.unmount();
+    }
+  });
+
+  it("releases an unstable seek baseline on frame eight", async () => {
+    const animationFrames: Array<{ handle: number; callback: FrameRequestCallback }> = [];
+    const cancelAnimationFrame = vi.fn();
+    let nextFrameHandle = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      nextFrameHandle += 1;
+      animationFrames.push({ handle: nextFrameHandle, callback });
+      return nextFrameHandle;
+    });
+    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+    const mounted = await mountLyricsView({
+      timing: "LINE",
+      lines: [
+        { time: 0, text: "source line" },
+        { time: 1, text: "unstable target" },
+        { time: 1.1, text: "latest line" },
+      ],
+    });
+    const seekTo = vi.spyOn(mounted.playbackSession, "seekTo").mockImplementation(() => undefined);
+    try {
+      const scroll = installScrollMetrics(mounted.wrapper);
+      const target = mounted.wrapper.findAll(".lyric-line")[1]!.element as HTMLElement;
+      let layoutShift = 0;
+      target.getBoundingClientRect = () => rect(80 + layoutShift - scroll.scrollTop, 80);
+
+      await mounted.wrapper.findAll(".lyric-line")[1]!.trigger("click");
+      mounted.playbackSession.update({ currentTime: 1.01 });
+      await nextTick();
+      await nextTick();
+      mounted.playbackSession.update({ currentTime: 1.11 });
+      await nextTick();
+
+      for (let frame = 1; frame < 8; frame += 1) {
+        layoutShift = frame * 2;
+        animationFrames.shift()?.callback(frame * 16);
+        expect(mounted.wrapper.findAll(".lyric-line")[1]?.classes()).toContain("active");
+      }
+
+      layoutShift = 16;
+      animationFrames.shift()?.callback(128);
+      await nextTick();
+      await nextTick();
+      expect(mounted.wrapper.findAll(".lyric-line")[2]?.classes()).toContain("active");
+
+    } finally {
+      seekTo.mockRestore();
+      if (mounted.wrapper.exists()) mounted.wrapper.unmount();
+    }
+  });
+
+  it("cancels a pending seek-layout frame on unmount and ignores its stale callback", async () => {
+    const animationFrames: Array<{ handle: number; callback: FrameRequestCallback }> = [];
+    const cancelAnimationFrame = vi.fn();
+    let nextFrameHandle = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      nextFrameHandle += 1;
+      animationFrames.push({ handle: nextFrameHandle, callback });
+      return nextFrameHandle;
+    });
+    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+    const mounted = await mountLyricsView({
+      timing: "LINE",
+      lines: [
+        { time: 0, text: "source line" },
+        { time: 1, text: "seek target" },
+        { time: 1.1, text: "later line" },
+      ],
+    });
+    const seekTo = vi.spyOn(mounted.playbackSession, "seekTo").mockImplementation(() => undefined);
+    try {
+      installScrollMetrics(mounted.wrapper);
+      await mounted.wrapper.findAll(".lyric-line")[1]!.trigger("click");
+      mounted.playbackSession.update({ currentTime: 1.01 });
+      await nextTick();
+      await nextTick();
+      mounted.playbackSession.update({ currentTime: 1.11 });
+      await nextTick();
+
+      const pendingFrame = animationFrames.shift();
+      expect(pendingFrame).toBeDefined();
+      mounted.wrapper.unmount();
+      expect(cancelAnimationFrame).toHaveBeenCalledWith(pendingFrame!.handle);
+
+      pendingFrame!.callback(16);
+      await nextTick();
+      expect(animationFrames).toHaveLength(0);
+    } finally {
+      seekTo.mockRestore();
+      if (mounted.wrapper.exists()) mounted.wrapper.unmount();
     }
   });
 

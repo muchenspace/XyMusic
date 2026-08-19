@@ -113,6 +113,7 @@ export class PlaybackSession implements PlaybackSessionPort {
       queue: this.ownQueue([]),
       queueVersion: 0,
       playbackIntentVersion: 0,
+      positionDiscontinuityVersion: 0,
       currentIndex: -1,
       isPlaying: false,
       loading: false,
@@ -191,6 +192,7 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.updateState({
       queue,
       queueVersion: this.advanceQueueRevision(),
+      positionDiscontinuityVersion: this.nextPositionDiscontinuityVersion(),
       currentIndex: restored.currentIndex,
       isPlaying: false,
       loading: false,
@@ -367,6 +369,8 @@ export class PlaybackSession implements PlaybackSessionPort {
       this.clearPrefetch();
     }
     const normalized = Math.max(0, Math.min(this.stateValue.duration, seconds));
+    const positionChanged = playbackPositionMilliseconds(this.audio.snapshot().currentTime)
+      !== playbackPositionMilliseconds(normalized);
     this.suppressBufferingUntil = Date.now() + BUFFERING_AFTER_SEEK_SUPPRESSION_MS;
     this.audio.seek(normalized);
     this.lastCheckpoint = normalized;
@@ -375,6 +379,9 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.updateState({
       currentTime: normalized,
       progress: this.stateValue.duration > 0 ? normalized / this.stateValue.duration * 100 : 0,
+      ...(positionChanged
+        ? { positionDiscontinuityVersion: this.nextPositionDiscontinuityVersion() }
+        : {}),
     });
     this.desktopPlayback.setPlayback(this.lastNativeStatus, normalized, this.stateValue.duration);
     this.scheduleProgressCheckpoint();
@@ -422,6 +429,7 @@ export class PlaybackSession implements PlaybackSessionPort {
 
   stopPlayback(terminalEvent: PlaybackTerminalEvent | null = "PAUSED"): void {
     if (this.disposed) return;
+    const positionChanged = playbackPositionMilliseconds(this.audio.snapshot().currentTime) !== 0;
     this.resumeWhenQueueExtends = false;
     this.finishPlaybackSession(this.capturePlaybackSession(), terminalEvent);
     this.automaticQuality.finishTrack();
@@ -432,7 +440,15 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.audio.stop();
     this.lastNativePosition = -1;
     this.lastNativeStatus = "stopped";
-    this.updateState({ isPlaying: false, loading: false, progress: 0, currentTime: 0 });
+    this.updateState({
+      isPlaying: false,
+      loading: false,
+      progress: 0,
+      currentTime: 0,
+      ...(positionChanged
+        ? { positionDiscontinuityVersion: this.nextPositionDiscontinuityVersion() }
+        : {}),
+    });
     this.desktopPlayback.setPlayback("stopped", 0, this.stateValue.duration);
     this.flushPersistState();
   }
@@ -874,6 +890,7 @@ export class PlaybackSession implements PlaybackSessionPort {
     const queueVersion = replaceQueue ? this.advanceQueueRevision() : this.stateValue.queueVersion;
     this.updateState({
       ...(replaceQueue ? { queue: tracks, queueVersion } : {}),
+      positionDiscontinuityVersion: this.nextPositionDiscontinuityVersion(),
       currentIndex: selectedIndex,
       isPlaying: false,
       progress: 0,
@@ -1105,6 +1122,7 @@ export class PlaybackSession implements PlaybackSessionPort {
       this.lastNativePosition = snapshot.currentTime;
       this.lastNativeStatus = "playing";
       this.updateState({
+        positionDiscontinuityVersion: this.nextPositionDiscontinuityVersion(),
         currentIndex: index,
         duration,
         currentTime: snapshot.currentTime,
@@ -1184,6 +1202,10 @@ export class PlaybackSession implements PlaybackSessionPort {
 
   private advancePlaybackIntent(): void {
     this.updateState({ playbackIntentVersion: this.stateValue.playbackIntentVersion + 1 });
+  }
+
+  private nextPositionDiscontinuityVersion(): number {
+    return this.stateValue.positionDiscontinuityVersion + 1;
   }
 
   private schedulePersistState(): void {
@@ -1302,6 +1324,10 @@ function createAbortError(message: string): Error {
 
 function validBitrate(value: number | undefined): number {
   return Number.isFinite(value) && Number(value) > 0 ? Number(value) : 0;
+}
+
+function playbackPositionMilliseconds(seconds: number): number {
+  return Math.round((Number.isFinite(seconds) ? Math.max(0, seconds) : 0) * 1_000);
 }
 
 const RETRY_DELAYS = [300, 900];

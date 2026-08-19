@@ -111,6 +111,34 @@ describe("desktop lyrics bridge", () => {
       mounted.unmount();
     }
   });
+
+  it("sends a small explicit seek immediately with its discontinuity generation", async () => {
+    const controller = new FakeDesktopLyricsController(visibleState());
+    const playbackSession = new FakePlaybackSession({
+      state: {
+        queue: [track("one")],
+        currentIndex: 0,
+        currentTime: 10,
+        duration: 180,
+        isPlaying: true,
+      },
+    });
+    const mounted = mountBridge(controller, playbackSession);
+    try {
+      await waitFor(() => controller.sendClock.mock.calls.length > 0);
+      controller.sendClock.mockClear();
+
+      playbackSession.seekTo(9.9);
+      await waitFor(() => controller.sendClock.mock.calls.length === 1);
+
+      expect(controller.sendClock).toHaveBeenCalledWith(expect.objectContaining({
+        positionSeconds: 9.9,
+        positionDiscontinuityVersion: 1,
+      }));
+    } finally {
+      mounted.unmount();
+    }
+  });
 });
 
 function mountBridge(controller: FakeDesktopLyricsController, playbackSession: FakePlaybackSession) {

@@ -50,6 +50,174 @@ describe("smooth lyrics playback position", () => {
     wrapper.unmount();
   });
 
+  it("corrects ordinary clock error over 120ms with the Android easing", async () => {
+    const nativePosition = ref(0);
+    const playing = ref(true);
+    let displayedPosition!: { value: number };
+    const wrapper = mount({
+      setup() {
+        displayedPosition = useSmoothLyricsPlaybackPosition({
+          currentTime: () => nativePosition.value,
+          isPlaying: () => playing.value,
+          renderPlan: () => ({ requiresAnimationFrame: true, nextChangeAtSeconds: null }),
+        });
+        return () => null;
+      },
+    });
+
+    await nextTick();
+    animationFrames.shift()?.(0);
+    vi.setSystemTime(40);
+    animationFrames.shift()?.(40);
+    expect(displayedPosition.value).toBeCloseTo(0.04, 3);
+
+    nativePosition.value = 0.2;
+    await nextTick();
+    expect(displayedPosition.value).toBeCloseTo(0.04, 3);
+
+    vi.setSystemTime(100);
+    animationFrames.shift()?.(100);
+    expect(displayedPosition.value).toBeGreaterThan(0.04);
+    expect(displayedPosition.value).toBeLessThan(0.26);
+
+    vi.setSystemTime(160);
+    animationFrames.shift()?.(160);
+    expect(displayedPosition.value).toBeCloseTo(0.32, 3);
+    wrapper.unmount();
+  });
+
+  it("snaps errors above 250ms, playback-state changes, and paused position updates", async () => {
+    const nativePosition = ref(0);
+    const playing = ref(true);
+    let displayedPosition!: { value: number };
+    const wrapper = mount({
+      setup() {
+        displayedPosition = useSmoothLyricsPlaybackPosition({
+          currentTime: () => nativePosition.value,
+          isPlaying: () => playing.value,
+        });
+        return () => null;
+      },
+    });
+
+    await nextTick();
+    vi.setSystemTime(50);
+    animationFrames.shift()?.(50);
+    nativePosition.value = 0.302;
+    await nextTick();
+    expect(displayedPosition.value).toBeCloseTo(0.302, 6);
+
+    nativePosition.value = 0.29;
+    playing.value = false;
+    await nextTick();
+    expect(displayedPosition.value).toBeCloseTo(0.29, 6);
+
+    nativePosition.value = 0.4;
+    await nextTick();
+    expect(displayedPosition.value).toBeCloseTo(0.4, 6);
+    wrapper.unmount();
+  });
+
+  it("never moves backwards while correcting a routine delayed sample", async () => {
+    const nativePosition = ref(0);
+    const playing = ref(true);
+    let displayedPosition!: { value: number };
+    const wrapper = mount({
+      setup() {
+        displayedPosition = useSmoothLyricsPlaybackPosition({
+          currentTime: () => nativePosition.value,
+          isPlaying: () => playing.value,
+          renderPlan: () => ({ requiresAnimationFrame: true, nextChangeAtSeconds: null }),
+        });
+        return () => null;
+      },
+    });
+
+    await nextTick();
+    vi.setSystemTime(100);
+    animationFrames.shift()?.(100);
+    expect(displayedPosition.value).toBeCloseTo(0.1, 3);
+
+    nativePosition.value = 0.01;
+    await nextTick();
+    vi.setSystemTime(160);
+    animationFrames.shift()?.(160);
+    expect(displayedPosition.value).toBeCloseTo(0.1, 6);
+
+    vi.setSystemTime(220);
+    animationFrames.shift()?.(220);
+    expect(displayedPosition.value).toBeCloseTo(0.13, 3);
+    wrapper.unmount();
+  });
+
+  it("snaps a small backwards change when the playback discontinuity changes", async () => {
+    const nativePosition = ref(1);
+    const discontinuity = ref(0);
+    let displayedPosition!: { value: number };
+    const wrapper = mount({
+      setup() {
+        displayedPosition = useSmoothLyricsPlaybackPosition({
+          currentTime: () => nativePosition.value,
+          isPlaying: () => true,
+          discontinuityToken: () => discontinuity.value,
+        });
+        return () => null;
+      },
+    });
+
+    await nextTick();
+    vi.setSystemTime(100);
+    animationFrames.shift()?.(100);
+    expect(displayedPosition.value).toBeCloseTo(1.1, 3);
+
+    nativePosition.value = 1.05;
+    discontinuity.value += 1;
+    await nextTick();
+    expect(displayedPosition.value).toBeCloseTo(1.05, 6);
+    wrapper.unmount();
+  });
+
+  it("returns line-timed lyrics to sleep after a clock correction settles", async () => {
+    const wakeTimers: Array<{ callback: () => void; delay: number }> = [];
+    const clearTimeout = vi.fn();
+    vi.stubGlobal("setTimeout", (callback: () => void, delay?: number) => {
+      wakeTimers.push({ callback, delay: delay ?? 0 });
+      return wakeTimers.length;
+    });
+    vi.stubGlobal("clearTimeout", clearTimeout);
+
+    const nativePosition = ref(0);
+    const playing = ref(true);
+    const wrapper = mount({
+      setup() {
+        useSmoothLyricsPlaybackPosition({
+          currentTime: () => nativePosition.value,
+          isPlaying: () => playing.value,
+          renderPlan: () => ({ requiresAnimationFrame: false, nextChangeAtSeconds: 10 }),
+        });
+        return () => null;
+      },
+    });
+
+    await nextTick();
+    animationFrames.shift()?.(0);
+    expect(wakeTimers).toHaveLength(1);
+
+    nativePosition.value = 0.1;
+    await nextTick();
+    expect(clearTimeout).toHaveBeenCalledWith(1);
+    expect(animationFrames).toHaveLength(1);
+
+    vi.setSystemTime(60);
+    animationFrames.shift()?.(60);
+    expect(animationFrames).toHaveLength(1);
+    vi.setSystemTime(120);
+    animationFrames.shift()?.(120);
+    expect(animationFrames).toHaveLength(0);
+    expect(wakeTimers).toHaveLength(2);
+    wrapper.unmount();
+  });
+
   it("does not keep an animation loop alive while the lyrics view is hidden", async () => {
     const nativePosition = ref(0);
     const playing = ref(true);
@@ -210,7 +378,7 @@ describe("smooth lyrics playback position", () => {
     expect(wakeTimers).toHaveLength(1);
     expect(wakeTimers[0]?.delay).toBeGreaterThan(9_000);
 
-    nativePosition.value = 0.01;
+    nativePosition.value = 0.0004;
     await nextTick();
     expect(clearTimeout).not.toHaveBeenCalled();
     expect(animationFrames).toHaveLength(0);

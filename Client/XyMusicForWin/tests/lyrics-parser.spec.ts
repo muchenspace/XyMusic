@@ -48,17 +48,14 @@ describe("lyrics parser", () => {
 		expect(result?.lines[0]?.words).toBeUndefined();
 	});
 
-	it("treats a BOM-prefixed enhanced line as server-declared LINE", () => {
-		const result = buildLyrics("track-1", [{
+	it("normalizes a leading BOM before enforcing declared timing", () => {
+		expect(() => buildLyrics("track-1", [{
 			language: "zh",
 			format: "LRC",
 			timing: "LINE",
 			content: "\uFEFF[00:01]<00:01>word",
 			isDefault: true,
-		}]);
-
-		expect(result?.lines).toEqual([{ time: 1, text: "word" }]);
-		expect(result?.lines[0]?.words).toBeUndefined();
+		}])).toThrow();
 	});
 
 	it("treats an NBSP-prefixed enhanced line as server-declared LINE", () => {
@@ -379,7 +376,7 @@ describe("lyrics parser", () => {
 		expect(result?.lines).toEqual([{
 			time: 1,
 			text: "Word",
-			words: [{ time: 1, text: "Word" }],
+			words: [{ time: 1, endTime: 1.36, text: "Word" }],
 		}]);
 	});
 
@@ -415,6 +412,126 @@ describe("lyrics parser", () => {
 		}]);
 
 		expect(result?.lines.map((line) => line.words?.[0]?.time)).toEqual([11, 10]);
+	});
+
+	it("normalizes BOM and mixed line endings without joining lines", () => {
+		const result = buildLyrics("track-1", [{
+			language: "zh",
+			format: "LRC",
+			timing: "LINE",
+			content: "\uFEFF[00:01]first\r[00:02]second\r\n[00:03]third\n[00:04]fourth",
+			isDefault: true,
+		}]);
+
+		expect(result?.lines.map((line) => line.text)).toEqual(["first", "second", "third", "fourth"]);
+	});
+
+	it("applies offset to lines and words and clamps negative results", () => {
+		const result = buildLyrics("track-1", [{
+			language: "zh",
+			format: "LRC",
+			timing: "WORD",
+			content: "[offset:-1500]\n[00:01]<00:01>A<00:02>B<00:03>",
+			isDefault: true,
+		}]);
+
+		expect(result?.lines[0]).toEqual({
+			time: 0,
+			text: "AB",
+			words: [
+				{ time: 0, endTime: 0.5, text: "A" },
+				{ time: 0.5, endTime: 1.5, text: "B" },
+			],
+		});
+	});
+
+	it("rebases word intervals for every repeated line timestamp", () => {
+		const result = buildLyrics("track-1", [{
+			language: "zh",
+			format: "LRC",
+			timing: "WORD",
+			content: "[00:01][00:10]<00:01>A<00:02>B<00:03>",
+			isDefault: true,
+		}]);
+
+		expect(result?.lines.map((line) => line.words)).toEqual([
+			[
+				{ time: 1, endTime: 2, text: "A" },
+				{ time: 2, endTime: 3, text: "B" },
+			],
+			[
+				{ time: 10, endTime: 11, text: "A" },
+				{ time: 11, endTime: 12, text: "B" },
+			],
+		]);
+	});
+
+	it("infers final word ends and bounds them at the next line", () => {
+		const result = buildLyrics("track-1", [{
+			language: "zh",
+			format: "LRC",
+			timing: "WORD",
+			content: "[00:01]<00:01>final\n[00:01.20]<00:01.20>next",
+			isDefault: true,
+		}]);
+
+		expect(result?.lines[0]?.words?.[0]?.endTime).toBe(1.2);
+		expect(result?.lines[1]?.words?.[0]?.endTime).toBe(1.56);
+	});
+
+	it("keeps explicit final word ends authoritative past the next line", () => {
+		const result = buildLyrics("track-1", [{
+			language: "zh",
+			format: "LRC",
+			timing: "WORD",
+			content: "[00:01]<00:01>A<00:03>\n[00:02]<00:02>B",
+			isDefault: true,
+		}]);
+
+		expect(result?.lines[0]?.words?.[0]?.endTime).toBe(3);
+	});
+
+	it("parses offset from a shared metadata line and clamps duplicate boundaries", () => {
+		const sharedOffset = buildLyrics("track-1", [{
+			language: "zh", format: "LRC", timing: "WORD",
+			content: "[ar:Artist][OFFSET:+500]\n[00:01]<00:01>A", isDefault: true,
+		}]);
+		const duplicates = buildLyrics("track-2", [{
+			language: "zh", format: "LRC", timing: "WORD",
+			content: "[offset:-2000]\n[00:01][00:02]<00:01>A", isDefault: true,
+		}]);
+
+		expect(sharedOffset?.lines[0]).toEqual({
+			time: 1.5,
+			text: "A",
+			words: [{ time: 1.5, endTime: 1.74, text: "A" }],
+		});
+		expect(duplicates?.lines.map((line) => line.words?.[0]?.endTime)).toEqual([0, 0.24]);
+	});
+
+	it("saturates the minimum signed offset at zero", () => {
+		const result = buildLyrics("track-1", [{
+			language: "zh", format: "LRC", timing: "WORD",
+			content: "[offset:-9223372036854775808]\n[00:01]<00:01>A<00:02>", isDefault: true,
+		}]);
+
+		expect(result?.lines[0]).toEqual({
+			time: 0,
+			text: "A",
+			words: [{ time: 0, endTime: 0, text: "A" }],
+		});
+	});
+
+	it("only parses line timestamps at the prefix and strips following LRC tags", () => {
+		const result = buildLyrics("track-1", [{
+			language: "zh",
+			format: "LRC",
+			timing: "LINE",
+			content: "[00:10.50][Verse] Later\ntext [00:02]not a prefix",
+			isDefault: true,
+		}]);
+
+		expect(result?.lines).toEqual([{ time: 10.5, text: "Later" }]);
 	});
 });
 
