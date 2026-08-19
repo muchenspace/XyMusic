@@ -8,6 +8,137 @@ import type { DesktopLyricsClockPayload, DesktopLyricsStatePayload } from "../sr
 const TEST_TRANSPORT_EPOCH = "test-main-window";
 
 describe("desktop lyrics window UI", () => {
+  it("runs an adjacent line rotation on the shared frame clock and settles it", async () => {
+    const animationFrames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+
+    try {
+      let clockListener!: (clock: DesktopLyricsClockPayload) => void;
+      const bridge: DesktopLyricsBridge = {
+        async onState() { return () => undefined; },
+        async onClock(listener) { clockListener = listener; return () => undefined; },
+        async emitAction() {},
+      };
+      const wrapper = mount(DesktopLyricsApp, {
+        props: { bridge, initialState: desktopLyricsState({ positionSeconds: 0.5 }) },
+      });
+      await flushPromises();
+      expect(animationFrames).toHaveLength(0);
+
+      const transitionStartedAt = performance.now();
+      clockListener({
+        version: 4,
+        transportEpoch: TEST_TRANSPORT_EPOCH,
+        revision: 2,
+        trackId: "track-1",
+        isPlaying: false,
+        positionSeconds: 2.1,
+        anchoredAtMs: 200,
+      });
+      await nextTick();
+
+      expect(wrapper.get(".desktop-lyric-line-current").text()).toContain("second line");
+      expect(wrapper.get(".desktop-lyric-line-outgoing").text()).toContain("first line");
+      expect(animationFrames).toHaveLength(1);
+
+      animationFrames.shift()?.(transitionStartedAt + 600);
+      await nextTick();
+      expect(wrapper.find(".desktop-lyric-line-outgoing").exists()).toBe(false);
+      expect(wrapper.get(".desktop-lyric-line-current").attributes("style"))
+        .toContain("--desktop-lyric-line-emphasis: 1");
+      wrapper.unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("snaps a backwards line jump without leaving stale outgoing text", async () => {
+    const animationFrames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+
+    try {
+      let clockListener!: (clock: DesktopLyricsClockPayload) => void;
+      const bridge: DesktopLyricsBridge = {
+        async onState() { return () => undefined; },
+        async onClock(listener) { clockListener = listener; return () => undefined; },
+        async emitAction() {},
+      };
+      const wrapper = mount(DesktopLyricsApp, {
+        props: { bridge, initialState: desktopLyricsState({ positionSeconds: 4.5 }) },
+      });
+      await flushPromises();
+
+      clockListener({
+        version: 4,
+        transportEpoch: TEST_TRANSPORT_EPOCH,
+        revision: 2,
+        trackId: "track-1",
+        isPlaying: false,
+        positionSeconds: 0.5,
+        anchoredAtMs: 200,
+      });
+      await nextTick();
+
+      expect(wrapper.get(".desktop-lyric-line-current").text()).toContain("first line");
+      expect(wrapper.find(".desktop-lyric-line-outgoing").exists()).toBe(false);
+      expect(animationFrames).toHaveLength(0);
+      wrapper.unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("snaps a sub-250ms backwards seek when the discontinuity generation changes", async () => {
+    let clockListener!: (clock: DesktopLyricsClockPayload) => void;
+    const bridge: DesktopLyricsBridge = {
+      async onState() { return () => undefined; },
+      async onClock(listener) { clockListener = listener; return () => undefined; },
+      async emitAction() {},
+    };
+    const initialState = desktopLyricsState({
+      isPlaying: true,
+      positionSeconds: 1.05,
+      positionDiscontinuityVersion: 0,
+      lyrics: {
+        trackId: "track-1",
+        source: "lrc",
+        synchronized: true,
+        timing: "LINE",
+        lines: [
+          { time: 0, text: "before boundary" },
+          { time: 1, text: "after boundary" },
+        ],
+      },
+    });
+    const wrapper = mount(DesktopLyricsApp, { props: { bridge, initialState } });
+    await flushPromises();
+    expect(wrapper.get(".desktop-lyric-line-current").text()).toContain("after boundary");
+
+    clockListener({
+      version: 4,
+      transportEpoch: TEST_TRANSPORT_EPOCH,
+      revision: 2,
+      trackId: "track-1",
+      isPlaying: true,
+      positionSeconds: 0.95,
+      anchoredAtMs: 200,
+      positionDiscontinuityVersion: 1,
+    });
+    await nextTick();
+
+    expect(wrapper.get(".desktop-lyric-line-current").text()).toContain("before boundary");
+    expect(wrapper.find(".desktop-lyric-line-outgoing").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("does not keep a frame loop for ordinary line-timed lyrics", async () => {
     const animationFrames: FrameRequestCallback[] = [];
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {

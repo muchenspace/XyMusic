@@ -21,6 +21,7 @@ export const usePlayerStore = defineStore("player", () => {
   const lyricsOpen = ref(false);
   const queueVersion = toRef(playbackState, "queueVersion");
   const playbackIntentVersion = toRef(playbackState, "playbackIntentVersion");
+  const positionDiscontinuityVersion = toRef(playbackState, "positionDiscontinuityVersion");
   const currentIndex = toRef(playbackState, "currentIndex");
   const isPlaying = toRef(playbackState, "isPlaying");
   const loading = toRef(playbackState, "loading");
@@ -119,6 +120,7 @@ export const usePlayerStore = defineStore("player", () => {
     queue,
     queueVersion,
     playbackIntentVersion,
+    positionDiscontinuityVersion,
     currentIndex,
     currentTrack,
     isPlaying,

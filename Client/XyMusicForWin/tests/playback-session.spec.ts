@@ -402,6 +402,39 @@ describe("playback session", () => {
     harness.session.dispose();
   });
 
+  it("advances the position discontinuity only when a seek changes the millisecond position", async () => {
+    const harness = createHarness();
+    await harness.session.startQueue([track("one")], 0)?.playback;
+    const initialVersion = harness.session.state().positionDiscontinuityVersion;
+
+    harness.session.seekTo(0);
+    expect(harness.session.state().positionDiscontinuityVersion).toBe(initialVersion);
+
+    harness.session.seekTo(0.0004);
+    expect(harness.session.state().positionDiscontinuityVersion).toBe(initialVersion);
+
+    harness.session.seekTo(2.5);
+    expect(harness.session.state().positionDiscontinuityVersion).toBe(initialVersion + 1);
+    harness.session.dispose();
+  });
+
+  it("publishes a position discontinuity when stop resets a paused track", async () => {
+    const harness = createHarness();
+    await harness.session.startQueue([track("one")], 0)?.playback;
+    harness.audio.setPlaybackPosition(42);
+    await harness.session.toggle();
+    const pausedVersion = harness.session.state().positionDiscontinuityVersion;
+
+    harness.session.stopPlayback();
+
+    expect(harness.session.state()).toMatchObject({
+      currentTime: 0,
+      isPlaying: false,
+      positionDiscontinuityVersion: pausedVersion + 1,
+    });
+    harness.session.dispose();
+  });
+
   it("ignores a mini-mode enable that resolves after reset", async () => {
     let resolveEnable!: () => void;
     const desktopWindow = {

@@ -1,10 +1,104 @@
 import { describe, expect, it } from "vitest";
 import type { Lyrics } from "../src/domain/music";
 import { shouldReanchorLyricPlaybackClock } from "../src/domain/lyricsTimeline";
-import { buildDesktopLyricsFrame, estimatePlaybackSeconds } from "../src/desktop-lyrics/timeline";
+import {
+  buildDesktopLyricsFrame,
+  createDesktopLyricsTransition,
+  desktopLyricsLineShiftPx,
+  desktopLyricsTransitionDurationMs,
+  desktopLyricsTransitionWeight,
+  estimatePlaybackSeconds,
+  fastOutSlowIn,
+  resolveDesktopLyricsTransitionMode,
+  retargetDesktopLyricsTransition,
+  sampleDesktopLyricsTransition,
+} from "../src/desktop-lyrics/timeline";
 import type { DesktopLyricsClockPayload } from "../src/desktop-lyrics/protocol";
 
 describe("desktop lyrics timeline", () => {
+  it("uses Android-aligned snap and dense playback transition rules", () => {
+    expect(resolveDesktopLyricsTransitionMode(null, 1, null, 1)).toBe("SNAP");
+    expect(resolveDesktopLyricsTransitionMode(4, 3, 4, 3)).toBe("SNAP");
+    expect(resolveDesktopLyricsTransitionMode(1, 4, 1, 3)).toBe("SNAP");
+    expect(resolveDesktopLyricsTransitionMode(1, 2, 1, 2)).toBe("ANIMATE");
+    expect(resolveDesktopLyricsTransitionMode(1, 4, 1, 1.45)).toBe("ANIMATE");
+  });
+
+  it("bounds line transition duration between 300 and 520 milliseconds", () => {
+    expect(desktopLyricsTransitionDurationMs(0)).toBe(300);
+    expect(desktopLyricsTransitionDurationMs(1)).toBe(302);
+    expect(desktopLyricsTransitionDurationMs(2)).toBe(520);
+    expect(desktopLyricsTransitionDurationMs(0, 74)).toBe(400);
+  });
+
+  it("samples source and target emphasis from one smooth frame clock", () => {
+    const transition = createDesktopLyricsTransition(2, 3, 1_000, 400);
+
+    const quarter = sampleDesktopLyricsTransition(transition, 1_100);
+    const expectedProgress = fastOutSlowIn(0.25);
+    expect(quarter.progress).toBeCloseTo(expectedProgress, 8);
+    expect(desktopLyricsTransitionWeight(quarter, 2)).toBeCloseTo(1 - expectedProgress, 8);
+    expect(desktopLyricsTransitionWeight(quarter, 3)).toBeCloseTo(expectedProgress, 8);
+
+    const complete = sampleDesktopLyricsTransition(transition, 1_400);
+    expect(complete.done).toBe(true);
+    expect(complete.weights).toEqual([{ index: 3, value: 1 }]);
+  });
+
+  it("preserves visible weights when a dense transition is interrupted", () => {
+    const first = createDesktopLyricsTransition(1, 2, 0, 400);
+    const beforeRetarget = sampleDesktopLyricsTransition(first, 200);
+    const interrupted = retargetDesktopLyricsTransition(first, 3, 200, 400);
+    const atRetarget = sampleDesktopLyricsTransition(interrupted, 200);
+
+    expect(interrupted.sourceIndex).toBe(2);
+    expect(interrupted.initialVelocityPerMs).toBeCloseTo(beforeRetarget.velocityPerMs, 10);
+    expect(interrupted.startLinePosition).toBeCloseTo(beforeRetarget.linePosition, 10);
+    expect(atRetarget.linePosition).toBeCloseTo(beforeRetarget.linePosition, 10);
+    expect(desktopLyricsLineShiftPx(2, atRetarget.linePosition))
+      .toBeCloseTo(desktopLyricsLineShiftPx(2, beforeRetarget.linePosition), 10);
+    expect(atRetarget.velocityPerMs).toBeCloseTo(beforeRetarget.velocityPerMs, 10);
+    expect(desktopLyricsTransitionWeight(atRetarget, 1))
+      .toBeCloseTo(desktopLyricsTransitionWeight(beforeRetarget, 1), 8);
+    expect(desktopLyricsTransitionWeight(atRetarget, 2))
+      .toBeCloseTo(desktopLyricsTransitionWeight(beforeRetarget, 2), 8);
+    expect(desktopLyricsTransitionWeight(atRetarget, 3)).toBe(0);
+
+    const halfway = sampleDesktopLyricsTransition(interrupted, 400);
+    const remaining = 1 - halfway.progress;
+    expect(desktopLyricsTransitionWeight(halfway, 1))
+      .toBeCloseTo(desktopLyricsTransitionWeight(beforeRetarget, 1) * remaining, 8);
+    expect(desktopLyricsTransitionWeight(halfway, 2))
+      .toBeCloseTo(desktopLyricsTransitionWeight(beforeRetarget, 2) * remaining, 8);
+    expect(desktopLyricsTransitionWeight(halfway, 3)).toBeCloseTo(halfway.progress, 8);
+
+    const afterTweenDuration = sampleDesktopLyricsTransition(interrupted, 600);
+    expect(afterTweenDuration.done).toBe(false);
+    const settled = sampleDesktopLyricsTransition(interrupted, 1_200);
+    expect(settled.done).toBe(true);
+    expect(settled.velocityPerMs).toBe(0);
+    expect(settled.weights).toEqual([{ index: 3, value: 1 }]);
+  });
+
+  it("keeps dense multi-line distance and retarget position on one spatial clock", () => {
+    const dense = createDesktopLyricsTransition(1, 4, 0);
+    expect(dense.durationMs).toBe(520);
+    const beforeRetarget = sampleDesktopLyricsTransition(dense, 260);
+    expect(beforeRetarget.linePosition).toBeCloseTo(
+      1 + (4 - 1) * beforeRetarget.progress,
+      10,
+    );
+
+    const retargeted = retargetDesktopLyricsTransition(dense, 5, 260);
+    const atRetarget = sampleDesktopLyricsTransition(retargeted, 260);
+    expect(atRetarget.linePosition).toBeCloseTo(beforeRetarget.linePosition, 10);
+    expect(desktopLyricsLineShiftPx(4, atRetarget.linePosition))
+      .toBeCloseTo(desktopLyricsLineShiftPx(4, beforeRetarget.linePosition), 10);
+    expect(retargeted.durationMs).toBe(
+      desktopLyricsTransitionDurationMs(5 - beforeRetarget.linePosition),
+    );
+  });
+
   it("does not reanchor on a normal coarse sample but does reanchor a pause or jump", () => {
     const current = clock({ isPlaying: true, positionSeconds: 0, anchoredAtMs: 0 });
 

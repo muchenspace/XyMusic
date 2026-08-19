@@ -8,6 +8,8 @@ export interface PlaybackSessionState {
   readonly queue: PlaybackQueue;
   readonly queueVersion: number;
   readonly playbackIntentVersion: number;
+  /** Changes on explicit seeks and playback-item discontinuities. */
+  readonly positionDiscontinuityVersion: number;
   readonly currentIndex: number;
   readonly isPlaying: boolean;
   readonly loading: boolean;

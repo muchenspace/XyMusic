@@ -1,7 +1,9 @@
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
+  LYRIC_PLAYBACK_POSITION_CORRECTION_EPSILON_SECONDS,
+  LYRIC_PLAYBACK_POSITION_CORRECTION_MS,
+  LYRIC_PLAYBACK_POSITION_SNAP_THRESHOLD_SECONDS,
   interpolateLyricPlaybackSeconds,
-  shouldReanchorLyricPlaybackClock,
   type LyricPlaybackClock,
   type LyricPlaybackRenderPlan,
 } from "../../domain/lyricsTimeline";
@@ -10,11 +12,17 @@ interface PlaybackSource {
   currentTime: () => number;
   isPlaying: () => boolean;
   isActive?: () => boolean;
+  discontinuityToken?: () => unknown;
   renderPlan?: (positionSeconds: number) => LyricPlaybackRenderPlan;
   renderPlanDependencies?: () => readonly unknown[];
 }
 
-type ReanchorSources = readonly [number, boolean, readonly unknown[]] | false;
+type ReanchorSources = readonly [number, boolean, readonly unknown[], unknown] | false;
+
+interface PlaybackPositionCorrection {
+  offsetSeconds: number;
+  startedAtMs: number;
+}
 
 export function useSmoothLyricsPlaybackPosition(source: PlaybackSource) {
   const isActive = source.isActive ?? (() => true);
@@ -26,16 +34,17 @@ export function useSmoothLyricsPlaybackPosition(source: PlaybackSource) {
   let scheduleGeneration = 0;
   let disposed = false;
   let lastUpdateAt = 0;
+  let correction: PlaybackPositionCorrection | null = null;
 
   const update = (frameTimestamp?: number) => {
     if (!canUpdate()) return;
     const nowMs = now(frameTimestamp);
-    const positionSeconds = interpolateLyricPlaybackSeconds(clock, nowMs);
+    const positionSeconds = renderedPositionAt(nowMs);
     const plan = source.renderPlan?.(positionSeconds);
 
     if (plan) {
       displayedPosition.value = positionSeconds;
-      if (plan.requiresAnimationFrame) {
+      if (plan.requiresAnimationFrame || correction !== null) {
         scheduleFrame();
       } else {
         scheduleWake(plan.nextChangeAtSeconds, positionSeconds);
@@ -75,21 +84,34 @@ export function useSmoothLyricsPlaybackPosition(source: PlaybackSource) {
     scheduleFrame();
   };
 
-  const reanchor = (renderPlanDependenciesChanged = false) => {
+  const reanchor = (renderPlanDependenciesChanged = false, forceSnap = false) => {
     if (!isActive()) {
       stop();
       return;
     }
     const nowMs = now();
     const nextClock = createClock(source, nowMs);
-    const isDiscontinuous = shouldReanchorLyricPlaybackClock(clock, nextClock, nowMs);
-    if (isDiscontinuous) {
+    const currentPosition = renderedPositionAt(nowMs);
+    const positionError = nextClock.positionSeconds - currentPosition;
+    const shouldSnap = forceSnap
+      || !nextClock.isPlaying
+      || clock.isPlaying !== nextClock.isPlaying
+      || Math.abs(positionError) > LYRIC_PLAYBACK_POSITION_SNAP_THRESHOLD_SECONDS;
+    if (shouldSnap) {
       stop();
       clock = nextClock;
+      correction = null;
       displayedPosition.value = nextClock.positionSeconds;
-    } else if (renderPlanDependenciesChanged) {
+    } else {
+      clock = nextClock;
+      const correctionOffset = currentPosition - nextClock.positionSeconds;
+      correction = Math.abs(correctionOffset) > LYRIC_PLAYBACK_POSITION_CORRECTION_EPSILON_SECONDS
+        ? { offsetSeconds: correctionOffset, startedAtMs: nowMs }
+        : null;
+    }
+    if (!shouldSnap && (renderPlanDependenciesChanged || (correction !== null && wakeTimer !== null))) {
       // A line-timed plan can be asleep until its next visual boundary. Re-run
-      // it immediately when inputs such as the lyric offset change.
+      // it immediately when inputs such as the lyric offset or clock correction change.
       stop();
     }
     if (clock.isPlaying) start();
@@ -104,6 +126,7 @@ export function useSmoothLyricsPlaybackPosition(source: PlaybackSource) {
       source.currentTime(),
       source.isPlaying(),
       source.renderPlanDependencies?.() ?? EMPTY_RENDER_PLAN_DEPENDENCIES,
+      source.discontinuityToken?.(),
     ];
   };
   watch(reanchorSources, (nextSources, previousSources) => {
@@ -111,7 +134,10 @@ export function useSmoothLyricsPlaybackPosition(source: PlaybackSource) {
       && previousSources !== false
       && previousSources !== undefined
       && !areRenderPlanDependenciesEqual(nextSources[2], previousSources[2]);
-    reanchor(renderPlanDependenciesChanged);
+    const discontinuityChanged = nextSources !== false
+      && previousSources !== undefined
+      && (previousSources === false || !Object.is(nextSources[3], previousSources[3]));
+    reanchor(renderPlanDependenciesChanged, discontinuityChanged);
   }, { immediate: true });
 
   const handleVisibilityChange = () => {
@@ -137,6 +163,19 @@ export function useSmoothLyricsPlaybackPosition(source: PlaybackSource) {
       && isActive()
       && clock.isPlaying
       && (typeof document === "undefined" || document.visibilityState !== "hidden");
+  }
+
+  function renderedPositionAt(nowMs: number): number {
+    const basePosition = interpolateLyricPlaybackSeconds(clock, nowMs);
+    const activeCorrection = correction;
+    if (!activeCorrection) return Math.max(displayedPosition.value, basePosition);
+    const progress = Math.max(
+      0,
+      Math.min(1, (nowMs - activeCorrection.startedAtMs) / LYRIC_PLAYBACK_POSITION_CORRECTION_MS),
+    );
+    const remainingOffset = activeCorrection.offsetSeconds * (1 - fastOutSlowIn(progress));
+    if (progress >= 1) correction = null;
+    return Math.max(displayedPosition.value, basePosition + remainingOffset);
   }
 
   function scheduleWake(nextChangeAtSeconds: number | null, positionSeconds: number): void {
@@ -183,6 +222,26 @@ function areRenderPlanDependenciesEqual(
 ): boolean {
   return current.length === previous.length
     && current.every((dependency, index) => Object.is(dependency, previous[index]));
+}
+
+/** Material/Compose FastOutSlowInEasing: cubic-bezier(0.4, 0, 0.2, 1). */
+function fastOutSlowIn(value: number): number {
+  const input = Math.max(0, Math.min(1, value));
+  let lower = 0;
+  let upper = 1;
+  for (let iteration = 0; iteration < 16; iteration += 1) {
+    const candidate = (lower + upper) / 2;
+    if (cubicBezierCoordinate(candidate, 0.4, 0.2) < input) lower = candidate;
+    else upper = candidate;
+  }
+  return cubicBezierCoordinate((lower + upper) / 2, 0, 1);
+}
+
+function cubicBezierCoordinate(time: number, firstControl: number, secondControl: number): number {
+  const inverse = 1 - time;
+  return 3 * inverse * inverse * time * firstControl
+    + 3 * inverse * time * time * secondControl
+    + time * time * time;
 }
 
 function monotonicNow(): number {
