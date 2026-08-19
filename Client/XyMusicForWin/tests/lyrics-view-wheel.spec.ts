@@ -423,7 +423,248 @@ describe("playback lyrics wheel controls", () => {
     }
   });
 
-  it("holds later lyric commits until the seek baseline is stable for two frames", async () => {
+  it("settles an interrupted transition when a lyric seek acknowledgement times out", async () => {
+    vi.useFakeTimers();
+    const animationFrames = new Map<number, FrameRequestCallback>();
+    let nextFrameHandle = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      nextFrameHandle += 1;
+      animationFrames.set(nextFrameHandle, callback);
+      return nextFrameHandle;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (handle: number) => {
+      animationFrames.delete(handle);
+    });
+    const mounted = await mountLyricsView({
+      timing: "LINE",
+      lines: [
+        { time: 0, text: "timeout source" },
+        { time: 0.1, text: "timeout current" },
+        { time: 0.2, text: "timeout target" },
+      ],
+    });
+    const seekTo = vi.spyOn(mounted.playbackSession, "seekTo").mockImplementation(() => undefined);
+    const runNextFrame = (timestamp: number): boolean => {
+      const next = animationFrames.entries().next().value as [number, FrameRequestCallback] | undefined;
+      if (!next) return false;
+      animationFrames.delete(next[0]);
+      next[1](timestamp);
+      return true;
+    };
+    try {
+      const scroll = installScrollMetrics(mounted.wrapper);
+      mounted.playbackSession.update({ currentTime: 0.1 });
+      await nextTick();
+      await nextTick();
+      expect(runNextFrame(16)).toBe(true);
+      const interruptedTop = scroll.scrollTop;
+      expect(interruptedTop).toBeGreaterThan(0);
+      expect(interruptedTop).toBeLessThan(70);
+
+      await mounted.wrapper.findAll(".lyric-line")[2]!.trigger("click");
+      expect(animationFrames.size).toBe(0);
+      vi.advanceTimersByTime(1_500);
+      await nextTick();
+      await nextTick();
+      expect(animationFrames.size).toBe(1);
+
+      for (let frame = 0; frame < 100 && animationFrames.size; frame += 1) {
+        runNextFrame(32 + frame * 16);
+      }
+      const lines = mounted.wrapper.findAll(".lyric-line");
+      expect(scroll.scrollTop).toBeCloseTo(70, 1);
+      expect(Number((lines[0]!.element as HTMLElement).style.getPropertyValue("--lyric-line-emphasis"))).toBe(0);
+      expect(Number((lines[1]!.element as HTMLElement).style.getPropertyValue("--lyric-line-emphasis"))).toBe(1);
+    } finally {
+      seekTo.mockRestore();
+      mounted.wrapper.unmount();
+    }
+  });
+
+  it("animates a lyric seek while the restored track is still paused", async () => {
+    const animationFrames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const mounted = await mountLyricsView({
+      timing: "LINE",
+      lines: [
+        { time: 0, text: "paused source" },
+        { time: 1, text: "paused second" },
+        { time: 2, text: "paused third" },
+        { time: 3, text: "paused target" },
+      ],
+    });
+    try {
+      const scroll = installScrollMetrics(mounted.wrapper);
+      expect(mounted.player.isPlaying).toBe(false);
+
+      await mounted.wrapper.findAll(".lyric-line")[3]!.trigger("click");
+      await nextTick();
+      await nextTick();
+
+      expect(mounted.playbackSession.state().currentTime).toBe(3);
+      expect(mounted.playbackSession.state().isPlaying).toBe(false);
+      expect(mounted.wrapper.findAll(".lyric-line")[3]?.classes()).toContain("active");
+      expect(scroll.scrollTop).toBe(0);
+
+      animationFrames.shift()?.(16);
+      animationFrames.shift()?.(32);
+      animationFrames.shift()?.(48);
+      expect(scroll.scrollTop).toBe(0);
+
+      animationFrames.shift()?.(64);
+      const animatingLines = mounted.wrapper.findAll(".lyric-line");
+      const sourceEmphasis = Number((animatingLines[0]!.element as HTMLElement).style.getPropertyValue("--lyric-line-emphasis"));
+      const targetEmphasis = Number((animatingLines[3]!.element as HTMLElement).style.getPropertyValue("--lyric-line-emphasis"));
+      expect(scroll.scrollTop).toBeGreaterThan(0);
+      expect(scroll.scrollTop).toBeLessThan(230);
+      expect(sourceEmphasis).toBeGreaterThan(0);
+      expect(sourceEmphasis).toBeLessThan(1);
+      expect(targetEmphasis).toBeGreaterThan(0);
+      expect(targetEmphasis).toBeLessThan(1);
+
+      for (let frame = 0; frame < 80 && animationFrames.length; frame += 1) {
+        animationFrames.shift()?.(80 + frame * 16);
+      }
+      expect(scroll.scrollTop).toBeCloseTo(230, 1);
+      expect(Number((animatingLines[3]!.element as HTMLElement).style.getPropertyValue("--lyric-line-emphasis"))).toBe(1);
+      expect(mounted.playbackSession.state().isPlaying).toBe(false);
+    } finally {
+      mounted.wrapper.unmount();
+    }
+  });
+
+  it("retargets an in-flight paused lyric seek from its visible frame", async () => {
+    const animationFrames = new Map<number, FrameRequestCallback>();
+    let nextFrameHandle = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      nextFrameHandle += 1;
+      animationFrames.set(nextFrameHandle, callback);
+      return nextFrameHandle;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (handle: number) => {
+      animationFrames.delete(handle);
+    });
+    const runNextFrame = (timestamp: number): boolean => {
+      const next = animationFrames.entries().next().value as [number, FrameRequestCallback] | undefined;
+      if (!next) return false;
+      animationFrames.delete(next[0]);
+      next[1](timestamp);
+      return true;
+    };
+    const mounted = await mountLyricsView({
+      timing: "LINE",
+      lines: [
+        { time: 0, text: "retarget source" },
+        { time: 1, text: "retarget first" },
+        { time: 2, text: "retarget second" },
+        { time: 3, text: "retarget final" },
+      ],
+    });
+    try {
+      const scroll = installScrollMetrics(mounted.wrapper);
+      await mounted.wrapper.findAll(".lyric-line")[2]!.trigger("click");
+      await nextTick();
+      await nextTick();
+
+      expect(runNextFrame(16)).toBe(true);
+      expect(runNextFrame(32)).toBe(true);
+      expect(runNextFrame(48)).toBe(true);
+      expect(runNextFrame(64)).toBe(true);
+      const interruptedTop = scroll.scrollTop;
+      expect(interruptedTop).toBeGreaterThan(0);
+      expect(interruptedTop).toBeLessThan(150);
+
+      await mounted.wrapper.findAll(".lyric-line")[3]!.trigger("click");
+      await nextTick();
+      await nextTick();
+      expect(mounted.wrapper.findAll(".lyric-line")[3]?.classes()).toContain("active");
+
+      expect(runNextFrame(80)).toBe(true);
+      expect(runNextFrame(96)).toBe(true);
+      expect(runNextFrame(112)).toBe(true);
+      expect(runNextFrame(128)).toBe(true);
+      expect(scroll.scrollTop).toBeGreaterThan(interruptedTop);
+      expect(scroll.scrollTop).toBeLessThan(230);
+
+      for (let frame = 0; frame < 120 && animationFrames.size; frame += 1) {
+        runNextFrame(144 + frame * 16);
+      }
+      const lines = mounted.wrapper.findAll(".lyric-line");
+      expect(scroll.scrollTop).toBeCloseTo(230, 1);
+      expect(Number((lines[2]!.element as HTMLElement).style.getPropertyValue("--lyric-line-emphasis"))).toBe(0);
+      expect(Number((lines[3]!.element as HTMLElement).style.getPropertyValue("--lyric-line-emphasis"))).toBe(1);
+      expect(animationFrames.size).toBe(0);
+    } finally {
+      mounted.wrapper.unmount();
+    }
+  });
+
+  it("cancels a paused lyric seek cleanly when manual dragging starts", async () => {
+    const animationFrames = new Map<number, FrameRequestCallback>();
+    let nextFrameHandle = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      nextFrameHandle += 1;
+      animationFrames.set(nextFrameHandle, callback);
+      return nextFrameHandle;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (handle: number) => {
+      animationFrames.delete(handle);
+    });
+    const runNextFrame = (timestamp: number): boolean => {
+      const next = animationFrames.entries().next().value as [number, FrameRequestCallback] | undefined;
+      if (!next) return false;
+      animationFrames.delete(next[0]);
+      next[1](timestamp);
+      return true;
+    };
+    const mounted = await mountLyricsView({
+      timing: "LINE",
+      lines: [
+        { time: 0, text: "drag source" },
+        { time: 1, text: "drag second" },
+        { time: 2, text: "drag third" },
+        { time: 3, text: "drag target" },
+      ],
+    });
+    try {
+      const scroll = installScrollMetrics(mounted.wrapper);
+      await mounted.wrapper.findAll(".lyric-line")[3]!.trigger("click");
+      await nextTick();
+      await nextTick();
+      runNextFrame(16);
+      runNextFrame(32);
+      runNextFrame(48);
+      runNextFrame(64);
+      const interruptedTop = scroll.scrollTop;
+      const staleTransition = animationFrames.values().next().value as FrameRequestCallback | undefined;
+      expect(interruptedTop).toBeGreaterThan(0);
+      expect(staleTransition).toBeDefined();
+
+      scroll.dispatchEvent(pointerEvent("pointerdown", { pointerId: 18, clientY: 100 }));
+      window.dispatchEvent(pointerEvent("pointermove", { pointerId: 18, clientY: 80 }));
+
+      const lines = mounted.wrapper.findAll(".lyric-line");
+      expect(lines[3]?.classes()).toContain("active");
+      expect(Number((lines[0]!.element as HTMLElement).style.getPropertyValue("--lyric-line-emphasis"))).toBe(0);
+      expect(Number((lines[3]!.element as HTMLElement).style.getPropertyValue("--lyric-line-emphasis"))).toBe(1);
+      expect(animationFrames.size).toBe(1);
+
+      staleTransition?.(80);
+      expect(scroll.scrollTop).toBe(interruptedTop);
+      expect(runNextFrame(96)).toBe(true);
+      expect(scroll.scrollTop).toBeCloseTo(interruptedTop + 20, 5);
+      expect(animationFrames.size).toBe(0);
+      window.dispatchEvent(pointerEvent("pointerup", { pointerId: 18, clientY: 80 }));
+    } finally {
+      mounted.wrapper.unmount();
+    }
+  });
+
+  it("holds later lyric commits through the seek animation after two stable frames", async () => {
     const animationFrames: FrameRequestCallback[] = [];
     let nextFrameHandle = 0;
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -442,7 +683,7 @@ describe("playback lyrics wheel controls", () => {
     });
     const seekTo = vi.spyOn(mounted.playbackSession, "seekTo").mockImplementation(() => undefined);
     try {
-      installScrollMetrics(mounted.wrapper);
+      const scroll = installScrollMetrics(mounted.wrapper);
       await mounted.wrapper.findAll(".lyric-line")[1]!.trigger("click");
       mounted.playbackSession.update({ currentTime: 1.01 });
       await nextTick();
@@ -461,6 +702,19 @@ describe("playback lyrics wheel controls", () => {
       expect(mounted.wrapper.findAll(".lyric-line")[1]?.classes()).toContain("active");
 
       animationFrames.shift()?.(48);
+      expect(mounted.wrapper.findAll(".lyric-line")[1]?.classes()).toContain("active");
+      expect(mounted.wrapper.findAll(".lyric-line")[2]?.classes()).not.toContain("active");
+
+      animationFrames.shift()?.(64);
+      expect(scroll.scrollTop).toBeGreaterThan(0);
+      expect(scroll.scrollTop).toBeLessThan(70);
+      for (let frame = 0; frame < 80; frame += 1) {
+        const callback = animationFrames.shift();
+        if (!callback) break;
+        callback(80 + frame * 16);
+        await nextTick();
+        if (mounted.wrapper.findAll(".lyric-line")[2]?.classes().includes("active")) break;
+      }
       await nextTick();
       await nextTick();
       expect(mounted.wrapper.findAll(".lyric-line")[2]?.classes()).toContain("active");
@@ -471,7 +725,7 @@ describe("playback lyrics wheel controls", () => {
     }
   });
 
-  it("releases an unstable seek baseline on frame eight", async () => {
+  it("starts the seek animation after an unstable baseline reaches frame eight", async () => {
     const animationFrames: Array<{ handle: number; callback: FrameRequestCallback }> = [];
     const cancelAnimationFrame = vi.fn();
     let nextFrameHandle = 0;
@@ -511,6 +765,19 @@ describe("playback lyrics wheel controls", () => {
 
       layoutShift = 16;
       animationFrames.shift()?.callback(128);
+      expect(mounted.wrapper.findAll(".lyric-line")[1]?.classes()).toContain("active");
+      expect(mounted.wrapper.findAll(".lyric-line")[2]?.classes()).not.toContain("active");
+
+      const beforeAnimation = scroll.scrollTop;
+      animationFrames.shift()?.callback(144);
+      expect(scroll.scrollTop).toBeGreaterThan(beforeAnimation);
+      for (let frame = 0; frame < 80; frame += 1) {
+        const pendingFrame = animationFrames.shift();
+        if (!pendingFrame) break;
+        pendingFrame.callback(160 + frame * 16);
+        await nextTick();
+        if (mounted.wrapper.findAll(".lyric-line")[2]?.classes().includes("active")) break;
+      }
       await nextTick();
       await nextTick();
       expect(mounted.wrapper.findAll(".lyric-line")[2]?.classes()).toContain("active");

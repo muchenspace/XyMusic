@@ -369,10 +369,15 @@ export class PlaybackSession implements PlaybackSessionPort {
       this.clearPrefetch();
     }
     const normalized = Math.max(0, Math.min(this.stateValue.duration, seconds));
-    const positionChanged = playbackPositionMilliseconds(this.audio.snapshot().currentTime)
+    const seekingPendingResume = this.pendingResumeTrackId === this.currentTrack.id;
+    const previousPosition = seekingPendingResume
+      ? this.stateValue.currentTime
+      : this.audio.snapshot().currentTime;
+    const positionChanged = playbackPositionMilliseconds(previousPosition)
       !== playbackPositionMilliseconds(normalized);
     this.suppressBufferingUntil = Date.now() + BUFFERING_AFTER_SEEK_SUPPRESSION_MS;
-    this.audio.seek(normalized);
+    if (seekingPendingResume) this.pendingResumePosition = normalized;
+    else this.audio.seek(normalized);
     this.lastCheckpoint = normalized;
     this.lastNativePosition = normalized;
     this.lastNativeStatus = this.stateValue.isPlaying ? "playing" : "paused";
@@ -429,7 +434,12 @@ export class PlaybackSession implements PlaybackSessionPort {
 
   stopPlayback(terminalEvent: PlaybackTerminalEvent | null = "PAUSED"): void {
     if (this.disposed) return;
-    const positionChanged = playbackPositionMilliseconds(this.audio.snapshot().currentTime) !== 0;
+    const currentTrack = this.currentTrack;
+    const stoppingPendingResume = currentTrack?.id === this.pendingResumeTrackId;
+    const previousPosition = stoppingPendingResume
+      ? this.stateValue.currentTime
+      : this.audio.snapshot().currentTime;
+    const positionChanged = playbackPositionMilliseconds(previousPosition) !== 0;
     this.resumeWhenQueueExtends = false;
     this.finishPlaybackSession(this.capturePlaybackSession(), terminalEvent);
     this.automaticQuality.finishTrack();
@@ -437,6 +447,8 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.loadController?.abort();
     this.loadController = null;
     this.clearPrefetch();
+    this.pendingResumeTrackId = "";
+    this.pendingResumePosition = 0;
     this.audio.stop();
     this.lastNativePosition = -1;
     this.lastNativeStatus = "stopped";
@@ -666,6 +678,10 @@ export class PlaybackSession implements PlaybackSessionPort {
   private handleAudioUpdate(snapshot: AudioSnapshot): void {
     if (this.disposed) return;
     const currentTrack = this.currentTrack;
+    // A restored track is represented by session state until its audio source is loaded. Late
+    // events from the empty or previously stopped element must not overwrite a lyric seek made
+    // during that window; playSelection applies pendingResumePosition after loading the source.
+    if (currentTrack?.id === this.pendingResumeTrackId) return;
     const duration = Number.isFinite(snapshot.duration) && snapshot.duration > 0
       ? snapshot.duration
       : this.stateValue.duration;
@@ -886,15 +902,19 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.automaticQuality.finishTrack();
     this.audio.stop();
     const selectedTrack = tracks[selectedIndex]!;
-    if (selectedTrack.id !== this.pendingResumeTrackId) this.pendingResumePosition = 0;
+    const resumingPendingTrack = selectedTrack.id === this.pendingResumeTrackId;
+    if (!resumingPendingTrack) this.pendingResumePosition = 0;
+    const initialPosition = resumingPendingTrack
+      ? clampPlaybackPosition(this.pendingResumePosition, selectedTrack.duration)
+      : 0;
     const queueVersion = replaceQueue ? this.advanceQueueRevision() : this.stateValue.queueVersion;
     this.updateState({
       ...(replaceQueue ? { queue: tracks, queueVersion } : {}),
       positionDiscontinuityVersion: this.nextPositionDiscontinuityVersion(),
       currentIndex: selectedIndex,
       isPlaying: false,
-      progress: 0,
-      currentTime: 0,
+      progress: selectedTrack.duration > 0 ? initialPosition / selectedTrack.duration * 100 : 0,
+      currentTime: initialPosition,
       duration: selectedTrack.duration,
     });
     const selectedSessionId = this.sessionIds.next();
@@ -904,8 +924,8 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.lastNativePosition = -1;
     this.desktopPlayback.setTrack(selectedTrack);
     this.lastNativeStatus = "paused";
-    this.lastNativePosition = 0;
-    this.desktopPlayback.setPlayback("paused", 0, selectedTrack.duration);
+    this.lastNativePosition = initialPosition;
+    this.desktopPlayback.setPlayback("paused", initialPosition, selectedTrack.duration);
     const requestedQuality = this.automaticQuality.selectTrackQuality(this.stateValue.quality);
     this.activeRequestQuality = requestedQuality;
     this.activeSelectedQuality = requestedQuality;
@@ -915,7 +935,7 @@ export class PlaybackSession implements PlaybackSessionPort {
       if (request !== this.loadRequest || controller.signal.aborted) return false;
       if (this.pendingResumePosition > 0 && selectedTrack.id === this.pendingResumeTrackId) {
         const playableDuration = this.audio.snapshot().duration || selectedTrack.duration;
-        const resumePosition = normalizeResumePosition(this.pendingResumePosition, playableDuration);
+        const resumePosition = clampPlaybackPosition(this.pendingResumePosition, playableDuration);
         if (resumePosition > 0) this.audio.seek(resumePosition);
         this.updateState({
           currentTime: resumePosition,
@@ -1328,6 +1348,12 @@ function validBitrate(value: number | undefined): number {
 
 function playbackPositionMilliseconds(seconds: number): number {
   return Math.round((Number.isFinite(seconds) ? Math.max(0, seconds) : 0) * 1_000);
+}
+
+function clampPlaybackPosition(position: number, duration: number): number {
+  const safePosition = Number.isFinite(position) ? Math.max(0, position) : 0;
+  const safeDuration = Number.isFinite(duration) ? Math.max(0, duration) : 0;
+  return safeDuration > 0 ? Math.min(safePosition, safeDuration) : safePosition;
 }
 
 const RETRY_DELAYS = [300, 900];

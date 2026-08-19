@@ -26,6 +26,7 @@ import {
   lyricLineTransitionEmphasis,
   lyricSeekBaselineIndex,
   lyricTransitionDurationMs,
+  lyricTransitionIsSettled,
   lyricTransitionMode,
   noBounceSpring,
   retargetLyricEmphasis,
@@ -81,9 +82,9 @@ let lyricFollowAnimationGeneration = 0;
 let lyricLayoutStabilizationFrame: number | null = null;
 let lyricLayoutStabilizationGeneration = 0;
 let lyricLayoutStabilization: LyricLayoutStabilization | null = null;
-let pendingSeekAutoFollowSnap = false;
 let pendingLyricSeek: PendingLyricSeek | null = null;
 let pendingLyricSeekTimer = 0;
+let explicitLyricSeek: ExplicitLyricSeek | null = null;
 let scrollPointerId: number | null = null;
 let scrollPointerStartY = 0;
 let scrollPointerStartTop = 0;
@@ -146,6 +147,12 @@ interface PendingLyricSeek {
   requestedAtMs: number;
 }
 
+interface ExplicitLyricSeek {
+  sourceIndex: number;
+  targetIndex: number;
+  phase: "stabilizing" | "animating" | "correcting";
+}
+
 const focusableSelector = [
   "button:not([disabled])",
   "input:not([disabled])",
@@ -175,14 +182,10 @@ function updateActivePosition(): void {
   const playbackTime = displayedPlaybackTime.value + lyricsStore.offset;
   const nextObservedLineIndex = resolveLyricPlaybackPosition(lyrics, playbackTime).lineIndex;
   observedLineIndex = nextObservedLineIndex;
-  if (lyricLayoutStabilization) return;
-  const hadPendingSeek = pendingLyricSeek !== null;
+  if (lyricLayoutStabilization || explicitLyricSeek) return;
   const visualIndex = visualIndexAfterPendingSeek(nextObservedLineIndex);
   if (visualIndex === null) return;
-  const activeIndexChanged = commitActiveLineIndex(visualIndex);
-  if (hadPendingSeek && !pendingLyricSeek && pendingSeekAutoFollowSnap && !activeIndexChanged) {
-    void scrollToActiveLine(visualIndex);
-  }
+  commitActiveLineIndex(visualIndex);
   if (visualIndex !== nextObservedLineIndex && !pendingLyricSeek && !lyricLayoutStabilization) {
     void nextTick(() => {
       if (!pendingLyricSeek && !lyricLayoutStabilization && observedLineIndex === nextObservedLineIndex) {
@@ -216,8 +219,13 @@ function visualIndexAfterPendingSeek(currentIndex: number): number | null {
   const baselineIndex = lyricSeekBaselineIndex(request.sourceIndex, request.targetIndex, currentIndex);
   if (baselineIndex !== null) {
     clearPendingLyricSeek();
-    if (!autoFollowPaused) prepareLyricLayoutStabilization(baselineIndex);
-    pendingSeekAutoFollowSnap = true;
+    explicitLyricSeek = {
+      sourceIndex: request.sourceIndex,
+      targetIndex: baselineIndex,
+      phase: "stabilizing",
+    };
+    prepareLyricLayoutStabilization(baselineIndex);
+    void beginExplicitSeekLayoutStabilization(baselineIndex);
     return baselineIndex;
   }
   if (monotonicNow() - request.requestedAtMs < LYRIC_SEEK_ACK_TIMEOUT_MS) return null;
@@ -327,32 +335,23 @@ async function scrollToActiveLine(index = activeIndex.value): Promise<void> {
   if (!player.lyricsOpen || index < 0) return;
   await nextTick();
   if (!player.lyricsOpen || index !== activeIndex.value) return;
-  const stabilization = lyricLayoutStabilization;
-  const isSeekBaselineSnap = pendingSeekAutoFollowSnap
-    && stabilization?.targetLineIndex === index;
-  if (stabilization && !isSeekBaselineSnap) return;
+  if (explicitLyricSeek || lyricLayoutStabilization) return;
   const scroll = lyricsScrollElement.value;
   const lineElement = lineElements.value[index];
   if (!scroll || !lineElement) {
     snapLineTransition(index, null);
-    if (isSeekBaselineSnap && !autoFollowPaused) {
-      clearPendingSeekAutoFollowSnap();
-      startLyricLayoutStabilization(stabilization);
-    }
     return;
   }
   const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
   const previousIndex = lastAutoFollowLineIndex;
   const previousTime = previousIndex === null ? null : lyricsStore.lyrics?.lines[previousIndex]?.time ?? null;
   const nextTime = lyricsStore.lyrics?.lines[index]?.time ?? null;
-  const mode: LyricTransitionMode = reducedMotion || pendingSeekAutoFollowSnap
+  const mode: LyricTransitionMode = reducedMotion
     ? "snap"
     : lyricTransitionMode(previousIndex, index, previousTime, nextTime);
   const targetTop = centeredLyricScrollTop(scroll, lineElement);
-  clearPendingSeekAutoFollowSnap();
   if (mode === "snap") {
     snapLineTransition(index, autoFollowPaused ? null : targetTop);
-    if (isSeekBaselineSnap && !autoFollowPaused) startLyricLayoutStabilization(stabilization);
   } else {
     scheduleLyricLineTransition(index, autoFollowPaused ? null : targetTop);
   }
@@ -481,7 +480,15 @@ function runLineTransitionFrame(transition: SharedLineTransition, timestamp: num
   transitionPhaseVelocity = 0;
   transitionPreviousProgress = 0;
   applyTransitionEmphasis(targetIndex);
-  if (!autoFollowPaused) startAlignmentCorrection(targetIndex, transition.durationMs, transition.generation);
+  if (explicitLyricSeek?.targetIndex === targetIndex && explicitLyricSeek.phase === "animating") {
+    explicitLyricSeek.phase = "correcting";
+  }
+  if (!autoFollowPaused) {
+    startAlignmentCorrection(targetIndex, transition.durationMs, transition.generation);
+  } else {
+    refreshLineTransitionActivity();
+    finishExplicitSeekTransition(targetIndex, transition.generation);
+  }
 }
 
 function applyTransitionEmphasis(targetIndex: number): void {
@@ -501,12 +508,14 @@ function startAlignmentCorrection(targetIndex: number, transitionDuration: numbe
   const line = lineElements.value[targetIndex];
   if (!scroll || !line || autoFollowPaused || pass >= LYRIC_LAYOUT_CORRECTION_MAX_PASSES) {
     refreshLineTransitionActivity();
+    finishExplicitSeekTransition(targetIndex, generation);
     return;
   }
   const targetTop = centeredLyricScrollTop(scroll, line);
   if (Math.abs(targetTop - scroll.scrollTop) <= LYRIC_LAYOUT_STABILITY_EPSILON_PX) {
     scroll.scrollTop = targetTop;
     refreshLineTransitionActivity();
+    finishExplicitSeekTransition(targetIndex, generation);
     return;
   }
   alignmentCorrection = {
@@ -629,7 +638,14 @@ function finishLyricLayoutStabilization(stabilization: LyricLayoutStabilization)
   lyricLayoutStabilization = null;
   lyricLayoutStabilizationFrame = null;
   refreshLineTransitionActivity();
-  updateActivePosition();
+  if (
+    explicitLyricSeek?.phase === "stabilizing"
+    && explicitLyricSeek.targetIndex === stabilization.targetLineIndex
+  ) {
+    startExplicitSeekTransition(explicitLyricSeek);
+  } else {
+    updateActivePosition();
+  }
 }
 
 function cancelLyricLayoutStabilization(): void {
@@ -648,6 +664,57 @@ function refreshLineTransitionActivity(): void {
     || lyricLayoutStabilization !== null;
 }
 
+async function beginExplicitSeekLayoutStabilization(targetIndex: number): Promise<void> {
+  await nextTick();
+  const seek = explicitLyricSeek;
+  const stabilization = lyricLayoutStabilization;
+  if (
+    !player.lyricsOpen
+    || !seek
+    || seek.phase !== "stabilizing"
+    || seek.targetIndex !== targetIndex
+    || stabilization?.targetLineIndex !== targetIndex
+  ) return;
+  startLyricLayoutStabilization(stabilization);
+}
+
+function startExplicitSeekTransition(seek: ExplicitLyricSeek): void {
+  if (explicitLyricSeek !== seek || seek.phase !== "stabilizing") return;
+  const scroll = lyricsScrollElement.value;
+  const line = lineElements.value[seek.targetIndex];
+  if (!scroll || !line) {
+    snapLineTransition(seek.targetIndex, null);
+    finishExplicitSeekTransition(seek.targetIndex, lyricFollowAnimationGeneration);
+    return;
+  }
+  const targetTop = centeredLyricScrollTop(scroll, line);
+  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  const alreadySettled = Math.abs(targetTop - scroll.scrollTop) <= LYRIC_LAYOUT_STABILITY_EPSILON_PX
+    && lyricTransitionIsSettled(
+      animatedLinePosition,
+      emphasisPhase,
+      seek.targetIndex,
+      emphasisTransition,
+    );
+  if (reducedMotion || alreadySettled) {
+    snapLineTransition(seek.targetIndex, targetTop);
+    lastAutoFollowLineIndex = seek.targetIndex;
+    finishExplicitSeekTransition(seek.targetIndex, lyricFollowAnimationGeneration);
+    return;
+  }
+  seek.phase = "animating";
+  lastAutoFollowLineIndex = seek.targetIndex;
+  scheduleLyricLineTransition(seek.targetIndex, targetTop);
+}
+
+function finishExplicitSeekTransition(targetIndex: number, generation: number): void {
+  const seek = explicitLyricSeek;
+  if (!seek || seek.targetIndex !== targetIndex || generation !== lyricFollowAnimationGeneration) return;
+  explicitLyricSeek = null;
+  refreshLineTransitionActivity();
+  updateActivePosition();
+}
+
 function requestLyricFollowFrame(callback: FrameRequestCallback): number {
   if (typeof window.requestAnimationFrame === "function") return window.requestAnimationFrame(callback);
   return window.setTimeout(() => callback(monotonicNow()), LYRIC_FOLLOW_FRAME_INTERVAL_MS);
@@ -659,6 +726,8 @@ function cancelLyricFollowFrame(handle: number): void {
 }
 
 function markSeekForAutoFollow(targetIndex: number): void {
+  explicitLyricSeek = null;
+  cancelLyricFollowAnimation();
   cancelLyricLayoutStabilization();
   clearPendingLyricSeek();
   pendingLyricSeek = {
@@ -670,12 +739,10 @@ function markSeekForAutoFollow(targetIndex: number): void {
     pendingLyricSeekTimer = 0;
     if (!pendingLyricSeek) return;
     pendingLyricSeek = null;
-    if (observedLineIndex >= 0) commitActiveLineIndex(observedLineIndex);
+    if (observedLineIndex < 0) return;
+    const activeIndexChanged = commitActiveLineIndex(observedLineIndex);
+    if (!activeIndexChanged) void scrollToActiveLine(observedLineIndex);
   }, LYRIC_SEEK_ACK_TIMEOUT_MS);
-}
-
-function clearPendingSeekAutoFollowSnap(): void {
-  pendingSeekAutoFollowSnap = false;
 }
 
 function clearPendingLyricSeek(): void {
@@ -796,12 +863,20 @@ function closeLyricsMenuOnResize(): void {
 }
 
 function pauseAutoFollow(): void {
+  const cancelledExplicitSeek = explicitLyricSeek !== null || pendingLyricSeek !== null;
   autoFollowPaused = true;
   window.clearTimeout(autoFollowTimer);
+  clearPendingLyricSeek();
+  explicitLyricSeek = null;
   cancelLyricLayoutStabilization();
-  if (alignmentCorrection) {
+  if (cancelledExplicitSeek) {
+    cancelLyricFollowAnimation();
+    updateActivePosition();
+    if (activeLineIndex >= 0) snapLineTransition(activeLineIndex, null);
+  } else if (alignmentCorrection) {
     alignmentCorrection = null;
     cancelLyricFollowFrameOnly();
+    refreshLineTransitionActivity();
   }
   autoFollowTimer = window.setTimeout(() => {
     autoFollowTimer = 0;
@@ -835,7 +910,7 @@ function resetAutoFollow(): void {
   window.clearTimeout(suppressClickTimer);
   cancelLyricFollowAnimation();
   cancelLyricLayoutStabilization();
-  clearPendingSeekAutoFollowSnap();
+  explicitLyricSeek = null;
   clearPendingLyricSeek();
   cancelPendingManualScrollFrame();
   detachManualScrollListeners();
@@ -862,7 +937,7 @@ function resetLineTransitionState(): void {
   cancelLyricFollowAnimation();
   cancelLyricLayoutStabilization();
   clearPendingLyricSeek();
-  clearPendingSeekAutoFollowSnap();
+  explicitLyricSeek = null;
   [...emphasizedLineIndices].forEach((index) => setLineEmphasis(index, 0));
   emphasizedLineIndices.clear();
   lineOutgoingStates.forEach((state) => { state.value = false; });
@@ -991,56 +1066,58 @@ function monotonicNow(): number {
     <section v-if="player.lyricsOpen && player.currentTrack" ref="viewElement" class="lyrics-view" role="dialog" aria-modal="true" aria-label="歌词全屏视图" tabindex="-1" @keydown="trapFocus">
       <div class="lyrics-titlebar-drag-region" data-tauri-drag-region aria-hidden="true" @dblclick="toggleMaximizeWindow"></div>
       <div class="lyrics-stage">
-        <div class="lyrics-album">
-          <ArtworkImage :src="player.currentTrack.coverUrl" :alt="`${player.currentTrack.title}封面`" kind="track" loading="eager" />
-          <p>正在播放</p>
-          <h2>{{ player.currentTrack.title }}</h2>
-          <span>{{ player.currentTrack.artist }} · {{ player.currentTrack.album || "未知专辑" }}</span>
-        </div>
+        <div class="lyrics-content">
+          <div class="lyrics-album">
+            <ArtworkImage :src="player.currentTrack.coverUrl" :alt="`${player.currentTrack.title}封面`" kind="track" loading="eager" />
+            <p>正在播放</p>
+            <h2>{{ player.currentTrack.title }}</h2>
+            <span>{{ player.currentTrack.artist }} · {{ player.currentTrack.album || "未知专辑" }}</span>
+          </div>
 
-        <div v-if="lyricsStore.loading" class="lyrics-loading" role="status" aria-label="正在加载歌词"><span></span><span></span><span></span><span></span></div>
-        <div
-          v-else-if="lyricsStore.lyrics?.lines.length"
-          ref="lyricsScrollElement"
-          class="lyrics-scroll"
-          :class="{ plain: !lyricsStore.lyrics.synchronized, dragging: draggingLyrics }"
-          :style="{
-            '--lyric-scale': lyricsStore.fontScale,
-            '--playback-lyric-text-dark': lyricsStore.colors.dark.textColor,
-            '--playback-lyric-highlight-dark': lyricsStore.colors.dark.highlightColor,
-            '--playback-lyric-text-light': lyricsStore.colors.light.textColor,
-            '--playback-lyric-highlight-light': lyricsStore.colors.light.highlightColor,
-          }"
-          tabindex="0"
-          aria-label="歌词，右键可调整显示设置"
-          @wheel="handleLyricsWheel"
-          @pointerdown="beginManualScroll"
-          @contextmenu.capture.prevent="openLyricsMenu"
-        >
-          <button
-            v-for="(line, index) in lyricsStore.lyrics.lines"
-            :key="`${lyricsStore.lyrics.trackId}-${line.time ?? 'plain'}-${index}`"
-            v-memo="[line, lyricsStore.showTranslation, lyricsStore.lyrics.timing, lyricsStore.offset]"
-            :ref="(element) => setLineElement(index, element)"
-            type="button"
-            class="lyric-line"
-            :disabled="line.time === null"
-            :aria-label="line.time === null ? line.text : `${line.text}，跳转到${formatTime(line.time)}`"
-            @click="seek(line, index, $event)"
+          <div v-if="lyricsStore.loading" class="lyrics-loading" role="status" aria-label="正在加载歌词"><span></span><span></span><span></span><span></span></div>
+          <div
+            v-else-if="lyricsStore.lyrics?.lines.length"
+            ref="lyricsScrollElement"
+            class="lyrics-scroll"
+            :class="{ plain: !lyricsStore.lyrics.synchronized, dragging: draggingLyrics }"
+            :style="{
+              '--lyric-scale': lyricsStore.fontScale,
+              '--playback-lyric-text-dark': lyricsStore.colors.dark.textColor,
+              '--playback-lyric-highlight-dark': lyricsStore.colors.dark.highlightColor,
+              '--playback-lyric-text-light': lyricsStore.colors.light.textColor,
+              '--playback-lyric-highlight-light': lyricsStore.colors.light.highlightColor,
+            }"
+            tabindex="0"
+            aria-label="歌词，右键可调整显示设置"
+            @wheel="handleLyricsWheel"
+            @pointerdown="beginManualScroll"
+            @contextmenu.capture.prevent="openLyricsMenu"
           >
-            <LyricsLineContent
-              :active-state="activeStateForLine(index)"
-              :outgoing-state="outgoingStateForLine(index)"
-              :line-emphasis-state="emphasisStateForLine(index)"
-              :line="line"
-              :next-line-time="lyricsStore.lyrics.lines[index + 1]?.time"
-              :offset="lyricsStore.offset"
-              :show-translation="lyricsStore.showTranslation"
-              :timing="lyricsStore.lyrics.timing"
-            />
-          </button>
+            <button
+              v-for="(line, index) in lyricsStore.lyrics.lines"
+              :key="`${lyricsStore.lyrics.trackId}-${line.time ?? 'plain'}-${index}`"
+              v-memo="[line, lyricsStore.showTranslation, lyricsStore.lyrics.timing, lyricsStore.offset]"
+              :ref="(element) => setLineElement(index, element)"
+              type="button"
+              class="lyric-line"
+              :disabled="line.time === null"
+              :aria-label="line.time === null ? line.text : `${line.text}，跳转到${formatTime(line.time)}`"
+              @click="seek(line, index, $event)"
+            >
+              <LyricsLineContent
+                :active-state="activeStateForLine(index)"
+                :outgoing-state="outgoingStateForLine(index)"
+                :line-emphasis-state="emphasisStateForLine(index)"
+                :line="line"
+                :next-line-time="lyricsStore.lyrics.lines[index + 1]?.time"
+                :offset="lyricsStore.offset"
+                :show-translation="lyricsStore.showTranslation"
+                :timing="lyricsStore.lyrics.timing"
+              />
+            </button>
+          </div>
+          <div v-else class="lyrics-empty" role="status"><Languages :size="30" /><p>{{ lyricsStore.error || "这首歌曲暂无歌词" }}</p></div>
         </div>
-        <div v-else class="lyrics-empty" role="status"><Languages :size="30" /><p>{{ lyricsStore.error || "这首歌曲暂无歌词" }}</p></div>
       </div>
 
       <div

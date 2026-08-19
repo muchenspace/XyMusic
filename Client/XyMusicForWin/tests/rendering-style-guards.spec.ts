@@ -27,6 +27,16 @@ describe("rendering style guards", () => {
     expect(declarations).not.toMatch(/\bcontent-visibility\s*:/u);
     expect(declarations).not.toMatch(/\bcontain-intrinsic-size\s*:/u);
   });
+
+  it("wraps unbroken playback lyrics in both the source and highlight layers", () => {
+    for (const selector of [
+      ".lyric-line strong",
+      ".lyric-line-words",
+      ".word-by-word-lyric-overlay-copy",
+    ]) {
+      expect(declarationsFor(overlayStyles, selector)).toMatch(/\boverflow-wrap\s*:\s*anywhere/u);
+    }
+  });
 });
 
 function declarationsFor(styles: string, selector: string): string {
