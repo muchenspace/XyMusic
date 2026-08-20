@@ -13,10 +13,10 @@ export function useWindowFullscreen(): DeepReadonly<Ref<boolean>> {
   }
 
   onMounted(() => {
-    window.addEventListener("keydown", handleShortcut);
+    window.addEventListener("keydown", handleShortcut, true);
   });
   onUnmounted(() => {
-    window.removeEventListener("keydown", handleShortcut);
+    window.removeEventListener("keydown", handleShortcut, true);
   });
 
   return computed(() => windowControls.fullscreen);

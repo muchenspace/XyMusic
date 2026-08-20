@@ -199,7 +199,7 @@ function playCurrentCollection(): void {
       <LoginView v-else-if="!session.session" />
       <DesktopShell v-else ref="shell" :has-player="Boolean(player.currentTrack)" :content-inert="player.lyricsOpen">
         <template #sidebar>
-          <AppSidebar :inert="player.lyricsOpen || undefined" :user="session.session.user" :active="navigation.activeView" :playlists="library.playlists" @navigate="navigate" @playlist="openPlaylist" @create-playlist="newPlaylist" @logout="logout" />
+          <AppSidebar :fullscreen="windowFullscreen" :inert="player.lyricsOpen || undefined" :user="session.session.user" :active="navigation.activeView" :playlists="library.playlists" @navigate="navigate" @playlist="openPlaylist" @create-playlist="newPlaylist" @logout="logout" />
         </template>
 
         <div v-if="pageLoading" key="loading" class="loading-shell" aria-label="正在加载内容"><span></span><span></span><span></span></div>

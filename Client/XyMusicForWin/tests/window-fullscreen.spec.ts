@@ -56,6 +56,7 @@ describe("window fullscreen shortcuts", () => {
     app.mount(element);
     await nextTick();
 
+    stateListener({ maximized: true, fullscreen: false });
     const event = new KeyboardEvent("keydown", { key: "F11", bubbles: true, cancelable: true });
     window.dispatchEvent(event);
     await Promise.resolve();
@@ -65,6 +66,13 @@ describe("window fullscreen shortcuts", () => {
     stateListener({ maximized: true, fullscreen: true });
     await nextTick();
     expect(element.textContent).toBe("fullscreen");
+
+    const exitEvent = new KeyboardEvent("keydown", { key: "Enter", altKey: true, bubbles: true, cancelable: true });
+    window.dispatchEvent(exitEvent);
+    await Promise.resolve();
+
+    expect(exitEvent.defaultPrevented).toBe(true);
+    expect(toggleFullscreen).toHaveBeenCalledTimes(2);
 
     app.unmount();
     element.remove();

@@ -59,13 +59,13 @@ describe("desktop window controller", () => {
     await settle();
 
     await controller.toggleFullscreen();
-    expect(controller.state()).toEqual({ maximized: true, fullscreen: true });
+    expect(controller.state()).toEqual({ maximized: false, fullscreen: true });
 
     staleMaximized.resolve(false);
     staleFullscreen.resolve(false);
     await settle();
 
-    expect(controller.state()).toEqual({ maximized: true, fullscreen: true });
+    expect(controller.state()).toEqual({ maximized: false, fullscreen: true });
   });
 
   it("removes a resize listener that resolves after disposal", async () => {
@@ -94,6 +94,18 @@ describe("desktop window controller", () => {
 
     expect(controller.state()).toEqual({ maximized: false, fullscreen: false });
     expect(warn).toHaveBeenCalledWith("window", "Could not toggle window fullscreen mode: native failure");
+  });
+
+  it("exposes true fullscreen as its own state instead of a maximized fullscreen hybrid", async () => {
+    const desktop = createDesktop({
+      isMaximized: vi.fn(async () => true),
+      isFullscreen: vi.fn(async () => true),
+    });
+    const controller = new DesktopWindowController(desktop, diagnostics(), new ManualTaskScheduler());
+
+    await controller.initialize();
+
+    expect(controller.state()).toEqual({ maximized: false, fullscreen: true });
   });
 });
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, watch } from "vue";
-import { Heart, ListMusic, LoaderCircle, Maximize2, Monitor, PanelTopOpen, Pause, Play, Repeat1, Repeat2, Shuffle, SkipBack, SkipForward, Volume1, Volume2, VolumeX } from "@lucide/vue";
+import { Heart, ListMusic, LoaderCircle, Monitor, PanelTopOpen, Pause, Play, Repeat1, Repeat2, Shuffle, SkipBack, SkipForward, Volume1, Volume2, VolumeX } from "@lucide/vue";
 import type { Track } from "../../domain/music";
 import { usePlayerStore } from "../stores/playerStore";
 import { useDesktopLyricsStore } from "../stores/desktopLyricsStore";
@@ -38,10 +38,6 @@ function toggleMute() {
     player.volume = Math.max(1, volumeBeforeMute);
   }
 }
-function toggleFullscreen() {
-  void windowControls.toggleFullscreen().catch(() => undefined);
-}
-
 </script>
 
 <template>
@@ -85,8 +81,7 @@ function toggleFullscreen() {
         <VolumeX v-else :size="18" />
       </button>
       <input :value="player.volume" class="volume-slider" type="range" min="0" max="100" aria-label="音量" :aria-valuetext="`${Math.round(player.volume)}%`" :style="{ '--range-progress': `${player.volume}%` }" @input="updateVolume" @change="player.flushPlayerPreferences" />
-      <button type="button" class="bare-button mini-mode-button" title="迷你播放器" aria-label="迷你播放器" @click="player.setMiniMode(true)"><PanelTopOpen :size="17" /></button>
-      <button type="button" class="bare-button fullscreen-button" title="全屏" aria-label="全屏" @click="toggleFullscreen"><Maximize2 :size="17" /></button>
+      <button v-if="!windowControls.fullscreen" type="button" class="bare-button mini-mode-button" title="迷你播放器" aria-label="迷你播放器" @click="player.setMiniMode(true)"><PanelTopOpen :size="17" /></button>
     </div>
   </footer>
 </template>

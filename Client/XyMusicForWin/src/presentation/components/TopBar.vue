@@ -84,7 +84,8 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <div class="titlebar-drag-region" data-tauri-drag-region @dblclick="toggleMaximizeWindow"></div>
+    <div v-if="props.fullscreen" class="titlebar-drag-region" aria-hidden="true"></div>
+    <div v-else class="titlebar-drag-region" data-tauri-drag-region @dblclick="toggleMaximizeWindow"></div>
     <div v-if="!props.fullscreen" class="window-controls" aria-label="窗口控制">
       <button type="button" class="window-control" title="最小化" aria-label="最小化" @click="minimizeWindow"><Minus :size="17" /></button>
       <button type="button" class="window-control" :title="maximized ? '还原' : '最大化'" :aria-label="maximized ? '还原' : '最大化'" @click="toggleMaximizeWindow"><Copy v-if="maximized" :size="13" /><Square v-else :size="13" /></button>

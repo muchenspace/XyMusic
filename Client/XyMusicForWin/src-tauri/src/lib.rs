@@ -17,6 +17,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .manage(desktop_lyrics::DesktopLyricsManager::default())
         .manage(window::MiniModeState::default())
+        .manage(window::TrueFullscreenState::default())
         .setup(|app| {
             app.manage(media::MediaSessionState::initialize(app.handle())?);
             tray::install(app)?;
@@ -60,6 +61,8 @@ pub fn run() {
             media::update_media_playback,
             media::clear_media_session,
             window::hide_main_window,
+            window::toggle_main_window_maximize,
+            window::toggle_main_window_fullscreen,
             window::set_mini_mode,
         ])
         .run(tauri::generate_context!())
