@@ -36,7 +36,18 @@ export interface ScrapingFields {
 
 export interface TagSearchInput { source: SearchSource; verbatim: boolean; query?: string; title?: string; artist?: string; album?: string; sources?: TagSource[] }
 export interface ApplyTagInput { expectedVersion: number; candidate: TagCandidate; verbatim: boolean; fields: ScrapingFields; writeBack: boolean; reason: string }
-export interface ApplyTagResult { appliedFields: string[]; coverApplied: boolean; warnings: string[] }
+export interface AppliedTrackMetadataVersion {
+  trackId: string;
+  version: number;
+}
+
+export interface ApplyTagResult {
+  /** The server returns the committed metadata snapshot, including this version. */
+  metadata?: AppliedTrackMetadataVersion;
+  appliedFields: string[];
+  coverApplied: boolean;
+  warnings: string[];
+}
 
 export interface ArtistCandidate {
   id: string;

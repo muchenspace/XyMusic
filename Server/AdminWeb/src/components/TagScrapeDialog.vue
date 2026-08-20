@@ -11,13 +11,13 @@ import {
   useWritebackSelection,
   writebackBlockedMessage,
 } from "@/features/music/presentation/writeback-capability";
-import { defaultScrapingFields, type SearchSource, type TagCandidate } from "@/features/scraping/domain/models";
+import { defaultScrapingFields, type ApplyTagResult, type SearchSource, type TagCandidate } from "@/features/scraping/domain/models";
 import { useTagScraping } from "@/app/services/scraping";
 import { useUiStore } from "@/stores/ui";
 
 const open = defineModel<boolean>({ required: true });
 const props = defineProps<{ track?: TrackSummary; expectedVersion?: number; writebackSource?: TrackMetadataRecord["source"] }>();
-const emit = defineEmits<{ applied: [] }>();
+const emit = defineEmits<{ applied: [result: ApplyTagResult] }>();
 const scraping = useTagScraping();
 const ui = useUiStore();
 const source = ref<SearchSource>("smart");
@@ -160,7 +160,7 @@ async function apply(): Promise<void> {
   try {
     const result = await scraping.apply(trackId, { expectedVersion: props.expectedVersion, candidate: selected.value, verbatim: verbatim.value, fields: { ...fields }, writeBack: writeBack.value, reason: reason.value.trim() || "在线 Tag 刮削" });
     if (result.warnings.length) ui.notify("warning", "Tag 已应用，但存在警告", result.warnings.join("；"));
-    emit("applied");
+    emit("applied", result);
     if (generation === applyGeneration && open.value && props.track?.id === trackId) open.value = false;
   } catch (cause) {
     if (generation === applyGeneration && open.value) error.value = cause instanceof Error ? cause.message : "应用失败";

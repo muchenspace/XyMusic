@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { GitMerge } from "lucide-vue-next";
-import { useMutation, useQueryClient } from "@tanstack/vue-query";
+import { useMutation } from "@tanstack/vue-query";
 import { computed, reactive, watch } from "vue";
 import { ApiError } from "@/shared/application/api-error";
+import { invalidateAdminMusicQueries } from "@/app/query-client";
 import { buildAlbumMergeCommand, createAlbumMergeDraft } from "@/features/music/application/album-merge";
 import type { AlbumMergeResult, AlbumSummary } from "@/features/music/domain/models";
 import { useMusicAdmin } from "@/app/services/music";
@@ -18,7 +19,6 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ merged: [result: AlbumMergeResult] }>();
 const musicAdmin = useMusicAdmin();
-const queryClient = useQueryClient();
 const ui = useUiStore();
 const draft = reactive(createAlbumMergeDraft(props.albums, props.preferredAlbumId));
 const selectedAlbums = computed(() => props.albums.filter((album) => draft.selectedIds.includes(album.id)));
@@ -44,10 +44,7 @@ const mutation = useMutation({
   onSuccess: async (result) => {
     open.value = false;
     ui.notify("success", `已合并 ${result.mergedAlbums} 个专辑，迁移 ${result.movedTracks} 首曲目`);
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["admin", "albums"] }),
-      queryClient.invalidateQueries({ queryKey: ["admin", "tracks"] }),
-    ]);
+    await invalidateAdminMusicQueries();
     emit("merged", result);
   },
 });

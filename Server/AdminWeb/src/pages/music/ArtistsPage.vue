@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { Check, Mic2, Pencil, RefreshCw, Search, Sparkles, X } from "lucide-vue-next";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/vue-query";
+import type { QueryFunctionContext } from "@tanstack/vue-query";
 import { refDebounced } from "@vueuse/core";
 import { computed, reactive, ref, watch } from "vue";
 import { ApiError } from "@/shared/application/api-error";
+import { invalidateAdminMusicQueries } from "@/app/query-client";
 import AppButton from "@/components/AppButton.vue";
 import AppPagination from "@/components/AppPagination.vue";
 import ArtistArtworkScrapeDialog from "@/components/ArtistArtworkScrapeDialog.vue";
@@ -12,13 +14,14 @@ import BaseDialog from "@/components/BaseDialog.vue";
 import BatchArtistArtworkScrapeDialog from "@/components/BatchArtistArtworkScrapeDialog.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import StatePanel from "@/components/StatePanel.vue";
-import type { ArtistSummary } from "@/features/music/domain/models";
+import type { ArtistSummary, MusicPage } from "@/features/music/domain/models";
 import { useMusicAdmin } from "@/app/services/music";
 import { DEFAULT_CATALOG_PAGE_SIZE } from "@/shared/presentation/pagination";
 import { useUiStore } from "@/stores/ui";
 import { formatDate } from "@/utils/format";
 
-const queryClient = useQueryClient();
+type ArtistListQueryKey = readonly ["admin", "artists", { page: number; pageSize: number; search: string }];
+
 const ui = useUiStore();
 const musicAdmin = useMusicAdmin();
 const search = ref("");
@@ -36,15 +39,12 @@ let allowEditorClose = false;
 const form = reactive({ name: "", description: "" });
 const maximumBatchArtists = 200;
 
-const query = useQuery({
-  queryKey: computed(() => ["admin", "artists", { page: page.value, pageSize: pageSize.value, search: debounced.value }]),
-  queryFn: ({ signal }) => musicAdmin.listArtists({
-    page: page.value,
-    pageSize: pageSize.value,
-    search: debounced.value,
-    sort: "name",
-    order: "asc",
-  }, signal),
+const query = useQuery<MusicPage<ArtistSummary>, Error, MusicPage<ArtistSummary>, ArtistListQueryKey>({
+  queryKey: computed<ArtistListQueryKey>(() => ["admin", "artists", { page: page.value, pageSize: pageSize.value, search: debounced.value }]),
+  queryFn: ({ signal, queryKey }: QueryFunctionContext<ArtistListQueryKey>) => {
+    const params = queryKey[2];
+    return musicAdmin.listArtists({ ...params, sort: "name", order: "asc" }, signal);
+  },
   placeholderData: keepPreviousData,
 });
 
@@ -109,13 +109,7 @@ function openArtworkScrape(): void {
 }
 
 async function refresh(): Promise<void> {
-  await Promise.all([
-    queryClient.invalidateQueries({ queryKey: ["admin", "artists"] }),
-    queryClient.invalidateQueries({ queryKey: ["admin", "albums"] }),
-    queryClient.invalidateQueries({ queryKey: ["admin", "tracks"] }),
-    queryClient.invalidateQueries({ queryKey: ["admin", "dashboard"] }),
-    queryClient.invalidateQueries({ queryKey: ["admin", "audit"] }),
-  ]);
+  await invalidateAdminMusicQueries();
   const updated = query.data.value?.items.find((artist) => artist.id === selected.value?.id);
   if (updated) selected.value = updated;
 }

@@ -197,7 +197,7 @@ test.describe("administrator browser contract", () => {
     test.skip(testInfo.project.name !== "chromium-desktop", "desktop archived track contract");
     const api = await installMockApi(page, true);
     api.trackStatus = "ARCHIVED";
-    api.extraTrackCount = 25;
+    api.extraTrackCount = 101;
     await page.goto("./music/tracks");
     await page.getByLabel("音频状态", { exact: true }).selectOption("ARCHIVED");
 
@@ -211,22 +211,96 @@ test.describe("administrator browser contract", () => {
     await row.click();
     await expect(page.getByRole("dialog", { name: "编辑音乐 Tag" })).toHaveCount(0);
     await page.getByRole("checkbox", { name: "选择当前页全部已归档曲目" }).check();
-    await expect(page.getByText("已选择 25 首已归档曲目", { exact: true })).toBeVisible();
+    await expect(page.getByText("已选择 100 首已归档曲目", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "下一页" }).click();
-    await expect(page.getByText("Extra track 25", { exact: true })).toBeVisible();
+    await expect(page.getByText("Extra track 101", { exact: true })).toBeVisible();
     await page.getByRole("checkbox", { name: "选择当前页全部已归档曲目" }).check();
-    await expect(page.getByText("已选择 26 首已归档曲目", { exact: true })).toBeVisible();
+    await expect(page.getByText("已选择 102 首已归档曲目", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "批量恢复" })).toBeVisible();
     await expect(page.getByRole("button", { name: "批量永久删除" })).toBeVisible();
     await expect(page.getByRole("button", { name: "在线刮削" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "批量修改" })).toHaveCount(0);
 
     await page.getByRole("button", { name: "批量恢复" }).click();
-    const dialog = page.getByRole("dialog", { name: "批量恢复 26 首曲目" });
+    const dialog = page.getByRole("dialog", { name: "批量恢复 102 首曲目" });
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "确认恢复" }).click();
-    await expect(page.getByText("已恢复 26 首曲目", { exact: true })).toBeVisible();
+    await expect(page.getByText("已恢复 102 首曲目", { exact: true })).toBeVisible();
     expect(api.batchRestoreTrackRequests).toBe(1);
+  });
+
+  test("archive and restore refreshes unfiltered album and artist lists after an empty search", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "chromium-desktop", "desktop catalog state regression");
+    const api = await installMockApi(page, true);
+    const albumItems = () => api.trackStatus === "ARCHIVED"
+      ? [catalogAlbum("other-album", "Other album", "Other artist")]
+      : [catalogAlbum("target-album", "Target album", "Target artist"), catalogAlbum("other-album", "Other album", "Other artist")];
+    const artistItems = () => api.trackStatus === "ARCHIVED"
+      ? [catalogArtist("other-artist", "Other artist")]
+      : [catalogArtist("target-artist", "Target artist"), catalogArtist("other-artist", "Other artist")];
+
+    await page.route("**/api/v1/admin/albums**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname !== "/api/v1/admin/albums") return route.fallback();
+      const search = (url.searchParams.get("search") ?? "").toLowerCase();
+      return json(route, pageResult(albumItems().filter((album) => !search || album.title.toLowerCase().includes(search) || album.artistCredits.some((credit) => credit.artist.name.toLowerCase().includes(search)))));
+    });
+    await page.route("**/api/v1/admin/artists**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname !== "/api/v1/admin/artists") return route.fallback();
+      const search = (url.searchParams.get("search") ?? "").toLowerCase();
+      return json(route, pageResult(artistItems().filter((artist) => !search || artist.name.toLowerCase().includes(search))));
+    });
+
+    await page.goto("./music/albums");
+    await expect(page.getByRole("heading", { name: "Target album", exact: true })).toBeVisible();
+    const albumSearch = page.locator("section input[type='search']");
+    await albumSearch.fill("Target album");
+    await expect(page.getByRole("heading", { name: "Target album", exact: true })).toBeVisible();
+
+    await page.getByRole("link", { name: "曲目", exact: true }).click();
+    let trackRow = page.locator("tbody tr").filter({ hasText: "Mock track" });
+    await trackRow.getByRole("button", { name: "移入回收站：Mock track" }).click();
+    await page.getByRole("dialog", { name: "删除曲目" }).getByRole("button", { name: "移入回收站" }).click();
+    await expect(page.getByText("曲目已移入回收站", { exact: true })).toBeVisible();
+
+    await page.getByRole("link", { name: "专辑", exact: true }).click();
+    await albumSearch.fill("Target album");
+    await expect(page.getByText("没有符合条件的专辑", { exact: true })).toBeVisible();
+
+    await page.getByRole("link", { name: "曲目", exact: true }).click();
+    await page.getByLabel("音频状态", { exact: true }).selectOption("ARCHIVED");
+    trackRow = page.locator("tbody tr").filter({ hasText: "Mock track" });
+    await trackRow.getByRole("button", { name: "恢复已归档曲目：Mock track" }).click();
+    await expect(page.getByText("曲目已恢复", { exact: true })).toBeVisible();
+
+    await page.getByRole("link", { name: "专辑", exact: true }).click();
+    await expect(page.locator("section input[type='search']")).toHaveValue("");
+    await expect(page.getByRole("heading", { name: "Target album", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Other album", exact: true })).toBeVisible();
+
+    await page.getByRole("link", { name: "艺术家", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Target artist", exact: true })).toBeVisible();
+    const artistSearch = page.locator("section input[type='search']");
+    await artistSearch.fill("Target artist");
+    await expect(page.getByRole("heading", { name: "Target artist", exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "曲目", exact: true }).click();
+    trackRow = page.locator("tbody tr").filter({ hasText: "Mock track" });
+    await trackRow.getByRole("button", { name: "移入回收站：Mock track" }).click();
+    await page.getByRole("dialog", { name: "删除曲目" }).getByRole("button", { name: "移入回收站" }).click();
+    await expect(page.getByText("曲目已移入回收站", { exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "艺术家", exact: true }).click();
+    await artistSearch.fill("Target artist");
+    await expect(page.getByText("没有符合条件的艺术家", { exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "曲目", exact: true }).click();
+    await page.getByLabel("音频状态", { exact: true }).selectOption("ARCHIVED");
+    trackRow = page.locator("tbody tr").filter({ hasText: "Mock track" });
+    await trackRow.getByRole("button", { name: "恢复已归档曲目：Mock track" }).click();
+    await expect(page.getByText("曲目已恢复", { exact: true }).last()).toBeVisible();
+    await page.getByRole("link", { name: "艺术家", exact: true }).click();
+    await expect(page.locator("section input[type='search']")).toHaveValue("");
+    await expect(page.getByRole("heading", { name: "Target artist", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Other artist", exact: true })).toBeVisible();
   });
 
   test("permanent deletion uses a persistent job for batch and single-track flows", async ({ page }, testInfo) => {
@@ -779,6 +853,35 @@ function track(
     mediaProcessing: { status: "READY", attempts: 1, maxAttempts: 5, lastError: null, updatedAt: "2026-01-01T00:00:00Z" }, variantSummary: [], activeWritebackJobId: null,
     latestWritebackErrorCode: state.latestWritebackErrorCode ?? null, latestWritebackError: state.latestWritebackError ?? null,
     publishedAt: "2026-01-01T00:00:00Z", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z", version,
+  };
+}
+
+function catalogAlbum(id: string, title: string, artistName: string) {
+  return {
+    id,
+    title,
+    artistCredits: [{ artist: { id: `${id}-artist`, name: artistName }, role: "PRIMARY", sortOrder: 0 }],
+    artwork: null,
+    releaseDate: null,
+    description: null,
+    trackCount: 1,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+    version: 1,
+  };
+}
+
+function catalogArtist(id: string, name: string) {
+  return {
+    id,
+    name,
+    description: null,
+    artwork: null,
+    albumCount: 1,
+    trackCount: 1,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+    version: 1,
   };
 }
 
