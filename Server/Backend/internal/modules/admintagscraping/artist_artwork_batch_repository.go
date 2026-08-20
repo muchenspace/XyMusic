@@ -416,14 +416,14 @@ func (repository *Repository) claimArtistArtworkBatchItems(
 			SELECT item_id, attempt_id
 			FROM unnest($2::uuid[], $3::uuid[]) AS input(item_id, attempt_id)
 		)
-		UPDATE artist_artwork_scraping_job_items SET
-			status = 'RUNNING', attempts = attempts + 1,
+		UPDATE artist_artwork_scraping_job_items AS item SET
+			status = 'RUNNING', attempts = item.attempts + 1,
 			attempt_id = requested.attempt_id, locked_by = $4, locked_until = $5,
 			started_at = $6, completed_at = NULL, updated_at = $6
 		FROM requested
-		WHERE id = requested.item_id AND job_id = $1
-		  AND status = 'PENDING' AND attempts < max_attempts
-		RETURNING id::text, attempt_id::text`,
+		WHERE item.id = requested.item_id AND item.job_id = $1
+		  AND item.status = 'PENDING' AND item.attempts < item.max_attempts
+		RETURNING item.id::text, item.attempt_id::text`,
 		job.ID, itemIDs, attemptIDs, workerID, lockedUntil, now,
 	)
 	if err != nil {
