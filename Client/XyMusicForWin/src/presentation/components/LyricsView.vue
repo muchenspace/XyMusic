@@ -202,6 +202,12 @@ function commitActiveLineIndex(nextActiveLineIndex: number): boolean {
     if (previousActiveLineIndex >= 0) {
       setLineActive(previousActiveLineIndex, false);
       setLineOutgoing(previousActiveLineIndex, true);
+    } else if (sharedTransition === null && !explicitLyricSeek && !lyricLayoutStabilization) {
+      emphasisTransition = settledLyricEmphasis(nextActiveLineIndex);
+      emphasisPhase = 0;
+      animatedLinePosition = nextActiveLineIndex;
+      settledLinePosition = nextActiveLineIndex;
+      if (nextActiveLineIndex >= 0) setLineEmphasis(nextActiveLineIndex, 1);
     }
     setLineOutgoing(nextActiveLineIndex, false);
     setLineActive(nextActiveLineIndex, true);
@@ -254,7 +260,10 @@ function outgoingStateForLine(index: number): Readonly<Ref<boolean>> {
 function emphasisStateForLine(index: number): Readonly<Ref<number>> {
   let emphasisState = lineEmphasisStates[index];
   if (!emphasisState) {
-    emphasisState = ref(lyricLineTransitionEmphasis(emphasisPhase, index, emphasisTransition));
+    const initial = index === activeLineIndex && sharedTransition === null
+      ? 1
+      : lyricLineTransitionEmphasis(emphasisPhase, index, emphasisTransition);
+    emphasisState = ref(initial);
     lineEmphasisStates[index] = emphasisState;
   }
   return emphasisState;
@@ -331,7 +340,7 @@ watch(
   { immediate: true },
 );
 
-async function scrollToActiveLine(index = activeIndex.value): Promise<void> {
+async function scrollToActiveLine(index = activeIndex.value, forceAnimation = false): Promise<void> {
   if (!player.lyricsOpen || index < 0) return;
   await nextTick();
   if (!player.lyricsOpen || index !== activeIndex.value) return;
@@ -348,7 +357,9 @@ async function scrollToActiveLine(index = activeIndex.value): Promise<void> {
   const nextTime = lyricsStore.lyrics?.lines[index]?.time ?? null;
   const mode: LyricTransitionMode = reducedMotion
     ? "snap"
-    : lyricTransitionMode(previousIndex, index, previousTime, nextTime);
+    : forceAnimation
+      ? "animate"
+      : lyricTransitionMode(previousIndex, index, previousTime, nextTime);
   const targetTop = centeredLyricScrollTop(scroll, lineElement);
   if (mode === "snap") {
     snapLineTransition(index, autoFollowPaused ? null : targetTop);
@@ -881,18 +892,14 @@ function pauseAutoFollow(): void {
   autoFollowTimer = window.setTimeout(() => {
     autoFollowTimer = 0;
     autoFollowPaused = false;
-    void snapAutoFollowToActiveLine();
+    void resumeAutoFollowToActiveLine();
   }, AUTO_FOLLOW_RESUME_MS);
 }
 
-async function snapAutoFollowToActiveLine(): Promise<void> {
+async function resumeAutoFollowToActiveLine(): Promise<void> {
   const index = activeIndex.value;
   if (!player.lyricsOpen || index < 0) return;
-  await nextTick();
-  const scroll = lyricsScrollElement.value;
-  const line = lineElements.value[index];
-  if (scroll && line) scroll.scrollTop = centeredLyricScrollTop(scroll, line);
-  lastAutoFollowLineIndex = index;
+  await scrollToActiveLine(index, true);
 }
 
 function handleLyricsWheel(event: WheelEvent): void {

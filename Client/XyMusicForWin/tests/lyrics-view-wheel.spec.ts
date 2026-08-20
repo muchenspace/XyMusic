@@ -93,6 +93,43 @@ describe("playback lyrics wheel controls", () => {
     }
   });
 
+  it("animates back to the current lyric when automatic following resumes", async () => {
+    vi.useFakeTimers();
+    const animationFrames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const mounted = await mountLyricsView({
+      timing: "LINE",
+      lines: [
+        { time: 0, text: "current line" },
+        { time: 1, text: "second line" },
+        { time: 2, text: "third line" },
+      ],
+    });
+    try {
+      const scroll = installScrollMetrics(mounted.wrapper);
+      animationFrames.splice(0);
+      scroll.scrollTop = 180;
+      scroll.dispatchEvent(new WheelEvent("wheel", { cancelable: true, deltaY: 100 }));
+
+      vi.advanceTimersByTime(4_000);
+      await nextTick();
+      await nextTick();
+
+      expect(scroll.scrollTop).toBe(180);
+      expect(animationFrames).toHaveLength(1);
+
+      animationFrames.shift()?.(16);
+      expect(scroll.scrollTop).toBeLessThan(180);
+      expect(scroll.scrollTop).toBeGreaterThan(0);
+    } finally {
+      mounted.wrapper.unmount();
+    }
+  });
+
   it("smoothly chases adjacent and dense lyric targets without native scrolling", async () => {
     const animationFrames: FrameRequestCallback[] = [];
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {

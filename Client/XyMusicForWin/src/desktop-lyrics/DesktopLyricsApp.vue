@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Lock, Minus, Pause, Play, Plus, SkipBack, SkipForward, X } from "@lucide/vue";
 import {
   DEFAULT_DESKTOP_LYRICS_HIGHLIGHT_COLOR,
@@ -22,6 +22,7 @@ import {
   createDesktopLyricsLockAction,
 } from "./protocol";
 import {
+  DESKTOP_LYRICS_TRANSITION_LINE_DISTANCE_PX,
   buildDesktopLyricsFrame,
   createDesktopLyricsTransition,
   desktopLyricsLineShiftPx,
@@ -73,6 +74,10 @@ const state = ref<DesktopLyricsStatePayload | null>(initialState);
 const clock = ref<LocalDesktopLyricsClock | null>(initialState ? localClock(clockFromState(initialState)) : null);
 const nowMs = ref(monotonicNow());
 const lyricTransition = ref<DesktopLyricsTransition | null>(null);
+const desktopLyricsCopyElement = ref<HTMLElement | null>(null);
+const currentLineElement = ref<HTMLElement | null>(null);
+const outgoingLineElements = ref<HTMLElement[]>([]);
+const transitionLineDistancePx = ref(DESKTOP_LYRICS_TRANSITION_LINE_DISTANCE_PX);
 const optimisticLocked = ref(false);
 const optimisticFontScale = ref<number | null>(null);
 const bridge = props.bridge ?? createDesktopLyricsBridge();
@@ -93,6 +98,8 @@ let observedLyricsIdentity: string | null = null;
 let observedActiveIndex: number | null = null;
 let playbackPositionCorrection: DesktopPlaybackPositionCorrection | null = null;
 let lastRenderedPlaybackSeconds = clock.value?.positionSeconds ?? 0;
+let lyricLayoutObserver: ResizeObserver | null = null;
+let transitionDistanceMeasureQueued = false;
 
 const locked = computed(() => Boolean(state.value?.locked || optimisticLocked.value));
 const isPlaying = computed(() => Boolean(clock.value?.isPlaying ?? state.value?.isPlaying));
@@ -151,14 +158,14 @@ const currentLineTransitionStyle = computed<Record<string, string | number>>(() 
   const weight = desktopLyricsTransitionWeight(sample, current.index);
   return desktopLyricLineStyle(
     weight,
-    desktopLyricsLineShiftPx(current.index, sample.linePosition),
+    desktopLyricsLineShiftPx(current.index, sample.linePosition, 0, transitionLineDistancePx.value),
   );
 });
 const nextLineTransitionStyle = computed<Record<string, string | number>>(() => {
   const sample = lyricTransitionSample.value;
   const next = nextLine.value;
   const shift = sample && !sample.done && next
-    ? desktopLyricsLineShiftPx(next.index, sample.linePosition, 1)
+    ? desktopLyricsLineShiftPx(next.index, sample.linePosition, 1, transitionLineDistancePx.value)
     : 0;
   return { "--desktop-lyric-next-shift": `${shift}px` };
 });
@@ -461,8 +468,23 @@ watch(
   { immediate: true, flush: "sync" },
 );
 watch(isPlaying, () => schedulePlaybackUpdate(true));
+watch(
+  [
+    () => currentLine.value?.index ?? -1,
+    () => outgoingLines.value.map(({ index }) => index).join(","),
+    fontScale,
+    () => state.value?.showTranslation ?? false,
+  ],
+  queueTransitionDistanceMeasure,
+  { flush: "post" },
+);
 
 onMounted(() => {
+  if (typeof ResizeObserver !== "undefined") {
+    lyricLayoutObserver = new ResizeObserver(measureTransitionLineDistance);
+  }
+  window.addEventListener("resize", queueTransitionDistanceMeasure);
+  queueTransitionDistanceMeasure();
   void connectBridgeListeners();
 });
 
@@ -470,6 +492,8 @@ onBeforeUnmount(() => {
   disposed = true;
   stopPlaybackUpdates();
   stopReadyRetries();
+  lyricLayoutObserver?.disconnect();
+  window.removeEventListener("resize", queueTransitionDistanceMeasure);
   document.removeEventListener("visibilitychange", handleVisibilityChange);
   unlisteners.splice(0).forEach((unlisten) => unlisten());
 });
@@ -585,6 +609,7 @@ function desktopLyricLineStyle(weight: number, shiftPx: number): Record<string, 
   return {
     "--desktop-lyric-line-emphasis": emphasis,
     "--desktop-lyric-word-emphasis": smoothstep(emphasis),
+    "--desktop-lyric-transition-opacity": emphasis,
     "--desktop-lyric-transition-shift": `${Number.isFinite(shiftPx) ? shiftPx : 0}px`,
     "--desktop-lyric-transition-scale": 1 + 0.012 * emphasis,
   };
@@ -594,8 +619,60 @@ function outgoingLineTransitionStyle(line: DesktopLyricsOutgoingLine): Record<st
   const sample = lyricTransitionSample.value;
   return desktopLyricLineStyle(
     line.weight,
-    sample ? desktopLyricsLineShiftPx(line.index, sample.linePosition) : 0,
+    sample
+      ? desktopLyricsLineShiftPx(line.index, sample.linePosition, 0, transitionLineDistancePx.value)
+      : 0,
   );
+}
+
+function queueTransitionDistanceMeasure(): void {
+  if (transitionDistanceMeasureQueued || disposed) return;
+  transitionDistanceMeasureQueued = true;
+  void nextTick(() => {
+    transitionDistanceMeasureQueued = false;
+    if (disposed) return;
+    observeDesktopLyricLayout();
+    measureTransitionLineDistance();
+  });
+}
+
+function observeDesktopLyricLayout(): void {
+  const observer = lyricLayoutObserver;
+  if (!observer) return;
+  observer.disconnect();
+  const elements = [
+    desktopLyricsCopyElement.value,
+    currentLineElement.value,
+    ...outgoingLineElements.value,
+  ];
+  elements.forEach((element) => {
+    if (element) observer.observe(element);
+  });
+}
+
+function measureTransitionLineDistance(): void {
+  if (disposed) return;
+  const lineElements = [currentLineElement.value, ...outgoingLineElements.value]
+    .filter((element): element is HTMLElement => element !== null);
+  const tallestLineHeight = lineElements.reduce(
+    (height, element) => Math.max(height, element.offsetHeight),
+    0,
+  );
+  const rowGap = desktopLyricsRowGapPx(desktopLyricsCopyElement.value);
+  transitionLineDistancePx.value = Math.max(
+    DESKTOP_LYRICS_TRANSITION_LINE_DISTANCE_PX,
+    tallestLineHeight > 0 ? tallestLineHeight + rowGap : 0,
+  );
+}
+
+function desktopLyricsRowGapPx(element: HTMLElement | null): number {
+  if (!element || typeof window === "undefined") return 0;
+  const style = window.getComputedStyle(element);
+  for (const value of [style.rowGap, style.gap]) {
+    const pixels = Number.parseFloat(value);
+    if (Number.isFinite(pixels)) return Math.max(0, pixels);
+  }
+  return 0;
 }
 
 function desktopLyricWordProgress(lineIndex: number, wordIndex: number): number {
@@ -679,6 +756,7 @@ function monotonicNow(): number {
 
       <div
         v-if="currentLine"
+        ref="desktopLyricsCopyElement"
         class="desktop-lyrics-copy"
         :class="{ 'is-transitioning': transitionInProgress }"
         data-tauri-drag-region
@@ -687,6 +765,7 @@ function monotonicNow(): number {
         <div
           v-for="outgoingLine in outgoingLines"
           :key="`outgoing-${outgoingLine.index}`"
+          ref="outgoingLineElements"
           class="desktop-lyric-line desktop-lyric-line-outgoing"
           :style="outgoingLineTransitionStyle(outgoingLine)"
           data-tauri-drag-region
@@ -725,6 +804,7 @@ function monotonicNow(): number {
         </div>
 
         <div
+          ref="currentLineElement"
           class="desktop-lyric-line desktop-lyric-line-current"
           :class="{ 'has-started': currentLine.started, 'is-transitioning': transitionInProgress }"
           :style="currentLineTransitionStyle"

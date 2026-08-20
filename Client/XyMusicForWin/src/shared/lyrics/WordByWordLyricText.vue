@@ -30,6 +30,7 @@ const overlayRects = computed(() => {
 });
 
 function queueMeasure(): void {
+  clearMeasuredLayout();
   if (measureQueued) return;
   measureQueued = true;
   void nextTick(() => {

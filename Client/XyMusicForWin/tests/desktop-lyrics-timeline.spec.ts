@@ -31,6 +31,12 @@ describe("desktop lyrics timeline", () => {
     expect(desktopLyricsTransitionDurationMs(0, 74)).toBe(400);
   });
 
+  it("uses a measured line distance without changing the default transition geometry", () => {
+    expect(desktopLyricsLineShiftPx(3, 2.5)).toBe(28);
+    expect(desktopLyricsLineShiftPx(3, 2.5, 0, 104)).toBe(52);
+    expect(desktopLyricsLineShiftPx(4, 2.5, 1, 104)).toBe(52);
+  });
+
   it("samples source and target emphasis from one smooth frame clock", () => {
     const transition = createDesktopLyricsTransition(2, 3, 1_000, 400);
 
