@@ -652,6 +652,14 @@ async function installMockApi(page: Page, initiallyAuthenticated: boolean, setup
       }
       return json(route, { restored: body.items.length, items: body.items.map((item) => ({ trackId: item.trackId, status: "READY", version: item.expectedVersion + 1 })) });
     }
+    if (path === "/api/v1/admin/tracks/batch/archive" && method === "POST") {
+      const body = request.postDataJSON() as { items: Array<{ trackId: string; expectedVersion: number }> };
+      for (const item of body.items) {
+        if (item.trackId === "track-1") { state.trackStatus = "ARCHIVED"; state.trackAudioStatus = "ARCHIVED"; }
+        if (item.trackId === "track-2") state.secondTrackStatus = "ARCHIVED";
+      }
+      return json(route, { archived: body.items.length, items: body.items.map((item) => ({ trackId: item.trackId, status: "ARCHIVED", version: item.expectedVersion + 1 })) });
+    }
     if (path === "/api/v1/admin/tracks/batch/delete-permanently" && method === "POST") {
       const body = request.postDataJSON() as { items: Array<{ trackId: string; expectedVersion: number }> };
       state.permanentDeleteJobRequests += 1;

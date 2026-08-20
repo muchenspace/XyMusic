@@ -50,7 +50,7 @@ describe("administrator HTTP API contract", () => {
   it("keeps the exported API surface explicit so new methods require contract coverage", () => {
     expect(Object.keys(adminApi).sort()).toEqual([
       "album", "albumDuplicates", "albums", "archiveTrack", "artists", "audit",
-      "batchRestoreTracks", "browseSourceDirectories", "bulkUpdateTracks", "cancelJob", "cancelScan",
+      "batchArchiveTracks", "batchRestoreTracks", "browseSourceDirectories", "bulkUpdateTracks", "cancelJob", "cancelScan",
       "cancelWritebackJob", "createPermanentDeleteTracksJob", "createSource", "createUser", "dashboard", "deleteSource",
       "deleteTrackPermanently", "deleteUser", "job", "jobEvents", "jobs", "mergeAlbums",
       "permanentDeleteTracksJob", "publishTrack", "resetUserPassword", "restoreTrack", "restoreUser", "retryJob",
@@ -107,6 +107,7 @@ describe("administrator HTTP API contract", () => {
     await expectRequest(() => adminApi.archiveTrack("track-1", 3), "/api/v1/admin/tracks/track-1/archive", { method: "POST", body: { expectedVersion: 3 } });
     await expectRequest(() => adminApi.restoreTrack("track-1", 3), "/api/v1/admin/tracks/track-1/restore", { method: "POST", body: { expectedVersion: 3 } });
     const mutationItems = [{ trackId: "track-1", expectedVersion: 3 }];
+    await expectRequest(() => adminApi.batchArchiveTracks(mutationItems), "/api/v1/admin/tracks/batch/archive", { method: "POST", body: { items: mutationItems } });
     await expectRequest(() => adminApi.batchRestoreTracks(mutationItems), "/api/v1/admin/tracks/batch/restore", { method: "POST", body: { items: mutationItems } });
     await expectRequest(() => adminApi.createPermanentDeleteTracksJob(mutationItems), "/api/v1/admin/tracks/batch/delete-permanently", { method: "POST", body: { items: mutationItems } });
     await expectRequest(() => adminApi.permanentDeleteTracksJob("delete-job-1", signal), "/api/v1/admin/tracks/batch/delete-permanently/delete-job-1", { signal });

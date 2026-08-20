@@ -12,6 +12,7 @@ export type {
   MetadataLyrics,
   MetadataStatus,
   BatchRestoreTracksResult,
+  BatchArchiveTracksResult,
   PermanentDeleteTrackJobItem,
   PermanentDeleteTracksJob,
   PermanentDeleteTrackItemStatus,

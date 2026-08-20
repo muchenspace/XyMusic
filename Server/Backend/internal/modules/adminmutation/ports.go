@@ -21,6 +21,7 @@ type Store interface {
 	PublishTrack(context.Context, string, int) error
 	ArchiveTrack(context.Context, string, int) error
 	RestoreTrack(context.Context, string, int) error
+	ArchiveTracksBatch(context.Context, string, string, []BatchTrackItemInput) ([]BatchArchiveItemRecord, error)
 	RestoreTracksBatch(context.Context, string, string, []BatchTrackItemInput) ([]BatchRestoreItemRecord, error)
 	DeleteTrackPermanently(context.Context, string, int, string) (DeleteResult, error)
 	CreatePermanentDeleteBatch(context.Context, string, string, []BatchTrackItemInput) (PermanentDeleteBatchRecord, []PermanentDeleteBatchItemRecord, error)

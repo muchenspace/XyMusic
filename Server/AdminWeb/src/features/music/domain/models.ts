@@ -81,6 +81,17 @@ export interface BatchRestoreTracksResult {
   items: BatchRestoreTrackItem[];
 }
 
+export interface BatchArchiveTrackItem {
+  trackId: string;
+  status: "ARCHIVED";
+  version: number;
+}
+
+export interface BatchArchiveTracksResult {
+  archived: number;
+  items: BatchArchiveTrackItem[];
+}
+
 export type PermanentDeleteTracksJobStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
 export type PermanentDeleteTrackItemStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
 

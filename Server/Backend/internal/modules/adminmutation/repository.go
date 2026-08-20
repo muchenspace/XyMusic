@@ -309,38 +309,8 @@ func (repository *Repository) ArchiveTrack(ctx context.Context, id string, expec
 	if state.Status == "ARCHIVED" {
 		return invalidTrackTransition("Track is already archived")
 	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE metadata_writeback_jobs SET
-			cancel_requested = true,
-			status = CASE
-				WHEN status = 'PENDING'
-					THEN 'CANCELLED'::metadata_writeback_status
-				ELSE status
-			END,
-			completed_at = CASE
-				WHEN status = 'PENDING' THEN now()
-				ELSE completed_at
-			END,
-			locked_by = CASE
-				WHEN status = 'PENDING' THEN NULL
-				ELSE locked_by
-			END,
-			locked_until = CASE
-				WHEN status = 'PENDING' THEN NULL
-				ELSE locked_until
-			END,
-			last_error_code = CASE
-				WHEN status = 'PENDING' THEN NULL
-				ELSE last_error_code
-			END,
-			last_error = CASE
-				WHEN status = 'PENDING' THEN NULL
-				ELSE last_error
-			END,
-			version = version + 1,
-			updated_at = now()
-		WHERE track_id = $1 AND status IN ('PENDING', 'PROCESSING')`, id); err != nil {
-		return fmt.Errorf("cancel metadata writebacks while archiving track: %w", err)
+	if err := cancelTrackWritebacksForArchive(ctx, tx, id); err != nil {
+		return err
 	}
 	command, err := tx.Exec(ctx, `UPDATE tracks SET status='ARCHIVED',version=version+1,updated_at=now()
 		WHERE id=$1 AND version=$2`, id, expectedVersion)
@@ -440,6 +410,43 @@ func (repository *Repository) transitionTrackToReady(
 
 func invalidTrackTransition(detail string) error {
 	return apperror.New(apperror.CodeInvalidStateTransition, detail)
+}
+
+func cancelTrackWritebacksForArchive(ctx context.Context, tx pgx.Tx, trackID string) error {
+	if _, err := tx.Exec(ctx, `
+		UPDATE metadata_writeback_jobs SET
+			cancel_requested = true,
+			status = CASE
+				WHEN status = 'PENDING'
+					THEN 'CANCELLED'::metadata_writeback_status
+				ELSE status
+			END,
+			completed_at = CASE
+				WHEN status = 'PENDING' THEN now()
+				ELSE completed_at
+			END,
+			locked_by = CASE
+				WHEN status = 'PENDING' THEN NULL
+				ELSE locked_by
+			END,
+			locked_until = CASE
+				WHEN status = 'PENDING' THEN NULL
+				ELSE locked_until
+			END,
+			last_error_code = CASE
+				WHEN status = 'PENDING' THEN NULL
+				ELSE last_error_code
+			END,
+			last_error = CASE
+				WHEN status = 'PENDING' THEN NULL
+				ELSE last_error
+			END,
+			version = version + 1,
+			updated_at = now()
+		WHERE track_id = $1 AND status IN ('PENDING', 'PROCESSING')`, trackID); err != nil {
+		return fmt.Errorf("cancel metadata writebacks while archiving track: %w", err)
+	}
+	return nil
 }
 
 func (repository *Repository) UpsertLyrics(ctx context.Context, trackID string, input LyricsInput) (StoredLyric, error) {
@@ -646,8 +653,32 @@ func deleteAlbumIfEmpty(ctx context.Context, tx pgx.Tx, albumID, reason string) 
 	if albumID == "" {
 		return false, nil
 	}
+	var lockedID string
+	if err := tx.QueryRow(ctx, `SELECT id FROM albums WHERE id=$1 FOR UPDATE`, albumID).Scan(&lockedID); errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("lock empty album: %w", err)
+	}
+	artistRows, err := tx.Query(ctx, `SELECT artist_id FROM album_artists WHERE album_id=$1`, albumID)
+	if err != nil {
+		return false, fmt.Errorf("query empty album artists: %w", err)
+	}
+	artistIDs := make([]string, 0)
+	for artistRows.Next() {
+		var artistID string
+		if err := artistRows.Scan(&artistID); err != nil {
+			artistRows.Close()
+			return false, fmt.Errorf("scan empty album artist: %w", err)
+		}
+		artistIDs = append(artistIDs, artistID)
+	}
+	if err := artistRows.Err(); err != nil {
+		artistRows.Close()
+		return false, fmt.Errorf("iterate empty album artists: %w", err)
+	}
+	artistRows.Close()
 	var cover *string
-	err := tx.QueryRow(ctx, `DELETE FROM albums al WHERE al.id=$1 AND NOT EXISTS(SELECT 1 FROM tracks WHERE album_id=al.id) RETURNING cover_asset_id`, albumID).Scan(&cover)
+	err = tx.QueryRow(ctx, `DELETE FROM albums al WHERE al.id=$1 AND NOT EXISTS(SELECT 1 FROM tracks WHERE album_id=al.id) RETURNING cover_asset_id`, albumID).Scan(&cover)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -657,7 +688,61 @@ func deleteAlbumIfEmpty(ctx context.Context, tx pgx.Tx, albumID, reason string) 
 	if err := scheduleArtworkCleanup(ctx, tx, cover, reason); err != nil {
 		return false, err
 	}
+	if err := deleteArtistsIfEmpty(ctx, tx, artistIDs, "EMPTY_ARTIST_AFTER_ALBUM_DELETE"); err != nil {
+		return false, err
+	}
 	return true, nil
+}
+
+func deleteArtistsIfEmpty(ctx context.Context, tx pgx.Tx, artistIDs []string, reason string) error {
+	if len(artistIDs) == 0 {
+		return nil
+	}
+	artistIDs = uniqueStrings(artistIDs)
+	rows, err := tx.Query(ctx, `DELETE FROM artists artist
+		WHERE artist.id=ANY($1::uuid[])
+		  AND NOT EXISTS (SELECT 1 FROM track_artists track_credit WHERE track_credit.artist_id=artist.id)
+		  AND NOT EXISTS (SELECT 1 FROM album_artists album_credit WHERE album_credit.artist_id=artist.id)
+		RETURNING artist.artwork_asset_id`, artistIDs)
+	if err != nil {
+		return fmt.Errorf("delete empty artists: %w", err)
+	}
+	assets := make([]*string, 0)
+	for rows.Next() {
+		var assetID *string
+		if err := rows.Scan(&assetID); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan deleted artist artwork: %w", err)
+		}
+		assets = append(assets, assetID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate deleted artists: %w", err)
+	}
+	rows.Close()
+	for _, assetID := range assets {
+		if err := scheduleArtworkCleanup(ctx, tx, assetID, reason); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func uniqueStrings(values []string) []string {
+	if len(values) < 2 {
+		return values
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 func scheduleArtworkCleanup(ctx context.Context, tx pgx.Tx, assetID *string, reason string) error {
 	if assetID == nil {

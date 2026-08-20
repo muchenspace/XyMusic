@@ -16,6 +16,7 @@ import type {
   MediaToolsConfig,
   MetadataWritebackJob,
   BatchRestoreTracksResult,
+  BatchArchiveTracksResult,
   PageResult,
   PermanentDeleteTracksJob,
   RuntimeSettings,
@@ -70,6 +71,7 @@ export const adminApi = {
   archiveTrack: (id: string, expectedVersion: number) => apiRequest<unknown>(`/api/v1/admin/tracks/${id}/archive`, { method: "POST", body: { expectedVersion } }),
   restoreTrack: (id: string, expectedVersion: number) => apiRequest<unknown>(`/api/v1/admin/tracks/${id}/restore`, { method: "POST", body: { expectedVersion } }),
   batchRestoreTracks: (items: TrackMutationTarget[]) => apiRequest<BatchRestoreTracksResult>("/api/v1/admin/tracks/batch/restore", { method: "POST", body: { items } }),
+  batchArchiveTracks: (items: TrackMutationTarget[]) => apiRequest<BatchArchiveTracksResult>("/api/v1/admin/tracks/batch/archive", { method: "POST", body: { items } }),
   createPermanentDeleteTracksJob: (items: TrackMutationTarget[]) => apiRequest<PermanentDeleteTracksJob>("/api/v1/admin/tracks/batch/delete-permanently", { method: "POST", body: { items } }),
   permanentDeleteTracksJob: (jobId: string, signal?: AbortSignal) => apiRequest<PermanentDeleteTracksJob>(`/api/v1/admin/tracks/batch/delete-permanently/${jobId}`, { signal }),
   deleteTrackPermanently: (id: string, expectedVersion: number) => apiRequest<{

@@ -238,6 +238,10 @@ func (repository *Repository) DeleteTrackPermanently(
 	if err != nil {
 		return restoreOnError(err)
 	}
+	artistIDs, err := queryTrackArtistIDs(ctx, tx, id)
+	if err != nil {
+		return restoreOnError(err)
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM playlist_tracks WHERE track_id=$1`, id); err != nil {
 		return restoreOnError(err)
 	}
@@ -281,6 +285,9 @@ func (repository *Repository) DeleteTrackPermanently(
 		return restoreOnError(apperror.Conflict(apperror.CodeVersionConflict, "Track changed during permanent deletion", nil))
 	}
 	if _, err := deleteAlbumIfEmpty(ctx, tx, stringValue(lockedAlbum), "EMPTY_ALBUM_AFTER_TRACK_DELETE"); err != nil {
+		return restoreOnError(err)
+	}
+	if err := deleteArtistsIfEmpty(ctx, tx, artistIDs, "EMPTY_ARTIST_AFTER_TRACK_DELETE"); err != nil {
 		return restoreOnError(err)
 	}
 	scheduled := 0
@@ -370,6 +377,26 @@ func queryTrackAssetIDs(ctx context.Context, tx pgx.Tx, trackID string) ([]strin
 	err = rows.Err()
 	rows.Close()
 	return ids, err
+}
+
+func queryTrackArtistIDs(ctx context.Context, tx pgx.Tx, trackID string) ([]string, error) {
+	rows, err := tx.Query(ctx, `SELECT artist_id FROM track_artists WHERE track_id=$1`, trackID)
+	if err != nil {
+		return nil, fmt.Errorf("query track artists before deletion: %w", err)
+	}
+	defer rows.Close()
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan track artist before deletion: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate track artists before deletion: %w", err)
+	}
+	return ids, nil
 }
 
 func secureSourcePath(rootPath, sourcePath string) (string, error) {

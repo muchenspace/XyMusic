@@ -52,8 +52,8 @@ func TestEveryIdempotentAPIHasReplayBoundaryTestEvidence(t *testing.T) {
 		covered++
 		t.Logf("%s | idempotency=%s#%s", key, reference.file, reference.test)
 	}
-	if covered != 57 {
-		t.Fatalf("idempotency evidence covers %d endpoints, want 57", covered)
+	if covered != 58 {
+		t.Fatalf("idempotency evidence covers %d endpoints, want 58", covered)
 	}
 }
 

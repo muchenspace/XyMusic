@@ -165,6 +165,20 @@ func TestAdminMutationRoutesExecuteReplayAndRejectPayloadConflicts(t *testing.T)
 			},
 		},
 		{
+			name: "archive tracks batch", method: http.MethodPost, path: "/api/v1/admin/tracks/batch/archive",
+			scope: "admin.track.archive.batch", status: http.StatusOK,
+			initialBody:      `{"items":[{"trackId":"` + trackID + `","expectedVersion":2},{"trackId":"` + secondTrackID + `","expectedVersion":3}],"unknown":"first"}`,
+			replayBody:       `{"items":[{"trackId":"` + trackID + `","expectedVersion":2},{"trackId":"` + secondTrackID + `","expectedVersion":3}],"unknown":"second","another":true}`,
+			conflictBody:     `{"items":[{"trackId":"` + trackID + `","expectedVersion":4},{"trackId":"` + secondTrackID + `","expectedVersion":3}],"unknown":"second"}`,
+			responseContains: `"archived":2`,
+			assertCall: func(t *testing.T, call mutationCall) {
+				input := call.input.(BatchTrackMutationInput)
+				if call.operation != "archiveTracksBatch" || len(input.Items) != 2 || input.Items[0].TrackID != trackID || input.Items[1].TrackID != secondTrackID {
+					t.Fatalf("call=%+v input=%+v", call, input)
+				}
+			},
+		},
+		{
 			name: "restore track", method: http.MethodPost, path: "/api/v1/admin/tracks/" + trackID + "/restore",
 			scope: "admin.track.restore:" + trackID, status: http.StatusOK,
 			initialBody:      `{"expectedVersion":2,"unknown":"first"}`,
@@ -313,7 +327,7 @@ func TestMutationSchemaValidationPrecedesAuthentication(t *testing.T) {
 	engine := gin.New()
 	routes.Register(engine)
 	id := "00000000-0000-4000-8000-000000000001"
-	requests := []struct{ method, path, body string }{{http.MethodPost, "/api/v1/admin/artists", `{}`}, {http.MethodPatch, "/api/v1/admin/artists/" + id, `{"expectedVersion":1}`}, {http.MethodPost, "/api/v1/admin/albums", `{"title":"Album","artistCredits":[]}`}, {http.MethodPost, "/api/v1/admin/tracks", `{"title":"Track","artistCredits":[],"discNumber":1}`}, {http.MethodPost, "/api/v1/admin/tracks/" + id + "/restore", `{}`}, {http.MethodPost, "/api/v1/admin/tracks/batch/restore", `{"items":[{"trackId":"not-a-uuid","expectedVersion":1}]}`}, {http.MethodPost, "/api/v1/admin/tracks/batch/delete-permanently", `{"items":[{"trackId":"` + id + `","expectedVersion":1},{"trackId":"` + strings.ToUpper(id) + `","expectedVersion":1}]}`}, {http.MethodPut, "/api/v1/admin/tracks/" + id + "/lyrics", `{"expectedVersion":1,"language":"zh","format":"LRC","content":"[00:01.00]line","isDefault":true}`}, {http.MethodPatch, "/api/v1/admin/users/" + id + "/status", `{"expectedVersion":1,"status":"DELETED","reason":"x"}`}}
+	requests := []struct{ method, path, body string }{{http.MethodPost, "/api/v1/admin/artists", `{}`}, {http.MethodPatch, "/api/v1/admin/artists/" + id, `{"expectedVersion":1}`}, {http.MethodPost, "/api/v1/admin/albums", `{"title":"Album","artistCredits":[]}`}, {http.MethodPost, "/api/v1/admin/tracks", `{"title":"Track","artistCredits":[],"discNumber":1}`}, {http.MethodPost, "/api/v1/admin/tracks/" + id + "/restore", `{}`}, {http.MethodPost, "/api/v1/admin/tracks/batch/archive", `{"items":[{"trackId":"not-a-uuid","expectedVersion":1}]}`}, {http.MethodPost, "/api/v1/admin/tracks/batch/restore", `{"items":[{"trackId":"not-a-uuid","expectedVersion":1}]}`}, {http.MethodPost, "/api/v1/admin/tracks/batch/delete-permanently", `{"items":[{"trackId":"` + id + `","expectedVersion":1},{"trackId":"` + strings.ToUpper(id) + `","expectedVersion":1}]}`}, {http.MethodPut, "/api/v1/admin/tracks/" + id + "/lyrics", `{"expectedVersion":1,"language":"zh","format":"LRC","content":"[00:01.00]line","isDefault":true}`}, {http.MethodPatch, "/api/v1/admin/users/" + id + "/status", `{"expectedVersion":1,"status":"DELETED","reason":"x"}`}}
 	for _, item := range requests {
 		request := httptest.NewRequest(item.method, item.path, bytes.NewBufferString(item.body))
 		request.Header.Set("Content-Type", "application/json")
@@ -429,6 +443,14 @@ func (stub *mutationAPIStub) PublishTrack(_ context.Context, actor, trace, id st
 func (stub *mutationAPIStub) ArchiveTrack(_ context.Context, actor, trace, id string, version int) (TrackDTO, error) {
 	stub.append("archiveTrack", actor, trace, id, version, nil)
 	return TrackDTO{ID: id, Status: "ARCHIVED", Version: version + 1}, nil
+}
+func (stub *mutationAPIStub) ArchiveTracksBatch(_ context.Context, actor, trace string, input BatchTrackMutationInput) (BatchArchiveDTO, error) {
+	stub.append("archiveTracksBatch", actor, trace, "", 0, input)
+	items := make([]BatchArchiveItemDTO, 0, len(input.Items))
+	for _, item := range input.Items {
+		items = append(items, BatchArchiveItemDTO{TrackID: item.TrackID, Status: "ARCHIVED", Version: item.ExpectedVersion + 1})
+	}
+	return BatchArchiveDTO{Archived: len(items), Items: items}, nil
 }
 func (stub *mutationAPIStub) RestoreTrack(_ context.Context, actor, trace, id string, version int) (TrackDTO, error) {
 	stub.append("restoreTrack", actor, trace, id, version, nil)

@@ -28,6 +28,7 @@ type API interface {
 	UpdateTrack(context.Context, string, string, string, UpdateTrackInput) (TrackDTO, error)
 	PublishTrack(context.Context, string, string, string, int) (TrackDTO, error)
 	ArchiveTrack(context.Context, string, string, string, int) (TrackDTO, error)
+	ArchiveTracksBatch(context.Context, string, string, BatchTrackMutationInput) (BatchArchiveDTO, error)
 	RestoreTrack(context.Context, string, string, string, int) (TrackDTO, error)
 	RestoreTracksBatch(context.Context, string, string, BatchTrackMutationInput) (BatchRestoreDTO, error)
 	DeleteTrackPermanently(context.Context, string, string, string, int) (DeleteTrackDTO, error)
@@ -63,6 +64,7 @@ func (routes *Routes) Register(router gin.IRouter) {
 	admin.PATCH("/albums/:id", httpserver.Handle(routes.updateAlbum))
 	admin.POST("/albums/merge", httpserver.Handle(routes.mergeAlbums))
 	admin.POST("/tracks", httpserver.Handle(routes.createTrack))
+	admin.POST("/tracks/batch/archive", httpserver.Handle(routes.archiveTracksBatch))
 	admin.POST("/tracks/batch/restore", httpserver.Handle(routes.restoreTracksBatch))
 	admin.POST("/tracks/batch/delete-permanently", httpserver.Handle(routes.createPermanentDeleteBatch))
 	admin.GET("/tracks/batch/delete-permanently/:jobId", httpserver.Handle(routes.permanentDeleteBatch))
@@ -182,6 +184,15 @@ func (routes *Routes) archiveTrack(c *gin.Context) error {
 }
 func (routes *Routes) restoreTrack(c *gin.Context) error {
 	return routes.versionMutation(c, "admin.track.restore:", routes.service.RestoreTrack)
+}
+func (routes *Routes) archiveTracksBatch(c *gin.Context) error {
+	input, err := decodeBatchTrackMutation(c)
+	if err != nil {
+		return err
+	}
+	return routes.execute(c, "admin.track.archive.batch", input, http.StatusOK, func(actor, trace string) (any, error) {
+		return routes.service.ArchiveTracksBatch(c.Request.Context(), actor, trace, input)
+	})
 }
 func (routes *Routes) restoreTracksBatch(c *gin.Context) error {
 	input, err := decodeBatchTrackMutation(c)

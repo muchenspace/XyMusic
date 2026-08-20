@@ -15,6 +15,7 @@ import type {
   AlbumMergeResult,
   AlbumSummary,
   ArtistSummary,
+  BatchArchiveTracksResult,
   BatchRestoreTracksResult,
   MusicListQuery,
   MusicPage,
@@ -47,6 +48,10 @@ export class HttpMusicAdminGateway implements MusicAdminGateway {
 
   batchRestoreTracks(items: TrackMutationTarget[]): Promise<BatchRestoreTracksResult> {
     return adminApi.batchRestoreTracks(items);
+  }
+
+  batchArchiveTracks(items: TrackMutationTarget[]): Promise<BatchArchiveTracksResult> {
+    return adminApi.batchArchiveTracks(items);
   }
 
   createPermanentDeleteTracksJob(items: TrackMutationTarget[]): Promise<PermanentDeleteTracksJob> {
