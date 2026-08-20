@@ -57,7 +57,7 @@ func bindAudit(c *gin.Context) (ListInput, error) {
 	if err != nil {
 		return ListInput{}, err
 	}
-	pageSize, err := auditInteger(c, "pageSize", 1, 100)
+	pageSize, err := auditInteger(c, "pageSize", 1, pagination.MaxPageSize)
 	if err != nil {
 		return ListInput{}, err
 	}

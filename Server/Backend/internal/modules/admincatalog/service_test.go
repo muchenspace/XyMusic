@@ -11,7 +11,7 @@ import (
 	"xymusic/server/internal/shared/apperror"
 )
 
-func TestListArtistsAppliesLegacyDefaultsAndPresentsArtwork(t *testing.T) {
+func TestListArtistsAppliesDefaultsAndPresentsArtwork(t *testing.T) {
 	now := time.Date(2026, 7, 16, 1, 2, 3, 456000000, time.UTC)
 	assetID := "asset-1"
 	var query ArtistQuery
@@ -29,7 +29,7 @@ func TestListArtistsAppliesLegacyDefaultsAndPresentsArtwork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if query.Sort != "name" || query.Order != SortAscending || query.Limit != 25 || query.Offset != 0 {
+	if query.Sort != "name" || query.Order != SortAscending || query.Limit != 100 || query.Offset != 0 {
 		t.Fatalf("query = %#v", query)
 	}
 	if len(result.Items) != 1 || result.Items[0].Artwork == nil || result.Items[0].Artwork.URL != "signed" ||
@@ -62,12 +62,12 @@ func TestDuplicateAlbumsGroupsSortsAndDeduplicatesPrimaryArtists(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result.GroupCount != 3 || result.DuplicateAlbumCount != 5 || result.Groups[0].Albums[0].ID != "album-2" ||
-		result.Page != 1 || result.PageSize != 25 || result.Total != 1 || result.TotalPages != 1 ||
+		result.Page != 1 || result.PageSize != 100 || result.Total != 1 || result.TotalPages != 1 ||
 		result.Groups[0].AlbumPage != 2 || result.Groups[0].AlbumPageSize != 100 ||
 		result.Groups[0].AlbumTotal != 202 || result.Groups[0].AlbumTotalPages != 3 {
 		t.Fatalf("result = %#v", result)
 	}
-	if query.AlbumID != "album-1" || query.Limit != 25 || query.Offset != 0 ||
+	if query.AlbumID != "album-1" || query.Limit != 100 || query.Offset != 0 ||
 		query.AlbumLimit != 100 || query.AlbumOffset != 100 {
 		t.Fatalf("query = %#v", query)
 	}
@@ -193,6 +193,9 @@ func TestListTracksFiltersByAudioStatus(t *testing.T) {
 	}
 	if query.Status != AudioStatusProcessing || result.Items == nil {
 		t.Fatalf("query/result = %#v / %#v", query, result)
+	}
+	if query.Limit != 100 || query.Offset != 0 || result.PageSize != 100 {
+		t.Fatalf("pagination defaults = %#v / %#v", query, result)
 	}
 	if _, err := service.ListTracks(context.Background(), TrackListInput{Status: AudioStatus("PENDING")}); err == nil {
 		t.Fatal("PENDING must not be accepted as a public audio status")

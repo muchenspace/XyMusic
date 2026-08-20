@@ -43,7 +43,7 @@ func TestRoutesExposeEightMetadataEndpoints(t *testing.T) {
 		{http.MethodPatch, "/api/v1/admin/tracks/" + trackID + "/metadata", `{"expectedVersion":1,"patch":{"title":"New title"},"reason":"edit"}`, http.StatusOK, true},
 		{http.MethodPost, "/api/v1/admin/metadata/batch", `{"items":[{"trackId":"` + trackID + `","expectedVersion":2}],"patch":{"genres":["Rock"]},"reason":"batch"}`, http.StatusOK, true},
 		{http.MethodPost, "/api/v1/admin/tracks/" + trackID + "/metadata/writeback", `{"expectedVersion":3,"reason":"write"}`, http.StatusAccepted, true},
-		{http.MethodGet, "/api/v1/admin/metadata/writeback-jobs?page=1&pageSize=20&status=FAILED&trackId=" + trackID, "", http.StatusOK, false},
+		{http.MethodGet, "/api/v1/admin/metadata/writeback-jobs?page=1&pageSize=1000&status=FAILED&trackId=" + trackID, "", http.StatusOK, false},
 		{http.MethodGet, "/api/v1/admin/metadata/writeback-jobs/" + jobID, "", http.StatusOK, false},
 		{http.MethodPost, "/api/v1/admin/metadata/writeback-jobs/" + jobID + "/retry", `{"expectedVersion":2,"reason":"retry"}`, http.StatusAccepted, true},
 		{http.MethodPost, "/api/v1/admin/metadata/writeback-jobs/" + jobID + "/cancel", `{"expectedVersion":3,"reason":"cancel"}`, http.StatusAccepted, true},
@@ -90,7 +90,7 @@ func TestRoutesExposeEightMetadataEndpoints(t *testing.T) {
 	if !reflect.DeepEqual(idempotency.scopes, wantScopes) {
 		t.Fatalf("scopes=%v", idempotency.scopes)
 	}
-	if api.writebackFilter.Status != WritebackFailed || api.writebackFilter.TrackID != trackID {
+	if api.writebackFilter.PageSize != 1000 || api.writebackFilter.Status != WritebackFailed || api.writebackFilter.TrackID != trackID {
 		t.Fatalf("writeback query=%+v", api.writebackFilter)
 	}
 }

@@ -11,6 +11,7 @@ import PageHeader from "@/components/PageHeader.vue";
 import StatePanel from "@/components/StatePanel.vue";
 import { useMusicAdmin } from "@/app/services/music";
 import type { AlbumMergeResult, AlbumSummary } from "@/features/music/domain/models";
+import { DEFAULT_CATALOG_PAGE_SIZE } from "@/shared/presentation/pagination";
 import { useUiStore } from "@/stores/ui";
 import { formatDuration } from "@/utils/format";
 
@@ -23,7 +24,7 @@ const mergeOpen = ref(false);
 const mergeLoading = ref(false);
 const mergeCandidates = ref<AlbumSummary[]>([]);
 const trackPage = ref(1);
-const trackPageSize = ref(25);
+const trackPageSize = ref(DEFAULT_CATALOG_PAGE_SIZE);
 const query = useQuery({
   queryKey: computed(() => ["admin", "album", albumId.value, { page: trackPage.value, pageSize: trackPageSize.value }]),
   queryFn: ({ signal }) => musicAdmin.getAlbum(albumId.value, trackPage.value, trackPageSize.value, signal),

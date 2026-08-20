@@ -17,6 +17,7 @@ import { scanQueuePresentation, sourceScanProgress, sourceScanRefetchInterval, s
 import type { SourceScanSubscription } from "@/features/sources/application/source-admin-gateway";
 import type { LibrarySource, LibrarySourceInput, SourceScan, SourceScanPage } from "@/features/sources/domain/models";
 import { useSourceAdmin } from "@/app/services/sources";
+import { DEFAULT_CATALOG_PAGE_SIZE, DEFAULT_PAGE_SIZE } from "@/shared/presentation/pagination";
 import { useUiStore } from "@/stores/ui";
 import { formatDate, formatRelative } from "@/utils/format";
 
@@ -44,13 +45,13 @@ const browseOpen = ref(false);
 const selected = ref<LibrarySource>();
 const historySourceId = ref("");
 const sourcePage = ref(1);
-const sourcePageSize = ref(12);
+const sourcePageSize = ref(DEFAULT_PAGE_SIZE);
 const page = ref(1);
-const pageSize = ref(12);
+const pageSize = ref(DEFAULT_PAGE_SIZE);
 const browsePath = ref("");
 const browseRequestPath = ref("");
 const browsePage = ref(1);
-const directoryPageSize = ref(100);
+const directoryPageSize = ref(DEFAULT_CATALOG_PAGE_SIZE);
 const archiveCatalog = ref(true);
 const fieldErrors = ref<Record<string, string>>({});
 const actionError = ref("");

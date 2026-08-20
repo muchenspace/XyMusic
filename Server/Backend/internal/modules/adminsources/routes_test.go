@@ -35,7 +35,7 @@ func TestRoutesExposeAllThirteenLibrarySourceAPIs(t *testing.T) {
 		body   string
 		status int
 	}{
-		{http.MethodGet, "/api/v1/admin/sources/browse?path=ignored&path=music&page=bad&page=2&pageSize=bad&pageSize=100&unknown=x", "", http.StatusOK},
+		{http.MethodGet, "/api/v1/admin/sources/browse?path=ignored&path=music&page=bad&page=2&pageSize=bad&pageSize=1000&unknown=x", "", http.StatusOK},
 		{http.MethodGet, "/api/v1/admin/sources?page=bad&page=3&pageSize=bad&pageSize=20", "", http.StatusOK},
 		{http.MethodPost, "/api/v1/admin/sources", `{"name":"Music","path":"music","mode":"READ_ONLY","enabled":true,"scanOnStartup":false,"scanIntervalMinutes":5e0,"includePatterns":[],"excludePatterns":[],"ignored":true}`, http.StatusCreated},
 		{http.MethodGet, "/api/v1/admin/sources/" + testRootID, "", http.StatusOK},
@@ -84,7 +84,7 @@ func TestRoutesExposeAllThirteenLibrarySourceAPIs(t *testing.T) {
 	if idempotency.payloadHadUnknown {
 		t.Fatal("ignored JSON property entered idempotency payload")
 	}
-	if api.browsePath != "music" || api.browsePage.Page != 2 || api.browsePage.PageSize != 100 ||
+	if api.browsePath != "music" || api.browsePage.Page != 2 || api.browsePage.PageSize != 1000 ||
 		api.rootPage.Page != 3 || api.rootPage.PageSize != 20 || api.filePage != 1 {
 		t.Fatalf("query projection browse=%q/%#v roots=%#v filePage=%d", api.browsePath, api.browsePage, api.rootPage, api.filePage)
 	}
@@ -103,7 +103,7 @@ func TestRouteValidationPrecedesAuthenticationAndKeepsTypeBoxBounds(t *testing.T
 	requests := []struct{ method, path, body string }{
 		{http.MethodGet, "/api/v1/admin/sources/browse?path=" + strings.Repeat("a", 4001), ""},
 		{http.MethodGet, "/api/v1/admin/sources/browse?page=0", ""},
-		{http.MethodGet, "/api/v1/admin/sources?pageSize=101", ""},
+		{http.MethodGet, "/api/v1/admin/sources?pageSize=1001", ""},
 		{http.MethodGet, "/api/v1/admin/sources/not-a-uuid", ""},
 		{http.MethodGet, "/api/v1/admin/sources/" + testRootID + "/files?page=0", ""},
 		{http.MethodGet, "/api/v1/admin/sources/" + testRootID + "/files?status=INVALID", ""},

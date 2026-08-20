@@ -39,7 +39,7 @@ func TestAuditQueryIgnoresUnknownFieldsAndUsesLastRepeatedValue(t *testing.T) {
 	id := "00000000-0000-0000-0000-000000000001"
 	request := httptest.NewRequest(
 		http.MethodGet,
-		"/api/v1/admin/audit?page=bad&page=2&pageSize=bad&pageSize=20&actorId=bad&actorId="+id+
+		"/api/v1/admin/audit?page=bad&page=2&pageSize=bad&pageSize=1000&actorId=bad&actorId="+id+
 			"&result=INVALID&result=SUCCESS&sort=invalid&sort=action&order=invalid&order=asc&unknown=true",
 		nil,
 	)
@@ -49,7 +49,7 @@ func TestAuditQueryIgnoresUnknownFieldsAndUsesLastRepeatedValue(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
-	if api.input.Page != 2 || api.input.PageSize != 20 || api.input.ActorID != id ||
+	if api.input.Page != 2 || api.input.PageSize != 1000 || api.input.ActorID != id ||
 		api.input.Result != "SUCCESS" || api.input.Sort != "action" || api.input.Order != "asc" {
 		t.Fatalf("input=%+v", api.input)
 	}

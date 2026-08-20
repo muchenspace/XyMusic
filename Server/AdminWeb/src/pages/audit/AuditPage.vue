@@ -15,6 +15,7 @@ import {
   auditResultLabel,
   auditTargetTypeLabel,
 } from "@/shared/presentation/audit";
+import { DEFAULT_PAGE_SIZE } from "@/shared/presentation/pagination";
 import { useAuditAdmin } from "@/app/services/audit";
 import { formatDate } from "@/utils/format";
 import { quoteCsvCell } from "@/utils/csv";
@@ -22,7 +23,7 @@ import { apiErrorMessage } from "@/shared/application/api-error";
 
 const page = ref(1);
 const auditAdmin = useAuditAdmin();
-const pageSize = ref(25);
+const pageSize = ref(DEFAULT_PAGE_SIZE);
 const search = ref("");
 const action = ref("");
 const debouncedSearch = refDebounced(search, 300);
