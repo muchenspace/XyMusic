@@ -15,6 +15,33 @@ import type { PlaybackStatePersistence } from "../src/application/services/Playb
 import { PlaybackSession } from "../src/application/services/PlaybackSession";
 
 describe("playback session", () => {
+  it("restores the persisted playback mode even without a resumable queue", () => {
+    const harness = createHarness({
+      restore: () => ({
+        ownerKey: "owner-1",
+        queue: [],
+        currentIndex: -1,
+        position: 0,
+        shuffled: true,
+        repeat: true,
+        repeatMode: "one" as const,
+        quality: "AUTO" as const,
+        crossfadeSeconds: 0,
+        savedAt: new Date(0).toISOString(),
+      }),
+    });
+
+    expect(harness.session.restoreState("owner-1")).toBe(false);
+    expect(harness.session.state()).toMatchObject({
+      shuffled: true,
+      repeatMode: "one",
+      queue: [],
+      currentIndex: -1,
+    });
+
+    harness.session.dispose();
+  });
+
   it("publishes a queue revision synchronously before asynchronous playback begins", async () => {
     const harness = createHarness();
     const tracks = [track("one"), track("two")];

@@ -9,9 +9,12 @@ import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaUri
 import com.xymusic.app.feature.player.domain.PlaybackCheckpoint
 import com.xymusic.app.feature.player.domain.PlaybackEventSink
 import com.xymusic.app.feature.player.domain.PlaybackEventType
+import com.xymusic.app.feature.player.domain.PlaybackModePreference
+import com.xymusic.app.feature.player.domain.PlaybackModeStore
 import com.xymusic.app.feature.player.domain.PlaybackQueueStore
 import com.xymusic.app.feature.player.domain.PlayerResult
 import com.xymusic.app.feature.player.domain.StoredPlaybackQueueItem
+import com.xymusic.app.feature.player.domain.model.RepeatMode
 import java.time.Clock
 import java.util.Collections
 import java.util.UUID
@@ -29,6 +32,7 @@ internal class PlaybackPersistenceController(
     private val player: Player,
     private val serviceScope: CoroutineScope,
     private val queueStore: PlaybackQueueStore,
+    private val modeStore: PlaybackModeStore,
     private val eventSink: PlaybackEventSink,
     private val clock: Clock,
     private val cancelSleepTimer: () -> Unit,
@@ -72,6 +76,9 @@ internal class PlaybackPersistenceController(
     }
 
     suspend fun restoreQueue() {
+        val mode = modeStore.read()
+        player.repeatMode = mode.repeatMode.toMedia3RepeatMode()
+        player.shuffleModeEnabled = mode.shuffleEnabled
         val storedItems = queueStore.observe().first()
         queueRestorer.restore(storedItems) { stored ->
             enqueuedAtByQueueItemId[stored.queueItemId] = stored.enqueuedAtEpochMillis
@@ -111,6 +118,25 @@ internal class PlaybackPersistenceController(
                 delay(STRUCTURAL_PERSISTENCE_DEBOUNCE_MS)
                 persistSafely(target, checkpoint = null)
             }
+    }
+
+    private fun schedulePlaybackModePersistence() {
+        val target = currentPersistenceTarget() ?: return
+        val preference = PlaybackModePreference(
+            repeatMode = player.repeatMode.toDomainRepeatMode(),
+            shuffleEnabled = player.shuffleModeEnabled,
+        )
+        launchPersistence {
+            try {
+                persistenceMutex.withLock {
+                    if (isCurrentPersistenceTarget(target)) modeStore.write(preference)
+                }
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (_: Exception) {
+                // The next mode change will retry local preference persistence.
+            }
+        }
     }
 
     private fun scheduleCurrentCheckpoint(event: PlaybackEventType) {
@@ -334,6 +360,14 @@ internal class PlaybackPersistenceController(
 
     private val playerListener =
         object : Player.Listener {
+            override fun onRepeatModeChanged(repeatMode: Int) {
+                schedulePlaybackModePersistence()
+            }
+
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                schedulePlaybackModePersistence()
+            }
+
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
                 scheduleStructuralPersistence()
             }
@@ -426,4 +460,14 @@ internal class PlaybackPersistenceController(
     }
 
     private data class PersistenceTarget(val ownerUserId: String, val generation: Long)
+}
+
+private fun RepeatMode.toMedia3RepeatMode(): Int = when (this) {
+    RepeatMode.ONE -> Player.REPEAT_MODE_ONE
+    RepeatMode.ALL -> Player.REPEAT_MODE_ALL
+}
+
+private fun Int.toDomainRepeatMode(): RepeatMode = when (this) {
+    Player.REPEAT_MODE_ONE -> RepeatMode.ONE
+    else -> RepeatMode.ALL
 }
