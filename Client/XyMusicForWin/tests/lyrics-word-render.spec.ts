@@ -104,6 +104,66 @@ describe("word-timed lyric rendering", () => {
       wrapper.unmount();
     }
   });
+
+  it("highlights the active line word-by-word immediately when opened mid-playback", async () => {
+    const pinia = createPinia();
+    const playbackSession = new FakePlaybackSession({
+      state: {
+        queue: [track()],
+        currentIndex: 0,
+        currentTime: 3.5,
+        duration: 180,
+        isPlaying: true,
+      },
+    });
+
+    const wrapper = mount(LyricsView, {
+      global: {
+        plugins: [pinia],
+        provide: { [applicationServicesKey as symbol]: services(playbackSession) },
+        stubs: {
+          ArtworkImage: { template: "<div />" },
+          LyricsPlayerControls: { template: "<div />" },
+        },
+      },
+    });
+
+    const player = usePlayerStore(pinia);
+    const lyrics = useLyricsStore(pinia);
+    lyrics.lyrics = {
+      trackId: "track-1",
+      source: "lrc",
+      synchronized: true,
+      timing: "WORD",
+      lines: [
+        {
+          time: 0,
+          text: "first second",
+          words: [{ time: 0, endTime: 1, text: "first" }, { time: 1, endTime: 2, text: " second" }],
+        },
+        {
+          time: 3,
+          text: "third fourth",
+          words: [{ time: 3, endTime: 4, text: "third" }, { time: 4, endTime: 5, text: " fourth" }],
+        },
+      ],
+    };
+
+    try {
+      player.lyricsOpen = true;
+      await nextTick();
+      await nextTick();
+
+      const lines = wrapper.findAll(".lyric-line");
+      expect(lines[1]?.classes()).toContain("active");
+      const thirdWord = wrapper.findAll(".lyric-word").find((element) => element.text().includes("third"));
+      expect(thirdWord).toBeDefined();
+      expect(thirdWord?.classes()).toContain("is-current");
+      expect(thirdWord?.attributes("style")).toContain("--lyric-word-progress: 50%;");
+    } finally {
+      wrapper.unmount();
+    }
+  });
 });
 
 function services(playbackSession: FakePlaybackSession): ApplicationServices {

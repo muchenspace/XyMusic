@@ -15,6 +15,17 @@ class PlayerLyricsFollowTest {
     }
 
     @Test
+    fun resumingAutoFollowAnimatesBackToTheCurrentLineEvenWhenTheIndexDoesNotChange() {
+        assertThat(
+            lyricFollowScrollMode(
+                previousLyricIndex = 7,
+                lyricIndex = 7,
+                forceAnimation = true,
+            ),
+        ).isEqualTo(LyricFollowScrollMode.Animate)
+    }
+
+    @Test
     fun firstAndFarLyricsSnapWhileAdjacentUnlaidOutLyricsAnimate() {
         assertThat(
             lyricFollowScrollMode(

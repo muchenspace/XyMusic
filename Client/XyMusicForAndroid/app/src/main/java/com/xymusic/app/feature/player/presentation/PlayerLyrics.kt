@@ -372,14 +372,7 @@ internal fun LyricsContent(
                         transitionPhaseVelocity = 0f
                         return@collectLatest
                     }
-                    if (lyricIndex == previousLyricIndexCollected) {
-                        if (resumedAutoFollow) {
-                            listState.followLyricLine(
-                                index = centeredLyricTargetIndex(lyricIndex, centerActiveLine),
-                                centerActiveLine = centerActiveLine,
-                                scrollMode = LyricFollowScrollMode.Snap,
-                            )
-                        }
+                    if (lyricIndex == previousLyricIndexCollected && !resumedAutoFollow) {
                         if (
                             lyricTransitionNeedsSettling(
                                 animatedLinePosition = activeLinePosition,
@@ -403,6 +396,7 @@ internal fun LyricsContent(
                                 uiState.lyrics.getOrNull(index)?.timeMs
                             },
                             lyricTimeMs = uiState.lyrics.getOrNull(lyricIndex)?.timeMs,
+                            forceAnimation = resumedAutoFollow,
                         )
                     when (scrollMode) {
                         LyricFollowScrollMode.Snap -> {
@@ -624,7 +618,9 @@ internal fun lyricFollowScrollMode(
     lyricIndex: Int,
     previousLyricTimeMs: Long? = null,
     lyricTimeMs: Long? = null,
+    forceAnimation: Boolean = false,
 ): LyricFollowScrollMode {
+    if (forceAnimation) return LyricFollowScrollMode.Animate
     // A decreasing lyric index is a seek/repeat discontinuity, not natural playback.  Reversing
     // the whole list animation is distracting and can briefly highlight already-finished words.
     if (previousLyricIndex != null && lyricIndex < previousLyricIndex) {

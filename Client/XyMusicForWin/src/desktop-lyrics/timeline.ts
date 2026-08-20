@@ -202,9 +202,13 @@ export function desktopLyricsLineShiftPx(
   lineIndex: number,
   linePosition: number,
   layoutSlotOffset = 0,
+  lineDistancePx = DESKTOP_LYRICS_TRANSITION_LINE_DISTANCE_PX,
 ): number {
+  const normalizedLineDistance = Number.isFinite(lineDistancePx)
+    ? Math.max(0, lineDistancePx)
+    : DESKTOP_LYRICS_TRANSITION_LINE_DISTANCE_PX;
   return (finiteNumber(lineIndex) - finiteNumber(linePosition) - finiteNumber(layoutSlotOffset))
-    * DESKTOP_LYRICS_TRANSITION_LINE_DISTANCE_PX;
+    * normalizedLineDistance;
 }
 
 export function desktopLyricsTransitionWeight(

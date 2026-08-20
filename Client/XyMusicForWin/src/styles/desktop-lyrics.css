@@ -59,6 +59,8 @@ body,
 }
 
 .desktop-lyrics-copy {
+  --desktop-lyrics-copy-padding-start: clamp(18px, 11vh, 30px);
+  --desktop-lyrics-copy-padding-inline: 20px;
   position: relative;
   z-index: 1;
   display: grid;
@@ -67,7 +69,9 @@ body,
     "next";
   width: min(100%, 1120px);
   gap: calc(clamp(4px, 3vh, 7px) * var(--desktop-lyric-scale));
-  padding: clamp(18px, 11vh, 30px) 20px clamp(4px, 3vh, 12px);
+  padding: var(--desktop-lyrics-copy-padding-start)
+    var(--desktop-lyrics-copy-padding-inline)
+    clamp(4px, 3vh, 12px);
   text-align: center;
   pointer-events: none;
 }
@@ -80,12 +84,8 @@ body,
   transform-origin: 50% 50%;
 }
 
-.desktop-lyric-line-current,
-.desktop-lyric-line-outgoing {
-  grid-area: current;
-}
-
 .desktop-lyric-line-current {
+  grid-area: current;
   z-index: 2;
   transform: translateY(var(--desktop-lyric-transition-shift, 0))
     scale(var(--desktop-lyric-transition-scale, 1.012));
@@ -93,11 +93,16 @@ body,
 
 .desktop-lyric-line-current.is-transitioning,
 .desktop-lyric-line-outgoing {
-  will-change: transform;
+  opacity: var(--desktop-lyric-transition-opacity, 1);
+  will-change: transform, opacity;
 }
 
 .desktop-lyric-line-outgoing {
+  position: absolute;
   z-index: 1;
+  top: var(--desktop-lyrics-copy-padding-start);
+  right: var(--desktop-lyrics-copy-padding-inline);
+  left: var(--desktop-lyrics-copy-padding-inline);
   transform: translateY(var(--desktop-lyric-transition-shift, 0))
     scale(var(--desktop-lyric-transition-scale, 1));
   pointer-events: none;
@@ -106,6 +111,7 @@ body,
 .desktop-lyric-line p {
   margin: 0;
   overflow: visible;
+  overflow-wrap: anywhere;
   text-overflow: clip;
   white-space: normal;
 }
@@ -128,6 +134,7 @@ body,
 
 .desktop-lyric-words {
   color: var(--desktop-lyric-idle);
+  overflow-wrap: anywhere;
   white-space: normal;
 }
 
@@ -154,6 +161,7 @@ body,
   font: inherit;
   letter-spacing: inherit;
   line-height: inherit;
+  overflow-wrap: anywhere;
   white-space: inherit;
   word-spacing: inherit;
   unicode-bidi: plaintext;
@@ -314,12 +322,19 @@ body,
 
 @media (max-height: 150px) {
   .desktop-lyrics-app { padding-block: 5px; }
-  .desktop-lyrics-copy { gap: 2px; padding-block: 18px 4px; }
+  .desktop-lyrics-copy {
+    --desktop-lyrics-copy-padding-start: 18px;
+    gap: 2px;
+    padding-block: var(--desktop-lyrics-copy-padding-start) 4px;
+  }
   .desktop-lyric-translation { display: none; }
 }
 
 @media (max-height: 120px) {
-  .desktop-lyrics-copy { padding-block: 8px; }
+  .desktop-lyrics-copy {
+    --desktop-lyrics-copy-padding-start: 8px;
+    padding-block: var(--desktop-lyrics-copy-padding-start);
+  }
   .desktop-lyric-line-next { display: none; }
 }
 

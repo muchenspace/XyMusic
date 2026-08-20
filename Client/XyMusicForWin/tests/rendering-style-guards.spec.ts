@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const contentStyles = readFileSync(path.resolve(import.meta.dirname, "../src/styles/content.css"), "utf8");
+const desktopLyricsStyles = readFileSync(path.resolve(import.meta.dirname, "../src/styles/desktop-lyrics.css"), "utf8");
 const overlayStyles = readFileSync(path.resolve(import.meta.dirname, "../src/styles/overlays.css"), "utf8");
 
 describe("rendering style guards", () => {
@@ -36,6 +37,24 @@ describe("rendering style guards", () => {
     ]) {
       expect(declarationsFor(overlayStyles, selector)).toMatch(/\boverflow-wrap\s*:\s*anywhere/u);
     }
+  });
+
+  it("wraps unbroken desktop lyrics in both the source and highlight layers", () => {
+    for (const selector of [
+      ".desktop-lyric-line p",
+      ".desktop-lyric-words",
+      ".word-by-word-lyric-overlay-copy",
+    ]) {
+      expect(declarationsFor(desktopLyricsStyles, selector)).toMatch(/\boverflow-wrap\s*:\s*anywhere/u);
+    }
+  });
+
+  it("keeps the outgoing desktop lyric from resizing the current grid row", () => {
+    const outgoing = declarationsFor(desktopLyricsStyles, ".desktop-lyric-line-outgoing");
+    expect(outgoing).toMatch(/\bposition\s*:\s*absolute/u);
+    expect(outgoing).toMatch(/\btop\s*:\s*var\(--desktop-lyrics-copy-padding-start\)/u);
+    expect(declarationsFor(desktopLyricsStyles, ".desktop-lyric-line-current"))
+      .toMatch(/\bgrid-area\s*:\s*current/u);
   });
 });
 
