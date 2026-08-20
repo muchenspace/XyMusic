@@ -34,6 +34,38 @@ export const queryClient = new QueryClient({
 
 export const vueQueryPluginOptions: VueQueryPluginOptions = { queryClient };
 
+/**
+ * Music mutations can change the membership and counts of several catalog
+ * views at once (for example archiving the last track of an album). Keep the
+ * invalidation scope in one place so every mutation observes the same data
+ * contract.
+ */
+const ADMIN_MUSIC_LIST_QUERY_PREFIXES = [
+  ["admin", "tracks"],
+  ["admin", "albums"],
+  ["admin", "artists"],
+] as const;
+
+const ADMIN_MUSIC_ACTIVE_QUERY_PREFIXES = [
+  ["admin", "track"],
+  ["admin", "album"],
+  ["admin", "dashboard"],
+  ["admin", "audit"],
+] as const;
+
+export async function invalidateAdminMusicQueries(): Promise<void> {
+  await Promise.all([
+    // Keep inactive catalog pages current so navigation never shows a fresh-looking stale list.
+    ...ADMIN_MUSIC_LIST_QUERY_PREFIXES.map((queryKey) =>
+      queryClient.invalidateQueries({ queryKey, refetchType: "all" }),
+    ),
+    // A detail can legitimately disappear after archiving its last track; mark inactive details stale without fetching them.
+    ...ADMIN_MUSIC_ACTIVE_QUERY_PREFIXES.map((queryKey) =>
+      queryClient.invalidateQueries({ queryKey, refetchType: "active" }),
+    ),
+  ]);
+}
+
 export async function clearAdminQueryCache(): Promise<void> {
   await queryClient.cancelQueries();
   queryClient.clear();

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { AlertTriangle, Archive, Check, Disc3, FileAudio, ListFilter, Pencil, RefreshCw, RotateCcw, Save, Search, Sparkles, Tags, Trash2, Upload, X } from "lucide-vue-next";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
+import type { QueryFunctionContext } from "@tanstack/vue-query";
 import { refDebounced } from "@vueuse/core";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { onBeforeRouteLeave, useRoute } from "vue-router";
 import { ApiError } from "@/shared/application/api-error";
+import { invalidateAdminMusicQueries } from "@/app/query-client";
 import { trackListAudioRefetchInterval } from "@/shared/application/audio-status-refresh";
 import AppButton from "@/components/AppButton.vue";
 import AppPagination from "@/components/AppPagination.vue";
@@ -16,7 +18,8 @@ import StatePanel from "@/components/StatePanel.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
 import TagScrapeDialog from "@/components/TagScrapeDialog.vue";
 import TrackStatusDisc from "@/components/TrackStatusDisc.vue";
-import type { CreditRole, PermanentDeleteTrackJobItem, PermanentDeleteTracksJob, TrackMetadataRecord, TrackSummary, TrackTagValues } from "@/features/music/domain/models";
+import type { CreditRole, MusicPage, PermanentDeleteTrackJobItem, PermanentDeleteTracksJob, TrackMetadataRecord, TrackSummary, TrackTagValues } from "@/features/music/domain/models";
+import type { ApplyTagResult } from "@/features/scraping/domain/models";
 import { useMusicAdmin } from "@/app/services/music";
 import { normalizeTrackTagScalars } from "@/features/music/presentation/track-tag-form";
 import { assertWritebackAllowed, sourceWritebackCapability, writebackBlockedMessage } from "@/features/music/presentation/writeback-capability";
@@ -28,6 +31,9 @@ type EditorTab = "metadata" | "lyrics";
 type EditableField = Exclude<keyof TrackTagValues, "hasArtwork">;
 type TrackStateAction = "publish" | "archive" | "restore";
 type TrackSelectionKind = "ACTIVE" | "ARCHIVED" | "MIXED" | null;
+type TrackListQueryKey = readonly ["admin", "tracks", { page: number; pageSize: number; search: string; status: string; metadataStatus: string }];
+type PermanentDeleteJobQueryKey = readonly ["admin", "tracks", "permanent-delete", string];
+type TrackMetadataQueryKey = readonly ["admin", "track", string | undefined, "metadata"];
 interface TagForm { title: string; primary: string; albumArtists: string; featured: string; composers: string; lyricists: string; producers: string; album: string; releaseDate: string; trackNumber: string; trackTotal: string; discNumber: string; discTotal: string; genres: string; bpm: string; isrc: string; copyright: string; comment: string; lyrics: string; lyricsFormat: "PLAIN" | "LRC"; lyricsTiming: "LINE" | "WORD"; lyricsLanguage: string; reason: string }
 
 const route = useRoute();
@@ -73,21 +79,33 @@ let allowBulkClose = false;
 const bulk = reactive({ primary: "", albumArtists: "", album: "", genres: "", comment: "", reason: "" });
 const tags = reactive<TagForm>({ title: "", primary: "", albumArtists: "", featured: "", composers: "", lyricists: "", producers: "", album: "", releaseDate: "", trackNumber: "", trackTotal: "", discNumber: "", discTotal: "", genres: "", bpm: "", isrc: "", copyright: "", comment: "", lyrics: "", lyricsFormat: "PLAIN", lyricsTiming: "LINE", lyricsLanguage: "und", reason: "" });
 
-const tracksQuery = useQuery({
-  queryKey: computed(() => ["admin", "tracks", { page: page.value, pageSize: pageSize.value, search: debouncedSearch.value, status: status.value, metadataStatus: metadataStatus.value }]),
-  queryFn: ({ signal }) => musicAdmin.listTracks({ page: page.value, pageSize: pageSize.value, search: debouncedSearch.value, status: status.value, metadataStatus: metadataStatus.value, sort: "updatedAt", order: "desc" }, signal),
+const tracksQuery = useQuery<MusicPage<TrackSummary>, Error, MusicPage<TrackSummary>, TrackListQueryKey>({
+  queryKey: computed<TrackListQueryKey>(() => ["admin", "tracks", { page: page.value, pageSize: pageSize.value, search: debouncedSearch.value, status: status.value, metadataStatus: metadataStatus.value }]),
+  queryFn: ({ signal, queryKey }: QueryFunctionContext<TrackListQueryKey>) => {
+    const params = queryKey[2];
+    return musicAdmin.listTracks({ ...params, sort: "updatedAt", order: "desc" }, signal);
+  },
   placeholderData: keepPreviousData,
   refetchInterval: (state) => trackListAudioRefetchInterval(state.state.data),
 });
 const permanentDeleteJobId = computed(() => permanentDeleteJob.value?.id ?? "");
-const permanentDeleteJobQuery = useQuery({
-  queryKey: computed(() => ["admin", "tracks", "permanent-delete", permanentDeleteJobId.value]),
-  queryFn: ({ signal }) => musicAdmin.getPermanentDeleteTracksJob(permanentDeleteJobId.value, signal),
+const permanentDeleteJobQuery = useQuery<PermanentDeleteTracksJob, Error, PermanentDeleteTracksJob, PermanentDeleteJobQueryKey>({
+  queryKey: computed<PermanentDeleteJobQueryKey>(() => ["admin", "tracks", "permanent-delete", permanentDeleteJobId.value]),
+  queryFn: ({ signal, queryKey }: QueryFunctionContext<PermanentDeleteJobQueryKey>) => musicAdmin.getPermanentDeleteTracksJob(queryKey[3], signal),
   enabled: computed(() => permanentDeleteOpen.value && Boolean(permanentDeleteJobId.value)),
   staleTime: 0,
   refetchInterval: (state) => !state.state.data || deleteJobStatusActive(state.state.data.status) ? 1_000 : false,
 });
-const metadataQuery = useQuery({ queryKey: computed(() => ["admin", "track", selectedTrack.value?.id, "metadata"]), queryFn: ({ signal }) => musicAdmin.getTrackMetadata(selectedTrack.value!.id, signal), enabled: computed(() => editorOpen.value && Boolean(selectedTrack.value)) });
+const metadataQuery = useQuery<TrackMetadataRecord, Error, TrackMetadataRecord, TrackMetadataQueryKey>({
+  queryKey: computed<TrackMetadataQueryKey>(() => ["admin", "track", selectedTrack.value?.id, "metadata"]),
+  queryFn: ({ signal, queryKey }: QueryFunctionContext<TrackMetadataQueryKey>) => {
+    const trackId = queryKey[2];
+    if (!trackId) throw new Error("Track metadata query requires a track id");
+    return musicAdmin.getTrackMetadata(trackId, signal);
+  },
+  enabled: computed(() => editorOpen.value && Boolean(selectedTrack.value)),
+  staleTime: 0,
+});
 const editorWritebackCapability = computed(() => sourceWritebackCapability(metadataQuery.data.value?.source));
 
 function nameList(value: string): string[] { return value.split(/[;\n]/).map((item) => item.trim()).filter(Boolean); }
@@ -229,8 +247,8 @@ watch(() => tracksQuery.data.value?.items, (items) => {
   selectedTracks.value = next;
   if (removed) ui.notify("warning", "选择已更新", `${removed} 首曲目状态已变化，已移出当前选择。`);
 });
-async function refresh(): Promise<void> { await Promise.all([queryClient.invalidateQueries({ queryKey: ["admin", "tracks"] }), queryClient.invalidateQueries({ queryKey: ["admin", "track"] }), queryClient.invalidateQueries({ queryKey: ["admin", "dashboard"] }), queryClient.invalidateQueries({ queryKey: ["admin", "audit"] })]); }
-async function refreshLists(): Promise<void> { await Promise.all([queryClient.invalidateQueries({ queryKey: ["admin", "tracks"] }), queryClient.invalidateQueries({ queryKey: ["admin", "dashboard"] })]); }
+async function refresh(): Promise<void> { await invalidateAdminMusicQueries(); }
+async function refreshLists(): Promise<void> { await invalidateAdminMusicQueries(); }
 
 function beforeUnload(event: BeforeUnloadEvent): void {
   if (!editorOpen.value || !editorDirty.value) return;
@@ -448,7 +466,39 @@ function openBatchScrape(): void {
   if (archived) { ui.notify("warning", "已归档曲目不能批量刮削", `请先恢复“${archived.title}”。`); return; }
   actionError.value = ""; batchScrapeOpen.value = true;
 }
-async function scrapingCompleted(): Promise<void> { clearSelection(); await refresh(); }
+function applyScrapeVersion(result?: ApplyTagResult): void {
+  const metadata = result?.metadata;
+  if (!metadata || typeof metadata.trackId !== "string" || !metadata.trackId.trim()
+    || !Number.isSafeInteger(metadata.version) || metadata.version < 1) return;
+  const trackId = metadata.trackId.trim();
+  const cachedMetadataKey = ["admin", "track", trackId, "metadata"];
+  queryClient.setQueryData<TrackMetadataRecord>(cachedMetadataKey, (current) => {
+    if (!current || current.trackId !== trackId || current.version >= metadata.version) return current;
+    return { ...current, version: metadata.version };
+  });
+
+  for (const [queryKey, current] of queryClient.getQueriesData<{ items: TrackSummary[] }>({ queryKey: ["admin", "tracks"] })) {
+    const isTrackList = queryKey[0] === "admin" && queryKey[1] === "tracks"
+      && typeof queryKey[2] === "object" && queryKey[2] !== null && !Array.isArray(queryKey[2]);
+    if (!isTrackList || !current || !Array.isArray(current.items)) continue;
+    queryClient.setQueryData(queryKey, {
+      ...current,
+      items: current.items.map((track) => track.id === trackId && (track.metadataVersion === null || track.metadataVersion < metadata.version)
+        ? { ...track, metadataVersion: metadata.version }
+        : track),
+    });
+  }
+
+  if (selectedTrack.value?.id === trackId
+    && (selectedTrack.value.metadataVersion === null || selectedTrack.value.metadataVersion < metadata.version)) {
+    selectedTrack.value = { ...selectedTrack.value, metadataVersion: metadata.version };
+  }
+}
+async function scrapingCompleted(result?: ApplyTagResult): Promise<void> {
+  applyScrapeVersion(result);
+  clearSelection();
+  await refresh();
+}
 watch(archiveOpen, (value) => { if (!value && stateMutation.isPending.value && stateMutation.variables.value?.action === "archive" && !allowArchiveClose) archiveOpen.value = true; allowArchiveClose = false; });
 watch(batchArchiveOpen, (value) => { if (!value && batchArchiveMutation.isPending.value && !allowBatchArchiveClose) batchArchiveOpen.value = true; if (!value && !batchArchiveMutation.isPending.value) { batchArchiveTargets.value = []; batchArchiveError.value = ""; } allowBatchArchiveClose = false; });
 watch(batchRestoreOpen, (value) => { if (!value && !batchRestoreMutation.isPending.value) { batchRestoreTargets.value = []; batchRestoreError.value = ""; } });

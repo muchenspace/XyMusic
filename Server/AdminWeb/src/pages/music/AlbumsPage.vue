@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { AlertTriangle, Album as AlbumIcon, GitMerge, Pencil, RefreshCw, Search } from "lucide-vue-next";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/vue-query";
+import type { QueryFunctionContext } from "@tanstack/vue-query";
 import { refDebounced } from "@vueuse/core";
 import { computed, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
+import { invalidateAdminMusicQueries } from "@/app/query-client";
 import AlbumMergeDialog from "@/components/AlbumMergeDialog.vue";
 import AppButton from "@/components/AppButton.vue";
 import AppPagination from "@/components/AppPagination.vue";
@@ -11,13 +13,15 @@ import ArtworkUploadField from "@/components/ArtworkUploadField.vue";
 import BaseDialog from "@/components/BaseDialog.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import StatePanel from "@/components/StatePanel.vue";
-import type { AlbumDuplicateGroup, AlbumSummary, CreditRole } from "@/features/music/domain/models";
+import type { AlbumDuplicateGroup, AlbumDuplicateSummary, AlbumSummary, CreditRole, MusicPage } from "@/features/music/domain/models";
 import { useMusicAdmin } from "@/app/services/music";
 import { DEFAULT_CATALOG_PAGE_SIZE } from "@/shared/presentation/pagination";
 import { useUiStore } from "@/stores/ui";
 import { formatDate } from "@/utils/format";
 
-const queryClient = useQueryClient();
+type AlbumListQueryKey = readonly ["admin", "albums", { page: number; pageSize: number; search: string }];
+type AlbumDuplicatesQueryKey = readonly ["admin", "albums", "duplicates", { page: number; pageSize: number }];
+
 const router = useRouter();
 const ui = useUiStore();
 const musicAdmin = useMusicAdmin();
@@ -39,26 +43,32 @@ const groupMergeLoadingKey = ref<string>();
 const actionError = ref("");
 let allowEditorClose = false;
 const form = reactive({ title: "", releaseDate: "", description: "", credits: [] as Array<{ artistId: string; name: string; role: CreditRole; sortOrder: number }> });
-const query = useQuery({ queryKey: computed(() => ["admin", "albums", { page: page.value, pageSize: pageSize.value, search: debounced.value }]), queryFn: ({ signal }) => musicAdmin.listAlbums({ page: page.value, pageSize: pageSize.value, search: debounced.value, sort: "updatedAt", order: "desc" }, signal), placeholderData: keepPreviousData });
-const duplicatesQuery = useQuery({
-  queryKey: computed(() => ["admin", "albums", "duplicates", { page: duplicatePage.value, pageSize: duplicatePageSize.value }]),
-  queryFn: ({ signal }) => musicAdmin.getAlbumDuplicates({ page: duplicatePage.value, pageSize: duplicatePageSize.value }, signal),
+const query = useQuery<MusicPage<AlbumSummary>, Error, MusicPage<AlbumSummary>, AlbumListQueryKey>({
+  queryKey: computed<AlbumListQueryKey>(() => ["admin", "albums", { page: page.value, pageSize: pageSize.value, search: debounced.value }]),
+  queryFn: ({ signal, queryKey }: QueryFunctionContext<AlbumListQueryKey>) => {
+    const params = queryKey[2];
+    return musicAdmin.listAlbums({ ...params, sort: "updatedAt", order: "desc" }, signal);
+  },
+  placeholderData: keepPreviousData,
+});
+const duplicatesQuery = useQuery<AlbumDuplicateSummary, Error, AlbumDuplicateSummary, AlbumDuplicatesQueryKey>({
+  queryKey: computed<AlbumDuplicatesQueryKey>(() => ["admin", "albums", "duplicates", { page: duplicatePage.value, pageSize: duplicatePageSize.value }]),
+  queryFn: ({ signal, queryKey }: QueryFunctionContext<AlbumDuplicatesQueryKey>) => {
+    const params = queryKey[3];
+    return musicAdmin.getAlbumDuplicates(params, signal);
+  },
   placeholderData: keepPreviousData,
 });
 function changePageSize(value: number): void { pageSize.value = value; page.value = 1; }
 function changeDuplicatePageSize(value: number): void { duplicatePageSize.value = value; duplicatePage.value = 1; }
 function openAlbum(album: AlbumSummary): void { void router.push({ name: "album-detail", params: { id: album.id } }); }
 function edit(album: AlbumSummary): void { selected.value = album; Object.assign(form, { title: album.title, releaseDate: album.releaseDate ?? "", description: album.description ?? "", credits: album.artistCredits.map((credit) => ({ artistId: credit.artist.id, name: credit.artist.name, role: credit.role, sortOrder: credit.sortOrder })) }); actionError.value = ""; editorOpen.value = true; }
-async function refresh(): Promise<void> { await Promise.all([queryClient.invalidateQueries({ queryKey: ["admin", "albums"] }), queryClient.invalidateQueries({ queryKey: ["admin", "tracks"] }), queryClient.invalidateQueries({ queryKey: ["admin", "artists"] }), queryClient.invalidateQueries({ queryKey: ["admin", "dashboard"] }), queryClient.invalidateQueries({ queryKey: ["admin", "audit"] })]); }
+async function refresh(): Promise<void> { await invalidateAdminMusicQueries(); }
 async function artworkUploaded(): Promise<void> {
   ui.notify("success", "专辑封面已更新");
   if (selected.value) selected.value = { ...selected.value, version: selected.value.version + 1 };
-  await Promise.all([
-    queryClient.invalidateQueries({ queryKey: ["admin", "albums", "duplicates"] }),
-    queryClient.invalidateQueries({ queryKey: ["admin", "tracks"] }),
-  ]);
-  const result = await query.refetch();
-  const updated = result.data?.items.find((album) => album.id === selected.value?.id);
+  await invalidateAdminMusicQueries();
+  const updated = query.data.value?.items.find((album) => album.id === selected.value?.id);
   if (updated) selected.value = updated;
 }
 const saveMutation = useMutation({ mutationFn: () => { if (!form.title.trim()) throw new Error("专辑标题不能为空"); if (!form.credits.length) throw new Error("专辑至少需要一个艺术家署名"); return musicAdmin.updateAlbum(selected.value!.id, { expectedVersion: selected.value!.version, title: form.title.trim(), releaseDate: form.releaseDate.trim() || null, description: form.description.trim() || null, artistCredits: form.credits.map((credit, index) => ({ artistId: credit.artistId, role: credit.role, sortOrder: index })) }); }, onSuccess: async () => { allowEditorClose = true; editorOpen.value = false; ui.notify("success", "专辑信息已更新"); await refresh(); }, onError: (error) => { actionError.value = error instanceof Error ? error.message : "专辑保存失败"; } });

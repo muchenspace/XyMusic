@@ -113,7 +113,13 @@ describe("TagScrapeDialog candidate details", () => {
     const second = candidate("remote-2", "第二候选");
     scraping.search.mockResolvedValue([first, second]);
     scraping.candidateDetail.mockResolvedValue(detail(second));
-    scraping.apply.mockResolvedValue({ appliedFields: ["lyrics"], coverApplied: false, warnings: [] });
+    const applied = {
+      metadata: { trackId: "track-1", version: 4 },
+      appliedFields: ["lyrics"],
+      coverApplied: false,
+      warnings: [],
+    };
+    scraping.apply.mockResolvedValue(applied);
     const wrapper = mountDialog();
 
     await wrapper.get("select[data-testid='tag-verbatim']").setValue("true");
@@ -151,6 +157,7 @@ describe("TagScrapeDialog candidate details", () => {
     await flushPromises();
 
     expect(scraping.apply).toHaveBeenCalledWith("track-1", expect.objectContaining({ verbatim: true }));
+    expect(wrapper.emitted("applied")).toEqual([[applied]]);
   });
 
   it("closes the detail view and aborts its request when a new search starts", async () => {
