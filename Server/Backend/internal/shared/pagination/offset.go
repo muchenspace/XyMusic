@@ -9,6 +9,7 @@ import (
 const (
 	MaxOffsetRows = 10_000
 	MaxPage       = MaxOffsetRows + 1
+	MaxPageSize   = 1_000
 )
 
 type Offset struct {
@@ -24,7 +25,7 @@ func ParseOffset(page, pageSize, defaultPageSize int) (Offset, error) {
 	if pageSize == 0 {
 		pageSize = defaultPageSize
 	}
-	if page < 1 || page > MaxPage || pageSize < 1 || pageSize > 100 {
+	if page < 1 || page > MaxPage || pageSize < 1 || pageSize > MaxPageSize {
 		return Offset{}, apperror.Validation("分页参数无效")
 	}
 	offset := (page - 1) * pageSize

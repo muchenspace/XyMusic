@@ -18,6 +18,8 @@ import (
 	"xymusic/server/internal/shared/tagwriteback"
 )
 
+const defaultCatalogPageSize = 100
+
 type Service struct {
 	store    Store
 	artworks ArtworkPresenter
@@ -34,7 +36,7 @@ func NewService(store Store, artworks ArtworkPresenter) (*Service, error) {
 }
 
 func (service *Service) ListArtists(ctx context.Context, input ListInput) (ArtistPageDTO, error) {
-	page, err := pagination.ParseOffset(input.Page, input.PageSize, 25)
+	page, err := pagination.ParseOffset(input.Page, input.PageSize, defaultCatalogPageSize)
 	if err != nil {
 		return ArtistPageDTO{}, err
 	}
@@ -77,7 +79,7 @@ func (service *Service) Artist(ctx context.Context, id string) (ArtistDTO, error
 }
 
 func (service *Service) ListAlbums(ctx context.Context, input ListInput) (AlbumPageDTO, error) {
-	page, err := pagination.ParseOffset(input.Page, input.PageSize, 25)
+	page, err := pagination.ParseOffset(input.Page, input.PageSize, defaultCatalogPageSize)
 	if err != nil {
 		return AlbumPageDTO{}, err
 	}
@@ -108,11 +110,11 @@ func (service *Service) ListAlbums(ctx context.Context, input ListInput) (AlbumP
 }
 
 func (service *Service) DuplicateAlbums(ctx context.Context, input DuplicateAlbumInput) (DuplicateAlbumsDTO, error) {
-	page, err := pagination.ParseOffset(input.Page, input.PageSize, 25)
+	page, err := pagination.ParseOffset(input.Page, input.PageSize, defaultCatalogPageSize)
 	if err != nil {
 		return DuplicateAlbumsDTO{}, err
 	}
-	albumPage, err := pagination.ParseOffset(input.AlbumPage, input.AlbumPageSize, 100)
+	albumPage, err := pagination.ParseOffset(input.AlbumPage, input.AlbumPageSize, defaultCatalogPageSize)
 	if err != nil {
 		return DuplicateAlbumsDTO{}, err
 	}
@@ -190,7 +192,7 @@ func (service *Service) DuplicateAlbums(ctx context.Context, input DuplicateAlbu
 }
 
 func (service *Service) Album(ctx context.Context, id string, input PageInput) (AlbumDetailDTO, error) {
-	page, err := pagination.ParseOffset(input.Page, input.PageSize, 25)
+	page, err := pagination.ParseOffset(input.Page, input.PageSize, defaultCatalogPageSize)
 	if err != nil {
 		return AlbumDetailDTO{}, err
 	}
@@ -213,7 +215,7 @@ func (service *Service) Album(ctx context.Context, id string, input PageInput) (
 }
 
 func (service *Service) ListTracks(ctx context.Context, input TrackListInput) (TrackPageDTO, error) {
-	page, err := pagination.ParseOffset(input.Page, input.PageSize, 25)
+	page, err := pagination.ParseOffset(input.Page, input.PageSize, defaultCatalogPageSize)
 	if err != nil {
 		return TrackPageDTO{}, err
 	}

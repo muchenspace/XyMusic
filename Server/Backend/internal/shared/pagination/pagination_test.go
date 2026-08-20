@@ -32,6 +32,12 @@ func TestOffsetPaginationBounds(t *testing.T) {
 	if err != nil || page.Page != 1 || page.PageSize != 25 || page.Offset != 0 {
 		t.Fatalf("unexpected defaults: %#v %v", page, err)
 	}
+	if page, err := ParseOffset(1, MaxPageSize, 25); err != nil || page.PageSize != MaxPageSize {
+		t.Fatalf("unexpected maximum page size: %#v %v", page, err)
+	}
+	if _, err := ParseOffset(1, MaxPageSize+1, 25); !apperror.IsCode(err, apperror.CodeValidationError) {
+		t.Fatalf("expected page size bound error, got %v", err)
+	}
 	if _, err := ParseOffset(102, 100, 25); !apperror.IsCode(err, apperror.CodeValidationError) {
 		t.Fatalf("expected offset bound error, got %v", err)
 	}

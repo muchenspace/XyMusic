@@ -36,7 +36,7 @@ func TestRoutesExposeNineEndpointsAndPreserveMutationContracts(t *testing.T) {
 		{http.MethodGet, "/api/v1/admin/dashboard", "", http.StatusOK},
 		{http.MethodGet, "/api/v1/admin/users?page=bad&page=1&pageSize=bad&pageSize=25&role=OWNER&role=ADMIN&status=INVALID&status=ACTIVE&unknown=true", "", http.StatusOK},
 		{http.MethodPost, "/api/v1/admin/users", `{"username":"Alice_1","password":"secret1","displayName":"Alice","role":"USER","unknown":true}`, http.StatusCreated},
-		{http.MethodGet, "/api/v1/admin/users/" + userID + "?page=bad&page=2&pageSize=bad&pageSize=10", "", http.StatusOK},
+		{http.MethodGet, "/api/v1/admin/users/" + userID + "?page=bad&page=2&pageSize=bad&pageSize=1000", "", http.StatusOK},
 		{http.MethodPatch, "/api/v1/admin/users/" + userID, `{"expectedVersion":1,"displayName":"Alice","reason":"test","unknown":true}`, http.StatusOK},
 		{http.MethodPost, "/api/v1/admin/users/" + userID + "/password", `{"expectedVersion":1,"password":"secret2","reason":"test"}`, http.StatusOK},
 		{http.MethodPost, "/api/v1/admin/users/" + userID + "/sessions/" + sessionID + "/revoke", `{"reason":"test"}`, http.StatusOK},
@@ -69,7 +69,7 @@ func TestRoutesExposeNineEndpointsAndPreserveMutationContracts(t *testing.T) {
 	if identityService.calls != 9 {
 		t.Fatalf("identity calls=%d", identityService.calls)
 	}
-	if api.sessionPage.Page != 2 || api.sessionPage.PageSize != 10 {
+	if api.sessionPage.Page != 2 || api.sessionPage.PageSize != 1000 {
 		t.Fatalf("session page=%#v", api.sessionPage)
 	}
 	expectedScopes := []string{

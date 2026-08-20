@@ -126,7 +126,7 @@ func bindSessionPage(c *gin.Context) (SessionPageInput, error) {
 	if err != nil {
 		return SessionPageInput{}, err
 	}
-	pageSize, err := routeOptionalInteger(c, "pageSize", 1, 100, 25)
+	pageSize, err := routeOptionalInteger(c, "pageSize", 1, pagination.MaxPageSize, 25)
 	if err != nil {
 		return SessionPageInput{}, err
 	}
@@ -271,7 +271,7 @@ func bindUserList(c *gin.Context) (ListUsersInput, error) {
 	if err != nil {
 		return ListUsersInput{}, err
 	}
-	pageSize, err := routeOptionalInteger(c, "pageSize", 1, 100, 25)
+	pageSize, err := routeOptionalInteger(c, "pageSize", 1, pagination.MaxPageSize, 25)
 	if err != nil {
 		return ListUsersInput{}, err
 	}

@@ -506,7 +506,7 @@ func bindFileQuery(c *gin.Context) (FileQuery, error) {
 	if err != nil {
 		return FileQuery{}, err
 	}
-	pageSize, err := optionalInteger(c, "pageSize", 1, 100)
+	pageSize, err := optionalInteger(c, "pageSize", 1, pagination.MaxPageSize)
 	if err != nil {
 		return FileQuery{}, err
 	}
@@ -527,7 +527,7 @@ func bindPageQuery(c *gin.Context) (PageQuery, error) {
 	if err != nil {
 		return PageQuery{}, err
 	}
-	pageSize, err := optionalInteger(c, "pageSize", 1, 100)
+	pageSize, err := optionalInteger(c, "pageSize", 1, pagination.MaxPageSize)
 	if err != nil {
 		return PageQuery{}, err
 	}

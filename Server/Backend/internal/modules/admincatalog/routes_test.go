@@ -24,11 +24,11 @@ func TestRoutesExposeSevenAdminCatalogQueries(t *testing.T) {
 	routes.Register(engine)
 	id := "00000000-0000-4000-8000-000000000001"
 	paths := []string{
-		"/api/v1/admin/artists?page=bad&page=1&pageSize=bad&pageSize=25&sort=invalid&sort=name&order=invalid&order=asc&unknown=true",
+		"/api/v1/admin/artists?page=bad&page=1&pageSize=bad&pageSize=1000&sort=invalid&sort=name&order=invalid&order=asc&unknown=true",
 		"/api/v1/admin/artists/" + id,
 		"/api/v1/admin/albums?sort=invalid&sort=releaseDate&order=invalid&order=desc&unknown=true",
 		"/api/v1/admin/albums/duplicates?page=bad&page=2&pageSize=bad&pageSize=10&albumPage=bad&albumPage=3&albumPageSize=bad&albumPageSize=50&albumId=bad&albumId=" + id,
-		"/api/v1/admin/albums/" + id + "?page=bad&page=3&pageSize=bad&pageSize=15",
+		"/api/v1/admin/albums/" + id + "?page=bad&page=3&pageSize=bad&pageSize=1000",
 		"/api/v1/admin/tracks?status=INVALID&status=PROCESSING&metadataStatus=INVALID&metadataStatus=NORMAL&sourceId=bad&sourceId=" + id + "&sort=invalid&sort=status&order=invalid&order=asc&unknown=true",
 		"/api/v1/admin/tracks/" + id + "?lyricPage=bad&lyricPage=2&lyricPageSize=bad&lyricPageSize=50",
 	}
@@ -49,11 +49,14 @@ func TestRoutesExposeSevenAdminCatalogQueries(t *testing.T) {
 	if identityService.calls != 7 {
 		t.Fatalf("identity calls=%d", identityService.calls)
 	}
+	if api.artistInput.Page != 1 || api.artistInput.PageSize != 1000 {
+		t.Fatalf("artist input=%#v", api.artistInput)
+	}
 	if api.duplicateInput.Page != 2 || api.duplicateInput.PageSize != 10 || api.duplicateInput.AlbumID != id ||
 		api.duplicateInput.AlbumPage != 3 || api.duplicateInput.AlbumPageSize != 50 {
 		t.Fatalf("duplicate input=%#v", api.duplicateInput)
 	}
-	if api.albumInput.Page != 3 || api.albumInput.PageSize != 15 {
+	if api.albumInput.Page != 3 || api.albumInput.PageSize != 1000 {
 		t.Fatalf("album input=%#v", api.albumInput)
 	}
 	if api.trackInput.Page != 2 || api.trackInput.PageSize != 50 {
@@ -77,10 +80,10 @@ func TestRouteSchemaValidationPrecedesAdminAuthentication(t *testing.T) {
 		"/api/v1/admin/artists/not-a-uuid",
 		"/api/v1/admin/albums/duplicates?albumId=bad",
 		"/api/v1/admin/albums/duplicates?albumPage=0",
-		"/api/v1/admin/albums/duplicates?albumPageSize=101",
+		"/api/v1/admin/albums/duplicates?albumPageSize=1001",
 		"/api/v1/admin/albums/00000000-0000-4000-8000-000000000001?page=0",
 		"/api/v1/admin/tracks/00000000-0000-4000-8000-000000000001?lyricPage=0",
-		"/api/v1/admin/tracks/00000000-0000-4000-8000-000000000001?lyricPageSize=101",
+		"/api/v1/admin/tracks/00000000-0000-4000-8000-000000000001?lyricPageSize=1001",
 	}
 	for _, path := range paths {
 		response := httptest.NewRecorder()
@@ -96,13 +99,15 @@ func TestRouteSchemaValidationPrecedesAdminAuthentication(t *testing.T) {
 
 type catalogAPIStub struct {
 	calls          map[string]int
+	artistInput    ListInput
 	duplicateInput DuplicateAlbumInput
 	albumInput     PageInput
 	trackInput     PageInput
 }
 
-func (stub *catalogAPIStub) ListArtists(context.Context, ListInput) (ArtistPageDTO, error) {
+func (stub *catalogAPIStub) ListArtists(_ context.Context, input ListInput) (ArtistPageDTO, error) {
 	stub.calls["artists"]++
+	stub.artistInput = input
 	return ArtistPageDTO{Items: []ArtistDTO{}}, nil
 }
 func (stub *catalogAPIStub) Artist(context.Context, string) (ArtistDTO, error) {

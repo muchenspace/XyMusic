@@ -628,7 +628,7 @@ func bindPaginationQuery(c *gin.Context) (int, int, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	pageSize, err := routeOptionalQueryInteger(c, "pageSize", 1, 100)
+	pageSize, err := routeOptionalQueryInteger(c, "pageSize", 1, pagination.MaxPageSize)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -640,7 +640,7 @@ func bindWritebackList(c *gin.Context) (WritebackListInput, error) {
 	if err != nil {
 		return WritebackListInput{}, err
 	}
-	pageSize, err := routeOptionalQueryInteger(c, "pageSize", 1, 100)
+	pageSize, err := routeOptionalQueryInteger(c, "pageSize", 1, pagination.MaxPageSize)
 	if err != nil {
 		return WritebackListInput{}, err
 	}

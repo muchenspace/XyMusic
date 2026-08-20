@@ -14,6 +14,7 @@ import PageHeader from "@/components/PageHeader.vue";
 import StatePanel from "@/components/StatePanel.vue";
 import type { ArtistSummary } from "@/features/music/domain/models";
 import { useMusicAdmin } from "@/app/services/music";
+import { DEFAULT_CATALOG_PAGE_SIZE } from "@/shared/presentation/pagination";
 import { useUiStore } from "@/stores/ui";
 import { formatDate } from "@/utils/format";
 
@@ -23,7 +24,7 @@ const musicAdmin = useMusicAdmin();
 const search = ref("");
 const debounced = refDebounced(search, 300);
 const page = ref(1);
-const pageSize = ref(24);
+const pageSize = ref(DEFAULT_CATALOG_PAGE_SIZE);
 const selected = ref<ArtistSummary>();
 const selectedArtists = ref(new Map<string, ArtistSummary>());
 const selectedIds = computed(() => new Set(selectedArtists.value.keys()));

@@ -217,7 +217,7 @@ func bindJobList(c *gin.Context) (ListInput, error) {
 	if err != nil {
 		return ListInput{}, err
 	}
-	pageSize, err := routeOptionalInteger(c, "pageSize", 1, 100)
+	pageSize, err := routeOptionalInteger(c, "pageSize", 1, pagination.MaxPageSize)
 	if err != nil {
 		return ListInput{}, err
 	}

@@ -20,6 +20,7 @@ import type { CreditRole, PermanentDeleteTrackJobItem, PermanentDeleteTracksJob,
 import { useMusicAdmin } from "@/app/services/music";
 import { normalizeTrackTagScalars } from "@/features/music/presentation/track-tag-form";
 import { assertWritebackAllowed, sourceWritebackCapability, writebackBlockedMessage } from "@/features/music/presentation/writeback-capability";
+import { DEFAULT_CATALOG_PAGE_SIZE } from "@/shared/presentation/pagination";
 import { useUiStore } from "@/stores/ui";
 import { formatDate, formatDuration } from "@/utils/format";
 
@@ -38,7 +39,7 @@ const debouncedSearch = refDebounced(search, 300);
 const status = ref("READY");
 const metadataStatus = ref("");
 const page = ref(1);
-const pageSize = ref(25);
+const pageSize = ref(DEFAULT_CATALOG_PAGE_SIZE);
 const selectedTracks = ref(new Map<string, TrackSummary>());
 const selectedIds = computed(() => new Set(selectedTracks.value.keys()));
 const selectedTrack = ref<TrackSummary>();

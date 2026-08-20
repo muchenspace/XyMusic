@@ -143,7 +143,7 @@ func bindPage(c *gin.Context) (PageInput, error) {
 	if err != nil {
 		return PageInput{}, err
 	}
-	pageSize, err := queryOptionalInteger(c, "pageSize", 1, 100)
+	pageSize, err := queryOptionalInteger(c, "pageSize", 1, pagination.MaxPageSize)
 	if err != nil {
 		return PageInput{}, err
 	}
@@ -159,7 +159,7 @@ func bindDuplicateAlbums(c *gin.Context) (DuplicateAlbumInput, error) {
 	if err != nil {
 		return DuplicateAlbumInput{}, err
 	}
-	albumPageSize, err := queryOptionalInteger(c, "albumPageSize", 1, 100)
+	albumPageSize, err := queryOptionalInteger(c, "albumPageSize", 1, pagination.MaxPageSize)
 	if err != nil {
 		return DuplicateAlbumInput{}, err
 	}
@@ -234,7 +234,7 @@ func bindLyricPage(c *gin.Context) (PageInput, error) {
 	if err != nil {
 		return PageInput{}, err
 	}
-	pageSize, err := queryOptionalInteger(c, "lyricPageSize", 1, 100)
+	pageSize, err := queryOptionalInteger(c, "lyricPageSize", 1, pagination.MaxPageSize)
 	if err != nil {
 		return PageInput{}, err
 	}
@@ -251,7 +251,7 @@ func bindList(c *gin.Context, allowedSorts []string) (ListInput, error) {
 	if err != nil {
 		return ListInput{}, err
 	}
-	pageSize, err := queryOptionalInteger(c, "pageSize", 1, 100)
+	pageSize, err := queryOptionalInteger(c, "pageSize", 1, pagination.MaxPageSize)
 	if err != nil {
 		return ListInput{}, err
 	}

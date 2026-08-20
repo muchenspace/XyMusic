@@ -37,7 +37,7 @@ func TestRoutesExposeJobQueriesAndIdempotentMutations(t *testing.T) {
 	requests := []struct {
 		method, path, body string
 	}{
-		{http.MethodGet, "/api/v1/admin/jobs?page=2&pageSize=10&search=track&status=FAILED&type=MEDIA_PROCESS&sort=updatedAt&order=asc", ""},
+		{http.MethodGet, "/api/v1/admin/jobs?page=2&pageSize=1000&search=track&status=FAILED&type=MEDIA_PROCESS&sort=updatedAt&order=asc", ""},
 		{http.MethodGet, "/api/v1/admin/jobs/" + jobID, ""},
 		{http.MethodPost, "/api/v1/admin/jobs/" + jobID + "/retry", ""},
 		{http.MethodPost, "/api/v1/admin/jobs/" + jobID + "/cancel", `{"reason":"stop"}`},
@@ -66,7 +66,7 @@ func TestRoutesExposeJobQueriesAndIdempotentMutations(t *testing.T) {
 	if api.listCalls != 1 || api.jobCalls != 1 || api.retryCalls != 1 || api.cancelCalls != 1 {
 		t.Fatalf("calls=%d/%d/%d/%d", api.listCalls, api.jobCalls, api.retryCalls, api.cancelCalls)
 	}
-	if api.listInput.Page != 2 || api.listInput.PageSize != 10 || api.listInput.Sort != SortUpdatedAt ||
+	if api.listInput.Page != 2 || api.listInput.PageSize != 1000 || api.listInput.Sort != SortUpdatedAt ||
 		api.listInput.Order != SortAscending || api.listInput.Status != JobStatusFailed {
 		t.Fatalf("list input=%+v", api.listInput)
 	}
