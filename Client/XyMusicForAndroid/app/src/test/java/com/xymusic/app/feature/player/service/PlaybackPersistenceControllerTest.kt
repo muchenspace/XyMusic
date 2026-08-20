@@ -5,9 +5,12 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import com.google.common.truth.Truth.assertThat
 import com.xymusic.app.feature.player.domain.PlaybackEventSink
+import com.xymusic.app.feature.player.domain.PlaybackModePreference
+import com.xymusic.app.feature.player.domain.PlaybackModeStore
 import com.xymusic.app.feature.player.domain.PlaybackQueueStore
 import com.xymusic.app.feature.player.domain.PlayerResult
 import com.xymusic.app.feature.player.domain.StoredPlaybackQueueItem
+import com.xymusic.app.feature.player.domain.model.RepeatMode
 import java.lang.reflect.Proxy
 import java.time.Clock
 import java.time.Instant
@@ -59,16 +62,50 @@ class PlaybackPersistenceControllerTest {
         assertThat(restoredPlayer.playWhenReady).isFalse()
     }
 
-    private fun kotlinx.coroutines.test.TestScope.controller(player: RecordingPlayer, store: PlaybackQueueStore) =
-        PlaybackPersistenceController(
-            player = player.delegate,
-            serviceScope = this,
-            queueStore = store,
-            eventSink = PlaybackEventSink { _, _ -> Unit },
-            clock = Clock.fixed(Instant.ofEpochMilli(10_000), ZoneOffset.UTC),
-            cancelSleepTimer = {},
-            clearPlaybackGrants = {},
+    @Test
+    fun playbackModeSurvivesControllerRecreationAndModeChangesArePersisted() = runTest {
+        val store = InMemoryPlaybackQueueStore(initialItems = storedQueue(resumePositionMs = 0))
+        val modeStore = InMemoryPlaybackModeStore(
+            PlaybackModePreference(
+                repeatMode = RepeatMode.ONE,
+                shuffleEnabled = true,
+            ),
         )
+        val player = RecordingPlayer()
+        val controller = controller(player, store, modeStore)
+
+        controller.clearForAccountChange(USER_ID)
+        controller.restoreQueue()
+
+        assertThat(player.delegate.repeatMode).isEqualTo(Player.REPEAT_MODE_ONE)
+        assertThat(player.delegate.shuffleModeEnabled).isTrue()
+
+        player.delegate.repeatMode = Player.REPEAT_MODE_ALL
+        player.delegate.shuffleModeEnabled = false
+        advanceUntilIdle()
+
+        assertThat(modeStore.preference).isEqualTo(
+            PlaybackModePreference(
+                repeatMode = RepeatMode.ALL,
+                shuffleEnabled = false,
+            ),
+        )
+    }
+
+    private fun kotlinx.coroutines.test.TestScope.controller(
+        player: RecordingPlayer,
+        store: PlaybackQueueStore,
+        modeStore: PlaybackModeStore = InMemoryPlaybackModeStore(),
+    ) = PlaybackPersistenceController(
+        player = player.delegate,
+        serviceScope = this,
+        queueStore = store,
+        modeStore = modeStore,
+        eventSink = PlaybackEventSink { _, _ -> Unit },
+        clock = Clock.fixed(Instant.ofEpochMilli(10_000), ZoneOffset.UTC),
+        cancelSleepTimer = {},
+        clearPlaybackGrants = {},
+    )
 
     private class InMemoryPlaybackQueueStore(initialItems: List<StoredPlaybackQueueItem>) : PlaybackQueueStore {
         private val state = MutableStateFlow(initialItems)
@@ -117,11 +154,23 @@ class PlaybackPersistenceControllerTest {
         }
     }
 
+    private class InMemoryPlaybackModeStore(var preference: PlaybackModePreference = PlaybackModePreference()) :
+        PlaybackModeStore {
+        override suspend fun read(): PlaybackModePreference = preference
+
+        override suspend fun write(preference: PlaybackModePreference) {
+            this.preference = preference
+        }
+    }
+
     private class RecordingPlayer {
         val mediaItems = mutableListOf<MediaItem>()
+        val listeners = mutableListOf<Player.Listener>()
         var currentMediaItemIndex = 0
         var currentPositionMs = 0L
         var playWhenReady = false
+        var repeatMode = Player.REPEAT_MODE_ALL
+        var shuffleModeEnabled = false
 
         val delegate: Player =
             Proxy.newProxyInstance(
@@ -129,7 +178,15 @@ class PlaybackPersistenceControllerTest {
                 arrayOf(Player::class.java),
             ) { _, method, args ->
                 when (method.name) {
-                    "addListener", "removeListener", "stop", "prepare", "release" -> Unit
+                    "addListener" -> {
+                        listeners += args!![0] as Player.Listener
+                        Unit
+                    }
+                    "removeListener" -> {
+                        listeners -= args!![0] as Player.Listener
+                        Unit
+                    }
+                    "stop", "prepare", "release" -> Unit
                     "clearMediaItems" -> {
                         mediaItems.clear()
                         currentMediaItemIndex = 0
@@ -162,6 +219,18 @@ class PlaybackPersistenceControllerTest {
                     }
 
                     "getPlayWhenReady" -> playWhenReady
+                    "setRepeatMode" -> {
+                        repeatMode = args!![0] as Int
+                        listeners.forEach { it.onRepeatModeChanged(repeatMode) }
+                        Unit
+                    }
+                    "getRepeatMode" -> repeatMode
+                    "setShuffleModeEnabled" -> {
+                        shuffleModeEnabled = args!![0] as Boolean
+                        listeners.forEach { it.onShuffleModeEnabledChanged(shuffleModeEnabled) }
+                        Unit
+                    }
+                    "getShuffleModeEnabled", "isShuffleModeEnabled" -> shuffleModeEnabled
                     "isPlaying" -> false
                     "getMediaItemCount" -> mediaItems.size
                     "getMediaItemAt" -> mediaItems[args!![0] as Int]

@@ -23,6 +23,7 @@ import com.xymusic.app.feature.player.adapter.media3.PlaybackSessionCommands
 import com.xymusic.app.feature.player.domain.AutomaticPlaybackQualityPolicy
 import com.xymusic.app.feature.player.domain.PlaybackEventSink
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
+import com.xymusic.app.feature.player.domain.PlaybackModeStore
 import com.xymusic.app.feature.player.domain.PlaybackQueueStore
 import dagger.hilt.android.AndroidEntryPoint
 import java.time.Clock
@@ -44,6 +45,9 @@ class PlaybackService : MediaSessionService() {
 
     @Inject
     lateinit var queueStore: PlaybackQueueStore
+
+    @Inject
+    lateinit var modeStore: PlaybackModeStore
 
     @Inject
     lateinit var grantRepository: PlaybackGrantRepository
@@ -88,6 +92,7 @@ class PlaybackService : MediaSessionService() {
                 player = player,
                 serviceScope = serviceScope,
                 queueStore = queueStore,
+                modeStore = modeStore,
                 eventSink = eventSink,
                 clock = clock,
                 cancelSleepTimer = sleepTimerController::cancelForAccountChange,

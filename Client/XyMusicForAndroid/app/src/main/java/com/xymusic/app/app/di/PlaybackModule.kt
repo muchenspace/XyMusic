@@ -11,6 +11,7 @@ import com.xymusic.app.core.session.SessionIdentityProvider
 import com.xymusic.app.core.session.SessionMutationCoordinator
 import com.xymusic.app.feature.player.adapter.media3.PlaybackDataSourceFactory
 import com.xymusic.app.feature.player.data.controller.Media3PlayerRepository
+import com.xymusic.app.feature.player.data.local.DataStorePlaybackModeStore
 import com.xymusic.app.feature.player.data.local.RoomPlaybackQueueStore
 import com.xymusic.app.feature.player.data.media.CacheOfflineMediaDownloader
 import com.xymusic.app.feature.player.data.media.InMemoryPlaybackGrantStore
@@ -30,6 +31,7 @@ import com.xymusic.app.feature.player.domain.LyricsSource
 import com.xymusic.app.feature.player.domain.OfflineTrackRepository
 import com.xymusic.app.feature.player.domain.PlaybackEventSink
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
+import com.xymusic.app.feature.player.domain.PlaybackModeStore
 import com.xymusic.app.feature.player.domain.PlaybackQueueStore
 import com.xymusic.app.feature.player.domain.PlayerRepository
 import dagger.Binds
@@ -64,6 +66,10 @@ abstract class PlaybackBindingModule {
     @Binds
     @Singleton
     abstract fun bindPlaybackQueueStore(implementation: RoomPlaybackQueueStore): PlaybackQueueStore
+
+    @Binds
+    @Singleton
+    abstract fun bindPlaybackModeStore(implementation: DataStorePlaybackModeStore): PlaybackModeStore
 
     @Binds
     @Singleton

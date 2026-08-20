@@ -171,6 +171,12 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.cancelActivePlaybackForRestore();
     this.playbackSessionStarted = false;
     const restored = this.playbackPersistence.restore(ownerKey);
+    if (restored) {
+      this.updateState({
+        shuffled: restored.shuffled,
+        repeatMode: restored.repeatMode,
+      });
+    }
     if (!restored?.queue.length) {
       this.clearPlaybackAfterRestoreFailure();
       return false;
