@@ -33,6 +33,23 @@ type BatchRestoreDTO struct {
 	Items    []BatchRestoreItemDTO `json:"items"`
 }
 
+type BatchArchiveItemRecord struct {
+	TrackID string
+	Status  string
+	Version int
+}
+
+type BatchArchiveItemDTO struct {
+	TrackID string `json:"trackId"`
+	Status  string `json:"status"`
+	Version int    `json:"version"`
+}
+
+type BatchArchiveDTO struct {
+	Archived int                   `json:"archived"`
+	Items    []BatchArchiveItemDTO `json:"items"`
+}
+
 type DeleteBatchStatus string
 
 const (

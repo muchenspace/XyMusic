@@ -15,6 +15,7 @@ import {
   type AlbumMergeResult,
   type AlbumSummary,
   type ArtistSummary,
+  type BatchArchiveTracksResult,
   type BatchRestoreTracksResult,
   type MusicListQuery,
   type MusicPage,
@@ -47,6 +48,10 @@ export class MusicAdminUseCases {
 
   batchRestoreTracks(tracks: readonly TrackSummary[]): Promise<BatchRestoreTracksResult> {
     return this.gateway.batchRestoreTracks(trackMutationTargets(tracks));
+  }
+
+  batchArchiveTracks(tracks: readonly TrackSummary[]): Promise<BatchArchiveTracksResult> {
+    return this.gateway.batchArchiveTracks(activeTrackMutationTargets(tracks));
   }
 
   createPermanentDeleteTracksJob(tracks: readonly TrackSummary[]): Promise<PermanentDeleteTracksJob> {
@@ -143,6 +148,20 @@ function trackMutationTargets(tracks: readonly TrackSummary[]): TrackMutationTar
   const seen = new Set<string>();
   return tracks.map((track) => {
     if (track.status !== "ARCHIVED") throw new Error(`曲目“${track.title}”不是已归档状态，请刷新后重试`);
+    if (!track.id || !Number.isSafeInteger(track.version) || track.version < 1) throw new Error(`曲目“${track.title}”版本无效，请刷新后重试`);
+    if (seen.has(track.id)) throw new Error(`曲目“${track.title}”被重复选择`);
+    seen.add(track.id);
+    return { trackId: track.id, expectedVersion: track.version };
+  });
+}
+
+function activeTrackMutationTargets(tracks: readonly TrackSummary[]): TrackMutationTarget[] {
+  if (!tracks.length) throw new Error("请先选择曲目");
+  const archived = tracks.find((track) => track.status === "ARCHIVED");
+  if (archived) throw new Error(`曲目“${archived.title}”已经归档，请刷新后重试`);
+  if (tracks.length > MAX_BATCH_TRACK_MUTATIONS) throw new Error(`一次最多处理 ${MAX_BATCH_TRACK_MUTATIONS} 首曲目`);
+  const seen = new Set<string>();
+  return tracks.map((track) => {
     if (!track.id || !Number.isSafeInteger(track.version) || track.version < 1) throw new Error(`曲目“${track.title}”版本无效，请刷新后重试`);
     if (seen.has(track.id)) throw new Error(`曲目“${track.title}”被重复选择`);
     seen.add(track.id);

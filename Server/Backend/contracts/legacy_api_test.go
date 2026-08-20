@@ -78,8 +78,8 @@ func TestLegacyAPIManifest(t *testing.T) {
 	if manifest.ContractName != "xymusic-legacy-http-api" {
 		t.Fatalf("contractName = %q", manifest.ContractName)
 	}
-	if manifest.CountingRules.ExpectedAPIEndpoints != 133 {
-		t.Fatalf("declared endpoint count = %d, want 133", manifest.CountingRules.ExpectedAPIEndpoints)
+	if manifest.CountingRules.ExpectedAPIEndpoints != 134 {
+		t.Fatalf("declared endpoint count = %d, want 134", manifest.CountingRules.ExpectedAPIEndpoints)
 	}
 	if got := len(manifest.APIs); got != manifest.CountingRules.ExpectedAPIEndpoints {
 		t.Fatalf("manifest contains %d APIs, declared %d", got, manifest.CountingRules.ExpectedAPIEndpoints)
@@ -150,16 +150,16 @@ func TestLegacyAPIManifest(t *testing.T) {
 	}
 
 	assertCounts(t, "method", methodCounts, map[string]int{
-		"GET": 48, "POST": 64, "PUT": 4, "PATCH": 11, "DELETE": 6,
+		"GET": 48, "POST": 65, "PUT": 4, "PATCH": 11, "DELETE": 6,
 	})
 	assertCounts(t, "auth", authCounts, map[string]int{
-		"none": 14, "bearer": 29, "refresh-token": 1, "admin-session": 88, "admin-refresh-cookie": 1,
+		"none": 14, "bearer": 29, "refresh-token": 1, "admin-session": 89, "admin-refresh-cookie": 1,
 	})
 	assertCounts(t, "idempotency", idempotencyCounts, map[string]int{
-		"none": 76, "required": 57,
+		"none": 76, "required": 58,
 	})
 	assertCounts(t, "bodyKind", bodyCounts, map[string]int{
-		"none": 63, "json": 67, "json-optional": 2, "binary": 1,
+		"none": 63, "json": 68, "json-optional": 2, "binary": 1,
 	})
 
 	keyContracts := []apiContract{
@@ -169,6 +169,7 @@ func TestLegacyAPIManifest(t *testing.T) {
 		{Method: "POST", Path: "/api/v1/admin/users/:id/sessions/:sessionId/revoke", Scope: "admin-management", Auth: "admin-session", Idempotency: "required", BodyKind: "json"},
 		{Method: "DELETE", Path: "/api/v1/playlists/:id/tracks/:entryId", Scope: "playlist", Auth: "bearer", Idempotency: "required", BodyKind: "none"},
 		{Method: "POST", Path: "/api/v1/admin/tracks/:id/restore", Scope: "admin-catalog-mutation", Auth: "admin-session", Idempotency: "required", BodyKind: "json"},
+		{Method: "POST", Path: "/api/v1/admin/tracks/batch/archive", Scope: "admin-catalog-mutation", Auth: "admin-session", Idempotency: "required", BodyKind: "json"},
 		{Method: "POST", Path: "/api/v1/admin/tracks/batch/delete-permanently", Scope: "admin-catalog-mutation", Auth: "admin-session", Idempotency: "required", BodyKind: "json"},
 		{Method: "GET", Path: "/api/v1/admin/tracks/batch/delete-permanently/:jobId", Scope: "admin-catalog-mutation", Auth: "admin-session", Idempotency: "none", BodyKind: "none"},
 		{Method: "POST", Path: "/api/v1/admin/tag-scraping/candidates/details", Scope: "admin-tag-scraping", Auth: "admin-session", Idempotency: "none", BodyKind: "json"},
@@ -201,8 +202,8 @@ func TestLegacyAPIManifestMatchesAuthoritativeRoutes(t *testing.T) {
 		sourcePath := filepath.Join(legacyRoot, filepath.FromSlash(source.File))
 		addExtractedRoutes(t, extracted, sourcePath, source.Scope)
 	}
-	if got := len(extracted); got != 133 {
-		t.Fatalf("authoritative Go route extraction found %d APIs, want 133", got)
+	if got := len(extracted); got != 134 {
+		t.Fatalf("authoritative Go route extraction found %d APIs, want 134", got)
 	}
 
 	manifestRoutes := make(map[string]string, len(manifest.APIs))

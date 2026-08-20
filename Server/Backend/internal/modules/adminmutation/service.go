@@ -288,6 +288,28 @@ func (service *Service) ArchiveTrack(ctx context.Context, actorID, traceID, id s
 	return service.track(ctx, id)
 }
 
+func (service *Service) ArchiveTracksBatch(
+	ctx context.Context,
+	actorID string,
+	traceID string,
+	input BatchTrackMutationInput,
+) (BatchArchiveDTO, error) {
+	if err := validateBatchTrackItems(input.Items); err != nil {
+		return BatchArchiveDTO{}, err
+	}
+	records, err := service.store.ArchiveTracksBatch(ctx, actorID, traceID, input.Items)
+	if err != nil {
+		return BatchArchiveDTO{}, err
+	}
+	items := make([]BatchArchiveItemDTO, 0, len(records))
+	for _, record := range records {
+		items = append(items, BatchArchiveItemDTO{
+			TrackID: record.TrackID, Status: record.Status, Version: record.Version,
+		})
+	}
+	return BatchArchiveDTO{Archived: len(items), Items: items}, nil
+}
+
 func (service *Service) RestoreTrack(ctx context.Context, actorID, traceID, id string, expectedVersion int) (TrackDTO, error) {
 	if expectedVersion < 1 {
 		return TrackDTO{}, apperror.Validation("expectedVersion is invalid")

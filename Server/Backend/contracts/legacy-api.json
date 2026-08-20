@@ -81,7 +81,7 @@
     ]
   },
   "countingRules": {
-    "expectedAPIEndpoints": 133,
+    "expectedAPIEndpoints": 134,
     "includes": [
       "Two health endpoints exposed by both control and configured runtime modes, counted once by method and path.",
       "Setup endpoints exposed by the control application while setup is required.",
@@ -949,6 +949,14 @@
     {
       "method": "POST",
       "path": "/api/v1/admin/tracks",
+      "scope": "admin-catalog-mutation",
+      "auth": "admin-session",
+      "idempotency": "required",
+      "bodyKind": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/tracks/batch/archive",
       "scope": "admin-catalog-mutation",
       "auth": "admin-session",
       "idempotency": "required",

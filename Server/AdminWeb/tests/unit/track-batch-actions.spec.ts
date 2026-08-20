@@ -47,24 +47,30 @@ function job(): PermanentDeleteTracksJob {
 
 describe("track batch actions", () => {
   it("maps archived track snapshots to optimistic-lock targets", async () => {
+    const archive = vi.fn().mockResolvedValue({ archived: 2, items: [] });
     const restore = vi.fn().mockResolvedValue({ restored: 2, items: [] });
     const createDelete = vi.fn().mockResolvedValue(job());
-    const gateway = { batchRestoreTracks: restore, createPermanentDeleteTracksJob: createDelete } as unknown as MusicAdminGateway;
+    const gateway = { batchArchiveTracks: archive, batchRestoreTracks: restore, createPermanentDeleteTracksJob: createDelete } as unknown as MusicAdminGateway;
     const useCases = new MusicAdminUseCases(gateway);
     const tracks = [track("track-1", "ARCHIVED", 3), track("track-2", "ARCHIVED", 5)];
 
+    await useCases.batchArchiveTracks([track("track-1", "READY", 3), track("track-2", "ERROR", 5)]);
     await useCases.batchRestoreTracks(tracks);
     await useCases.createPermanentDeleteTracksJob(tracks);
 
     const targets = [{ trackId: "track-1", expectedVersion: 3 }, { trackId: "track-2", expectedVersion: 5 }];
+    expect(archive).toHaveBeenCalledWith(targets);
     expect(restore).toHaveBeenCalledWith(targets);
     expect(createDelete).toHaveBeenCalledWith(targets);
   });
 
   it("rejects empty, mixed, duplicate, or oversized destructive selections before HTTP", () => {
-    const gateway = { batchRestoreTracks: vi.fn(), createPermanentDeleteTracksJob: vi.fn() } as unknown as MusicAdminGateway;
+    const gateway = { batchArchiveTracks: vi.fn(), batchRestoreTracks: vi.fn(), createPermanentDeleteTracksJob: vi.fn() } as unknown as MusicAdminGateway;
     const useCases = new MusicAdminUseCases(gateway);
 
+    expect(() => useCases.batchArchiveTracks([])).toThrow("请先选择曲目");
+    expect(() => useCases.batchArchiveTracks([track("archived")])).toThrow("已经归档");
+    expect(() => useCases.batchArchiveTracks(Array.from({ length: 201 }, (_, index) => track(`track-${index}`, "READY")))).toThrow("一次最多处理 200 首曲目");
     expect(() => useCases.batchRestoreTracks([])).toThrow("请先选择曲目");
     expect(() => useCases.batchRestoreTracks([track("active", "READY")])).toThrow("不是已归档状态");
     expect(() => useCases.createPermanentDeleteTracksJob([track("same"), track("same")])).toThrow("被重复选择");

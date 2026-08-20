@@ -6,6 +6,7 @@ import type {
   AlbumMergeFieldSources,
   AlbumSummary,
   ArtistSummary,
+  BatchArchiveTracksResult,
   BatchRestoreTracksResult,
   CreditRole,
   MusicListQuery,
@@ -61,6 +62,7 @@ export interface MusicAdminGateway {
   updateTrackMetadata(trackId: string, command: UpdateTrackMetadataCommand): Promise<TrackMetadataRecord>;
   setTrackState(trackId: string, expectedVersion: number, action: "publish" | "archive" | "restore"): Promise<void>;
   batchRestoreTracks(items: TrackMutationTarget[]): Promise<BatchRestoreTracksResult>;
+  batchArchiveTracks(items: TrackMutationTarget[]): Promise<BatchArchiveTracksResult>;
   createPermanentDeleteTracksJob(items: TrackMutationTarget[]): Promise<PermanentDeleteTracksJob>;
   getPermanentDeleteTracksJob(jobId: string, signal?: AbortSignal): Promise<PermanentDeleteTracksJob>;
   deleteTrackPermanently(trackId: string, expectedVersion: number): Promise<{

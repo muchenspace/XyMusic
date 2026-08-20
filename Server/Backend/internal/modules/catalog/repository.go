@@ -48,10 +48,16 @@ func (r *Repository) ListTracks(ctx context.Context, input ListTracksQuery) ([]T
 	}
 	if input.ArtistID != "" {
 		position := appendArgument(&arguments, input.ArtistID)
-		conditions = append(conditions, fmt.Sprintf(`EXISTS (
-			SELECT 1 FROM track_artists filter_credit
-			WHERE filter_credit.track_id = t.id AND filter_credit.artist_id = $%d
-		)`, position))
+		conditions = append(conditions, fmt.Sprintf(`(
+			EXISTS (
+				SELECT 1 FROM track_artists filter_credit
+				WHERE filter_credit.track_id = t.id AND filter_credit.artist_id = $%d
+			)
+			OR EXISTS (
+				SELECT 1 FROM album_artists filter_credit
+				WHERE filter_credit.album_id = t.album_id AND filter_credit.artist_id = $%d
+			)
+		)`, position, position))
 	}
 	if input.After != nil {
 		condition, err := trackAfterCondition(input.Sort, input.After, &arguments)
@@ -141,7 +147,7 @@ func (r *Repository) FindLyric(ctx context.Context, trackID string) (*LyricRecor
 }
 
 func (r *Repository) ListArtists(ctx context.Context, input ListArtistsQuery) ([]ArtistRecord, error) {
-	conditions := make([]string, 0, 1)
+	conditions := []string{visibleArtistSQL}
 	arguments := make([]any, 0, 3)
 	if input.After != nil {
 		valuePosition := appendArgument(&arguments, input.After.Value)
@@ -168,7 +174,7 @@ func (r *Repository) ListArtists(ctx context.Context, input ListArtistsQuery) ([
 }
 
 func (r *Repository) FindArtist(ctx context.Context, artistID string) (ArtistRecord, error) {
-	rows, err := r.queryArtists(ctx, artistSelectSQL+" WHERE ar.id = $1 LIMIT 1", artistID)
+	rows, err := r.queryArtists(ctx, artistSelectSQL+" WHERE ar.id = $1 AND "+visibleArtistSQL+" LIMIT 1", artistID)
 	if err != nil {
 		return ArtistRecord{}, err
 	}
@@ -246,6 +252,8 @@ func (r *Repository) SearchTracks(ctx context.Context, input SearchQuery) ([]Tra
 		"(" + fuzzySQL("t.normalized_title", queryPosition, patternPosition, input.UseTrigram) +
 			" OR EXISTS (SELECT 1 FROM track_artists search_credit JOIN artists search_artist ON search_artist.id = search_credit.artist_id WHERE search_credit.track_id = t.id AND " +
 			fuzzySQL("search_artist.normalized_name", queryPosition, patternPosition, input.UseTrigram) + ")" +
+			" OR EXISTS (SELECT 1 FROM album_artists search_credit JOIN artists search_artist ON search_artist.id = search_credit.artist_id WHERE search_credit.album_id = t.album_id AND " +
+			fuzzySQL("search_artist.normalized_name", queryPosition, patternPosition, input.UseTrigram) + ")" +
 			" OR EXISTS (SELECT 1 FROM albums search_album WHERE search_album.id = t.album_id AND " +
 			fuzzySQL("search_album.normalized_title", queryPosition, patternPosition, input.UseTrigram) + "))",
 	}
@@ -270,7 +278,7 @@ func (r *Repository) SearchArtists(ctx context.Context, input SearchQuery) ([]Ar
 		queryPosition = appendArgument(&arguments, input.NormalizedQuery)
 	}
 	patternPosition := appendArgument(&arguments, input.Pattern)
-	conditions := []string{fuzzySQL("ar.normalized_name", queryPosition, patternPosition, input.UseTrigram)}
+	conditions := []string{visibleArtistSQL, fuzzySQL("ar.normalized_name", queryPosition, patternPosition, input.UseTrigram)}
 	if input.After != nil {
 		valuePosition := appendArgument(&arguments, input.After.Value)
 		idPosition := appendArgument(&arguments, input.After.ID)
@@ -727,3 +735,19 @@ const visibleAlbumSQL = `EXISTS (
 	  AND visible_track.status = 'READY'
 	  AND visible_track.published_at IS NOT NULL
 )`
+
+const visibleArtistSQL = `(EXISTS (
+	SELECT 1
+	FROM track_artists visible_credit
+	JOIN tracks visible_track ON visible_track.id = visible_credit.track_id
+	WHERE visible_credit.artist_id = ar.id
+	  AND visible_track.status = 'READY'
+	  AND visible_track.published_at IS NOT NULL
+) OR EXISTS (
+	SELECT 1
+	FROM album_artists visible_credit
+	JOIN tracks visible_track ON visible_track.album_id = visible_credit.album_id
+	WHERE visible_credit.artist_id = ar.id
+	  AND visible_track.status = 'READY'
+	  AND visible_track.published_at IS NOT NULL
+))`

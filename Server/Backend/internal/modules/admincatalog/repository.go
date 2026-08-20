@@ -23,10 +23,10 @@ func (repository *Repository) ListArtists(
 	query ArtistQuery,
 ) ([]ArtistRecord, int, error) {
 	arguments := make([]any, 0, 3)
-	where := ""
+	where := " WHERE " + adminArtistHasActiveTracksSQL
 	if query.Search != "" {
 		position := appendArgument(&arguments, "%"+escapeLike(query.Search)+"%")
-		where = fmt.Sprintf(` WHERE (name ILIKE $%d ESCAPE E'\\' OR description ILIKE $%d ESCAPE E'\\')`, position, position)
+		where += fmt.Sprintf(` AND (name ILIKE $%d ESCAPE E'\\' OR description ILIKE $%d ESCAPE E'\\')`, position, position)
 	}
 	countArguments := append([]any(nil), arguments...)
 	column := map[string]string{"name": "normalized_name", "createdAt": "created_at", "updatedAt": "updated_at"}[query.Sort]
@@ -58,7 +58,7 @@ func (repository *Repository) ListArtists(
 }
 
 func (repository *Repository) FindArtist(ctx context.Context, id string) (ArtistRecord, error) {
-	rows, err := repository.pool.Query(ctx, artistSelectSQL+" WHERE id = $1 LIMIT 1", id)
+	rows, err := repository.pool.Query(ctx, artistSelectSQL+" WHERE id = $1 AND "+adminArtistHasActiveTracksSQL+" LIMIT 1", id)
 	if err != nil {
 		return ArtistRecord{}, fmt.Errorf("query admin artist: %w", err)
 	}
@@ -85,8 +85,12 @@ func (repository *Repository) enrichArtists(ctx context.Context, records []Artis
 		statement string
 		album     bool
 	}{
-		{`SELECT artist_id, count(DISTINCT album_id)::int FROM album_artists WHERE artist_id = ANY($1::uuid[]) GROUP BY artist_id`, true},
-		{`SELECT artist_id, count(DISTINCT track_id)::int FROM track_artists WHERE artist_id = ANY($1::uuid[]) GROUP BY artist_id`, false},
+		{`SELECT artist_id, count(DISTINCT album_id)::int
+			FROM album_artists
+			WHERE artist_id = ANY($1::uuid[]) GROUP BY artist_id`, true},
+		{`SELECT artist_id, count(DISTINCT track_id)::int
+			FROM track_artists
+			WHERE artist_id = ANY($1::uuid[]) GROUP BY artist_id`, false},
 	} {
 		rows, err := repository.pool.Query(ctx, aggregate.statement, ids)
 		if err != nil {
@@ -123,10 +127,10 @@ func (repository *Repository) ListAlbums(
 	query AlbumQuery,
 ) ([]AlbumRecord, int, error) {
 	arguments := make([]any, 0, 3)
-	where := ""
+	where := " WHERE " + adminAlbumHasActiveTracksSQL
 	if query.Search != "" {
 		position := appendArgument(&arguments, "%"+escapeLike(query.Search)+"%")
-		where = fmt.Sprintf(` WHERE (al.title ILIKE $%d ESCAPE E'\\' OR EXISTS (
+		where += fmt.Sprintf(` AND (al.title ILIKE $%d ESCAPE E'\\' OR EXISTS (
 			SELECT 1 FROM album_artists credit
 			JOIN artists artist ON artist.id = credit.artist_id
 			WHERE credit.album_id = al.id AND artist.name ILIKE $%d ESCAPE E'\\'
@@ -177,13 +181,22 @@ func (repository *Repository) FindDuplicateAlbums(ctx context.Context, query Dup
 	var result DuplicateAlbumPage
 	if err := repository.pool.QueryRow(ctx, `
 		WITH duplicate_groups AS (
-			SELECT normalized_title, count(*)::int AS album_count
-			FROM albums GROUP BY normalized_title HAVING count(*) > 1
+			SELECT album.normalized_title, count(*)::int AS album_count
+			FROM albums album
+			WHERE EXISTS (
+				SELECT 1 FROM tracks track
+				WHERE track.album_id = album.id AND track.status <> 'ARCHIVED'
+			)
+			GROUP BY album.normalized_title HAVING count(*) > 1
 		)
 		SELECT count(*)::int,
 		       COALESCE(sum(album_count - 1), 0)::int,
 		       count(*) FILTER (WHERE $1::uuid IS NULL OR normalized_title = (
-			   SELECT normalized_title FROM albums WHERE id = $1::uuid
+			   SELECT album.normalized_title FROM albums album
+			   WHERE album.id = $1::uuid AND EXISTS (
+				   SELECT 1 FROM tracks track
+				   WHERE track.album_id = album.id AND track.status <> 'ARCHIVED'
+			   )
 		   ))::int
 		FROM duplicate_groups`, albumID).Scan(
 		&result.GroupCount, &result.DuplicateAlbumCount, &result.Total,
@@ -192,12 +205,21 @@ func (repository *Repository) FindDuplicateAlbums(ctx context.Context, query Dup
 	}
 	groupRows, err := repository.pool.Query(ctx, `
 		WITH duplicate_groups AS (
-			SELECT normalized_title, min(title) AS title, count(*)::int AS album_count
-			FROM albums GROUP BY normalized_title HAVING count(*) > 1
+			SELECT album.normalized_title, min(album.title) AS title, count(*)::int AS album_count
+			FROM albums album
+			WHERE EXISTS (
+				SELECT 1 FROM tracks track
+				WHERE track.album_id = album.id AND track.status <> 'ARCHIVED'
+			)
+			GROUP BY album.normalized_title HAVING count(*) > 1
 		)
 		SELECT normalized_title, title, album_count FROM duplicate_groups
 		WHERE $3::uuid IS NULL OR normalized_title = (
-			SELECT normalized_title FROM albums WHERE id = $3::uuid
+			SELECT album.normalized_title FROM albums album
+			WHERE album.id = $3::uuid AND EXISTS (
+				SELECT 1 FROM tracks track
+				WHERE track.album_id = album.id AND track.status <> 'ARCHIVED'
+			)
 		)
 		ORDER BY normalized_title ASC LIMIT $1 OFFSET $2
 	`, query.Limit, query.Offset, albumID)
@@ -233,6 +255,10 @@ func (repository *Repository) FindDuplicateAlbums(ctx context.Context, query Dup
 			       source.created_at, source.updated_at
 			FROM albums source
 			WHERE source.normalized_title = selected.normalized_title
+			  AND EXISTS (
+				  SELECT 1 FROM tracks track
+				  WHERE track.album_id = source.id AND track.status <> 'ARCHIVED'
+			  )
 			ORDER BY source.id ASC LIMIT $2 OFFSET $3
 		) al ON TRUE
 		ORDER BY selected.position ASC, al.id ASC
@@ -257,7 +283,7 @@ func (repository *Repository) FindDuplicateAlbums(ctx context.Context, query Dup
 }
 
 func (repository *Repository) FindAlbum(ctx context.Context, id string, limit, offset int) (AlbumRecord, []TrackRecord, int, error) {
-	rows, err := repository.pool.Query(ctx, albumSelectSQL+" WHERE al.id = $1 LIMIT 1", id)
+	rows, err := repository.pool.Query(ctx, albumSelectSQL+" WHERE al.id = $1 AND "+adminAlbumHasActiveTracksSQL+" LIMIT 1", id)
 	if err != nil {
 		return AlbumRecord{}, nil, 0, fmt.Errorf("query admin album: %w", err)
 	}
@@ -789,6 +815,29 @@ const artistSelectSQL = `
 	       version, created_at, updated_at
 	FROM artists
 `
+
+// Archived tracks remain linked so they can be restored; parent catalog entries
+// are therefore considered archived when no non-archived track still references them.
+const adminArtistHasActiveTracksSQL = `(
+	EXISTS (
+		SELECT 1
+		FROM track_artists credit
+		JOIN tracks track ON track.id = credit.track_id
+		WHERE credit.artist_id = artists.id AND track.status <> 'ARCHIVED'
+	)
+	OR EXISTS (
+		SELECT 1
+		FROM album_artists credit
+		JOIN tracks track ON track.album_id = credit.album_id
+		WHERE credit.artist_id = artists.id AND track.status <> 'ARCHIVED'
+	)
+)`
+
+const adminAlbumHasActiveTracksSQL = `EXISTS (
+	SELECT 1
+	FROM tracks track
+	WHERE track.album_id = al.id AND track.status <> 'ARCHIVED'
+)`
 
 const albumSelectSQL = `
 	SELECT al.id, al.title, al.normalized_title, al.description, al.cover_asset_id,

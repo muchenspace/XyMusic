@@ -51,20 +51,24 @@ const bulkOpen = ref(false);
 const scrapeOpen = ref(false);
 const batchScrapeOpen = ref(false);
 const archiveOpen = ref(false);
+const batchArchiveOpen = ref(false);
 const batchRestoreOpen = ref(false);
 const permanentDeleteOpen = ref(false);
 const deletionTrack = ref<TrackSummary>();
+const batchArchiveTargets = ref<TrackSummary[]>([]);
 const batchRestoreTargets = ref<TrackSummary[]>([]);
 const permanentDeleteTargets = ref<TrackSummary[]>([]);
 const permanentDeleteConfirmation = ref("");
 const permanentDeleteJob = ref<PermanentDeleteTracksJob>();
 const batchRestoreError = ref("");
+const batchArchiveError = ref("");
 const permanentDeleteError = ref("");
 const actionError = ref("");
 const editorDirty = ref(false);
 const remoteChanged = ref(false);
 let populating = false;
 let allowArchiveClose = false;
+let allowBatchArchiveClose = false;
 let allowBulkClose = false;
 const bulk = reactive({ primary: "", albumArtists: "", album: "", genres: "", comment: "", reason: "" });
 const tags = reactive<TagForm>({ title: "", primary: "", albumArtists: "", featured: "", composers: "", lyricists: "", producers: "", album: "", releaseDate: "", trackNumber: "", trackTotal: "", discNumber: "", discTotal: "", genres: "", bpm: "", isrc: "", copyright: "", comment: "", lyrics: "", lyricsFormat: "PLAIN", lyricsTiming: "LINE", lyricsLanguage: "und", reason: "" });
@@ -317,6 +321,18 @@ const batchRestoreMutation = useMutation({
   onError: (error) => { batchRestoreError.value = error instanceof Error ? error.message : "批量恢复失败"; },
 });
 
+const batchArchiveMutation = useMutation({
+  mutationFn: () => musicAdmin.batchArchiveTracks(batchArchiveTargets.value),
+  onSuccess: async (result) => {
+    allowBatchArchiveClose = true;
+    batchArchiveOpen.value = false;
+    removeSelected(result.items.map((item) => item.trackId));
+    ui.notify("success", `已归档 ${result.archived} 首曲目`);
+    await refresh();
+  },
+  onError: (error) => { batchArchiveError.value = error instanceof Error ? error.message : "批量归档失败"; },
+});
+
 function deleteJobStatusActive(status: PermanentDeleteTracksJob["status"] | undefined): boolean {
   return status === "PENDING" || status === "RUNNING";
 }
@@ -329,7 +345,7 @@ const deleteJobCreateMutation = useMutation({
   onError: (error) => { permanentDeleteError.value = error instanceof Error ? error.message : "无法创建永久删除任务"; },
 });
 const permanentDeletePending = computed(() => deleteJobCreateMutation.isPending.value || deleteJobStatusActive(permanentDeleteJob.value?.status));
-const selectionLocked = computed(() => batchRestoreMutation.isPending.value || permanentDeletePending.value);
+const selectionLocked = computed(() => batchArchiveMutation.isPending.value || batchRestoreMutation.isPending.value || permanentDeletePending.value);
 const permanentDeleteCounts = computed(() => (permanentDeleteJob.value?.items ?? []).reduce((summary, item) => ({
   deletedFiles: summary.deletedFiles + item.deletedFiles,
   quarantinedFiles: summary.quarantinedFiles + item.quarantinedFiles,
@@ -387,6 +403,19 @@ function archivedTargetsOrNotify(tracks: readonly TrackSummary[]): TrackSummary[
   if (invalid) { ui.notify("warning", "选择中包含非归档曲目", `曲目“${invalid.title}”状态已变化，请刷新后重新选择。`); return undefined; }
   return [...tracks];
 }
+function activeTargetsOrNotify(tracks: readonly TrackSummary[]): TrackSummary[] | undefined {
+  if (!tracks.length) { ui.notify("warning", "请先选择曲目"); return undefined; }
+  const invalid = tracks.find((track) => track.status === "ARCHIVED");
+  if (invalid) { ui.notify("warning", "选择中包含已归档曲目", `曲目“${invalid.title}”状态已变化，请刷新后重新选择。`); return undefined; }
+  return [...tracks];
+}
+function openBatchArchive(): void {
+  const targets = activeTargetsOrNotify([...selectedTracks.value.values()]);
+  if (!targets) return;
+  batchArchiveTargets.value = targets;
+  batchArchiveError.value = "";
+  batchArchiveOpen.value = true;
+}
 function openBatchRestore(): void {
   const targets = archivedTargetsOrNotify([...selectedTracks.value.values()]);
   if (!targets) return;
@@ -421,6 +450,7 @@ function openBatchScrape(): void {
 }
 async function scrapingCompleted(): Promise<void> { clearSelection(); await refresh(); }
 watch(archiveOpen, (value) => { if (!value && stateMutation.isPending.value && stateMutation.variables.value?.action === "archive" && !allowArchiveClose) archiveOpen.value = true; allowArchiveClose = false; });
+watch(batchArchiveOpen, (value) => { if (!value && batchArchiveMutation.isPending.value && !allowBatchArchiveClose) batchArchiveOpen.value = true; if (!value && !batchArchiveMutation.isPending.value) { batchArchiveTargets.value = []; batchArchiveError.value = ""; } allowBatchArchiveClose = false; });
 watch(batchRestoreOpen, (value) => { if (!value && !batchRestoreMutation.isPending.value) { batchRestoreTargets.value = []; batchRestoreError.value = ""; } });
 watch(permanentDeleteOpen, (value) => { if (!value && !permanentDeletePending.value) { permanentDeleteTargets.value = []; permanentDeleteConfirmation.value = ""; permanentDeleteJob.value = undefined; permanentDeleteError.value = ""; } });
 watch(bulkOpen, (value) => { if (!value && bulkMutation.isPending.value && !allowBulkClose) bulkOpen.value = true; allowBulkClose = false; });
@@ -432,7 +462,7 @@ watch(bulkOpen, (value) => { if (!value && bulkMutation.isPending.value && !allo
     <nav class="flex gap-1 overflow-x-auto rounded-xl bg-[var(--surface-muted)] p-1 sm:w-max"><RouterLink class="pressable rounded-lg bg-[var(--surface-solid)] px-4 py-2 text-sm font-bold text-[var(--primary)] shadow-sm" to="/music/tracks">曲目</RouterLink><RouterLink class="pressable rounded-lg px-4 py-2 text-sm font-semibold text-[var(--muted)]" to="/music/albums">专辑</RouterLink><RouterLink class="pressable rounded-lg px-4 py-2 text-sm font-semibold text-[var(--muted)]" to="/music/artists">艺术家</RouterLink></nav>
     <Transition name="content-swap">
       <div v-if="selectedIds.size && selectionKind === 'ARCHIVED'" class="sticky top-[84px] z-10 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-500/25 bg-[var(--surface-solid)] p-3 shadow-xl"><span class="grid h-9 w-9 place-items-center rounded-xl bg-slate-500/10 text-slate-500"><Archive :size="17" /></span><p class="mr-auto font-semibold">已选择 {{ selectedIds.size }} 首已归档曲目</p><AppButton variant="ghost" :disabled="selectionLocked" @click="clearSelection"><template #icon><X :size="15" /></template>取消</AppButton><AppButton :disabled="selectionLocked" @click="openBatchRestore"><template #icon><RotateCcw :size="15" /></template>批量恢复</AppButton><AppButton variant="danger" :disabled="selectionLocked" @click="openBatchPermanentDelete"><template #icon><Trash2 :size="15" /></template>批量永久删除</AppButton></div>
-      <div v-else-if="selectedIds.size && selectionKind === 'ACTIVE'" class="sticky top-[84px] z-10 flex flex-wrap items-center gap-3 rounded-2xl border border-violet-500/25 bg-[var(--surface-solid)] p-3 shadow-xl"><span class="grid h-9 w-9 place-items-center rounded-xl bg-[var(--primary-soft)] text-[var(--primary)]"><Check :size="17" /></span><p class="mr-auto font-semibold">已选择 {{ selectedIds.size }} 首曲目</p><AppButton variant="ghost" :disabled="selectionLocked" @click="clearSelection"><template #icon><X :size="15" /></template>取消</AppButton><AppButton :disabled="selectionLocked" @click="openBatchScrape"><template #icon><Sparkles :size="15" /></template>在线刮削</AppButton><AppButton variant="primary" :disabled="selectionLocked" @click="openBulk"><template #icon><Tags :size="15" /></template>批量修改</AppButton></div>
+      <div v-else-if="selectedIds.size && selectionKind === 'ACTIVE'" class="sticky top-[84px] z-10 flex flex-wrap items-center gap-3 rounded-2xl border border-violet-500/25 bg-[var(--surface-solid)] p-3 shadow-xl"><span class="grid h-9 w-9 place-items-center rounded-xl bg-[var(--primary-soft)] text-[var(--primary)]"><Check :size="17" /></span><p class="mr-auto font-semibold">已选择 {{ selectedIds.size }} 首曲目</p><AppButton variant="ghost" :disabled="selectionLocked" @click="clearSelection"><template #icon><X :size="15" /></template>取消</AppButton><AppButton variant="danger" :disabled="selectionLocked" @click="openBatchArchive"><template #icon><Archive :size="15" /></template>批量归档</AppButton><AppButton :disabled="selectionLocked" @click="openBatchScrape"><template #icon><Sparkles :size="15" /></template>在线刮削</AppButton><AppButton variant="primary" :disabled="selectionLocked" @click="openBulk"><template #icon><Tags :size="15" /></template>批量修改</AppButton></div>
       <div v-else-if="selectedIds.size" class="sticky top-[84px] z-10 flex flex-wrap items-center gap-3 rounded-2xl border border-amber-500/30 bg-[var(--surface-solid)] p-3 shadow-xl"><AlertTriangle :size="18" class="text-amber-500" /><p class="mr-auto font-semibold">选择中包含不同曲目状态，请清除后重新选择</p><AppButton variant="ghost" @click="clearSelection"><template #icon><X :size="15" /></template>清除选择</AppButton></div>
     </Transition>
     <section class="ui-card overflow-hidden" :class="{ 'data-refreshing': tracksQuery.isFetching.value && !tracksQuery.isPending.value }" :aria-busy="tracksQuery.isFetching.value">
@@ -486,10 +516,16 @@ watch(bulkOpen, (value) => { if (!value && bulkMutation.isPending.value && !allo
       <p v-if="batchRestoreError" class="mt-4 whitespace-pre-line rounded-xl bg-rose-500/10 p-3 text-sm text-[var(--danger)]">{{ batchRestoreError }}</p>
       <template #footer><AppButton :disabled="batchRestoreMutation.isPending.value" @click="batchRestoreOpen = false">取消</AppButton><AppButton variant="primary" :loading="batchRestoreMutation.isPending.value" @click="batchRestoreMutation.mutate()"><template #icon><RotateCcw :size="15" /></template>确认恢复</AppButton></template>
     </BaseDialog>
-    <BaseDialog v-model="archiveOpen" title="删除曲目" description="曲目会移入回收站，并立即从默认列表及客户端中消失。"><div class="rounded-xl bg-[var(--surface-muted)] p-4"><p class="font-semibold">{{ deletionTrack?.title }}</p><p class="mt-1 text-xs text-[var(--muted)]">可以在回收站中永久删除原始文件和全部数据。</p></div><p v-if="actionError" class="mt-4 rounded-xl bg-rose-500/10 p-3 text-sm text-[var(--danger)]">{{ actionError }}</p><template #footer><AppButton @click="archiveOpen = false">取消</AppButton><AppButton variant="danger" :loading="stateMutation.isPending.value" @click="stateMutation.mutate({ track: deletionTrack!, action: 'archive' })">移入回收站</AppButton></template></BaseDialog>
+    <BaseDialog v-model="batchArchiveOpen" :title="`批量归档 ${batchArchiveTargets.length} 首曲目`" description="归档操作会原子校验全部曲目版本；空专辑和艺术家会同步归档，恢复曲目后会重新出现。" :prevent-close="batchArchiveMutation.isPending.value">
+      <div class="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4"><p class="font-semibold">将 {{ batchArchiveTargets.length }} 首曲目移入回收站</p><p class="mt-2 text-xs leading-5 text-[var(--muted)]">曲目会立即从默认列表和客户端中消失；没有其他曲目的专辑和艺术家也会同步隐藏，但关联和本地文件会保留。</p></div>
+      <div class="mt-4 max-h-56 divide-y divide-[var(--border)] overflow-y-auto rounded-xl border border-[var(--border)]"><div v-for="track in batchArchiveTargets.slice(0, 8)" :key="track.id" class="px-4 py-3"><p class="truncate font-semibold">{{ track.title }}</p><p class="mt-0.5 truncate text-xs text-[var(--muted)]">{{ track.artists.join('、') || '未知艺术家' }}</p></div><p v-if="batchArchiveTargets.length > 8" class="px-4 py-3 text-xs text-[var(--muted)]">另有 {{ batchArchiveTargets.length - 8 }} 首曲目</p></div>
+      <p v-if="batchArchiveError" class="mt-4 whitespace-pre-line rounded-xl bg-rose-500/10 p-3 text-sm text-[var(--danger)]">{{ batchArchiveError }}</p>
+      <template #footer><AppButton :disabled="batchArchiveMutation.isPending.value" @click="batchArchiveOpen = false">取消</AppButton><AppButton variant="danger" :loading="batchArchiveMutation.isPending.value" @click="batchArchiveMutation.mutate()"><template #icon><Archive :size="15" /></template>确认批量归档</AppButton></template>
+    </BaseDialog>
+    <BaseDialog v-model="archiveOpen" title="删除曲目" description="曲目会移入回收站；空专辑和艺术家会同步隐藏，恢复曲目后会重新出现。"><div class="rounded-xl bg-[var(--surface-muted)] p-4"><p class="font-semibold">{{ deletionTrack?.title }}</p><p class="mt-1 text-xs text-[var(--muted)]">本地文件和关联会保留；可以在回收站中恢复曲目，或永久删除原始文件和全部数据。</p></div><p v-if="actionError" class="mt-4 rounded-xl bg-rose-500/10 p-3 text-sm text-[var(--danger)]">{{ actionError }}</p><template #footer><AppButton @click="archiveOpen = false">取消</AppButton><AppButton variant="danger" :loading="stateMutation.isPending.value" @click="stateMutation.mutate({ track: deletionTrack!, action: 'archive' })">移入回收站</AppButton></template></BaseDialog>
     <BaseDialog v-model="permanentDeleteOpen" :title="permanentDeleteJob ? '永久删除任务' : `永久删除 ${permanentDeleteTargets.length} 首曲目`" :description="permanentDeleteJob ? '任务由服务端持久化执行，页面持续查询逐项结果。' : '此操作不可恢复，并会清理曲目关联的本地文件与媒体对象。'" width="lg" :prevent-close="permanentDeletePending">
       <template v-if="!permanentDeleteJob">
-        <div class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4"><p class="font-semibold text-[var(--danger)]">将永久删除 {{ permanentDeleteTargets.length }} 首曲目</p><p class="mt-2 text-xs leading-5 text-[var(--muted)]">歌单引用、收藏、播放历史、Tag、歌词、转码文件及 MinIO 对象都会进入删除或安全清理流程。</p></div>
+        <div class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4"><p class="font-semibold text-[var(--danger)]">将永久删除 {{ permanentDeleteTargets.length }} 首曲目</p><p class="mt-2 text-xs leading-5 text-[var(--muted)]">歌单引用、收藏、播放历史、Tag、歌词、转码文件及 MinIO 对象都会进入删除或安全清理流程；不再有任何曲目的专辑和艺术家也会一并删除。</p></div>
         <div class="mt-4 max-h-48 divide-y divide-[var(--border)] overflow-y-auto rounded-xl border border-[var(--border)]"><div v-for="track in permanentDeleteTargets.slice(0, 8)" :key="track.id" class="px-4 py-3"><p class="truncate font-semibold">{{ track.title }}</p><p class="mt-0.5 truncate text-xs text-[var(--muted)]">{{ track.source?.relativePath ?? track.id }}</p></div><p v-if="permanentDeleteTargets.length > 8" class="px-4 py-3 text-xs text-[var(--muted)]">另有 {{ permanentDeleteTargets.length - 8 }} 首曲目</p></div>
         <div class="mt-5"><label class="ui-label">输入“永久删除”以确认</label><input v-model="permanentDeleteConfirmation" class="ui-input" autocomplete="off" aria-label="永久删除确认文字" placeholder="永久删除" /></div>
         <p v-if="permanentDeleteError" class="mt-4 whitespace-pre-line rounded-xl bg-rose-500/10 p-3 text-sm text-[var(--danger)]">{{ permanentDeleteError }}</p>
