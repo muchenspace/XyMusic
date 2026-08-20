@@ -1071,7 +1071,8 @@ function monotonicNow(): number {
 <template>
   <Transition name="lyrics-view">
     <section v-if="player.lyricsOpen && player.currentTrack" ref="viewElement" class="lyrics-view" role="dialog" aria-modal="true" aria-label="歌词全屏视图" tabindex="-1" @keydown="trapFocus">
-      <div class="lyrics-titlebar-drag-region" data-tauri-drag-region aria-hidden="true" @dblclick="toggleMaximizeWindow"></div>
+      <div v-if="props.fullscreen" class="lyrics-titlebar-drag-region" aria-hidden="true"></div>
+      <div v-else class="lyrics-titlebar-drag-region" data-tauri-drag-region aria-hidden="true" @dblclick="toggleMaximizeWindow"></div>
       <div class="lyrics-stage">
         <div class="lyrics-content">
           <div class="lyrics-album">

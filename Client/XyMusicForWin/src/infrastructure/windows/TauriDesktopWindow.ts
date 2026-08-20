@@ -13,17 +13,14 @@ export class TauriDesktopWindow implements DesktopWindow {
   toggleMaximize(): Promise<void> {
     return this.windowModeTransitions.run(async () => {
       if (!isTauriRuntime()) return;
-      const appWindow = getCurrentWindow();
-      if (await appWindow.isFullscreen()) return;
-      await appWindow.toggleMaximize();
+      await invoke("toggle_main_window_maximize");
     });
   }
 
   toggleFullscreen(): Promise<void> {
     return this.windowModeTransitions.run(async () => {
       if (!isTauriRuntime()) return;
-      const appWindow = getCurrentWindow();
-      await appWindow.setFullscreen(!(await appWindow.isFullscreen()));
+      await invoke("toggle_main_window_fullscreen");
     });
   }
 

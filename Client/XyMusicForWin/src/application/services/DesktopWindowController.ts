@@ -139,16 +139,17 @@ export class DesktopWindowController implements DesktopWindowControllerPort {
         this.desktopWindow.isFullscreen(),
       ]);
       if (this.disposed || revision !== this.stateRevision) return;
-      this.updateState({ maximized, fullscreen });
+      this.updateState({ maximized: fullscreen ? false : maximized, fullscreen });
     } catch (cause) {
       if (!this.disposed && revision === this.stateRevision) this.report("read native window state", cause);
     }
   }
 
   private updateState(next: DesktopWindowState): void {
-    if (this.stateValue.maximized === next.maximized && this.stateValue.fullscreen === next.fullscreen) return;
-    this.stateValue = next;
-    for (const listener of this.listeners) listener(next);
+    const normalized = next.fullscreen ? { ...next, maximized: false } : next;
+    if (this.stateValue.maximized === normalized.maximized && this.stateValue.fullscreen === normalized.fullscreen) return;
+    this.stateValue = normalized;
+    for (const listener of this.listeners) listener(normalized);
   }
 
   private report(action: string, cause: unknown): void {

@@ -354,7 +354,7 @@
 .lyrics-button:hover { color: var(--text); background: var(--surface-hover); }
 .lyrics-button.enabled { color: var(--text); background: var(--accent-soft); }
 .desktop-lyrics-button { width: 30px; justify-content: center; padding: 0; }
-.volume-button, .mini-mode-button, .fullscreen-button { width: 30px; height: 30px; border-radius: var(--radius-sm); }
+.volume-button, .mini-mode-button { width: 30px; height: 30px; border-radius: var(--radius-sm); }
 .volume-slider { min-width: 40px; max-width: 76px; flex: 1 1 76px; }
 .player-extras button.liked, .mini-transport button.liked { color: var(--danger); }
 
@@ -408,7 +408,7 @@
   .topbar { grid-template-columns: auto minmax(190px, 360px) auto minmax(12px, 1fr) auto; padding-left: 8px; }
   .window-control { width: 42px; }
   .player-bar { grid-template-columns: minmax(170px, 0.8fr) minmax(280px, 1.35fr) minmax(200px, 0.8fr); }
-  .player-extras .volume-slider, .fullscreen-button { display: none; }
+  .player-extras .volume-slider { display: none; }
   .lyrics-button span { display: none; }
   .lyrics-button { width: 31px; justify-content: center; padding: 0; }
 }

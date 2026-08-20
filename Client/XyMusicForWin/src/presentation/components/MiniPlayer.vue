@@ -18,7 +18,8 @@ function close(): void { void windowControls.close().catch(() => undefined); }
 <template>
   <section v-if="player.currentTrack" class="mini-player" aria-label="迷你播放器">
     <header class="mini-titlebar">
-      <span data-tauri-drag-region>XY Music</span>
+      <span v-if="fullscreen">XY Music</span>
+      <span v-else data-tauri-drag-region>XY Music</span>
       <div v-if="!fullscreen" class="mini-window-controls">
         <button type="button" title="退出迷你模式" aria-label="退出迷你模式" @click="player.setMiniMode(false)"><ChevronDown :size="16" /></button>
         <button type="button" title="最小化" aria-label="最小化" @click="minimize"><Minus :size="16" /></button>

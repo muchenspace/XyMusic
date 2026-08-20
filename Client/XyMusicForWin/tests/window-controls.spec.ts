@@ -72,11 +72,13 @@ describe("window controls", () => {
 
     await nextTick();
     expect(wrapper.find(".window-controls").exists()).toBe(false);
+    expect(wrapper.get(".titlebar-drag-region").attributes("data-tauri-drag-region")).toBeUndefined();
     await wrapper.get(".titlebar-drag-region").trigger("dblclick");
     expect(toggleMaximize).not.toHaveBeenCalled();
 
     await wrapper.setProps({ fullscreen: false });
     expect(wrapper.get(".window-controls").findAll("button")).toHaveLength(3);
+    expect(wrapper.get(".titlebar-drag-region").attributes("data-tauri-drag-region")).toBe("");
     await wrapper.get(".titlebar-drag-region").trigger("dblclick");
     expect(toggleMaximize).toHaveBeenCalledOnce();
 

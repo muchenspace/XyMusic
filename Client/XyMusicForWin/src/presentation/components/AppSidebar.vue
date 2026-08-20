@@ -6,7 +6,9 @@ import brandMark from "../../assets/brand-mark-512.webp";
 import type { Playlist } from "../../domain/music";
 import type { LibraryView } from "../../domain/navigation";
 
-const props = defineProps<{ user: UserSession["user"]; active: LibraryView; playlists: Playlist[] }>();
+const props = withDefaults(defineProps<{ user: UserSession["user"]; active: LibraryView; playlists: Playlist[]; fullscreen?: boolean }>(), {
+  fullscreen: false,
+});
 const emit = defineEmits<{ logout: []; navigate: [view: LibraryView]; playlist: [playlist: Playlist]; createPlaylist: [] }>();
 const initials = computed(() => (props.user.displayName || props.user.username).trim().slice(0, 1).toUpperCase());
 const avatarFailed = ref(false);
@@ -20,7 +22,11 @@ const library = [
 
 <template>
   <aside class="sidebar" aria-label="应用侧栏">
-    <div class="brand" aria-label="XY Music" data-tauri-drag-region>
+    <div v-if="props.fullscreen" class="brand" aria-label="XY Music">
+      <span class="brand-mark"><img :src="brandMark" alt="" /></span>
+      <span>XY Music</span>
+    </div>
+    <div v-else class="brand" aria-label="XY Music" data-tauri-drag-region>
       <span class="brand-mark"><img :src="brandMark" alt="" /></span>
       <span>XY Music</span>
     </div>
