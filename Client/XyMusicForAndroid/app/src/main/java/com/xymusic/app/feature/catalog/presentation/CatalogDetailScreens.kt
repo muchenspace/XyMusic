@@ -170,7 +170,7 @@ fun AlbumDetailScreen(
                                 CatalogTrackRow(
                                     track = track,
                                     onClick = { onTrackPlay?.invoke(loadedTracks, track) },
-                                    showTrackNumber = true,
+                                    showArtwork = false,
                                     onPlayClick =
                                     onTrackPlay?.let { play ->
                                         { play(loadedTracks, track) }

@@ -1,5 +1,8 @@
 package com.xymusic.app.feature.playlist.presentation
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -39,6 +42,8 @@ internal object PlaylistDetailTestTags {
     const val TracksList = "playlist-tracks-list"
 
     fun track(entryId: String): String = "playlist-landscape-track-$entryId"
+
+    fun reorderHandle(entryId: String): String = "playlist-reorder-handle-$entryId"
 }
 
 internal data class PlaylistLandscapeActions(
@@ -165,6 +170,7 @@ internal fun PlaylistLandscapeScreen(
                                 key = { _, item -> item.entryId },
                                 contentType = { _, _ -> "playlist-track" },
                             ) { index, entry ->
+                                val dragging = reorderState.draggedEntryId == entry.entryId
                                 PlaylistTrackRow(
                                     entry = entry,
                                     index = index,
@@ -172,7 +178,9 @@ internal fun PlaylistLandscapeScreen(
                                     enabled = !uiState.isMutating,
                                     removeEnabled = !uiState.isMutating,
                                     reorderEnabled = uiState.entriesComplete && !uiState.isMutating,
+                                    isDragging = dragging,
                                     onPlay = { actions.onPlay(entry.entryId) },
+                                    onDragStarted = { reorderState.startDrag(entry.entryId) },
                                     onMove = { direction -> reorderState.move(entry.entryId, direction) },
                                     onReorderFinished = {
                                         reorderState.finish()?.let(actions.onReorder)
@@ -181,7 +189,21 @@ internal fun PlaylistLandscapeScreen(
                                     onRemove = { actions.onRemove(entry.entryId) },
                                     onMore = { actions.onTrackMore(entry.track.id) },
                                     compact = compactLandscape,
-                                    modifier = Modifier.testTag(PlaylistDetailTestTags.track(entry.entryId)),
+                                    modifier =
+                                    Modifier
+                                        .animateItem(
+                                            fadeInSpec = null,
+                                            placementSpec =
+                                            if (dragging) {
+                                                snap()
+                                            } else {
+                                                spring(
+                                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                                    stiffness = Spring.StiffnessMedium,
+                                                )
+                                            },
+                                            fadeOutSpec = null,
+                                        ).testTag(PlaylistDetailTestTags.track(entry.entryId)),
                                 )
                             }
                         }

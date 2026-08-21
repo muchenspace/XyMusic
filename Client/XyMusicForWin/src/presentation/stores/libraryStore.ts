@@ -1,6 +1,6 @@
 import { computed, onScopeDispose, ref } from "vue";
 import { defineStore } from "pinia";
-import type { Album, Artist, Playlist, PlaylistDetail, PlaylistVisibility, Track } from "../../domain/music";
+import type { Album, Artist, Playlist, PlaylistDetail, PlaylistEntry, PlaylistVisibility, Track } from "../../domain/music";
 import type { LibraryView } from "../../domain/navigation";
 import type { FavoriteSort, PlaylistSort } from "../../domain/pagination";
 import { useApplicationServices } from "../services";
@@ -206,14 +206,15 @@ export const useLibraryStore = defineStore("library-view", () => {
         const page = await playlistUseCases.getPage(source.id, cursor, DETAIL_PAGE_SIZE, controller.signal);
         if (currentRequest === requestId && selectedPlaylist.value?.id === source.id) {
           const entries = page.entries.map((entry) => ({ ...entry, track: applyFavoriteOverride(entry.track) }));
+          const mergedEntries = sortPlaylistEntriesNewestFirst([...selectedPlaylist.value.entries, ...entries]);
           selectedPlaylist.value = {
             ...selectedPlaylist.value,
             version: page.version,
             trackCount: page.trackCount,
-            entries: [...selectedPlaylist.value.entries, ...entries],
+            entries: mergedEntries,
             nextCursor: page.nextCursor,
           };
-          tracks.value.push(...entries.map((entry) => entry.track));
+          tracks.value = mergedEntries.map((entry) => entry.track);
           detailNextCursor.value = page.nextCursor ?? null;
         }
       }
@@ -325,7 +326,7 @@ export const useLibraryStore = defineStore("library-view", () => {
       selectedPlaylist.value = {
         ...detail,
         version,
-        entries: orderedEntryIds.map((id, position) => ({ ...byId.get(id)!, position })),
+        entries: orderedEntryIds.map((id, index) => ({ ...byId.get(id)!, position: orderedEntryIds.length - 1 - index })),
       };
       syncSelectedPlaylist();
     } finally {
@@ -500,7 +501,8 @@ export const useLibraryStore = defineStore("library-view", () => {
   function applyPlaylistFavoriteOverrides(detail: PlaylistDetail): PlaylistDetail {
     return {
       ...detail,
-      entries: detail.entries.map((entry) => ({ ...entry, track: applyFavoriteOverride(entry.track) })),
+      entries: sortPlaylistEntriesNewestFirst(detail.entries)
+        .map((entry) => ({ ...entry, track: applyFavoriteOverride(entry.track) })),
     };
   }
 
@@ -520,6 +522,10 @@ interface ListSnapshot {
 
 function isListView(view: LibraryView): boolean {
   return view === "favorites" || view === "playlists";
+}
+
+function sortPlaylistEntriesNewestFirst(entries: PlaylistEntry[]): PlaylistEntry[] {
+  return [...entries].sort((left, right) => right.position - left.position);
 }
 
 function isSameEntrySet(currentIds: string[], orderedIds: string[]): boolean {

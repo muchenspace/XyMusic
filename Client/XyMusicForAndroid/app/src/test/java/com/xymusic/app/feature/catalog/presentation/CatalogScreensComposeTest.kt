@@ -60,7 +60,7 @@ class CatalogScreensComposeTest {
 
      */
     @Test
-    fun albumDetailShowsTracksInProvidedAlbumOrder() {
+    fun albumDetailShowsTrackTitlesWithoutNumbersInProvidedOrder() {
         composeRule.setCatalogContent {
             AlbumDetailScreen(
                 uiState =
@@ -85,10 +85,10 @@ class CatalogScreensComposeTest {
         }
 
         composeRule.waitForIdle()
-        composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("1  Opening"))
-        composeRule.onNodeWithText("1  Opening").assertIsDisplayed()
-        composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("2  Finale"))
-        composeRule.onNodeWithText("2  Finale").assertIsDisplayed()
+        composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Opening"))
+        composeRule.onNodeWithText("Opening").assertIsDisplayed()
+        composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Finale"))
+        composeRule.onNodeWithText("Finale").assertIsDisplayed()
     }
 
     @Test
@@ -171,6 +171,7 @@ class CatalogScreensComposeTest {
         }
 
         composeRule.waitForIdle()
+        composeRule.onNodeWithText("Opening").assertIsDisplayed()
         val info =
             composeRule
                 .onNodeWithTag(CatalogDetailTestTags.AlbumLandscapeInfo)

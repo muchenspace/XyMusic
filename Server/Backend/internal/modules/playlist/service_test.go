@@ -81,8 +81,8 @@ func TestGetEnforcesPrivateVisibilityAndMapsOnlyPresentableEntries(t *testing.T)
 				t.Fatalf("entry query = %#v", query)
 			}
 			return []EntryRecord{
-				{ID: "entry-1", PlaylistID: "playlist-1", TrackID: "track-1", Position: 0, AddedBy: "owner-1", AddedAt: now},
-				{ID: "entry-2", PlaylistID: "playlist-1", TrackID: "track-hidden", Position: 1, AddedBy: "owner-1", AddedAt: now},
+				{ID: "entry-1", PlaylistID: "playlist-1", TrackID: "track-1", Position: 1, AddedBy: "owner-1", AddedAt: now},
+				{ID: "entry-2", PlaylistID: "playlist-1", TrackID: "track-hidden", Position: 0, AddedBy: "owner-1", AddedAt: now},
 			}, nil
 		},
 	}
@@ -170,10 +170,10 @@ func TestAddTrackPresentsMutationAndMapsDomainErrors(t *testing.T) {
 	}
 }
 
-func TestReorderRequiresUniqueCompleteListAndPassesExactOrder(t *testing.T) {
+func TestReorderRequiresUniqueCompleteListAndConvertsDisplayOrderToStorageOrder(t *testing.T) {
 	store := &storeStub{
 		reorder: func(_ context.Context, params ReorderParams) (VersionMutation, error) {
-			if !reflect.DeepEqual(params.OrderedEntryIDs, []string{"entry-2", "entry-1"}) {
+			if !reflect.DeepEqual(params.OrderedEntryIDs, []string{"entry-1", "entry-2"}) {
 				t.Fatalf("ordered ids = %#v", params.OrderedEntryIDs)
 			}
 			return VersionMutation{PlaylistID: params.PlaylistID, Version: 5, UpdatedAt: params.Now}, nil

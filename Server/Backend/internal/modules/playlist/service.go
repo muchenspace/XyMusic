@@ -124,7 +124,7 @@ func (service *Service) Get(ctx context.Context, requesterID, playlistID string,
 	if err != nil {
 		return DetailDTO{}, err
 	}
-	scope := fmt.Sprintf("playlist-entries:%s:%d", playlistID, playlist.Version)
+	scope := fmt.Sprintf("playlist-entries-desc:%s:%d", playlistID, playlist.Version)
 	cursor, err := decodeEntryCursor(service.cursors, scope, input.Cursor)
 	if err != nil {
 		return DetailDTO{}, err
@@ -319,9 +319,13 @@ func (service *Service) Reorder(ctx context.Context, ownerID, playlistID string,
 		}
 		seen[id] = struct{}{}
 	}
+	storageEntryIDs := make([]string, len(orderedEntryIDs))
+	for index, id := range orderedEntryIDs {
+		storageEntryIDs[len(orderedEntryIDs)-1-index] = id
+	}
 	mutation, err := service.repository.Reorder(ctx, ReorderParams{
 		OwnerID: ownerID, PlaylistID: playlistID, ExpectedVersion: input.ExpectedVersion,
-		OrderedEntryIDs: append([]string(nil), orderedEntryIDs...), Now: service.clock.Now(),
+		OrderedEntryIDs: storageEntryIDs, Now: service.clock.Now(),
 	})
 	if err != nil {
 		return VersionDTO{}, mapStoreError(err)

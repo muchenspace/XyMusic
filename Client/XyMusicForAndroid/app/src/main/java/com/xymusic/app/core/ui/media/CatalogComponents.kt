@@ -64,7 +64,7 @@ internal fun CatalogTrackRow(
     track: CatalogTrackUi,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    showTrackNumber: Boolean = false,
+    showArtwork: Boolean = true,
     onPlayClick: (() -> Unit)? = null,
     onMoreClick: (() -> Unit)? = null,
 ) {
@@ -91,7 +91,7 @@ internal fun CatalogTrackRow(
                 .padding(start = 20.dp, end = 8.dp, top = 7.dp, bottom = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (!showTrackNumber) {
+            if (showArtwork) {
                 CatalogArtwork(
                     artwork = track.artwork,
                     fallbackIcon = Icons.Outlined.MusicNote,
@@ -105,12 +105,7 @@ internal fun CatalogTrackRow(
                 verticalArrangement = Arrangement.spacedBy(1.dp),
             ) {
                 Text(
-                    text =
-                    if (showTrackNumber) {
-                        track.orderLabel()?.let { "$it  ${track.title}" } ?: track.title
-                    } else {
-                        track.title
-                    },
+                    text = track.title,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodyLarge,
@@ -141,7 +136,7 @@ internal fun CatalogTrackRow(
             }
         }
         HorizontalDivider(
-            modifier = Modifier.padding(start = if (showTrackNumber) 20.dp else 82.dp),
+            modifier = Modifier.padding(start = if (showArtwork) 82.dp else 20.dp),
             thickness = 0.5.dp,
             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f),
         )
@@ -608,7 +603,3 @@ internal fun CatalogTrackUi.artistNames(): String = artists
 
 internal fun CatalogAlbumUi.artistNames(): String = artists
     .joinToString(separator = " · ", transform = CatalogArtistLinkUi::name)
-
-private fun CatalogTrackUi.orderLabel(): String? = trackNumber?.let { number ->
-    if (discNumber > 1) "$discNumber-$number" else number.toString()
-}

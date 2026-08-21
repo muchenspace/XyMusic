@@ -126,7 +126,7 @@
 
 .track-table { overflow: hidden; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line); background: transparent; }
 .playlist-selection-toolbar { display: flex; min-height: 44px; align-items: center; gap: 14px; margin-bottom: 12px; padding: 7px 10px; border-bottom: 1px solid var(--line); color: var(--text-muted); font-size: 13px; }
-.playlist-selection-toolbar label { display: flex; align-items: center; gap: 7px; color: var(--text); font-weight: 600; }
+.playlist-selection-toolbar label { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; color: var(--text); font-weight: 600; white-space: nowrap; }
 .playlist-selection-toolbar .danger-button { min-height: 30px; margin-left: auto; padding: 6px 10px; }
 .playlist-selection-toolbar small { color: var(--text-muted); }
 .track-row-group { position: relative; }
@@ -135,30 +135,37 @@
 .mood-card, .random-track-card { content-visibility: auto; }
 .mood-card { contain-intrinsic-size: auto 152px; }
 .random-track-card { contain-intrinsic-size: auto 72px; }
-.track-row { display: grid; height: 64px; min-height: 64px; grid-template-columns: 36px minmax(210px, 1.55fr) minmax(120px, 0.9fr) 100px 56px 112px; align-items: center; padding: 0 11px; border-bottom: 1px solid var(--line); color: var(--text-muted); font-size: 13px; transition: background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), opacity var(--motion-fast) var(--ease-standard); }
+.track-row { position: relative; display: grid; height: 64px; min-height: 64px; grid-template-columns: 36px minmax(210px, 1.55fr) minmax(120px, 0.9fr) 100px 56px 112px; align-items: center; padding: 0 11px; isolation: isolate; border-bottom: 1px solid var(--line); color: var(--text-muted); font-size: 13px; scale: 1; transform-origin: center; transition: scale 120ms var(--ease-standard), background 120ms var(--ease-standard), color 120ms var(--ease-standard), box-shadow 120ms var(--ease-standard), opacity 120ms var(--ease-standard); }
+.track-reorder-move { transition: transform 150ms cubic-bezier(0.2, 0, 0, 1), background 120ms var(--ease-standard), color 120ms var(--ease-standard), box-shadow 120ms var(--ease-standard), opacity 120ms var(--ease-standard); }
 .track-row:not(.track-header) { cursor: pointer; }
 .track-row:last-of-type { border-bottom: 0; }
 .track-row:not(.track-header):hover, .track-row:not(.track-header):focus-within { background: var(--surface-hover); }
 .track-row.current { background: var(--accent-soft); box-shadow: inset 2px 0 var(--accent); }
-.track-row.drag-over { box-shadow: inset 0 2px var(--accent); }
-.track-row.dragging { opacity: 0.45; }
+.track-row.drag-over:not(.dragging) { background: color-mix(in srgb, var(--accent) 6%, transparent); box-shadow: inset 0 2px var(--accent); }
+.track-row.dragging { z-index: 3; color: var(--text); background: color-mix(in srgb, var(--accent) 12%, var(--surface-solid)); box-shadow: var(--shadow-md), inset 2px 0 var(--accent); scale: 1.012; transform: translateY(var(--track-drag-offset-y, 0px)) !important; transition: scale 120ms var(--ease-standard), background 120ms var(--ease-standard), color 120ms var(--ease-standard), box-shadow 120ms var(--ease-standard), opacity 120ms var(--ease-standard); }
+.track-row.dragging.track-reorder-move { transition: scale 120ms var(--ease-standard), background 120ms var(--ease-standard), color 120ms var(--ease-standard), box-shadow 120ms var(--ease-standard), opacity 120ms var(--ease-standard); }
+.track-row.dragging.settling { transition: transform 140ms cubic-bezier(0.2, 0, 0, 1), scale 120ms var(--ease-standard), background 120ms var(--ease-standard), color 120ms var(--ease-standard), box-shadow 120ms var(--ease-standard), opacity 120ms var(--ease-standard); }
+.track-row.dragging .track-main-title { font-weight: 680; }
+.track-row.dragging .track-title .artwork-image { transform: scale(1.05); }
+.track-row.dragging .drag-handle { color: var(--accent); background: var(--accent-soft); transform: scale(1.12); }
 .track-row:not(.track-header):focus-visible { outline-offset: -3px; }
 .track-header { height: 38px; min-height: 38px; border-bottom-color: var(--line-strong); color: var(--text-muted); background: transparent; font-size: 12px; font-weight: 650; letter-spacing: 0; }
 .track-title { display: flex; min-width: 0; align-items: center; gap: 11px; }
-.track-title .artwork-image { width: 40px; height: 40px; flex: 0 0 auto; border-radius: var(--radius-sm); }
+.track-title .artwork-image { width: 40px; height: 40px; flex: 0 0 auto; border-radius: var(--radius-sm); transition: transform 120ms var(--ease-standard), opacity 120ms var(--ease-standard); }
 .track-title > span { min-width: 0; }
 .track-main-title { display: block; max-width: 100%; overflow: hidden; color: var(--text); font-size: 14px; font-weight: 620; text-overflow: ellipsis; white-space: nowrap; }
 .track-row.current .track-main-title { color: var(--text); }
 .track-title small { display: block; overflow: hidden; margin-top: 3px; color: var(--text-muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .track-album { overflow: hidden; padding-right: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .track-index { position: relative; display: grid; width: 28px; height: 30px; place-items: center; }
-.track-index input { width: 15px; height: 15px; accent-color: var(--accent); }
-.track-actions { display: flex; align-items: center; justify-content: flex-end; gap: 3px; }
-.track-actions button { display: grid; width: 26px; height: 26px; place-items: center; padding: 0; border: 0; border-radius: 7px; color: var(--text-muted); background: transparent; cursor: pointer; }
+.track-index input { width: 16px; height: 16px; accent-color: var(--accent); }
+.track-actions { display: flex; align-items: center; justify-content: flex-end; gap: 2px; }
+.track-actions button { display: grid; width: 26px; height: 26px; flex: 0 0 26px; place-items: center; padding: 0; border: 0; border-radius: 7px; color: var(--text-muted); background: transparent; cursor: pointer; transition: transform 120ms var(--ease-standard), color 120ms var(--ease-standard), background 120ms var(--ease-standard); }
 .track-actions button:hover { color: var(--text); background: var(--surface-hover); }
 .track-actions button.liked { color: var(--accent); }
-.track-actions .drag-handle { cursor: grab; }
-.track-actions .drag-handle:active { cursor: grabbing; }
+.track-actions .drag-handle { cursor: grab; touch-action: none; user-select: none; -webkit-user-drag: none; }
+.track-actions .drag-handle:active, .track-row.dragging .drag-handle { cursor: grabbing; }
+html.track-reordering, html.track-reordering * { cursor: grabbing !important; user-select: none !important; }
 
 .playlist-library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 32px 22px; }
 .playlist-library-card { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px 6px; }
@@ -288,7 +295,7 @@
   .hero h1 { font-size: 42px; }
   .mood-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mood-card:nth-child(n + 5) { display: none; }
-  .track-row { grid-template-columns: 34px minmax(200px, 1.5fr) minmax(110px, 0.85fr) 52px 108px; }
+  .track-row { grid-template-columns: 34px minmax(200px, 1.5fr) minmax(110px, 0.85fr) 52px 110px; }
   .track-row > :nth-child(4) { display: none; }
   .collection-header { grid-template-columns: 34px 128px minmax(0, 1fr); align-items: end; }
   .collection-header > .artwork-image { width: 128px; height: 128px; }
@@ -334,6 +341,7 @@
   .random-track-duration { display: none; }
   .track-row { grid-template-columns: 32px minmax(170px, 1fr) 48px 100px; }
   .track-row > :nth-child(3) { display: none; }
+  .track-actions button { width: 25px; height: 25px; flex-basis: 25px; }
   .collection-header { grid-template-columns: 34px 96px minmax(0, 1fr); gap: 14px; }
   .collection-header > .artwork-image { width: 96px; height: 96px; }
   .collection-header h1 { font-size: 28px; }
