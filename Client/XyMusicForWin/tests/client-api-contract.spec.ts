@@ -197,9 +197,9 @@ describe("desktop playlist API contract", () => {
   it("covers list, detail continuation, and explicit detail pages", async () => {
     const api = new RecordingApi([
       { items: [playlistDto()], nextCursor: "playlist-next" },
-      playlistDetailDto(["entry-1"], "entry-next"),
-      playlistDetailDto(["entry-2"], null),
-      playlistDetailDto(["entry-3"], "page-next"),
+      playlistDetailDto(["entry-2"], "entry-next", [1]),
+      playlistDetailDto(["entry-1"], null, [0]),
+      playlistDetailDto(["entry-1", "entry-3", "entry-2"], "page-next", [0, 2, 1]),
     ]);
     const repository = new HttpPlaylistRepository(api.client);
 
@@ -213,9 +213,10 @@ describe("desktop playlist API contract", () => {
       "api/v1/playlists/playlist%2F1?limit=100&cursor=entry-next",
       "api/v1/playlists/playlist%2F1?limit=1&cursor=entry%2Fpage",
     ]);
-    expect(complete.entries.map((entry) => entry.id)).toEqual(["entry-1", "entry-2"]);
+    expect(complete.entries.map((entry) => entry.id)).toEqual(["entry-2", "entry-1"]);
     expect(complete.nextCursor).toBeNull();
-    expect(page).toMatchObject({ nextCursor: "page-next", entries: [{ id: "entry-3" }] });
+    expect(page.entries.map((entry) => entry.id)).toEqual(["entry-3", "entry-2", "entry-1"]);
+    expect(page.nextCursor).toBe("page-next");
   });
 
   it("covers every playlist mutation with versioning and idempotency", async () => {
@@ -372,10 +373,14 @@ function playlistDto(overrides: Partial<PlaylistDto> = {}): PlaylistDto {
   };
 }
 
-function playlistDetailDto(entryIds: string[], nextCursor: string | null): PlaylistDetailDto {
+function playlistDetailDto(entryIds: string[], nextCursor: string | null, positions?: number[]): PlaylistDetailDto {
   return {
     ...playlistDto(),
-    entries: entryIds.map((id, index) => ({ id, position: index, track: trackDto(`track-${index + 1}`) })),
+    entries: entryIds.map((id, index) => ({
+      id,
+      position: positions?.[index] ?? index,
+      track: trackDto(`track-${index + 1}`),
+    })),
     nextCursor,
   };
 }

@@ -467,6 +467,9 @@ class DefaultPlaylistRepositoryConcurrencyTest {
         assertThat(database.playlistDao().entries(OWNER_ID, PLAYLIST_ID).map { it.id })
             .containsExactly(FIRST_ENTRY_ID, SECOND_ENTRY_ID, NEW_ENTRY_ID)
             .inOrder()
+        assertThat(requireNotNull(repository.observePlaylist(PLAYLIST_ID).first()).entries.map { it.id })
+            .containsExactly(NEW_ENTRY_ID, SECOND_ENTRY_ID, FIRST_ENTRY_ID)
+            .inOrder()
 
         assertThat(
             repository.removeTrack(
@@ -478,19 +481,25 @@ class DefaultPlaylistRepositoryConcurrencyTest {
         assertThat(database.playlistDao().entries(OWNER_ID, PLAYLIST_ID).map { it.id })
             .containsExactly(SECOND_ENTRY_ID, NEW_ENTRY_ID)
             .inOrder()
+        assertThat(requireNotNull(repository.observePlaylist(PLAYLIST_ID).first()).entries.map { it.id })
+            .containsExactly(NEW_ENTRY_ID, SECOND_ENTRY_ID)
+            .inOrder()
 
         assertThat(
             repository.reorder(
                 ReorderPlaylistCommand(
                     PLAYLIST_ID,
                     4,
-                    listOf(NEW_ENTRY_ID, SECOND_ENTRY_ID),
+                    listOf(SECOND_ENTRY_ID, NEW_ENTRY_ID),
                 ),
             ),
         ).isInstanceOf(PlaylistResult.Success::class.java)
         assertThat(database.playlistDao().playlist(OWNER_ID, PLAYLIST_ID)?.version).isEqualTo(5)
         assertThat(database.playlistDao().entries(OWNER_ID, PLAYLIST_ID).map { it.id })
             .containsExactly(NEW_ENTRY_ID, SECOND_ENTRY_ID)
+            .inOrder()
+        assertThat(requireNotNull(repository.observePlaylist(PLAYLIST_ID).first()).entries.map { it.id })
+            .containsExactly(SECOND_ENTRY_ID, NEW_ENTRY_ID)
             .inOrder()
 
         assertThat(repository.delete(PLAYLIST_ID, 5)).isInstanceOf(PlaylistResult.Success::class.java)

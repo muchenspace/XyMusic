@@ -70,7 +70,7 @@ func (repository *Repository) ListEntries(ctx context.Context, input ListEntries
 		positionArgument := appendArgument(&arguments, input.After.Position)
 		idArgument := appendArgument(&arguments, input.After.ID)
 		conditions = append(conditions, fmt.Sprintf(
-			"(position > $%d OR (position = $%d AND id > $%d))",
+			"(position < $%d OR (position = $%d AND id < $%d))",
 			positionArgument, positionArgument, idArgument,
 		))
 	}
@@ -79,7 +79,7 @@ func (repository *Repository) ListEntries(ctx context.Context, input ListEntries
 		SELECT id, playlist_id, track_id, position, added_by, added_at
 		FROM playlist_tracks
 		WHERE `+strings.Join(conditions, " AND ")+`
-		ORDER BY position ASC, id ASC
+		ORDER BY position DESC, id DESC
 		LIMIT $`+fmt.Sprintf("%d", limitArgument), arguments...)
 	if err != nil {
 		return nil, fmt.Errorf("query playlist entries: %w", err)

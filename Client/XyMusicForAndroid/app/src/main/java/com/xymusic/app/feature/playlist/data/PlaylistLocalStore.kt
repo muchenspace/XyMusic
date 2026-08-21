@@ -196,10 +196,13 @@ internal class PlaylistLocalStore(
                 when {
                     snapshot.playlist.version > mutation.version -> Unit
                     snapshot.playlist.version == mutation.version -> {
+                        val storedDisplayOrder =
+                            snapshot.entries
+                                .sortedByDescending(PlaylistEntryEntity::position)
+                                .map(PlaylistEntryEntity::id)
                         val alreadyApplied =
                             snapshot.hasCompleteEntries() &&
-                                snapshot.entries.sortedBy(PlaylistEntryEntity::position).map(PlaylistEntryEntity::id) ==
-                                command.orderedEntryIds
+                                storedDisplayOrder == command.orderedEntryIds
                         if (!alreadyApplied) {
                             playlistDao.replaceEntries(owner, command.playlistId, emptyList())
                         }
@@ -312,9 +315,10 @@ internal class PlaylistLocalStore(
             return
         }
 
+        val lastPosition = command.orderedEntryIds.lastIndex
         val entries =
-            command.orderedEntryIds.mapIndexed { position, entryId ->
-                requireNotNull(byId[entryId]).copy(position = position)
+            command.orderedEntryIds.mapIndexed { index, entryId ->
+                requireNotNull(byId[entryId]).copy(position = lastPosition - index)
             }
         playlistDao.replacePlaylist(
             snapshot.playlist.copy(

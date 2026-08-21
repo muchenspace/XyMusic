@@ -12,34 +12,34 @@ import org.junit.Test
 
 class PlaylistPageAccumulatorTest {
     @Test
-    fun firstPageIsAvailableWithoutLoadingTheContinuation() {
+    fun newestFirstPageIsAvailableWithoutLoadingTheContinuation() {
         val (accumulator, result) =
             PlaylistPageAccumulator.start(
                 PLAYLIST_ID,
-                page(trackCount = 2, entries = listOf(entry("entry-1", 0)), nextCursor = "cursor-2"),
+                page(trackCount = 2, entries = listOf(entry("entry-2", 1)), nextCursor = "cursor-2"),
             )
 
         assertThat(accumulator).isNotNull()
-        assertThat(result.page.entries.map(PlaylistEntryDto::id)).containsExactly("entry-1")
+        assertThat(result.page.entries.map(PlaylistEntryDto::id)).containsExactly("entry-2")
         assertThat(result.completeDetail).isNull()
     }
 
     @Test
-    fun explicitContinuationCompletesThePlaylist() {
+    fun explicitContinuationCompletesThePlaylistInNewestFirstOrder() {
         val (accumulator, _) =
             PlaylistPageAccumulator.start(
                 PLAYLIST_ID,
-                page(trackCount = 2, entries = listOf(entry("entry-1", 0)), nextCursor = "cursor-2"),
+                page(trackCount = 2, entries = listOf(entry("entry-2", 1)), nextCursor = "cursor-2"),
             )
 
         val result =
             requireNotNull(accumulator).append(
                 requestedCursor = "cursor-2",
-                page = page(trackCount = 2, entries = listOf(entry("entry-2", 1)), nextCursor = null),
+                page = page(trackCount = 2, entries = listOf(entry("entry-1", 0)), nextCursor = null),
             )
 
         assertThat(result.completeDetail?.entries?.map(PlaylistEntryDto::id))
-            .containsExactly("entry-1", "entry-2")
+            .containsExactly("entry-2", "entry-1")
             .inOrder()
     }
 
@@ -48,13 +48,13 @@ class PlaylistPageAccumulatorTest {
         val (accumulator, _) =
             PlaylistPageAccumulator.start(
                 PLAYLIST_ID,
-                page(trackCount = 2, entries = listOf(entry("entry-1", 0)), nextCursor = "cursor-2"),
+                page(trackCount = 2, entries = listOf(entry("entry-2", 1)), nextCursor = "cursor-2"),
             )
 
         assertThrows(PlaylistProtocolException::class.java) {
             requireNotNull(accumulator).append(
                 requestedCursor = "cursor-2",
-                page = page(trackCount = 2, entries = listOf(entry("entry-1", 1)), nextCursor = null),
+                page = page(trackCount = 2, entries = listOf(entry("entry-2", 0)), nextCursor = null),
             )
         }
     }
@@ -64,7 +64,7 @@ class PlaylistPageAccumulatorTest {
         val (accumulator, _) =
             PlaylistPageAccumulator.start(
                 PLAYLIST_ID,
-                page(trackCount = 3, entries = listOf(entry("entry-1", 0)), nextCursor = "cursor-2"),
+                page(trackCount = 3, entries = listOf(entry("entry-3", 2)), nextCursor = "cursor-2"),
             )
         requireNotNull(accumulator).append(
             requestedCursor = "cursor-2",
@@ -74,7 +74,7 @@ class PlaylistPageAccumulatorTest {
         assertThrows(PlaylistProtocolException::class.java) {
             accumulator.append(
                 requestedCursor = "cursor-3",
-                page = page(trackCount = 3, entries = listOf(entry("entry-3", 2)), nextCursor = "cursor-2"),
+                page = page(trackCount = 3, entries = listOf(entry("entry-1", 0)), nextCursor = "cursor-2"),
             )
         }
     }

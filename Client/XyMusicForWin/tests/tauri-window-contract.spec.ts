@@ -48,6 +48,7 @@ describe("Tauri window integration", () => {
     expect(capabilitySource).not.toContain("allow-toggle-maximize");
   });
 
+
   it("does not expose a second fullscreen exit control in the player", () => {
     const source = readFileSync(
       path.join(projectRoot, "src/presentation/components/PlayerBar.vue"),

@@ -128,7 +128,7 @@ func TestRepositoryAgainstConfiguredPostgres(t *testing.T) {
 		t.Fatalf("ListEntries: %v", err)
 	}
 	for index, entry := range entries {
-		if entry.Position != index {
+		if entry.Position != len(entries)-1-index {
 			t.Fatalf("entry positions after insert = %#v", entries)
 		}
 	}
@@ -154,7 +154,7 @@ func TestRepositoryAgainstConfiguredPostgres(t *testing.T) {
 		}
 		version = mutation.Version
 		entries, err = repository.ListEntries(ctx, ListEntriesQuery{PlaylistID: created.ID, Limit: MaxPlaylistEntries})
-		if err != nil || entries[0].ID != ordered[0] {
+		if err != nil || entries[0].ID != ordered[len(ordered)-1] {
 			t.Fatalf("entries after reorder = %#v, %v", entries, err)
 		}
 	}

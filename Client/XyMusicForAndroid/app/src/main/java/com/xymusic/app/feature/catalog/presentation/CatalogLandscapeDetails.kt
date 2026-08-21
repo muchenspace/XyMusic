@@ -118,7 +118,7 @@ internal fun AlbumLandscapeDetail(
                         LandscapeCatalogTrackRow(
                             track = track,
                             onClick = { onTrackPlay?.invoke(loadedTracks, track) },
-                            showTrackNumber = true,
+                            showArtwork = false,
                             onPlayClick =
                             onTrackPlay?.let { play ->
                                 { play(loadedTracks, track) }
@@ -130,7 +130,7 @@ internal fun AlbumLandscapeDetail(
                         CatalogTrackRow(
                             track = track,
                             onClick = { onTrackPlay?.invoke(loadedTracks, track) },
-                            showTrackNumber = true,
+                            showArtwork = false,
                             onPlayClick =
                             onTrackPlay?.let { play ->
                                 { play(loadedTracks, track) }
@@ -445,7 +445,7 @@ internal fun LandscapeCatalogTrackRow(
     track: CatalogTrackUi,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    showTrackNumber: Boolean = false,
+    showArtwork: Boolean = true,
     onPlayClick: (() -> Unit)? = null,
     onMoreClick: (() -> Unit)? = null,
 ) {
@@ -469,7 +469,7 @@ internal fun LandscapeCatalogTrackRow(
                 .padding(start = 14.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (!showTrackNumber) {
+            if (showArtwork) {
                 CatalogArtwork(
                     artwork = track.artwork,
                     fallbackIcon = Icons.Outlined.MusicNote,
@@ -480,7 +480,7 @@ internal fun LandscapeCatalogTrackRow(
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = landscapeTrackTitle(track, showTrackNumber),
+                    text = track.title,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodyMedium,
@@ -511,7 +511,7 @@ internal fun LandscapeCatalogTrackRow(
             }
         }
         HorizontalDivider(
-            modifier = Modifier.padding(start = if (showTrackNumber) 14.dp else 64.dp),
+            modifier = Modifier.padding(start = if (showArtwork) 64.dp else 14.dp),
             thickness = 0.5.dp,
             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f),
         )
@@ -573,11 +573,4 @@ internal fun LandscapeCatalogAlbumRow(album: CatalogAlbumUi, onClick: () -> Unit
             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f),
         )
     }
-}
-
-private fun landscapeTrackTitle(track: CatalogTrackUi, showTrackNumber: Boolean): String {
-    if (!showTrackNumber) return track.title
-    val number = track.trackNumber ?: return track.title
-    val order = if (track.discNumber > 1) "${track.discNumber}-$number" else number.toString()
-    return "$order  ${track.title}"
 }

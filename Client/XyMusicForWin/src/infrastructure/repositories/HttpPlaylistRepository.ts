@@ -32,7 +32,7 @@ export class HttpPlaylistRepository implements PlaylistRepository {
     );
     return {
       ...mapPlaylist(first, 0),
-      entries: entries.map((entry) => ({ id: entry.id, position: entry.position, track: mapTrack(entry.track) })),
+      entries: mapPlaylistEntries(entries),
       nextCursor: null,
     };
   }
@@ -44,7 +44,7 @@ export class HttpPlaylistRepository implements PlaylistRepository {
     if (!Array.isArray(page.entries)) throw paginationError("歌单详情缺少曲目列表");
     return {
       ...mapPlaylist(page, 0),
-      entries: page.entries.map((entry) => ({ id: entry.id, position: entry.position, track: mapTrack(entry.track) })),
+      entries: mapPlaylistEntries(page.entries),
       nextCursor: page.nextCursor || null,
     };
   }
@@ -89,6 +89,12 @@ export class HttpPlaylistRepository implements PlaylistRepository {
     });
     return result.version;
   }
+}
+
+function mapPlaylistEntries(entries: PlaylistDetailDto["entries"]): PlaylistDetail["entries"] {
+  return entries
+    .map((entry) => ({ id: entry.id, position: entry.position, track: mapTrack(entry.track) }))
+    .sort((left, right) => right.position - left.position);
 }
 
 function idempotencyHeaders(): HeadersInit {

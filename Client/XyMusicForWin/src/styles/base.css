@@ -107,7 +107,7 @@ img { max-width: 100%; }
 
 .field-group { display: grid; gap: 7px; }
 .field-group > span:first-child { color: var(--text-secondary); font-size: 13px; font-weight: 600; }
-input:not([type="range"]), select, textarea {
+input:not([type="range"], [type="checkbox"], [type="radio"]), select, textarea {
   width: 100%;
   border: 1px solid var(--control-border);
   border-radius: var(--radius-sm);
@@ -117,12 +117,21 @@ input:not([type="range"]), select, textarea {
   box-shadow: none;
   transition: border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard);
 }
-input:not([type="range"]), select { min-height: 42px; padding: 0 12px; }
+input:not([type="range"], [type="checkbox"], [type="radio"]), select { min-height: 42px; padding: 0 12px; }
 textarea { min-height: 92px; padding: 10px 12px; resize: vertical; line-height: 1.55; }
-input:not([type="range"]):hover:not(:disabled), select:hover:not(:disabled), textarea:hover:not(:disabled) { border-color: var(--line-strong); }
-input:not([type="range"]):focus, select:focus, textarea:focus { border-color: var(--accent); background: var(--control-bg-hover); box-shadow: 0 0 0 3px var(--accent-soft); }
+input:not([type="range"], [type="checkbox"], [type="radio"]):hover:not(:disabled), select:hover:not(:disabled), textarea:hover:not(:disabled) { border-color: var(--line-strong); }
+input:not([type="range"], [type="checkbox"], [type="radio"]):focus, select:focus, textarea:focus { border-color: var(--accent); background: var(--control-bg-hover); box-shadow: 0 0 0 3px var(--accent-soft); }
 input::placeholder, textarea::placeholder { color: var(--text-muted); }
-input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
+input[type="checkbox"], input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
 
 input[type="range"] {
   --range-progress: 0%;

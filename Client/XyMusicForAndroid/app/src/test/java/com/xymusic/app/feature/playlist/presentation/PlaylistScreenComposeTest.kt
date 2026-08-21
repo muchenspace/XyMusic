@@ -2,6 +2,7 @@ package com.xymusic.app.feature.playlist.presentation
 
 import android.content.Context
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
@@ -16,6 +17,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import com.xymusic.app.R
@@ -59,6 +61,38 @@ class PlaylistScreenComposeTest {
         composeRule.onNode(hasScrollToIndexAction()).performScrollToIndex(1)
         composeRule.onNodeWithText("First Track").assertIsDisplayed().performClick()
         assertThat(playedEntryId).isEqualTo("entry-1")
+    }
+
+    @Test
+    fun draggingReorderHandleDispatchesUpdatedVisibleOrder() {
+        var reorderedEntryIds: List<String>? = null
+        composeRule.setPlaylistContent(
+            uiState = PlaylistUiState(detail = reorderableDetail()),
+            onReorder = { reorderedEntryIds = it },
+        )
+
+        composeRule.onNode(hasScrollToIndexAction()).performScrollToIndex(1)
+        val reorderHandle =
+            composeRule.onNodeWithTag(
+                PlaylistDetailTestTags.reorderHandle("entry-1"),
+                useUnmergedTree = true,
+            )
+        val dragDistance = reorderHandle.fetchSemanticsNode().boundsInRoot.height * 1.5f
+        reorderHandle
+            .performTouchInput {
+                down(center)
+                advanceEventTime(100)
+                moveBy(Offset(0f, dragDistance))
+                advanceEventTime(100)
+                moveBy(Offset(0f, dragDistance))
+                advanceEventTime(100)
+                up()
+            }
+        composeRule.waitForIdle()
+
+        assertThat(reorderedEntryIds)
+            .containsExactly("entry-2", "entry-3", "entry-1")
+            .inOrder()
     }
 
     @Test
@@ -185,6 +219,7 @@ class PlaylistScreenComposeTest {
         onPlay: (String?) -> Unit = {},
         onUpdate: (String, String?, PlaylistVisibility) -> Unit = { _, _, _ -> },
         onDelete: () -> Unit = {},
+        onReorder: (List<String>) -> Unit = {},
     ) {
         setContent {
             XyMusicTheme(darkTheme = false) {
@@ -198,11 +233,32 @@ class PlaylistScreenComposeTest {
                     onUpdate = onUpdate,
                     onDelete = onDelete,
                     onRemove = {},
-                    onReorder = {},
+                    onReorder = onReorder,
                     onTrackMore = {},
                 )
             }
         }
+    }
+
+    private fun reorderableDetail(): PlaylistDetailUi {
+        val first = detail().entries.single().copy(position = 2)
+        return detail().copy(
+            trackCount = 3,
+            entries =
+            listOf(
+                first,
+                first.copy(
+                    entryId = "entry-2",
+                    position = 1,
+                    track = first.track.copy(id = "track-2", title = "Second Track"),
+                ),
+                first.copy(
+                    entryId = "entry-3",
+                    position = 0,
+                    track = first.track.copy(id = "track-3", title = "Third Track"),
+                ),
+            ),
+        )
     }
 
     private fun detail() = PlaylistDetailUi(

@@ -57,7 +57,7 @@ internal class PlaylistPageAccumulator private constructor(
 
     private fun completeDetailOrNull(): PlaylistDetailDto? = if (nextCursor == null) {
         firstPage.copy(
-            entries = entries.sortedBy(PlaylistEntryDto::position),
+            entries = entries.sortedByDescending(PlaylistEntryDto::position),
             nextCursor = null,
         )
     } else {

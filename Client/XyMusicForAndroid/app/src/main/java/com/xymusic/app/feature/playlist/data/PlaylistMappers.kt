@@ -58,7 +58,7 @@ internal fun PlaylistDetailDto.toEntity(ownerUserId: String): PlaylistEntity = P
 
 internal fun PlaylistDetailDto.toDomainPage(ownerUserId: String): PlaylistDetailPage = PlaylistDetailPage(
     playlist = toEntity(ownerUserId).toDomain(),
-    entries = entries.sortedBy(PlaylistEntryDto::position).map(PlaylistEntryDto::toDomain),
+    entries = entries.sortedByDescending(PlaylistEntryDto::position).map(PlaylistEntryDto::toDomain),
     nextCursor = nextCursor,
 )
 
@@ -130,7 +130,7 @@ internal suspend fun PlaylistSnapshot.toDomain(catalogDao: CatalogDao): Playlist
     return PlaylistDetail(
         playlist = playlist.toDomain(),
         entries =
-        entries.sortedBy(PlaylistEntryEntity::position).mapNotNull { entry ->
+        entries.sortedByDescending(PlaylistEntryEntity::position).mapNotNull { entry ->
             tracks[entry.trackId]?.let { track ->
                 PlaylistEntry(
                     id = entry.id,

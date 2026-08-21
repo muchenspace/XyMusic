@@ -1,5 +1,8 @@
 package com.xymusic.app.feature.playlist.presentation
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -251,6 +254,7 @@ fun PlaylistScreen(
                                         key = { _, item -> item.entryId },
                                         contentType = { _, _ -> "playlist-track" },
                                     ) { index, entry ->
+                                        val dragging = reorderState.draggedEntryId == entry.entryId
                                         PlaylistTrackRow(
                                             entry = entry,
                                             index = index,
@@ -258,7 +262,9 @@ fun PlaylistScreen(
                                             enabled = !uiState.isMutating,
                                             removeEnabled = !uiState.isMutating,
                                             reorderEnabled = uiState.entriesComplete && !uiState.isMutating,
+                                            isDragging = dragging,
                                             onPlay = { onPlay(entry.entryId) },
+                                            onDragStarted = { reorderState.startDrag(entry.entryId) },
                                             onMove = { direction -> reorderState.move(entry.entryId, direction) },
                                             onReorderFinished = {
                                                 reorderState.finish()?.let(onReorder)
@@ -266,6 +272,21 @@ fun PlaylistScreen(
                                             onReorderCancelled = reorderState::cancel,
                                             onRemove = { onRemove(entry.entryId) },
                                             onMore = { onTrackMore(entry.track.id) },
+                                            modifier =
+                                            Modifier
+                                                .animateItem(
+                                                    fadeInSpec = null,
+                                                    placementSpec =
+                                                    if (dragging) {
+                                                        snap()
+                                                    } else {
+                                                        spring(
+                                                            dampingRatio = Spring.DampingRatioNoBouncy,
+                                                            stiffness = Spring.StiffnessMedium,
+                                                        )
+                                                    },
+                                                    fadeOutSpec = null,
+                                                ).testTag(PlaylistDetailTestTags.track(entry.entryId)),
                                         )
                                     }
                                 }

@@ -213,7 +213,7 @@ constructor(
         pagedDetail.value =
             PlaylistDetail(
                 playlist = page.playlist,
-                entries = (current.entries + page.entries).sortedBy { entry -> entry.position },
+                entries = (current.entries + page.entries).sortedByDescending { entry -> entry.position },
             )
         nextCursor.value = page.nextCursor
     }
@@ -351,7 +351,7 @@ private fun PlaylistDetail.toUi(): PlaylistDetailUi = PlaylistDetailUi(
     trackCount = playlist.trackCount,
     version = playlist.version,
     entries =
-    entries.sortedBy { it.position }.map { entry ->
+    entries.sortedByDescending { it.position }.map { entry ->
         PlaylistEntryUi(
             entryId = entry.id,
             position = entry.position,

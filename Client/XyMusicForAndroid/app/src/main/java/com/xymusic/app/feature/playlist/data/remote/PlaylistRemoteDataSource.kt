@@ -117,7 +117,7 @@ constructor(
         } while (cursor != null)
 
         return requireNotNull(first).copy(
-            entries = entries.sortedBy(PlaylistEntryDto::position),
+            entries = entries.sortedByDescending(PlaylistEntryDto::position),
             nextCursor = null,
         )
     }
