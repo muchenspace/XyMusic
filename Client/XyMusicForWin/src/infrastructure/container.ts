@@ -30,8 +30,6 @@ import { TauriDiagnostics } from "./diagnostics/TauriDiagnostics";
 import { BrowserTaskScheduler } from "./scheduling/BrowserTaskScheduler";
 import { BrowserPageLifecycle } from "./scheduling/BrowserPageLifecycle";
 import { BrowserSessionIdGenerator } from "./scheduling/BrowserSessionIdGenerator";
-import { BrowserRuntimeEnvironment } from "./runtime/BrowserRuntimeEnvironment";
-import { BrowserTextClipboard } from "./runtime/BrowserTextClipboard";
 
 export function createApplicationServices(): ApplicationServices {
   const api = new ApiClient();
@@ -74,8 +72,6 @@ export function createApplicationServices(): ApplicationServices {
     desktopLyricsController: new DesktopLyricsController(desktopLyrics, uiPreferences, scheduler, pageLifecycle),
     desktopWindowController,
     diagnostics,
-    runtimeEnvironment: new BrowserRuntimeEnvironment(),
-    textClipboard: new BrowserTextClipboard(),
     uiPreferences,
   };
 }

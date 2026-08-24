@@ -115,7 +115,7 @@ function createDesktop(overrides: Partial<DesktopIntegration>): DesktopIntegrati
 }
 
 function diagnostics(warn = vi.fn()): Diagnostics {
-  return { info() {}, warn, error() {}, entries: () => [], clear() {} };
+  return { info() {}, warn, error() {} };
 }
 
 function noopCommands() {

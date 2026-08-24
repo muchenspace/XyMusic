@@ -772,7 +772,7 @@ class FakePageLifecycle implements PageLifecycle {
 }
 
 function diagnostics(): Diagnostics {
-  return { info() {}, warn() {}, error() {}, entries: () => [], clear() {} };
+  return { info() {}, warn() {}, error() {} };
 }
 
 function scheduler(): TaskScheduler {

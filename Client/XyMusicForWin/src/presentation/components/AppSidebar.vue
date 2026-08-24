@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Activity, Disc3, Heart, Home, ListMusic, LogOut, Plus, Settings } from "@lucide/vue";
+import { Disc3, Heart, Home, ListMusic, LogOut, Plus, Settings } from "@lucide/vue";
 import type { UserSession } from "../../application/ports/SessionRepository";
 import brandMark from "../../assets/brand-mark-512.webp";
 import type { Playlist } from "../../domain/music";
@@ -92,17 +92,6 @@ const library = [
     </section>
 
     <div class="sidebar-footer">
-      <button
-        type="button"
-        class="nav-item"
-        :class="{ active: active === 'diagnostics' }"
-        :aria-current="active === 'diagnostics' ? 'page' : undefined"
-        title="诊断"
-        @click="emit('navigate', 'diagnostics')"
-      >
-        <Activity :size="19" aria-hidden="true" />
-        <span>诊断</span>
-      </button>
       <button
         type="button"
         class="nav-item"

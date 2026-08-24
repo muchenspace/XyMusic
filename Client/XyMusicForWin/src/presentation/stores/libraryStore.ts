@@ -54,9 +54,9 @@ export const useLibraryStore = defineStore("library-view", () => {
       loading.value = false;
       return;
     }
-    loading.value = view !== "discover" && view !== "settings" && view !== "diagnostics";
+    loading.value = view !== "discover" && view !== "settings";
     try {
-      if (view === "discover" || view === "settings" || view === "diagnostics") return;
+      if (view === "discover" || view === "settings") return;
       const controller = new AbortController();
       requestController = controller;
       if (view === "recent") {
@@ -509,7 +509,7 @@ export const useLibraryStore = defineStore("library-view", () => {
   return { activeView, tracks, playlists, selectedPlaylist, detailOpen, heading, loading, loadingMore, detailLoadingMore, playlistMutating, error, retryAvailable, nextCursor, detailNextCursor, favoriteSort, playlistSort, visibleTracks, navigate, retry, loadMore, loadMoreCollection, changeSort, openAlbum, openArtist, openPlaylist, createPlaylist, updatePlaylist, deletePlaylist, addTrack, removeEntry, removeEntries, moveEntry, reorderEntries, removeFavorite, setFavorite, setPlaylists, cancelPending, reset };
 });
 
-const VIEW_TITLES: Record<LibraryView, string> = { discover: "发现音乐", recent: "最近播放", favorites: "喜欢的音乐", playlists: "我的歌单", settings: "设置", diagnostics: "诊断" };
+const VIEW_TITLES: Record<LibraryView, string> = { discover: "发现音乐", recent: "最近播放", favorites: "喜欢的音乐", playlists: "我的歌单", settings: "设置" };
 const PAGE_SIZE = 50;
 const DETAIL_PAGE_SIZE = 100;
 const MAX_LIST_CACHE_ENTRIES = 8;
