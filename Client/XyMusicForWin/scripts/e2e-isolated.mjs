@@ -375,11 +375,6 @@ try {
     await page.screenshot({ path: path.join(artifacts, "win-e2e-settings-dark.png"), fullPage: true });
   });
 
-  await step("diagnostics-view", async () => {
-    await page.locator(".sidebar-footer > .nav-item").nth(0).click();
-    await page.locator(".diagnostics-intro").waitFor();
-  });
-
   await step("server-switch", async () => {
     await openSettings("system");
     const form = page.locator("#settings-category-panel form.settings-card");
@@ -430,7 +425,7 @@ try {
 
   await page.screenshot({ path: path.join(artifacts, "win-e2e-final-login.png"), fullPage: true });
   if (report.unexpectedResponses.length || report.requestFailures.length || report.browserErrors.length) {
-    throw new Error("browser or network diagnostics contain unexpected failures");
+    throw new Error("browser or network checks contain unexpected failures");
   }
   writeReport(true);
 } catch (error) {
@@ -467,7 +462,7 @@ async function login(name, secret) {
 }
 
 async function openSettings(category = "account") {
-  await page.locator(".sidebar-footer > .nav-item").nth(1).click();
+  await page.locator(".sidebar-footer > .nav-item").first().click();
   await page.locator(".settings-view").waitFor();
   await selectSettingsCategory(category);
 }

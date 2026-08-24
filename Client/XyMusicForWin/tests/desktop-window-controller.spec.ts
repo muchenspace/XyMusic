@@ -131,7 +131,7 @@ function createDesktop(overrides: Partial<DesktopWindow> = {}): DesktopWindow & 
 }
 
 function diagnostics(warn = vi.fn()): Diagnostics {
-  return { info() {}, warn, error() {}, entries: () => [], clear() {} };
+  return { info() {}, warn, error() {} };
 }
 
 class ManualTaskScheduler implements TaskScheduler {

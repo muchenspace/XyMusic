@@ -2,8 +2,6 @@ import type { DesktopLyricsController } from "./ports/DesktopLyricsController";
 import type { DesktopWindowController } from "./ports/DesktopWindowController";
 import type { Diagnostics } from "./ports/Diagnostics";
 import type { PlaybackSession } from "./ports/PlaybackSession";
-import type { RuntimeEnvironment } from "./ports/RuntimeEnvironment";
-import type { TextClipboard } from "./ports/TextClipboard";
 import type { UserInterfacePreferences } from "./ports/UserInterfacePreferences";
 import type { CatalogUseCases } from "./use-cases/CatalogUseCases";
 import type { LibraryUseCases } from "./use-cases/LibraryUseCases";
@@ -19,7 +17,5 @@ export interface ApplicationServices {
   desktopLyricsController: DesktopLyricsController;
   desktopWindowController: DesktopWindowController;
   diagnostics: Diagnostics;
-  runtimeEnvironment: RuntimeEnvironment;
-  textClipboard: TextClipboard;
   uiPreferences: UserInterfacePreferences;
 }

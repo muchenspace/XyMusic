@@ -25,6 +25,7 @@ describe("catalog entry points", () => {
     expect(navigationTitles).toContain("喜欢的音乐");
     expect(navigationTitles).not.toContain("专辑");
     expect(navigationTitles).not.toContain("歌手");
+    expect(navigationTitles).not.toContain("\u8bca\u65ad");
   });
 
   it("keeps album and artist results reachable through search", async () => {

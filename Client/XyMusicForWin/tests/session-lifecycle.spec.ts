@@ -151,8 +151,6 @@ function createServices(restorePlayback: (ownerKey: string) => unknown): Applica
       info() {},
       warn() {},
       error() {},
-      entries: () => [],
-      clear() {},
     },
     notifier: { async notify() {} },
     uiPreferences: {

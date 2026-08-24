@@ -8,7 +8,6 @@ describe("library view availability", () => {
       "favorites",
       "playlists",
       "settings",
-      "diagnostics",
     ];
 
     expect(libraryViewRequiresHomeFeed("discover")).toBe(true);

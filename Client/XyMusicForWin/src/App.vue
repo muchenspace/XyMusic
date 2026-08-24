@@ -35,7 +35,6 @@ const PlaylistDialog = defineAsyncComponent(() => import("./presentation/compone
 const AddToPlaylistDialog = defineAsyncComponent(() => import("./presentation/components/AddToPlaylistDialog.vue"));
 const QueuePanel = defineAsyncComponent(() => import("./presentation/components/QueuePanel.vue"));
 const LyricsView = defineAsyncComponent(() => import("./presentation/components/LyricsView.vue"));
-const DiagnosticsView = defineAsyncComponent(() => import("./presentation/views/DiagnosticsView.vue"));
 
 const home = useHomeStore();
 const desktopLyrics = useDesktopLyricsStore();
@@ -327,8 +326,6 @@ function playCurrentCollection(): void {
             @logout="logout"
             @logout-all="logoutAll"
           />
-
-          <DiagnosticsView v-else-if="currentLibraryView === 'diagnostics'" :server-config="session.serverConfig" />
 
           <PlaylistsView
             v-else-if="currentLibraryView === 'playlists'"

@@ -17,23 +17,6 @@
 .page-sort-control select, .view-toolbar select { width: auto; min-width: 142px; min-height: 38px; background: transparent; }
 .view-toolbar { display: flex; justify-content: flex-end; margin: -22px 0 20px; }
 .pagination-footer { display: flex; min-height: 58px; align-items: center; justify-content: center; color: var(--text-muted); font-size: 13px; }
-.diagnostics-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 48px; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line); }
-.diagnostics-summary > div { display: grid; min-width: 0; gap: 5px; padding: 15px 20px; border-right: 1px solid var(--line); }
-.diagnostics-summary > div:first-child { padding-left: 0; }
-.diagnostics-summary > div:last-child { padding-right: 0; border-right: 0; }
-.diagnostics-summary span { color: var(--text-muted); font-size: 12px; }
-.diagnostics-summary strong { overflow: hidden; color: var(--text); font-size: 14px; font-weight: 620; text-overflow: ellipsis; white-space: nowrap; }
-.diagnostics-heading { align-items: center; }
-.diagnostics-actions { display: flex; align-items: center; gap: 8px; }
-.diagnostics-actions button { min-height: 32px; padding: 6px 10px; }
-.diagnostics-log { overflow: hidden; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line); }
-.diagnostic-entry { display: grid; grid-template-columns: 150px 50px 86px minmax(0, 1fr); align-items: baseline; gap: 10px; padding: 11px 4px; border-bottom: 1px solid var(--line); color: var(--text-muted); font: 13px/1.5 "Cascadia Mono", "Consolas", monospace; }
-.diagnostic-entry:last-child { border-bottom: 0; }
-.diagnostic-entry strong { color: var(--text-secondary); }
-.diagnostic-entry.level-warn strong { color: var(--warning); }
-.diagnostic-entry.level-error strong { color: var(--danger); }
-.diagnostic-entry p { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--text); }
-.diagnostics-empty { margin: 0; padding: 28px; color: var(--text-muted); text-align: center; font-size: 14px; }
 
 .hero { position: relative; min-height: 360px; margin: calc(-1 * var(--content-top)) calc(-1 * var(--content-gutter)) 48px; overflow: hidden; isolation: isolate; background: var(--media-surface); }
 .hero::before { content: ""; position: absolute; z-index: -2; inset: 0; background-image: var(--hero-image); background-position: center 38%; background-size: cover; }
@@ -352,12 +335,6 @@ html.track-reordering, html.track-reordering * { cursor: grabbing !important; us
   .lyrics-color-settings { grid-template-columns: 1fr; }
   .server-config-fields { grid-template-columns: 96px minmax(0, 1fr); }
   .server-config-fields .server-port { grid-column: 1 / -1; }
-  .diagnostics-summary { grid-template-columns: 1fr; }
-  .diagnostics-summary > div { padding: 13px 0; border-right: 0; border-bottom: 1px solid var(--line); }
-  .diagnostics-summary > div:last-child { border-bottom: 0; }
-  .diagnostics-heading { align-items: flex-start; flex-direction: column; }
-  .diagnostic-entry { grid-template-columns: 1fr auto; }
-  .diagnostic-entry span, .diagnostic-entry p { grid-column: 1 / -1; }
   .login-view { grid-template-columns: 1fr; grid-template-rows: calc(var(--titlebar-height) + 76px) minmax(0, 1fr); }
   .login-brand-panel { justify-items: start; padding: calc(var(--titlebar-height) + 10px) 20px 10px; border-right: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
   .login-brand { display: flex; gap: 12px; text-align: left; }
