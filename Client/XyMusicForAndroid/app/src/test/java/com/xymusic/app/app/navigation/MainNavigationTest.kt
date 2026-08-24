@@ -71,4 +71,25 @@ class MainNavigationTest {
             ),
         )
     }
+
+    @Test
+    fun imeSuppressesTheMiniPlayerSoItDoesNotFloatAboveTheKeyboard() {
+        val config =
+            MainNavigationLayoutConfig(
+                useNavigationRail = false,
+                compactPlayerBar = false,
+                hasPlayerItem = true,
+            )
+
+        val state =
+            mainNavigationChromeState(
+                config = config,
+                currentRoute = MainSecondaryDestination.Search.route,
+                lastSelectedMainDestination = MainDestination.Home,
+                imeVisible = true,
+            )
+
+        assertThat(state.showMiniPlayer).isFalse()
+        assertThat(state.selectedMainDestination).isEqualTo(MainDestination.Home)
+    }
 }

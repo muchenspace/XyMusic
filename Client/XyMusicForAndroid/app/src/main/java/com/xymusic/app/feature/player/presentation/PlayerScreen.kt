@@ -41,7 +41,6 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.xymusic.app.R
 import com.xymusic.app.core.ui.component.ArtworkAmbientPalette
 import com.xymusic.app.core.ui.component.rememberArtworkAmbientPalette
-import com.xymusic.app.feature.player.domain.model.PlayerQueueItem
 import com.xymusic.app.ui.theme.XyMotion
 import com.xymusic.app.ui.theme.xyColors
 
@@ -86,23 +85,6 @@ fun PlayerScreen(
         playbackPosition ?: rememberPlaybackPositionSnapshotState(uiState.player)
     val queueUiState = remember(uiState.player.queue) { PlayerQueueUiState(uiState.player.queue) }
     var draggedPosition by remember(current?.queueItemId) { mutableStateOf<Float?>(null) }
-    val targetPalette = rememberArtworkAmbientPalette(current?.artworkUrl, current?.artworkCacheKey)
-        ?: PlayerFallbackAmbientPalette
-    val animatedPrimary = animateColorAsState(
-        targetValue = targetPalette.primary,
-        animationSpec = tween(XyMotion.Emphasized),
-        label = "playerAmbientPrimary",
-    )
-    val animatedSecondary = animateColorAsState(
-        targetValue = targetPalette.secondary,
-        animationSpec = tween(XyMotion.Emphasized),
-        label = "playerAmbientSecondary",
-    )
-    val animatedHighlight = animateColorAsState(
-        targetValue = targetPalette.highlight,
-        animationSpec = tween(XyMotion.Emphasized),
-        label = "playerAmbientHighlight",
-    )
 
     if (confirmClearQueue) {
         PlayerAlertDialog(
@@ -177,13 +159,8 @@ fun PlayerScreen(
                 ),
         ) {
             PlayerAmbientBackdrop(
-                item = current,
-                ambientPalette =
-                ArtworkAmbientPalette(
-                    primary = animatedPrimary.value,
-                    secondary = animatedSecondary.value,
-                    highlight = animatedHighlight.value,
-                ),
+                artworkUrl = current?.artworkUrl,
+                artworkCacheKey = current?.artworkCacheKey,
                 modifier = Modifier.fillMaxSize(),
             )
             if (isLandscape) {
@@ -372,18 +349,42 @@ private fun LandscapeKeepScreenOnEffect(enabled: Boolean) {
 }
 
 @Composable
-private fun PlayerAmbientBackdrop(
-    item: PlayerQueueItem?,
-    ambientPalette: ArtworkAmbientPalette,
-    modifier: Modifier = Modifier,
-) {
+private fun PlayerAmbientBackdrop(artworkUrl: String?, artworkCacheKey: String?, modifier: Modifier = Modifier) {
     val themeColors = MaterialTheme.xyColors
-    val backdropColors = resolvePlayerBackdropColors(themeColors, ambientPalette)
+    val targetPalette = rememberArtworkAmbientPalette(artworkUrl, artworkCacheKey)
+        ?: PlayerFallbackAmbientPalette
+    val animatedPrimary = animateColorAsState(
+        targetValue = targetPalette.primary,
+        animationSpec = PlayerAmbientColorAnimationSpec,
+        label = "playerAmbientPrimary",
+    )
+    val animatedSecondary = animateColorAsState(
+        targetValue = targetPalette.secondary,
+        animationSpec = PlayerAmbientColorAnimationSpec,
+        label = "playerAmbientSecondary",
+    )
+    val animatedHighlight = animateColorAsState(
+        targetValue = targetPalette.highlight,
+        animationSpec = PlayerAmbientColorAnimationSpec,
+        label = "playerAmbientHighlight",
+    )
     Box(
         modifier =
         modifier
             .background(themeColors.nowPlayingBg)
             .drawWithCache {
+                // Read the animated colors from draw so palette interpolation invalidates only
+                // this backdrop instead of recomposing the full player tree every frame.
+                val backdropColors =
+                    resolvePlayerBackdropColors(
+                        themeColors = themeColors,
+                        ambientPalette =
+                        ArtworkAmbientPalette(
+                            primary = animatedPrimary.value,
+                            secondary = animatedSecondary.value,
+                            highlight = animatedHighlight.value,
+                        ),
+                    )
                 val background =
                     Brush.linearGradient(
                         colorStops =
@@ -400,6 +401,11 @@ private fun PlayerAmbientBackdrop(
             },
     )
 }
+
+private val PlayerAmbientColorAnimationSpec = tween<Color>(
+    durationMillis = XyMotion.Emphasized,
+    easing = XyMotion.EaseOutQuart,
+)
 
 private val PlayerFallbackAmbientPalette = ArtworkAmbientPalette(
     primary = Color(0xFF684032),

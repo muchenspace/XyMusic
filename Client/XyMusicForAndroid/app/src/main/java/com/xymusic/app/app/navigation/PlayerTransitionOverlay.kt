@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -22,9 +23,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.xymusic.app.feature.player.presentation.PlayerDismissTarget
+import com.xymusic.app.feature.player.presentation.playerDismissDurationMillis
 import com.xymusic.app.feature.player.presentation.resolvePlayerDismissTarget
 import com.xymusic.app.feature.player.presentation.updatePlayerDismissOffset
 import com.xymusic.app.ui.theme.XyMotion
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
 
@@ -39,10 +42,192 @@ private enum class PlayerOverlayPhase {
     Exiting,
 }
 
+private data class PlayerOverlayMetrics(
+    val dismissTargetOffset: Float,
+    val dismissThreshold: Float,
+    val dismissVelocityThreshold: Float,
+)
+
 /**
- * Keeps the player above the navigation shell while a single offset drives opening, closing,
- * and drag dismissal. The underlying route never changes during this transition.
+ * Keeps the player above the navigation shell while a single layer offset drives opening,
+ * closing, and drag dismissal. Frame-rate values stay inside [translationY] so they never
+ * invalidate the player composition.
  */
+@Stable
+private class PlayerOverlayMotion(initialVisible: Boolean) {
+    private val offsetY = Animatable(0f)
+    private var phase by mutableStateOf(
+        if (initialVisible) PlayerOverlayPhase.Visible else PlayerOverlayPhase.Hidden,
+    )
+    private var dragOffsetY by mutableFloatStateOf(0f)
+    private var isDragging by mutableStateOf(false)
+    private var dismissRequested by mutableStateOf(false)
+
+    val shouldCompose: Boolean
+        get() = phase != PlayerOverlayPhase.Hidden
+
+    val dragEnabled: Boolean
+        get() = !dismissRequested && phase != PlayerOverlayPhase.Exiting
+
+    val startDragImmediately: Boolean
+        get() = offsetY.isRunning
+
+    val immersiveLandscape: Boolean
+        get() = phase == PlayerOverlayPhase.Visible
+
+    suspend fun updateVisibility(visible: Boolean, metrics: PlayerOverlayMetrics) {
+        when {
+            visible && phase == PlayerOverlayPhase.Hidden -> enterFromHidden(metrics)
+            visible && phase == PlayerOverlayPhase.Exiting -> returnToVisible()
+            !visible && phase != PlayerOverlayPhase.Hidden && phase != PlayerOverlayPhase.Exiting -> {
+                exitToHidden(metrics)
+            }
+        }
+    }
+
+    fun requestDismiss(
+        scope: CoroutineScope,
+        metrics: PlayerOverlayMetrics,
+        releaseVelocity: Float,
+        onDismissRequest: () -> Unit,
+    ) {
+        if (dismissRequested || phase == PlayerOverlayPhase.Exiting) return
+
+        val startingOffset = currentOffset()
+        val dismissDuration =
+            playerDismissDurationMillis(
+                offsetPx = startingOffset,
+                maxOffsetPx = metrics.dismissTargetOffset,
+                releaseVelocityPxPerSecond = releaseVelocity,
+            )
+        dismissRequested = true
+        phase = PlayerOverlayPhase.Exiting
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            // Cancels an in-flight entry before the parent updates visibility.
+            offsetY.snapTo(startingOffset)
+            isDragging = false
+            onDismissRequest()
+            animateExit(metrics.dismissTargetOffset, dismissDuration)
+        }
+    }
+
+    fun dragBy(dragDelta: Float, metrics: PlayerOverlayMetrics) {
+        if (!dragEnabled || !isDragging) return
+        dragOffsetY =
+            updatePlayerDismissOffset(
+                currentOffsetPx = dragOffsetY,
+                dragDeltaPx = dragDelta,
+                maxOffsetPx = metrics.dismissTargetOffset,
+            )
+    }
+
+    fun startDrag(scope: CoroutineScope, metrics: PlayerOverlayMetrics) {
+        dragOffsetY = offsetY.value.coerceIn(0f, metrics.dismissTargetOffset)
+        isDragging = true
+        scope.launch { offsetY.stop() }
+    }
+
+    fun stopDrag(
+        scope: CoroutineScope,
+        metrics: PlayerOverlayMetrics,
+        releaseVelocity: Float,
+        onDismissRequest: () -> Unit,
+    ) {
+        if (!dragEnabled) return
+        when (
+            resolvePlayerDismissTarget(
+                offsetPx = dragOffsetY,
+                releaseVelocityPxPerSecond = releaseVelocity,
+                distanceThresholdPx = metrics.dismissThreshold,
+                velocityThresholdPxPerSecond = metrics.dismissVelocityThreshold,
+            )
+        ) {
+            PlayerDismissTarget.Dismiss ->
+                requestDismiss(
+                    scope = scope,
+                    metrics = metrics,
+                    releaseVelocity = releaseVelocity,
+                    onDismissRequest = onDismissRequest,
+                )
+
+            PlayerDismissTarget.Restore -> restore(scope, releaseVelocity)
+        }
+    }
+
+    fun translationY(dismissTargetOffset: Float): Float = when {
+        isDragging -> dragOffsetY
+        phase == PlayerOverlayPhase.Hidden -> dismissTargetOffset
+        else -> offsetY.value
+    }
+
+    private suspend fun enterFromHidden(metrics: PlayerOverlayMetrics) {
+        dismissRequested = false
+        phase = PlayerOverlayPhase.Entering
+        offsetY.snapTo(metrics.dismissTargetOffset)
+        offsetY.animateTo(
+            targetValue = 0f,
+            animationSpec = tween(
+                durationMillis = XyMotion.Emphasized,
+                easing = XyMotion.EmphasizedDecel,
+            ),
+        )
+        phase = PlayerOverlayPhase.Visible
+    }
+
+    private suspend fun returnToVisible() {
+        dismissRequested = false
+        phase = PlayerOverlayPhase.Entering
+        offsetY.animateTo(
+            targetValue = 0f,
+            animationSpec = tween(
+                durationMillis = XyMotion.Standard,
+                easing = XyMotion.EmphasizedDecel,
+            ),
+        )
+        phase = PlayerOverlayPhase.Visible
+    }
+
+    private suspend fun exitToHidden(metrics: PlayerOverlayMetrics) {
+        val startingOffset = currentOffset()
+        val dismissDuration =
+            playerDismissDurationMillis(
+                offsetPx = startingOffset,
+                maxOffsetPx = metrics.dismissTargetOffset,
+            )
+        isDragging = false
+        phase = PlayerOverlayPhase.Exiting
+        offsetY.snapTo(startingOffset)
+        animateExit(metrics.dismissTargetOffset, dismissDuration)
+    }
+
+    private suspend fun animateExit(dismissTargetOffset: Float, durationMillis: Int) {
+        offsetY.animateTo(
+            targetValue = dismissTargetOffset,
+            animationSpec = tween(
+                durationMillis = durationMillis,
+                easing = XyMotion.EmphasizedEasing,
+            ),
+        )
+        phase = PlayerOverlayPhase.Hidden
+        dismissRequested = false
+    }
+
+    private fun restore(scope: CoroutineScope, releaseVelocity: Float) {
+        val startingOffset = dragOffsetY
+        scope.launch {
+            offsetY.snapTo(startingOffset)
+            isDragging = false
+            offsetY.animateTo(
+                targetValue = 0f,
+                animationSpec = XyMotion.SheetDismissSpring,
+                initialVelocity = releaseVelocity,
+            )
+        }
+    }
+
+    private fun currentOffset(): Float = if (isDragging) dragOffsetY else offsetY.value
+}
+
 @Composable
 internal fun PlayerTransitionOverlay(
     visible: Boolean,
@@ -56,159 +241,58 @@ internal fun PlayerTransitionOverlay(
 ) {
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
-    val offsetY = remember { Animatable(0f) }
-    var phase by remember {
-        mutableStateOf(if (visible) PlayerOverlayPhase.Visible else PlayerOverlayPhase.Hidden)
-    }
-    var dragOffsetY by remember { mutableFloatStateOf(0f) }
-    var isDragging by remember { mutableStateOf(false) }
-    var dismissRequested by remember { mutableStateOf(false) }
+    val motion = remember { PlayerOverlayMotion(initialVisible = visible) }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val dismissTargetOffset = with(density) { maxHeight.toPx() }.coerceAtLeast(1f)
-        val dismissThreshold = minOf(with(density) { 180.dp.toPx() }, dismissTargetOffset)
-        val dismissVelocityThreshold = with(density) { 1_000.dp.toPx() }
+        val metrics =
+            PlayerOverlayMetrics(
+                dismissTargetOffset = dismissTargetOffset,
+                dismissThreshold = minOf(with(density) { 180.dp.toPx() }, dismissTargetOffset),
+                dismissVelocityThreshold = with(density) { 1_000.dp.toPx() },
+            )
 
         LaunchedEffect(visible, dismissTargetOffset) {
-            when {
-                visible && phase == PlayerOverlayPhase.Hidden -> {
-                    dismissRequested = false
-                    phase = PlayerOverlayPhase.Entering
-                    offsetY.snapTo(dismissTargetOffset)
-                    offsetY.animateTo(
-                        targetValue = 0f,
-                        animationSpec = tween(
-                            durationMillis = XyMotion.Emphasized,
-                            easing = XyMotion.EmphasizedDecel,
-                        ),
-                    )
-                    phase = PlayerOverlayPhase.Visible
-                }
-
-                visible && phase == PlayerOverlayPhase.Exiting -> {
-                    dismissRequested = false
-                    phase = PlayerOverlayPhase.Entering
-                    offsetY.animateTo(
-                        targetValue = 0f,
-                        animationSpec = tween(
-                            durationMillis = XyMotion.Standard,
-                            easing = XyMotion.EmphasizedDecel,
-                        ),
-                    )
-                    phase = PlayerOverlayPhase.Visible
-                }
-
-                !visible &&
-                    phase != PlayerOverlayPhase.Hidden &&
-                    phase != PlayerOverlayPhase.Exiting -> {
-                    isDragging = false
-                    phase = PlayerOverlayPhase.Exiting
-                    offsetY.animateTo(
-                        targetValue = dismissTargetOffset,
-                        animationSpec = tween(
-                            durationMillis = XyMotion.Standard,
-                            easing = XyMotion.EmphasizedEasing,
-                        ),
-                    )
-                    phase = PlayerOverlayPhase.Hidden
-                    dismissRequested = false
-                }
-            }
+            motion.updateVisibility(visible = visible, metrics = metrics)
         }
 
-        if (visible || phase != PlayerOverlayPhase.Hidden) {
-            val requestDismiss: () -> Unit = {
-                if (!dismissRequested && phase != PlayerOverlayPhase.Exiting) {
-                    val startingOffset =
-                        if (isDragging) {
-                            dragOffsetY
-                        } else {
-                            offsetY.value
-                        }
-                    dismissRequested = true
-                    phase = PlayerOverlayPhase.Exiting
-                    scope.launch(start = CoroutineStart.UNDISPATCHED) {
-                        // Cancels an in-flight entry before the parent updates visibility.
-                        offsetY.snapTo(startingOffset)
-                        isDragging = false
-                        onDismissRequest()
-                        offsetY.animateTo(
-                            targetValue = dismissTargetOffset,
-                            animationSpec = tween(
-                                durationMillis = XyMotion.Standard,
-                                easing = XyMotion.EmphasizedEasing,
-                            ),
-                        )
-                        phase = PlayerOverlayPhase.Hidden
-                        dismissRequested = false
-                    }
-                }
-            }
-            val dragState =
-                rememberDraggableState { dragDelta ->
-                    if (!dismissRequested && phase != PlayerOverlayPhase.Exiting && isDragging) {
-                        dragOffsetY =
-                            updatePlayerDismissOffset(
-                                currentOffsetPx = dragOffsetY,
-                                dragDeltaPx = dragDelta,
-                                maxOffsetPx = dismissTargetOffset,
-                            )
-                    }
-                }
+        if (visible || motion.shouldCompose) {
+            val dragState = rememberDraggableState { dragDelta -> motion.dragBy(dragDelta, metrics) }
             val dragModifier =
                 Modifier.draggable(
                     state = dragState,
                     orientation = Orientation.Vertical,
-                    enabled = !dismissRequested && phase != PlayerOverlayPhase.Exiting,
-                    startDragImmediately = offsetY.isRunning,
-                    onDragStarted = {
-                        dragOffsetY = offsetY.value.coerceIn(0f, dismissTargetOffset)
-                        isDragging = true
-                        scope.launch { offsetY.stop() }
-                    },
+                    enabled = motion.dragEnabled,
+                    startDragImmediately = motion.startDragImmediately,
+                    onDragStarted = { motion.startDrag(scope, metrics) },
                     onDragStopped = { releaseVelocity ->
-                        if (!dismissRequested && phase != PlayerOverlayPhase.Exiting) {
-                            when (
-                                resolvePlayerDismissTarget(
-                                    offsetPx = dragOffsetY,
-                                    releaseVelocityPxPerSecond = releaseVelocity,
-                                    distanceThresholdPx = dismissThreshold,
-                                    velocityThresholdPxPerSecond = dismissVelocityThreshold,
-                                )
-                            ) {
-                                PlayerDismissTarget.Dismiss -> requestDismiss()
-                                PlayerDismissTarget.Restore ->
-                                    scope.launch {
-                                        offsetY.snapTo(dragOffsetY)
-                                        isDragging = false
-                                        offsetY.animateTo(
-                                            targetValue = 0f,
-                                            animationSpec = XyMotion.SheetDismissSpring,
-                                            initialVelocity = releaseVelocity,
-                                        )
-                                    }
-                            }
-                        }
+                        motion.stopDrag(
+                            scope = scope,
+                            metrics = metrics,
+                            releaseVelocity = releaseVelocity,
+                            onDismissRequest = onDismissRequest,
+                        )
                     },
                 )
-            val translationY =
-                when {
-                    isDragging -> dragOffsetY
-                    phase == PlayerOverlayPhase.Hidden -> dismissTargetOffset
-                    else -> offsetY.value
-                }
-
             Box(
                 modifier =
                 Modifier
                     .fillMaxSize()
-                    .graphicsLayer { this.translationY = translationY }
-                    .testTag(PlayerTransitionTestTags.Surface),
+                    .graphicsLayer {
+                        translationY = motion.translationY(metrics.dismissTargetOffset)
+                    }.testTag(PlayerTransitionTestTags.Surface),
             ) {
                 content(
-                    requestDismiss,
+                    {
+                        motion.requestDismiss(
+                            scope = scope,
+                            metrics = metrics,
+                            releaseVelocity = 0f,
+                            onDismissRequest = onDismissRequest,
+                        )
+                    },
                     dragModifier,
-                    phase == PlayerOverlayPhase.Visible,
+                    motion.immersiveLandscape,
                 )
             }
         }

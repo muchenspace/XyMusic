@@ -2,6 +2,7 @@ package com.xymusic.app.app.navigation
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +54,25 @@ class PlayerTransitionOverlayComposeTest {
         assertThat(positions.first()).isAtLeast(homeBounds.bottom - POSITION_TOLERANCE_PX)
         assertThat(positions.last()).isLessThan(positions.first() - POSITION_TOLERANCE_PX)
         assertMonotonicallyNonIncreasing(positions)
+    }
+
+    @Test
+    fun openingAnimationUpdatesTheLayerWithoutRecomposingPlayerContentPerFrame() {
+        val fixture = setFixture()
+
+        composeRule.mainClock.autoAdvance = false
+        startOpening(fixture)
+        val compositionsAfterEntryStarted = fixture.contentCompositionCount()
+
+        repeat(OPENING_RECOMPOSITION_SAMPLE_COUNT) {
+            composeRule.mainClock.advanceTimeBy(OPENING_RECOMPOSITION_SAMPLE_MILLIS)
+            composeRule.waitForIdle()
+        }
+
+        val animationCompositions = fixture.contentCompositionCount() - compositionsAfterEntryStarted
+        assertThat(animationCompositions).isAtMost(1)
+        composeRule.mainClock.autoAdvance = true
+        composeRule.waitForIdle()
     }
 
     @Test
@@ -134,6 +154,7 @@ class PlayerTransitionOverlayComposeTest {
         lateinit var setVisible: (Boolean) -> Unit
         lateinit var requestDismiss: () -> Unit
         lateinit var dismissRequestCount: () -> Int
+        var contentCompositionCount = 0
 
         composeRule.setContent {
             XyMusicTheme(dynamicColor = false) {
@@ -152,6 +173,7 @@ class PlayerTransitionOverlayComposeTest {
                         },
                     ) { onDismiss, dismissGestureModifier, _ ->
                         requestDismiss = onDismiss
+                        SideEffect { contentCompositionCount += 1 }
                         Box(
                             modifier =
                             dismissGestureModifier
@@ -168,6 +190,7 @@ class PlayerTransitionOverlayComposeTest {
             setVisible = { visible -> composeRule.runOnIdle { setVisible(visible) } },
             requestDismiss = { composeRule.runOnIdle { requestDismiss() } },
             dismissRequestCount = { composeRule.runOnIdle { dismissRequestCount() } },
+            contentCompositionCount = { composeRule.runOnIdle { contentCompositionCount } },
         )
     }
 
@@ -208,11 +231,14 @@ class PlayerTransitionOverlayComposeTest {
         val setVisible: (Boolean) -> Unit,
         val requestDismiss: () -> Unit,
         val dismissRequestCount: () -> Int,
+        val contentCompositionCount: () -> Int,
     )
 
     private companion object {
         const val OPENING_SAMPLE_COUNT = 7
         const val OPENING_SAMPLE_MILLIS = 40L
+        const val OPENING_RECOMPOSITION_SAMPLE_COUNT = 5
+        const val OPENING_RECOMPOSITION_SAMPLE_MILLIS = 32L
         const val OPENING_PROGRESS_MILLIS = 120L
         const val CLOSING_SAMPLE_COUNT = 5
         const val CLOSING_SAMPLE_MILLIS = 32L

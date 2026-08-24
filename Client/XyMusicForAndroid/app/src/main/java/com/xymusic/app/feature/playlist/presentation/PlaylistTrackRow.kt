@@ -1,11 +1,11 @@
 package com.xymusic.app.feature.playlist.presentation
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
@@ -36,6 +36,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -55,6 +56,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.xymusic.app.R
 import kotlin.math.abs
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun PlaylistTrackRow(
@@ -78,6 +81,8 @@ internal fun PlaylistTrackRow(
     var menuExpanded by remember { mutableStateOf(false) }
     var dragActive by remember(entry.entryId) { mutableStateOf(false) }
     var dragOffsetY by remember(entry.entryId) { mutableFloatStateOf(0f) }
+    val settledOffsetY = remember(entry.entryId) { Animatable(0f) }
+    val scope = rememberCoroutineScope()
     val moveUpLabel = stringResource(R.string.player_move_up)
     val moveDownLabel = stringResource(R.string.player_move_down)
     val currentIndex by rememberUpdatedState(index)
@@ -132,28 +137,15 @@ internal fun PlaylistTrackRow(
         animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing),
         label = "playlist-row-tonal-elevation",
     )
-    val scale by animateFloatAsState(
+    val scale = animateFloatAsState(
         targetValue = if (visualDragging) 1.012f else 1f,
         animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing),
         label = "playlist-row-scale",
     )
-    val handleScale by animateFloatAsState(
+    val handleScale = animateFloatAsState(
         targetValue = if (visualDragging) 1.12f else 1f,
         animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing),
         label = "playlist-handle-scale",
-    )
-    val renderedOffsetY by animateFloatAsState(
-        targetValue = dragOffsetY,
-        animationSpec =
-        if (visualDragging) {
-            snap()
-        } else {
-            spring(
-                dampingRatio = Spring.DampingRatioNoBouncy,
-                stiffness = Spring.StiffnessMedium,
-            )
-        },
-        label = "playlist-row-drag-offset",
     )
     val actions =
         if (reorderEnabled) {
@@ -187,9 +179,11 @@ internal fun PlaylistTrackRow(
                 horizontal = if (compact) 4.dp else 8.dp,
                 vertical = if (compact) 2.dp else 3.dp,
             ).graphicsLayer {
-                translationY = renderedOffsetY
-                scaleX = scale
-                scaleY = scale
+                // Drag deltas arrive much faster than structural reorder updates. Read them in
+                // the layer phase so moving a finger does not recompose and relayout the row.
+                translationY = if (dragActive) dragOffsetY else settledOffsetY.value
+                scaleX = scale.value
+                scaleY = scale.value
             },
         shape = shape,
         color = containerColor,
@@ -265,8 +259,8 @@ internal fun PlaylistTrackRow(
                     .size(handleSize)
                     .testTag(PlaylistDetailTestTags.reorderHandle(entry.entryId))
                     .graphicsLayer {
-                        scaleX = handleScale
-                        scaleY = handleScale
+                        scaleX = handleScale.value
+                        scaleY = handleScale.value
                     }.then(
                         if (reorderEnabled) {
                             Modifier.pointerInput(entry.entryId, compact) {
@@ -274,6 +268,10 @@ internal fun PlaylistTrackRow(
                                 detectDragGestures(
                                     onDragStart = {
                                         if (currentOnDragStarted()) {
+                                            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                                                settledOffsetY.stop()
+                                                settledOffsetY.snapTo(0f)
+                                            }
                                             dragActive = true
                                             dragDistance = 0f
                                             dragOffsetY = 0f
@@ -282,6 +280,16 @@ internal fun PlaylistTrackRow(
                                     },
                                     onDragEnd = {
                                         val completed = dragActive
+                                        val releasedOffset = dragOffsetY
+                                        if (completed) {
+                                            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                                                settledOffsetY.snapTo(releasedOffset)
+                                                settledOffsetY.animateTo(
+                                                    targetValue = 0f,
+                                                    animationSpec = PlaylistRowSettleSpec,
+                                                )
+                                            }
+                                        }
                                         dragActive = false
                                         dragDistance = 0f
                                         dragOffsetY = 0f
@@ -289,6 +297,16 @@ internal fun PlaylistTrackRow(
                                     },
                                     onDragCancel = {
                                         val cancelled = dragActive
+                                        val releasedOffset = dragOffsetY
+                                        if (cancelled) {
+                                            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                                                settledOffsetY.snapTo(releasedOffset)
+                                                settledOffsetY.animateTo(
+                                                    targetValue = 0f,
+                                                    animationSpec = PlaylistRowSettleSpec,
+                                                )
+                                            }
+                                        }
                                         dragActive = false
                                         dragDistance = 0f
                                         dragOffsetY = 0f
@@ -377,3 +395,8 @@ internal fun PlaylistTrackRow(
         }
     }
 }
+
+private val PlaylistRowSettleSpec = spring<Float>(
+    dampingRatio = Spring.DampingRatioNoBouncy,
+    stiffness = Spring.StiffnessMedium,
+)

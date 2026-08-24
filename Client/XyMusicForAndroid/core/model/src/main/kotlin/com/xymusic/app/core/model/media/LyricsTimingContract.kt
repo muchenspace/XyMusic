@@ -18,28 +18,33 @@ private fun hasCompleteWordTiming(content: String): Boolean {
         .replace('\r', '\n')
         .removePrefix(BYTE_ORDER_MARK)
     for (rawLine in normalizedContent.lineSequence()) {
-        if (rawLine.isBlank()) continue
-        val prefix = LINE_TIMESTAMP_PREFIX_REGEX.find(rawLine)
-        if (prefix == null) {
-            if (METADATA_ONLY_LINE_REGEX.matches(rawLine)) continue
-            return false
-        }
-
-        val body = rawLine.substring(prefix.range.last + 1).trim()
-        if (body.isEmpty()) continue
-
-        hasTimedLyricLine = true
-        val remaining = WORD_TIMESTAMP_REGEX.replace(body, "")
-        if (
-            !WORD_TIMESTAMP_START_REGEX.containsMatchIn(body) ||
-            ANY_WORD_MARKER_REGEX.containsMatchIn(remaining) ||
-            remaining.isBlank() ||
-            !wordTimestampsAreNondecreasing(body)
-        ) {
-            return false
+        when (rawLine.wordTimingStatus()) {
+            LyricsLineTimingStatus.Ignored -> Unit
+            LyricsLineTimingStatus.Timed -> hasTimedLyricLine = true
+            LyricsLineTimingStatus.Invalid -> return false
         }
     }
     return hasTimedLyricLine
+}
+
+private fun String.wordTimingStatus(): LyricsLineTimingStatus {
+    if (isBlank()) return LyricsLineTimingStatus.Ignored
+    val prefix = LINE_TIMESTAMP_PREFIX_REGEX.find(this)
+        ?: return if (METADATA_ONLY_LINE_REGEX.matches(this)) {
+            LyricsLineTimingStatus.Ignored
+        } else {
+            LyricsLineTimingStatus.Invalid
+        }
+    val body = substring(prefix.range.last + 1).trim()
+    if (body.isEmpty()) return LyricsLineTimingStatus.Ignored
+
+    val remaining = WORD_TIMESTAMP_REGEX.replace(body, "")
+    val valid =
+        WORD_TIMESTAMP_START_REGEX.containsMatchIn(body) &&
+            !ANY_WORD_MARKER_REGEX.containsMatchIn(remaining) &&
+            remaining.isNotBlank() &&
+            wordTimestampsAreNondecreasing(body)
+    return if (valid) LyricsLineTimingStatus.Timed else LyricsLineTimingStatus.Invalid
 }
 
 private fun wordTimestampsAreNondecreasing(body: String): Boolean {
@@ -57,6 +62,12 @@ private fun MatchResult.toTimestampMs(): Long {
     val seconds = groupValues[2].toLong()
     val fractionMs = groupValues[3].padEnd(3, '0').toLong()
     return minutes * 60_000 + seconds * 1_000 + fractionMs
+}
+
+private enum class LyricsLineTimingStatus {
+    Ignored,
+    Timed,
+    Invalid,
 }
 
 private val LINE_TIMESTAMP_PREFIX_REGEX =
