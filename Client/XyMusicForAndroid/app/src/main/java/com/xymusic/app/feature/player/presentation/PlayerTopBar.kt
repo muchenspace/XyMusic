@@ -37,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -59,7 +60,6 @@ internal fun PlayerTopBar(
     onShowSpeed: () -> Unit,
     onShowSleepTimer: () -> Unit,
 ) {
-    var menuExpanded by remember { mutableStateOf(false) }
     Box(
         modifier =
         Modifier
@@ -69,193 +69,247 @@ internal fun PlayerTopBar(
             .testTag(PlayerTestTags.TopBar),
         contentAlignment = Alignment.Center,
     ) {
-        IconButton(
+        PlayerDismissButton(
             onClick = onDismiss,
-            modifier = Modifier.size(44.dp).align(Alignment.CenterStart),
-        ) {
-            Icon(
-                imageVector = Icons.Default.KeyboardArrowDown,
-                contentDescription = stringResource(R.string.common_back),
-                tint = PlayerPrimaryContent,
-                modifier = Modifier.size(30.dp),
-            )
-        }
-        if (item == null && showTrackInfo) {
+            modifier = Modifier.align(Alignment.CenterStart),
+        )
+        PlayerTopBarTrackInfo(item = item, visible = showTrackInfo)
+        PlayerTopBarActions(
+            isFavorite = isFavorite,
+            onToggleFavorite = onToggleFavorite,
+            onAddToPlaylist = onAddToPlaylist,
+            playbackSpeed = playbackSpeed,
+            sleepTimerRemainingMs = sleepTimerRemainingMs,
+            onShowSpeed = onShowSpeed,
+            onShowSleepTimer = onShowSleepTimer,
+            modifier = Modifier.align(Alignment.CenterEnd),
+        )
+    }
+}
+
+@Composable
+private fun PlayerDismissButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    IconButton(
+        onClick = onClick,
+        modifier = modifier.size(44.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Default.KeyboardArrowDown,
+            contentDescription = stringResource(R.string.common_back),
+            tint = PlayerPrimaryContent,
+            modifier = Modifier.size(30.dp),
+        )
+    }
+}
+
+@Composable
+private fun PlayerTopBarTrackInfo(item: PlayerQueueItem?, visible: Boolean) {
+    if (!visible) return
+    if (item == null) {
+        Text(
+            text = stringResource(R.string.player_now_playing),
+            color = PlayerPrimaryContent,
+            fontWeight = FontWeight.SemiBold,
+        )
+        return
+    }
+
+    val artistNames = remember(item.queueItemId, item.artistNames) { item.artistNames.joinToString(" / ") }
+    val artistLine = artistNames.ifBlank { stringResource(R.string.catalog_unknown_artist) }
+    Row(
+        modifier =
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 58.dp, end = 116.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        MediaArtwork(
+            url = item.artworkUrl,
+            cacheKey = item.artworkCacheKey,
+            contentDescription = null,
+            fallbackImageRes = R.drawable.xymusic_compact,
+            modifier = Modifier.size(56.dp),
+            shape = PlayerTopBarArtworkShape,
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = stringResource(R.string.player_now_playing),
+                text = item.title,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 color = PlayerPrimaryContent,
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = FontWeight.Bold,
             )
-        } else if (item != null && showTrackInfo) {
-            Row(
-                modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 58.dp, end = 116.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                MediaArtwork(
-                    url = item.artworkUrl,
-                    cacheKey = item.artworkCacheKey,
-                    contentDescription = null,
-                    fallbackImageRes = R.drawable.xymusic_compact,
-                    modifier = Modifier.size(56.dp),
-                    shape = RoundedCornerShape(14.dp),
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = item.title,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = PlayerPrimaryContent,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        text = item.artistNames.joinToString(" / ").ifBlank {
-                            stringResource(R.string.catalog_unknown_artist)
-                        },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = PlayerSecondaryContent,
-                    )
-                }
-            }
-        }
-        Row(
-            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(
-                onClick = onToggleFavorite,
-                modifier =
-                Modifier
-                    .size(42.dp)
-                    .clip(CircleShape)
-                    .background(PlayerPrimaryContent.copy(alpha = 0.15f))
-                    .testTag(PlayerTestTags.Favorite),
-            ) {
-                Icon(
-                    imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
-                    contentDescription = stringResource(
-                        if (isFavorite) R.string.library_remove_favorite else R.string.library_add_favorite,
-                    ),
-                    tint = PlayerPrimaryContent,
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-            Box {
-                IconButton(
-                    onClick = { menuExpanded = true },
-                    modifier =
-                    Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(PlayerPrimaryContent.copy(alpha = 0.15f)),
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MoreVert,
-                        contentDescription = stringResource(R.string.player_playback_options),
-                        tint = PlayerPrimaryContent,
-                        modifier = Modifier.size(24.dp),
-                    )
-                }
-                DropdownMenu(
-                    expanded = menuExpanded,
-                    onDismissRequest = { menuExpanded = false },
-                    modifier =
-                    Modifier
-                        .clip(RoundedCornerShape(18.dp)),
-                    shape = RoundedCornerShape(18.dp),
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    tonalElevation = 0.dp,
-                    shadowElevation = 18.dp,
-                ) {
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                text = stringResource(
-                                    if (isFavorite) {
-                                        R.string.library_remove_favorite
-                                    } else {
-                                        R.string.library_add_favorite
-                                    },
-                                ),
-                                color = PlayerPrimaryContent,
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector =
-                                if (isFavorite) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
-                                contentDescription = null,
-                                tint = PlayerPrimaryContent,
-                            )
-                        },
-                        onClick = {
-                            menuExpanded = false
-                            onToggleFavorite()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                text = stringResource(R.string.playlist_add_track),
-                                color = PlayerPrimaryContent,
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Outlined.PlaylistAdd,
-                                contentDescription = null,
-                                tint = PlayerPrimaryContent,
-                            )
-                        },
-                        onClick = {
-                            menuExpanded = false
-                            onAddToPlaylist()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                text =
-                                stringResource(R.string.player_playback_speed) +
-                                    " - " + formatPlaybackSpeed(playbackSpeed),
-                                color = PlayerPrimaryContent,
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(Icons.Default.GraphicEq, contentDescription = null, tint = PlayerPrimaryContent)
-                        },
-                        onClick = {
-                            menuExpanded = false
-                            onShowSpeed()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                text = sleepTimerRemainingMs?.let { remaining ->
-                                    stringResource(
-                                        R.string.player_sleep_timer_remaining,
-                                        ((remaining + 59_999L) / 60_000L).coerceAtLeast(1L),
-                                    )
-                                } ?: stringResource(R.string.player_sleep_timer),
-                                color = PlayerPrimaryContent,
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(Icons.Default.Pause, contentDescription = null, tint = PlayerPrimaryContent)
-                        },
-                        onClick = {
-                            menuExpanded = false
-                            onShowSleepTimer()
-                        },
-                    )
-                }
-            }
+            Text(
+                text = artistLine,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = PlayerSecondaryContent,
+            )
         }
     }
 }
+
+@Composable
+private fun PlayerTopBarActions(
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
+    onAddToPlaylist: () -> Unit,
+    playbackSpeed: Float,
+    sleepTimerRemainingMs: Long?,
+    onShowSpeed: () -> Unit,
+    onShowSleepTimer: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    Row(
+        modifier = modifier.padding(end = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PlayerFavoriteButton(isFavorite = isFavorite, onClick = onToggleFavorite)
+        Box {
+            PlayerOverflowButton(onClick = { menuExpanded = true })
+            PlayerOptionsMenu(
+                expanded = menuExpanded,
+                isFavorite = isFavorite,
+                playbackSpeed = playbackSpeed,
+                sleepTimerRemainingMs = sleepTimerRemainingMs,
+                onDismiss = { menuExpanded = false },
+                onToggleFavorite = {
+                    menuExpanded = false
+                    onToggleFavorite()
+                },
+                onAddToPlaylist = {
+                    menuExpanded = false
+                    onAddToPlaylist()
+                },
+                onShowSpeed = {
+                    menuExpanded = false
+                    onShowSpeed()
+                },
+                onShowSleepTimer = {
+                    menuExpanded = false
+                    onShowSleepTimer()
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun PlayerFavoriteButton(isFavorite: Boolean, onClick: () -> Unit) {
+    IconButton(
+        onClick = onClick,
+        modifier =
+        Modifier
+            .size(42.dp)
+            .clip(CircleShape)
+            .background(PlayerPrimaryContent.copy(alpha = 0.15f))
+            .testTag(PlayerTestTags.Favorite),
+    ) {
+        Icon(
+            imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
+            contentDescription =
+            stringResource(
+                if (isFavorite) R.string.library_remove_favorite else R.string.library_add_favorite,
+            ),
+            tint = PlayerPrimaryContent,
+            modifier = Modifier.size(22.dp),
+        )
+    }
+}
+
+@Composable
+private fun PlayerOverflowButton(onClick: () -> Unit) {
+    IconButton(
+        onClick = onClick,
+        modifier =
+        Modifier
+            .size(42.dp)
+            .clip(CircleShape)
+            .background(PlayerPrimaryContent.copy(alpha = 0.15f)),
+    ) {
+        Icon(
+            imageVector = Icons.Default.MoreVert,
+            contentDescription = stringResource(R.string.common_more_actions),
+            tint = PlayerPrimaryContent,
+        )
+    }
+}
+
+@Composable
+private fun PlayerOptionsMenu(
+    expanded: Boolean,
+    isFavorite: Boolean,
+    playbackSpeed: Float,
+    sleepTimerRemainingMs: Long?,
+    onDismiss: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onAddToPlaylist: () -> Unit,
+    onShowSpeed: () -> Unit,
+    onShowSleepTimer: () -> Unit,
+) {
+    val favoriteLabel =
+        stringResource(
+            if (isFavorite) R.string.library_remove_favorite else R.string.library_add_favorite,
+        )
+    val playbackSpeedLabel =
+        stringResource(R.string.player_playback_speed) + " - " + formatPlaybackSpeed(playbackSpeed)
+    val sleepTimerLabel =
+        sleepTimerRemainingMs?.let { remaining ->
+            stringResource(
+                R.string.player_sleep_timer_remaining,
+                ((remaining + 59_999L) / 60_000L).coerceAtLeast(1L),
+            )
+        } ?: stringResource(R.string.player_sleep_timer)
+
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+        modifier = Modifier.clip(PlayerOptionsMenuShape),
+        shape = PlayerOptionsMenuShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 0.dp,
+        shadowElevation = 18.dp,
+    ) {
+        PlayerDropdownMenuItem(
+            text = favoriteLabel,
+            icon = if (isFavorite) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
+            onClick = onToggleFavorite,
+        )
+        PlayerDropdownMenuItem(
+            text = stringResource(R.string.playlist_add_track),
+            icon = Icons.AutoMirrored.Outlined.PlaylistAdd,
+            onClick = onAddToPlaylist,
+        )
+        PlayerDropdownMenuItem(
+            text = playbackSpeedLabel,
+            icon = Icons.Default.GraphicEq,
+            onClick = onShowSpeed,
+        )
+        PlayerDropdownMenuItem(
+            text = sleepTimerLabel,
+            icon = Icons.Default.Pause,
+            onClick = onShowSleepTimer,
+        )
+    }
+}
+
+@Composable
+private fun PlayerDropdownMenuItem(text: String, icon: ImageVector, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(text = text, color = PlayerPrimaryContent) },
+        leadingIcon = {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = PlayerPrimaryContent,
+            )
+        },
+        onClick = onClick,
+    )
+}
+
+private val PlayerTopBarArtworkShape = RoundedCornerShape(14.dp)
+private val PlayerOptionsMenuShape = RoundedCornerShape(18.dp)

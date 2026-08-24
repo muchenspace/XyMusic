@@ -27,6 +27,9 @@ private const val NAVIGATION_HOME_TAG = "main_navigation_home"
 private const val NAVIGATION_MINE_TAG = "main_navigation_mine"
 private const val MINE_SETTINGS_TAG = "mine_settings"
 private const val SETTINGS_ROOT_TAG = "settings_root"
+private const val PLAYER_MINI_BAR_TAG = "player_mini_bar"
+private const val PLAYER_TOP_BAR_TAG = "player_top_bar"
+private const val PLAYER_CONTENT_PAGER_TAG = "player_content_pager"
 
 private const val BENCHMARK_SERVER_HOST = "127.0.0.1"
 private const val BENCHMARK_SERVER_PORT = "1"
@@ -101,6 +104,16 @@ private fun UiDevice.exerciseSignedInJourney() {
 
     val homeDestination = findAppObject(appResourceIdSelector(NAVIGATION_HOME_TAG)) ?: return
     homeDestination.clickThroughClickableAncestor()
+    awaitAppResource(HOME_SEARCH_TAG)
+
+    val miniPlayer = findAppObject(appResourceIdSelector(PLAYER_MINI_BAR_TAG)) ?: return
+    miniPlayer.clickThroughClickableAncestor()
+    awaitAppResource(PLAYER_TOP_BAR_TAG)
+    awaitAppResource(PLAYER_CONTENT_PAGER_TAG).swipe(Direction.LEFT, 0.72f)
+    waitForIdle()
+    awaitAppResource(PLAYER_CONTENT_PAGER_TAG).swipe(Direction.RIGHT, 0.72f)
+    waitForIdle()
+    navigateBackAndAwaitGone(appResourceIdSelector(PLAYER_TOP_BAR_TAG))
     awaitAppResource(HOME_SEARCH_TAG)
 }
 

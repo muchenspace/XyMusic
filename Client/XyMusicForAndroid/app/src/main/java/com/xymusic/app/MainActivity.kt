@@ -1,6 +1,7 @@
 package com.xymusic.app
 
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.ReportDrawnWhen
@@ -24,6 +25,7 @@ import kotlin.math.roundToLong
 class MainActivity : ComponentActivity() {
     private val appViewModel: AppViewModel by viewModels()
     private var frameJankMonitor: FrameJankMonitor? = null
+    private var lastSlowFrameLogNanos = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
@@ -39,7 +41,7 @@ class MainActivity : ComponentActivity() {
                     window = window,
                     frameBudgetNanos = (NANOS_PER_SECOND / refreshRate).roundToLong(),
                 ) { durationNanos ->
-                    Log.w("XyMusicJank", "slowFrameNs=$durationNanos refreshRate=$refreshRate")
+                    logSlowFrame(durationNanos = durationNanos, refreshRate = refreshRate)
                 }
         }
         splashScreen.setKeepOnScreenCondition {
@@ -78,7 +80,16 @@ class MainActivity : ComponentActivity() {
         super.onPause()
     }
 
+    private fun logSlowFrame(durationNanos: Long, refreshRate: Float) {
+        val now = SystemClock.elapsedRealtimeNanos()
+        if (now - lastSlowFrameLogNanos < SLOW_FRAME_LOG_INTERVAL_NANOS) return
+        lastSlowFrameLogNanos = now
+        // Logging every missed frame can contend with rendering and turn diagnostics into jank.
+        Log.w("XyMusicJank", "slowFrameNs=$durationNanos refreshRate=$refreshRate")
+    }
+
     private companion object {
         const val NANOS_PER_SECOND = 1_000_000_000f
+        const val SLOW_FRAME_LOG_INTERVAL_NANOS = 1_000_000_000L
     }
 }

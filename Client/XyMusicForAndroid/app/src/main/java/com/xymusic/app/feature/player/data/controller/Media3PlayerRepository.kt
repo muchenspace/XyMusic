@@ -208,11 +208,10 @@ constructor(
             PlayerResult.Success(Unit)
         }
 
-    override suspend fun clearQueue(): PlayerResult<Unit> =
-        withController(rebuildQueueAfterCommand = true) {
-            pendingRestoredMediaItemSeek.cancel()
-            it.clearMediaItems()
-        }
+    override suspend fun clearQueue(): PlayerResult<Unit> = withController(rebuildQueueAfterCommand = true) {
+        pendingRestoredMediaItemSeek.cancel()
+        it.clearMediaItems()
+    }
 
     override suspend fun play(): PlayerResult<Unit> = withController {
         if (it.playbackState == Player.STATE_IDLE && it.currentMediaItem != null) it.prepare()
@@ -697,10 +696,7 @@ internal class PendingRestoredMediaItemSeek {
         }
     }
 
-    private data class Request(
-        val expectedQueueItemId: String?,
-        val positionMs: Long,
-    )
+    private data class Request(val expectedQueueItemId: String?, val positionMs: Long)
 }
 
 internal fun playerEventForCustomAction(customAction: String): PlayerEvent? = when (customAction) {

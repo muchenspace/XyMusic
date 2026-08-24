@@ -277,11 +277,12 @@ internal fun mainNavigationChromeState(
     config: MainNavigationLayoutConfig,
     currentRoute: String?,
     lastSelectedMainDestination: MainDestination? = null,
+    imeVisible: Boolean = false,
 ): MainNavigationChromeState {
     val foregroundRoute = currentRoute ?: MainDestination.Home.route
     return MainNavigationChromeState(
         showMainNavigation = shouldShowMainBottomBar(foregroundRoute),
-        showMiniPlayer = config.hasPlayerItem,
+        showMiniPlayer = config.hasPlayerItem && !imeVisible,
         selectedMainDestination =
         MainDestination.fromRoute(foregroundRoute) ?: lastSelectedMainDestination,
     )

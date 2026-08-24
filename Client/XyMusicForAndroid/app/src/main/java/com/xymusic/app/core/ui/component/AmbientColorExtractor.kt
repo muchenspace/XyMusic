@@ -46,8 +46,12 @@ fun rememberArtworkAmbientPalette(artworkUrl: String?, cacheKey: String?): Artwo
         ) {
             if (artworkUrl.isNullOrBlank()) {
                 value = null
-            } else if (value == null) {
+            } else {
                 val identity = stableArtworkCacheKey(cacheKey) ?: artworkUrl
+                // `produceState` keeps its backing state across key changes. Always resolve the
+                // new identity instead of treating the previous track's palette as a cache hit.
+                // The assignment happens after the suspend load completes, so the old palette
+                // remains visible while the next one is decoded and avoids a fallback-color flash.
                 value = cachedArtworkAmbientPalette(identity)
                     ?: extractArtworkAmbientColor(
                         artworkUrl = artworkUrl,
@@ -127,6 +131,16 @@ private fun cachedArtworkAmbientPalette(key: String): ArtworkAmbientPalette? =
 private fun cacheArtworkAmbientPalette(key: String, colors: ArtworkAmbientPalette) {
     synchronized(artworkAmbientPaletteCache) {
         artworkAmbientPaletteCache.put(key, colors)
+    }
+}
+
+internal fun cacheArtworkAmbientPaletteForTest(key: String, colors: ArtworkAmbientPalette) {
+    cacheArtworkAmbientPalette(key, colors)
+}
+
+internal fun clearArtworkAmbientPaletteCacheForTest() {
+    synchronized(artworkAmbientPaletteCache) {
+        artworkAmbientPaletteCache.evictAll()
     }
 }
 

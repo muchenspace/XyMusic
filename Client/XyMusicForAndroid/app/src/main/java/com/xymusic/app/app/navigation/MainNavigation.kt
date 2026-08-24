@@ -1,7 +1,10 @@
 package com.xymusic.app.app.navigation
 
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,6 +40,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MainNavigation(
     snackbarHostState: SnackbarHostState,
@@ -63,6 +67,7 @@ fun MainNavigation(
     val trackActionsUiState by trackActionsViewModel.uiState.collectAsStateWithLifecycle()
     val playerIsFavorite = trackActionsUiState.playerIsFavorite
     val hasPlayerItem = playerUiState.player.currentItem != null
+    val imeVisible = WindowInsets.isImeVisible
     var playerPresented by rememberSaveable { mutableStateOf(false) }
 
     PlayerEffectSnackbar(playerViewModel.effects, snackbarHostState)
@@ -95,6 +100,7 @@ fun MainNavigation(
                 config = layoutConfig,
                 currentRoute = currentRoute,
                 lastSelectedMainDestination = lastSelectedMainDestination,
+                imeVisible = imeVisible,
             )
         val navigateMain: (MainDestination) -> Unit = { destination ->
             navController.navigateMain(destination.route)
@@ -117,17 +123,19 @@ fun MainNavigation(
                 )
             },
             miniPlayer = { miniPlayerModifier ->
-                PlayerMiniBarRoute(
-                    uiState = playerUiState,
-                    playbackPosition = playbackPosition,
-                    onOpenPlayer = {
-                        playerPresented = true
-                    },
-                    onTogglePlayback = playerViewModel::togglePlayback,
-                    onNext = playerViewModel::skipToNext,
-                    compact = layoutConfig.compactPlayerBar,
-                    modifier = miniPlayerModifier,
-                )
+                if (!imeVisible) {
+                    PlayerMiniBarRoute(
+                        uiState = playerUiState,
+                        playbackPosition = playbackPosition,
+                        onOpenPlayer = {
+                            playerPresented = true
+                        },
+                        onTogglePlayback = playerViewModel::togglePlayback,
+                        onNext = playerViewModel::skipToNext,
+                        compact = layoutConfig.compactPlayerBar,
+                        modifier = miniPlayerModifier,
+                    )
+                }
             },
         ) { chromeInsets ->
             MainNavHost(
@@ -158,7 +166,7 @@ fun MainNavigation(
                 isFavorite = playerIsFavorite,
                 onToggleFavorite = trackActionsViewModel::togglePlayerFavorite,
                 onAddToPlaylist = trackActionsViewModel::open,
-                dismissGestureModifier = dismissGestureModifier,
+                modifier = dismissGestureModifier,
                 immersiveLandscape = immersiveLandscape,
             )
         }
@@ -201,7 +209,7 @@ private fun PlayerOverlayContent(
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
     onAddToPlaylist: (String) -> Unit,
-    dismissGestureModifier: Modifier,
+    modifier: Modifier,
     immersiveLandscape: Boolean,
 ) {
     PlayerScreen(
@@ -226,7 +234,7 @@ private fun PlayerOverlayContent(
                 ?.let(onAddToPlaylist)
         },
         playbackPosition = playbackPosition,
-        dismissGestureModifier = dismissGestureModifier,
+        dismissGestureModifier = modifier,
         immersiveLandscape = immersiveLandscape,
     )
 }
