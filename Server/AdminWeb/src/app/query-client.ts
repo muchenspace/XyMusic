@@ -50,7 +50,6 @@ const ADMIN_MUSIC_ACTIVE_QUERY_PREFIXES = [
   ["admin", "track"],
   ["admin", "album"],
   ["admin", "dashboard"],
-  ["admin", "audit"],
 ] as const;
 
 export async function invalidateAdminMusicQueries(): Promise<void> {

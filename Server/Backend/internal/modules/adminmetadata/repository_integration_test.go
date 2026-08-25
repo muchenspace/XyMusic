@@ -70,7 +70,6 @@ func TestRepositoryProductionMetadataLifecycle(t *testing.T) {
 	cleanup := func() {
 		cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cleanupCancel()
-		_, _ = pool.Exec(cleanupContext, `delete from audit_logs where actor_id = $1`, actorID)
 		if trackID != "" {
 			_, _ = pool.Exec(cleanupContext, `delete from tracks where id = $1`, trackID)
 		}
@@ -137,7 +136,7 @@ func TestRepositoryProductionMetadataLifecycle(t *testing.T) {
 		t.Fatalf("baseline=%+v", baseline)
 	}
 
-	updated, err := service.Update(ctx, actorID, "integration:update", trackID, MetadataMutationInput{
+	updated, err := service.Update(ctx, actorID, trackID, MetadataMutationInput{
 		ExpectedVersion: baseline.Version,
 		Patch: map[string]any{
 			"title":        "Updated Track " + suffix,
@@ -147,7 +146,6 @@ func TestRepositoryProductionMetadataLifecycle(t *testing.T) {
 			"genres": []any{"Rock"},
 			"lyrics": map[string]any{"content": "integration lyric", "format": "PLAIN", "language": "en", "timing": "LINE"},
 		},
-		Reason: "integration metadata update",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -168,9 +166,9 @@ func TestRepositoryProductionMetadataLifecycle(t *testing.T) {
 		t.Fatalf("projection=%q/%q", projectedTitle, projectedArtist)
 	}
 
-	batch, err := service.BatchUpdate(ctx, actorID, "integration:batch", BatchMetadataMutationInput{
+	batch, err := service.BatchUpdate(ctx, actorID, BatchMetadataMutationInput{
 		Items: []BatchMutationItem{{TrackID: trackID, ExpectedVersion: updated.Version}},
-		Patch: map[string]any{"comment": "batch note"}, Reason: "integration batch update",
+		Patch: map[string]any{"comment": "batch note"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -179,7 +177,7 @@ func TestRepositoryProductionMetadataLifecycle(t *testing.T) {
 		t.Fatalf("batch=%+v", batch)
 	}
 	queued, err := service.EnqueueWriteback(
-		ctx, actorID, "integration:enqueue", trackID,
+		ctx, actorID, trackID,
 		VersionReasonInput{ExpectedVersion: batch.Items[0].Version, Reason: "integration writeback"},
 	)
 	if err != nil {
@@ -198,8 +196,7 @@ func TestRepositoryProductionMetadataLifecycle(t *testing.T) {
 		t.Fatalf("writeback page=%+v", page)
 	}
 	cancelled, err := service.CancelWriteback(
-		ctx, actorID, "integration:cancel", queued.ID,
-		VersionReasonInput{ExpectedVersion: queued.Version, Reason: "integration cancel"},
+		ctx, queued.ID, VersionInput{ExpectedVersion: queued.Version},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -208,7 +205,7 @@ func TestRepositoryProductionMetadataLifecycle(t *testing.T) {
 		t.Fatalf("cancelled=%+v", cancelled)
 	}
 	retried, err := service.RetryWriteback(
-		ctx, actorID, "integration:retry", queued.ID,
+		ctx, actorID, queued.ID,
 		VersionReasonInput{ExpectedVersion: cancelled.Version, Reason: "integration retry"},
 	)
 	if err != nil {
@@ -219,8 +216,6 @@ func TestRepositoryProductionMetadataLifecycle(t *testing.T) {
 	}
 
 	// A final expired lease without a backup becomes terminal. ClaimWriteback
-	// must finish reading UPDATE ... RETURNING before it writes the audit row,
-	// otherwise pgx reports "conn busy" here.
 	deadAttemptID := uuid.NewString()
 	if _, err := pool.Exec(ctx, `
 		update metadata_writeback_jobs set status = 'PROCESSING', attempts = max_attempts,
@@ -246,7 +241,7 @@ func TestRepositoryProductionMetadataLifecycle(t *testing.T) {
 	}
 
 	legacyPending, err := service.RetryWriteback(
-		ctx, actorID, "integration:legacy-retry", exhausted.ID,
+		ctx, actorID, exhausted.ID,
 		VersionReasonInput{ExpectedVersion: exhausted.Version, Reason: "integration legacy retry"},
 	)
 	if err != nil {
@@ -261,8 +256,7 @@ func TestRepositoryProductionMetadataLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	cancelledLegacy, err := service.CancelWriteback(
-		ctx, actorID, "integration:cancel-legacy", legacyPending.ID,
-		VersionReasonInput{ExpectedVersion: legacyPending.Version, Reason: "cancel legacy pointer"},
+		ctx, legacyPending.ID, VersionInput{ExpectedVersion: legacyPending.Version},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -280,7 +274,7 @@ func TestRepositoryProductionMetadataLifecycle(t *testing.T) {
 	}
 
 	retriedLegacy, err := service.RetryWriteback(
-		ctx, actorID, "integration:retry-legacy", cancelledLegacy.ID,
+		ctx, actorID, cancelledLegacy.ID,
 		VersionReasonInput{ExpectedVersion: cancelledLegacy.Version, Reason: "retry without backup"},
 	)
 	if err != nil {

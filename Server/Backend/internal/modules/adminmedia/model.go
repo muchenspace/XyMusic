@@ -94,7 +94,6 @@ type InspectedUpload struct {
 
 type FinalizeCompletionParams struct {
 	ActorID         string
-	TraceID         string
 	UploadID        string
 	CompletionToken string
 	AssetID         string
@@ -128,19 +127,7 @@ type MediaJob struct {
 }
 
 type RetryJobParams struct {
-	ActorID         string
-	TraceID         string
 	JobID           string
 	ExpectedVersion int
-	Reason          *string
 	Now             time.Time
-}
-
-type AuditWrite struct {
-	ActorID    string
-	Action     string
-	TargetType string
-	TargetID   string
-	TraceID    string
-	Details    map[string]any
 }

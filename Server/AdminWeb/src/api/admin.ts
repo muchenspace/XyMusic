@@ -5,7 +5,6 @@ import type {
   AlbumMergeResult,
   AlbumSummary,
   ArtistSummary,
-  AuditEntry,
   CreateUserInput,
   DashboardData,
   DatabaseSettingsInput,
@@ -110,7 +109,6 @@ export const adminApi = {
   retryWritebackJob: (id: string, expectedVersion: number, reason: string) => apiRequest<MetadataWritebackJob>(`/api/v1/admin/metadata/writeback-jobs/${id}/retry`, { method: "POST", body: { expectedVersion, reason } }),
   cancelWritebackJob: (id: string, expectedVersion: number, reason: string) => apiRequest<MetadataWritebackJob>(`/api/v1/admin/metadata/writeback-jobs/${id}/cancel`, { method: "POST", body: { expectedVersion, reason } }),
 
-  audit: (params: ListQuery & { action?: string; result?: string; actorId?: string; from?: string; to?: string }, signal?: AbortSignal) => apiRequest<PageResult<AuditEntry>>("/api/v1/admin/audit", { query: query(params), signal }),
 
   settings: (signal?: AbortSignal) => apiRequest<RuntimeSettings>("/api/v1/admin/settings", { signal }),
   updateSettings: (input: RuntimeSettingsUpdate) => apiRequest<RuntimeSettings>("/api/v1/admin/settings", { method: "PATCH", body: input }),

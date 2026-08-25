@@ -731,11 +731,7 @@ func (synchronizer *ProductionSynchronizer) touchDiscoveredSource(
 				SELECT 1 FROM local_music_source_tracks mapping
 				WHERE mapping.source_id=$1 AND mapping.track_id=track.id
 			)
-			AND NOT EXISTS(
-				SELECT 1 FROM audit_logs audit
-				WHERE audit.action='admin.track.archive' AND audit.target_type='track'
-				AND audit.target_id=track.id AND audit.result='SUCCESS'
-			)`, sourceID, sourceUpdatedAt, now); err != nil {
+			AND NOT track.archived_manually`, sourceID, sourceUpdatedAt, now); err != nil {
 			return fmt.Errorf("restore incorrectly archived local library tracks: %w", err)
 		}
 	}
@@ -761,7 +757,7 @@ func (synchronizer *ProductionSynchronizer) ArchiveMissing(
 		UPDATE local_music_sources SET status='MISSING',updated_at=$3
 		WHERE id IN(SELECT id FROM stale_sources) AND status<>'MISSING' RETURNING id
 	), archived_tracks AS(
-		UPDATE tracks track SET status='ARCHIVED',version=track.version+1,updated_at=$3
+		UPDATE tracks track SET status='ARCHIVED',archived_manually=false,version=track.version+1,updated_at=$3
 		WHERE track.status<>'ARCHIVED' AND EXISTS(
 			SELECT 1 FROM local_music_source_tracks mapping
 			JOIN stale_sources missing ON missing.id=mapping.source_id WHERE mapping.track_id=track.id

@@ -82,7 +82,7 @@ func TestRoutesExposeNineEndpointsAndPreserveMutationContracts(t *testing.T) {
 	if api.deleted.Status.Value != StatusDeleted || api.restored.Status.Value != StatusActive {
 		t.Fatalf("delete/restore=%#v/%#v", api.deleted, api.restored)
 	}
-	if payload, ok := idempotency.payloads[4].(VersionReasonInput); !ok || payload.ExpectedVersion != 1 {
+	if payload, ok := idempotency.payloads[4].(VersionInput); !ok || payload.ExpectedVersion != 1 {
 		t.Fatalf("delete idempotency payload=%#v", idempotency.payloads[4])
 	}
 }
@@ -161,11 +161,11 @@ func (stub *managementAPIStub) User(_ context.Context, _ string, input SessionPa
 	stub.sessionPage = input
 	return UserDetailDTO{Sessions: []SessionDTO{}}, nil
 }
-func (stub *managementAPIStub) CreateUser(context.Context, string, string, CreateUserInput) (UserDetailDTO, error) {
+func (stub *managementAPIStub) CreateUser(context.Context, CreateUserInput) (UserDetailDTO, error) {
 	stub.calls["create"]++
 	return UserDetailDTO{Sessions: []SessionDTO{}}, nil
 }
-func (stub *managementAPIStub) UpdateUser(_ context.Context, _, _, _ string, input UpdateUserInput) (UserDetailDTO, error) {
+func (stub *managementAPIStub) UpdateUser(_ context.Context, _, _ string, input UpdateUserInput) (UserDetailDTO, error) {
 	if input.Status.Set && input.Status.Value == StatusDeleted {
 		stub.calls["delete"]++
 		stub.deleted = input
@@ -177,11 +177,11 @@ func (stub *managementAPIStub) UpdateUser(_ context.Context, _, _, _ string, inp
 	}
 	return UserDetailDTO{Sessions: []SessionDTO{}}, nil
 }
-func (stub *managementAPIStub) ResetPassword(context.Context, string, string, string, PasswordInput) (UpdatedDTO, error) {
+func (stub *managementAPIStub) ResetPassword(context.Context, string, PasswordInput) (UpdatedDTO, error) {
 	stub.calls["password"]++
 	return UpdatedDTO{Updated: true}, nil
 }
-func (stub *managementAPIStub) RevokeSession(context.Context, string, string, string, string, string) (RevokedDTO, error) {
+func (stub *managementAPIStub) RevokeSession(context.Context, string, string) (RevokedDTO, error) {
 	stub.calls["session"]++
 	return RevokedDTO{Revoked: true}, nil
 }

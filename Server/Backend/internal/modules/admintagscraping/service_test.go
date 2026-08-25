@@ -243,7 +243,7 @@ func TestApplyPassesVerbatimToLyricProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = service.Apply(context.Background(), "admin", "trace", "track", ApplyInput{
+	_, err = service.Apply(context.Background(), "admin", "track", ApplyInput{
 		ExpectedVersion: 1,
 		Candidate:       Candidate{ID: "candidate", Name: "Song", Source: SourceQMusic},
 		Fields:          ApplyFields{Lyrics: true, Overwrite: true},
@@ -268,7 +268,7 @@ func TestApplyWithClaimedMetadataSkipsMetadataReload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = service.applyWithMetadata(context.Background(), "admin", "trace", "track", ApplyInput{
+	_, err = service.applyWithMetadata(context.Background(), "admin", "track", ApplyInput{
 		ExpectedVersion: 1,
 		Candidate:       Candidate{ID: "candidate", Name: "Changed", Source: SourceQMusic},
 		Fields:          ApplyFields{Title: true, Overwrite: true},
@@ -324,7 +324,7 @@ func TestApplyPreservesExistingFieldsAndCoordinatesLyricsCoverAndWriteback(t *te
 	service, _ := NewService(ServiceDependencies{
 		Store: store, Music: music, Artwork: artwork, DefaultLibraryDirectory: "music",
 	})
-	result, err := service.Apply(context.Background(), "admin", "trace", "track", ApplyInput{
+	result, err := service.Apply(context.Background(), "admin", "track", ApplyInput{
 		ExpectedVersion: version,
 		Candidate: Candidate{
 			ID: "candidate", Name: "New title", Artist: "Artist A & Artist B", Album: "New album",
@@ -363,7 +363,7 @@ func TestApplyReturnsVersionConflictBeforeSideEffects(t *testing.T) {
 	service, _ := NewService(ServiceDependencies{
 		Store: store, Music: &musicStub{}, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
 	})
-	_, err := service.Apply(context.Background(), "admin", "trace", "track", ApplyInput{
+	_, err := service.Apply(context.Background(), "admin", "track", ApplyInput{
 		ExpectedVersion: 4,
 		Candidate:       Candidate{ID: "id", Name: "name", Source: SourceNetease},
 		Fields:          ApplyFields{Title: true},
@@ -384,7 +384,7 @@ func TestApplyRejectsArchivedTrackBeforeSideEffects(t *testing.T) {
 	service, _ := NewService(ServiceDependencies{
 		Store: store, Music: &musicStub{}, Artwork: artwork, DefaultLibraryDirectory: "music",
 	})
-	_, err := service.Apply(context.Background(), "admin", "trace", "track", ApplyInput{
+	_, err := service.Apply(context.Background(), "admin", "track", ApplyInput{
 		ExpectedVersion: 1,
 		Candidate: Candidate{
 			ID: "candidate", Name: "Changed", AlbumImg: "https://example.com/cover.jpg", Source: SourceQMusic,
@@ -415,7 +415,7 @@ func TestApplyRechecksWritebackEligibilityAfterBatchPreflight(t *testing.T) {
 	service, _ := NewService(ServiceDependencies{
 		Store: store, Music: &musicStub{}, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
 	})
-	_, err := service.Apply(context.Background(), "admin", "trace", "track", ApplyInput{
+	_, err := service.Apply(context.Background(), "admin", "track", ApplyInput{
 		ExpectedVersion: 1,
 		Candidate:       Candidate{ID: "candidate", Name: "Changed", Source: SourceQMusic},
 		Fields:          ApplyFields{Title: true, Overwrite: true},
@@ -437,7 +437,7 @@ func TestApplyCancellationGuardFencesMetadataAndWritebackSideEffects(t *testing.
 			Store: store, Music: &musicStub{}, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
 		})
 		checks := 0
-		_, err := service.Apply(context.Background(), "admin", "trace", "track", ApplyInput{
+		_, err := service.Apply(context.Background(), "admin", "track", ApplyInput{
 			ExpectedVersion: 1,
 			Candidate:       Candidate{ID: "candidate", Name: "Changed", Source: SourceQMusic},
 			Fields:          ApplyFields{Title: true, Overwrite: true},
@@ -465,7 +465,7 @@ func TestApplyCancellationGuardFencesMetadataAndWritebackSideEffects(t *testing.
 			Store: store, Music: &musicStub{}, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
 		})
 		checks := 0
-		_, err := service.Apply(context.Background(), "admin", "trace", "track", ApplyInput{
+		_, err := service.Apply(context.Background(), "admin", "track", ApplyInput{
 			ExpectedVersion: 1,
 			Candidate:       Candidate{ID: "candidate", Name: "Changed", Source: SourceQMusic},
 			Fields:          ApplyFields{Title: true, Overwrite: true},
@@ -581,7 +581,7 @@ type artworkStub struct {
 	err                   error
 }
 
-func (stub *artworkStub) ApplyAlbumArtwork(_ context.Context, _, _, albumID string, _ DownloadedArtwork) error {
+func (stub *artworkStub) ApplyAlbumArtwork(_ context.Context, _, albumID string, _ DownloadedArtwork) error {
 	stub.calls++
 	stub.albumID = albumID
 	return stub.err
@@ -589,7 +589,7 @@ func (stub *artworkStub) ApplyAlbumArtwork(_ context.Context, _, _, albumID stri
 
 func (stub *artworkStub) ApplyArtistArtwork(
 	ctx context.Context,
-	_, _ string,
+	_ string,
 	artistID string,
 	expectedVersion int,
 	overwrite bool,
@@ -645,7 +645,7 @@ func (stub *storeStub) FingerprintSource(context.Context, string) (FingerprintSo
 func (stub *storeStub) Metadata(context.Context, string) (TrackMetadata, error) {
 	return stub.metadata, stub.metadataErr
 }
-func (stub *storeStub) UpdateMetadata(_ context.Context, _, _, _ string, _ int, patch MetadataPatch, _ string) (TrackMetadata, error) {
+func (stub *storeStub) UpdateMetadata(_ context.Context, _, _ string, _ int, patch MetadataPatch, _ string) (TrackMetadata, error) {
 	stub.updateCalls++
 	stub.patch = patch
 	return stub.updatedMetadata, nil
@@ -653,7 +653,7 @@ func (stub *storeStub) UpdateMetadata(_ context.Context, _, _, _ string, _ int, 
 func (stub *storeStub) TrackAlbumID(context.Context, string) (*string, error) {
 	return stub.albumID, stub.albumErr
 }
-func (stub *storeStub) EnqueueWriteback(_ context.Context, _, _, _ string, expected int, _ string) (WritebackJob, error) {
+func (stub *storeStub) EnqueueWriteback(_ context.Context, _, _ string, expected int, _ string) (WritebackJob, error) {
 	stub.writebackCalls++
 	stub.writebackExpectedVersion = expected
 	return stub.writeback, stub.writebackErr

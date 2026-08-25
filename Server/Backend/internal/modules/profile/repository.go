@@ -2,7 +2,6 @@ package profile
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -159,18 +158,6 @@ func (repository *Repository) CreateAvatarUpload(
 	))
 	if err != nil {
 		return AvatarUpload{}, fmt.Errorf("insert avatar upload: %w", err)
-	}
-	details, _ := json.Marshal(map[string]any{
-		"purpose":   AvatarUploadPurpose,
-		"targetId":  input.ActorID,
-		"sizeBytes": input.SizeBytes,
-	})
-	if _, err := tx.Exec(ctx, `
-		insert into audit_logs (actor_id, action, target_type, target_id, result, trace_id, details)
-		values ($1, 'media.upload.create', 'media_upload', $2, 'SUCCESS', $3, $4::jsonb)`,
-		input.ActorID, input.ID, input.TraceID, string(details),
-	); err != nil {
-		return AvatarUpload{}, fmt.Errorf("audit avatar upload reservation: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return AvatarUpload{}, fmt.Errorf("commit avatar upload reservation: %w", err)
@@ -418,19 +405,6 @@ func (repository *Repository) FinalizeAvatarCompletion(
 		if err := queueObjectCleanup(ctx, tx, objectKey, "NORMALIZED_UPLOAD_SOURCE", input.Now); err != nil {
 			return err
 		}
-	}
-	details, _ := json.Marshal(map[string]any{
-		"assetId":  input.AssetID,
-		"jobId":    nil,
-		"purpose":  AvatarUploadPurpose,
-		"targetId": input.ActorID,
-	})
-	if _, err := tx.Exec(ctx, `
-		insert into audit_logs (actor_id, action, target_type, target_id, result, trace_id, details)
-		values ($1, 'media.upload.complete', 'media_upload', $2, 'SUCCESS', $3, $4::jsonb)`,
-		input.ActorID, input.UploadID, input.TraceID, string(details),
-	); err != nil {
-		return fmt.Errorf("audit avatar completion: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit avatar completion: %w", err)

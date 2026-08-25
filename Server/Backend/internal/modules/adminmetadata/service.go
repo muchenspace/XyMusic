@@ -38,15 +38,11 @@ func (service *Service) Metadata(ctx context.Context, trackID string) (MetadataD
 
 func (service *Service) Update(
 	ctx context.Context,
-	actorID, traceID, trackID string,
+	actorID, trackID string,
 	input MetadataMutationInput,
 ) (MetadataDTO, error) {
 	if input.ExpectedVersion < 1 {
 		return MetadataDTO{}, apperror.Validation("expectedVersion is invalid")
-	}
-	reason, err := validateReason(input.Reason)
-	if err != nil {
-		return MetadataDTO{}, err
 	}
 	patch, err := NormalizeMetadataPatch(input.Patch)
 	if err != nil {
@@ -58,10 +54,9 @@ func (service *Service) Update(
 	if err := service.store.EnsureMetadata(ctx, []string{trackID}); err != nil {
 		return MetadataDTO{}, err
 	}
-	record, err := service.store.UpdateMetadata(ctx, actorID, traceID, trackID, MetadataMutationInput{
+	record, err := service.store.UpdateMetadata(ctx, actorID, trackID, MetadataMutationInput{
 		ExpectedVersion: input.ExpectedVersion,
 		Patch:           map[string]any(patch),
-		Reason:          reason,
 	})
 	if err != nil {
 		return MetadataDTO{}, err
@@ -71,7 +66,7 @@ func (service *Service) Update(
 
 func (service *Service) BatchUpdate(
 	ctx context.Context,
-	actorID, traceID string,
+	actorID string,
 	input BatchMetadataMutationInput,
 ) (BatchUpdateDTO, error) {
 	if len(input.Items) < 1 || len(input.Items) > 200 {
@@ -81,10 +76,6 @@ func (service *Service) BatchUpdate(
 		if _, containsLyrics := input.Patch[string(FieldLyrics)]; containsLyrics {
 			return BatchUpdateDTO{}, apperror.Validation("Batch lyric edits are limited to 20 tracks")
 		}
-	}
-	reason, err := validateReason(input.Reason)
-	if err != nil {
-		return BatchUpdateDTO{}, err
 	}
 	patch, err := NormalizeMetadataPatch(input.Patch)
 	if err != nil {
@@ -108,8 +99,8 @@ func (service *Service) BatchUpdate(
 	if err := service.store.EnsureMetadata(ctx, trackIDs); err != nil {
 		return BatchUpdateDTO{}, err
 	}
-	records, err := service.store.BatchUpdateMetadata(ctx, actorID, traceID, BatchMetadataMutationInput{
-		Items: input.Items, Patch: map[string]any(patch), Reason: reason,
+	records, err := service.store.BatchUpdateMetadata(ctx, actorID, BatchMetadataMutationInput{
+		Items: input.Items, Patch: map[string]any(patch),
 	})
 	if err != nil {
 		return BatchUpdateDTO{}, err
@@ -126,7 +117,7 @@ func (service *Service) BatchUpdate(
 
 func (service *Service) EnqueueWriteback(
 	ctx context.Context,
-	actorID, traceID, trackID string,
+	actorID, trackID string,
 	input VersionReasonInput,
 ) (WritebackJobDTO, error) {
 	validated, err := validateVersionReason(input)
@@ -136,7 +127,7 @@ func (service *Service) EnqueueWriteback(
 	if err := service.store.EnsureMetadata(ctx, []string{trackID}); err != nil {
 		return WritebackJobDTO{}, err
 	}
-	job, err := service.store.EnqueueWriteback(ctx, actorID, traceID, trackID, validated)
+	job, err := service.store.EnqueueWriteback(ctx, actorID, trackID, validated)
 	if err != nil {
 		return WritebackJobDTO{}, err
 	}
@@ -180,14 +171,14 @@ func (service *Service) WritebackJob(ctx context.Context, jobID string) (Writeba
 
 func (service *Service) RetryWriteback(
 	ctx context.Context,
-	actorID, traceID, jobID string,
+	actorID, jobID string,
 	input VersionReasonInput,
 ) (WritebackJobDTO, error) {
 	validated, err := validateVersionReason(input)
 	if err != nil {
 		return WritebackJobDTO{}, err
 	}
-	job, err := service.store.RetryWriteback(ctx, actorID, traceID, jobID, validated)
+	job, err := service.store.RetryWriteback(ctx, actorID, jobID, validated)
 	if err != nil {
 		return WritebackJobDTO{}, err
 	}
@@ -196,14 +187,13 @@ func (service *Service) RetryWriteback(
 
 func (service *Service) CancelWriteback(
 	ctx context.Context,
-	actorID, traceID, jobID string,
-	input VersionReasonInput,
+	jobID string,
+	input VersionInput,
 ) (WritebackJobDTO, error) {
-	validated, err := validateVersionReason(input)
-	if err != nil {
-		return WritebackJobDTO{}, err
+	if input.ExpectedVersion < 1 {
+		return WritebackJobDTO{}, apperror.Validation("expectedVersion is invalid")
 	}
-	job, err := service.store.CancelWriteback(ctx, actorID, traceID, jobID, validated)
+	job, err := service.store.CancelWriteback(ctx, jobID, input)
 	if err != nil {
 		return WritebackJobDTO{}, err
 	}
@@ -225,10 +215,10 @@ func NewAdminJobsAdapter(service *Service) (*AdminJobsAdapter, error) {
 
 func (adapter *AdminJobsAdapter) Retry(
 	ctx context.Context,
-	actorID, traceID, jobID string,
+	actorID, jobID string,
 	input adminjobs.MetadataMutationInput,
 ) error {
-	_, err := adapter.service.RetryWriteback(ctx, actorID, traceID, jobID, VersionReasonInput{
+	_, err := adapter.service.RetryWriteback(ctx, actorID, jobID, VersionReasonInput{
 		ExpectedVersion: input.ExpectedVersion,
 		Reason:          input.Reason,
 	})
@@ -237,13 +227,10 @@ func (adapter *AdminJobsAdapter) Retry(
 
 func (adapter *AdminJobsAdapter) Cancel(
 	ctx context.Context,
-	actorID, traceID, jobID string,
-	input adminjobs.MetadataMutationInput,
+	jobID string,
+	input adminjobs.MetadataCancelInput,
 ) error {
-	_, err := adapter.service.CancelWriteback(ctx, actorID, traceID, jobID, VersionReasonInput{
-		ExpectedVersion: input.ExpectedVersion,
-		Reason:          input.Reason,
-	})
+	_, err := adapter.service.CancelWriteback(ctx, jobID, VersionInput{ExpectedVersion: input.ExpectedVersion})
 	return err
 }
 

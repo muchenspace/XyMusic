@@ -2,13 +2,11 @@ package adminmutation
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"xymusic/server/internal/shared/apperror"
@@ -107,7 +105,7 @@ func (repository *Repository) UpdateAlbum(ctx context.Context, input UpdateAlbum
 	return nil
 }
 
-func (repository *Repository) MergeAlbums(ctx context.Context, actorID, traceID string, input MergeAlbumsInput) (MergeResultDTO, error) {
+func (repository *Repository) MergeAlbums(ctx context.Context, input MergeAlbumsInput) (MergeResultDTO, error) {
 	expected := map[string]int{input.Target.AlbumID: input.Target.ExpectedVersion}
 	sourceIDs := make([]string, 0, len(input.Sources))
 	for _, source := range input.Sources {
@@ -222,10 +220,6 @@ func (repository *Repository) MergeAlbums(ctx context.Context, actorID, traceID 
 			return MergeResultDTO{}, apperror.Conflict(apperror.CodeResourceConflict, "Source album could not be deleted after moving its tracks", map[string]any{"albumId": sourceID})
 		}
 	}
-	details := map[string]any{"sourceAlbumIds": sourceIDs, "movedTracks": int(moved.RowsAffected()), "fieldSources": input.FieldSources}
-	if err := writeAudit(ctx, tx, actorID, "admin.album.merge", "album", input.Target.AlbumID, traceID, details); err != nil {
-		return MergeResultDTO{}, err
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return MergeResultDTO{}, fmt.Errorf("commit admin album merge: %w", err)
 	}
@@ -312,7 +306,7 @@ func (repository *Repository) ArchiveTrack(ctx context.Context, id string, expec
 	if err := cancelTrackWritebacksForArchive(ctx, tx, id); err != nil {
 		return err
 	}
-	command, err := tx.Exec(ctx, `UPDATE tracks SET status='ARCHIVED',version=version+1,updated_at=now()
+	command, err := tx.Exec(ctx, `UPDATE tracks SET status='ARCHIVED',archived_manually=true,version=version+1,updated_at=now()
 		WHERE id=$1 AND version=$2`, id, expectedVersion)
 	if err != nil {
 		return fmt.Errorf("archive admin track: %w", err)
@@ -594,24 +588,6 @@ func (repository *Repository) FindUser(ctx context.Context, id string) (UserReco
 		return UserRecord{}, fmt.Errorf("query mutation user: %w", err)
 	}
 	return r, nil
-}
-
-func (repository *Repository) WriteAudit(ctx context.Context, actorID, action, targetType, targetID, traceID string, details map[string]any) error {
-	return writeAudit(ctx, repository.pool, actorID, action, targetType, targetID, traceID, details)
-}
-
-func writeAudit(ctx context.Context, executor interface {
-	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
-}, actorID, action, targetType, targetID, traceID string, details map[string]any) error {
-	encoded, err := json.Marshal(details)
-	if err != nil {
-		return err
-	}
-	_, err = executor.Exec(ctx, `INSERT INTO audit_logs(actor_id,action,target_type,target_id,result,trace_id,details) VALUES($1,$2,$3,$4,'SUCCESS',$5,$6::jsonb)`, actorID, action, targetType, targetID, traceID, encoded)
-	if err != nil {
-		return fmt.Errorf("write admin mutation audit: %w", err)
-	}
-	return nil
 }
 
 func (repository *Repository) versionFailure(ctx context.Context, label, table, id string, expected int) error {

@@ -162,7 +162,7 @@ type mediaAPIStub struct {
 	contentLength int64
 }
 
-func (stub *mediaAPIStub) CreateUpload(context.Context, string, string, CreateUploadInput) (UploadReservationDTO, error) {
+func (stub *mediaAPIStub) CreateUpload(context.Context, string, CreateUploadInput) (UploadReservationDTO, error) {
 	stub.calls["create"]++
 	return UploadReservationDTO{ID: "upload", RequiredHeaders: map[string]string{}}, nil
 }
@@ -173,7 +173,7 @@ func (stub *mediaAPIStub) UploadContent(_ context.Context, _ string, _ string, c
 	stub.content, _ = io.ReadAll(body)
 	return nil
 }
-func (stub *mediaAPIStub) CompleteUpload(context.Context, string, string, string, CompleteUploadInput) (UploadCompletionDTO, error) {
+func (stub *mediaAPIStub) CompleteUpload(context.Context, string, string, CompleteUploadInput) (UploadCompletionDTO, error) {
 	stub.calls["complete"]++
 	return UploadCompletionDTO{UploadID: "upload", AssetID: "asset", Status: UploadStatusCompleted}, nil
 }
@@ -181,7 +181,7 @@ func (stub *mediaAPIStub) GetJob(context.Context, string) (MediaJobDTO, error) {
 	stub.calls["job"]++
 	return MediaJobDTO{ID: "job", Status: JobStatusPending}, nil
 }
-func (stub *mediaAPIStub) RetryJob(context.Context, string, string, string, RetryJobInput) (MediaJobDTO, error) {
+func (stub *mediaAPIStub) RetryJob(context.Context, string, RetryJobInput) (MediaJobDTO, error) {
 	stub.calls["retry"]++
 	return MediaJobDTO{ID: "job", Status: JobStatusPending}, nil
 }

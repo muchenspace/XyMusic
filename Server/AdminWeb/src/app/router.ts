@@ -82,7 +82,6 @@ const routes: RouteRecordRaw[] = [
       { path: "music/artists", name: "artists", component: () => import("@/pages/music/ArtistsPage.vue"), meta: { title: "艺术家", requiresAuth: true } },
       { path: "sources", name: "sources", component: () => import("@/pages/sources/SourcesPage.vue"), meta: { title: "音源与扫描", requiresAuth: true } },
       { path: "jobs", name: "jobs", component: () => import("@/pages/jobs/JobsPage.vue"), meta: { title: "后台任务", requiresAuth: true } },
-      { path: "audit", name: "audit", component: () => import("@/pages/audit/AuditPage.vue"), meta: { title: "审计日志", requiresAuth: true } },
       { path: "settings", name: "settings", component: () => import("@/pages/settings/SettingsPage.vue"), meta: { title: "系统设置", requiresAuth: true } },
     ],
   },

@@ -185,7 +185,7 @@ func (connection *productionInstallationDatabase) Reset(ctx context.Context) err
 		tag_scraping_job_items, tag_scraping_jobs, object_cleanup_jobs,
 		metadata_writeback_jobs, track_metadata,
 		library_scan_runs, local_music_source_tracks, library_roots, local_music_sources,
-		audit_logs, media_jobs, media_uploads, play_history, favorite_tracks,
+		media_jobs, media_uploads, play_history, favorite_tracks,
 		playlist_tracks, playlists, track_variants, lyrics, track_artists, tracks,
 		album_artists, albums, artists, user_profiles, media_assets,
 		idempotency_records, rate_limit_buckets, refresh_tokens, auth_sessions, users
@@ -343,21 +343,12 @@ func (connection *productionInstallationDatabase) Provision(
 func (connection *productionInstallationDatabase) Compensate(
 	ctx context.Context,
 	installation ProvisionedInstallation,
-	traceID string,
 ) error {
 	tx, err := connection.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin installation compensation: %w", err)
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	if _, err := tx.Exec(ctx, `
-		delete from audit_logs
-		where actor_id = $1::uuid and action = 'system.setup.complete' and trace_id = $2`,
-		installation.AdministratorID,
-		traceID,
-	); err != nil {
-		return fmt.Errorf("remove setup audit: %w", err)
-	}
 	if installation.CreatedLibraryRoot {
 		if _, err := tx.Exec(ctx, "delete from library_roots where id = $1::uuid", installation.LibraryRootID); err != nil {
 			return fmt.Errorf("remove setup music source: %w", err)
@@ -372,26 +363,6 @@ func (connection *productionInstallationDatabase) Compensate(
 		return fmt.Errorf("commit installation compensation: %w", err)
 	}
 	return nil
-}
-
-func (connection *productionInstallationDatabase) RecordSetupSuccess(
-	ctx context.Context,
-	administratorID string,
-	traceID string,
-	platform string,
-) error {
-	details, err := json.Marshal(map[string]string{"platform": platform})
-	if err != nil {
-		return err
-	}
-	_, err = connection.Exec(ctx, `
-		insert into audit_logs (actor_id, action, target_type, target_id, result, trace_id, details)
-		values ($1::uuid, 'system.setup.complete', 'system', null, 'SUCCESS', $2, $3::jsonb)`,
-		administratorID,
-		traceID,
-		string(details),
-	)
-	return err
 }
 
 type ProductionObjectStorageFactory struct{}

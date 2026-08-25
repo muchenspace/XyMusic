@@ -103,7 +103,6 @@ func NewService(cfg config.Config, dependencies ServiceDependencies) (*Service, 
 func (service *Service) CreateUpload(
 	ctx context.Context,
 	actorID string,
-	traceID string,
 	input CreateUploadInput,
 ) (UploadReservationDTO, error) {
 	normalized, err := service.validateUpload(input)
@@ -139,21 +138,6 @@ func (service *Service) CreateUpload(
 	if err != nil {
 		_ = service.repository.MarkUploadFailed(ctx, actorID, upload.ID)
 		return UploadReservationDTO{}, apperror.DependencyUnavailable("Object storage upload signing is unavailable")
-	}
-	if err := service.repository.WriteAudit(ctx, AuditWrite{
-		ActorID:    actorID,
-		Action:     "media.upload.create",
-		TargetType: "media_upload",
-		TargetID:   upload.ID,
-		TraceID:    traceID,
-		Details: map[string]any{
-			"purpose":   normalized.Purpose,
-			"targetId":  normalized.TargetID,
-			"sizeBytes": normalized.SizeBytes,
-		},
-	}); err != nil {
-		_ = service.repository.MarkUploadFailed(ctx, actorID, upload.ID)
-		return UploadReservationDTO{}, err
 	}
 	return UploadReservationDTO{
 		ID:        upload.ID,
@@ -265,7 +249,6 @@ func (service *Service) AbandonUpload(ctx context.Context, actorID, uploadID str
 func (service *Service) CompleteUpload(
 	ctx context.Context,
 	actorID string,
-	traceID string,
 	uploadID string,
 	input CompleteUploadInput,
 ) (UploadCompletionDTO, error) {
@@ -331,7 +314,6 @@ func (service *Service) CompleteUpload(
 	}
 	completed, finalizeErr := service.repository.FinalizeCompletion(ctx, FinalizeCompletionParams{
 		ActorID:         actorID,
-		TraceID:         traceID,
 		UploadID:        uploadID,
 		CompletionToken: claim.Token,
 		AssetID:         service.newID(),
@@ -376,27 +358,15 @@ func (service *Service) GetJob(ctx context.Context, jobID string) (MediaJobDTO, 
 
 func (service *Service) RetryJob(
 	ctx context.Context,
-	actorID string,
-	traceID string,
 	jobID string,
 	input RetryJobInput,
 ) (MediaJobDTO, error) {
 	if input.ExpectedVersion < 1 {
 		return MediaJobDTO{}, apperror.Validation("expectedVersion must be a positive integer")
 	}
-	var reason *string
-	if input.Reason.Set {
-		if length := javascriptStringLength(input.Reason.Value); length < 1 || length > 500 {
-			return MediaJobDTO{}, apperror.Validation("reason is invalid")
-		}
-		reason = &input.Reason.Value
-	}
 	job, err := service.repository.RetryJob(ctx, RetryJobParams{
-		ActorID:         actorID,
-		TraceID:         traceID,
 		JobID:           jobID,
 		ExpectedVersion: input.ExpectedVersion,
-		Reason:          reason,
 		Now:             service.clock.Now().UTC(),
 	})
 	if err != nil {

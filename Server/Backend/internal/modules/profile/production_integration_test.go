@@ -161,7 +161,6 @@ func TestProfileProductionAvatarLifecycle(t *testing.T) {
 	_, err = repository.CreateAvatarUpload(ctx, CreateUploadParams{
 		ID:             uploadID,
 		ActorID:        userID,
-		TraceID:        "profile-integration-trace",
 		ObjectKey:      objectKey,
 		FileName:       "avatar.png",
 		ContentType:    "image/png",
@@ -227,7 +226,6 @@ func TestProfileProductionAvatarLifecycle(t *testing.T) {
 	}
 	if err := repository.FinalizeAvatarCompletion(ctx, FinalizeAvatarParams{
 		ActorID:         userID,
-		TraceID:         "profile-integration-complete",
 		UploadID:        uploadID,
 		CompletionToken: claim.Token,
 		AssetID:         assetID,
@@ -318,7 +316,6 @@ func cleanupProfileIntegrationRows(
 			args []any
 		}{
 			{"idempotency records", `delete from idempotency_records where actor_id = $1`, []any{id}},
-			{"audit logs", `delete from audit_logs where actor_id = $1`, []any{id}},
 			{"cleanup jobs", `delete from object_cleanup_jobs where object_key = any($1::varchar[])`, []any{objectKeys}},
 			{"profile", `delete from user_profiles where user_id = $1`, []any{id}},
 			{"uploads", `delete from media_uploads where uploader_id = $1`, []any{id}},

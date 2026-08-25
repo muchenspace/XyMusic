@@ -70,8 +70,6 @@ const (
 
 type PermanentDeleteBatchRecord struct {
 	ID          string
-	RequestedBy *string
-	TraceID     string
 	Status      DeleteBatchStatus
 	Total       int
 	Processed   int

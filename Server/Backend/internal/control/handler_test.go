@@ -290,6 +290,6 @@ func (fakeSetupAPI) TestAdministrator(context.Context, setup.AdministratorInput)
 	return setup.OKResponse{OK: true}, nil
 }
 
-func (fakeSetupAPI) Complete(context.Context, setup.SetupInput, string) (setup.CompletionResponse, error) {
+func (fakeSetupAPI) Complete(context.Context, setup.SetupInput) (setup.CompletionResponse, error) {
 	return setup.CompletionResponse{Configured: true}, nil
 }

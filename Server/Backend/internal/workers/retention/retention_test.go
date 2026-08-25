@@ -17,7 +17,6 @@ func TestRetentionCutoffsMatchLegacyDurations(t *testing.T) {
 	assertTime(t, "revoked sessions", cutoffs.RevokedSessions, now.Add(-90*24*time.Hour))
 	assertTime(t, "uploads", cutoffs.Uploads, now.Add(-30*24*time.Hour))
 	assertTime(t, "operational jobs", cutoffs.OperationalJobs, now.Add(-90*24*time.Hour))
-	assertTime(t, "audit", cutoffs.Audit, now.Add(-365*24*time.Hour))
 }
 
 func TestRunIfDueAppliesEveryPolicyInBatchesAndLogsCounts(t *testing.T) {
@@ -39,7 +38,6 @@ func TestRunIfDueAppliesEveryPolicyInBatchesAndLogsCounts(t *testing.T) {
 	executor.responses[writebacksStatement] = []executeResult{{rows: 11}}
 	executor.responses[objectCleanupJobsStatement] = []executeResult{{rows: 12}}
 	executor.responses[trackDeleteBatchesStatement] = []executeResult{{rows: 13}}
-	executor.responses[auditStatement] = []executeResult{{rows: 14}}
 	database := &fakeDatabase{executor: executor}
 	logger := &recordingLogger{}
 	clock := &mutableClock{now: now}
@@ -57,7 +55,7 @@ func TestRunIfDueAppliesEveryPolicyInBatchesAndLogsCounts(t *testing.T) {
 		RefreshTokens: 4, SessionsRevoked: 5, SessionsDeleted: 6,
 		UploadsExpired: 7, UploadsDeleted: 8, MediaJobs: 9,
 		LibraryScans: 10, Writebacks: 11, ObjectCleanupJobs: 12,
-		TrackDeleteBatches: 13, Audit: 14,
+		TrackDeleteBatches: 13,
 	}
 	if !result.Ran || result.Counts != expected {
 		t.Fatalf("result=%+v", result)
@@ -221,7 +219,6 @@ func assertPolicyArguments(t *testing.T, executor *scriptedExecutor, now time.Ti
 		{writebacksStatement, []any{cutoffs.OperationalJobs}},
 		{objectCleanupJobsStatement, []any{cutoffs.OperationalJobs}},
 		{trackDeleteBatchesStatement, []any{cutoffs.OperationalJobs}},
-		{auditStatement, []any{cutoffs.Audit}},
 	}
 	for _, check := range checks {
 		calls := executor.callsFor(check.statement)

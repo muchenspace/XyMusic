@@ -2,7 +2,6 @@ package adminmanagement
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -78,47 +77,6 @@ func (repository *Repository) Dashboard(ctx context.Context) (DashboardCounts, e
 		if err != nil {
 			return DashboardCounts{}, fmt.Errorf("iterate dashboard %s: %w", grouped.label, err)
 		}
-	}
-	activities, err := repository.queryRecentActivity(ctx)
-	if err != nil {
-		return DashboardCounts{}, err
-	}
-	result.RecentActivity = activities
-	return result, nil
-}
-
-func (repository *Repository) queryRecentActivity(ctx context.Context) ([]AuditRecord, error) {
-	rows, err := repository.pool.Query(ctx, `
-		SELECT a.id, a.actor_id, u.username, p.display_name, a.action, a.target_type,
-		       a.target_id, a.result::text, a.trace_id, a.details, a.created_at
-		FROM audit_logs a
-		LEFT JOIN users u ON u.id = a.actor_id
-		LEFT JOIN user_profiles p ON p.user_id = u.id
-		ORDER BY a.created_at DESC
-		LIMIT 12
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("query dashboard activity: %w", err)
-	}
-	defer rows.Close()
-	result := make([]AuditRecord, 0, 12)
-	for rows.Next() {
-		var record AuditRecord
-		var details []byte
-		if err := rows.Scan(
-			&record.ID, &record.ActorID, &record.ActorUsername, &record.ActorDisplayName,
-			&record.Action, &record.TargetType, &record.TargetID, &record.Result,
-			&record.TraceID, &details, &record.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan dashboard activity: %w", err)
-		}
-		if err := json.Unmarshal(details, &record.Details); err != nil {
-			return nil, fmt.Errorf("decode dashboard activity details: %w", err)
-		}
-		result = append(result, record)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate dashboard activity: %w", err)
 	}
 	return result, nil
 }
@@ -441,21 +399,6 @@ func (repository *Repository) UpdateStatus(
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return fmt.Errorf("commit managed status update: %w", err)
-	}
-	return nil
-}
-
-func (repository *Repository) WriteAudit(ctx context.Context, input AuditWrite) error {
-	details, err := input.JSONDetails()
-	if err != nil {
-		return fmt.Errorf("encode managed user audit details: %w", err)
-	}
-	_, err = repository.pool.Exec(ctx, `
-		INSERT INTO audit_logs (actor_id, action, target_type, target_id, result, trace_id, details)
-		VALUES ($1, $2, 'user', $3, 'SUCCESS', $4, $5::jsonb)
-	`, input.ActorID, input.Action, input.TargetID, input.TraceID, details)
-	if err != nil {
-		return fmt.Errorf("write managed user audit: %w", err)
 	}
 	return nil
 }

@@ -101,3 +101,7 @@ type MetadataMutationInput struct {
 	ExpectedVersion int
 	Reason          string
 }
+
+type MetadataCancelInput struct {
+	ExpectedVersion int
+}

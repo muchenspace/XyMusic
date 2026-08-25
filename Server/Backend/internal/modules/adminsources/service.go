@@ -80,7 +80,6 @@ func (service *Service) Root(ctx context.Context, rootID string) (RootDTO, error
 
 func (service *Service) CreateRoot(
 	ctx context.Context,
-	actorID, traceID string,
 	input CreateRootInput,
 ) (RootDTO, error) {
 	if input.Enabled == nil || input.ScanOnStartup == nil || input.IncludePatterns == nil || input.ExcludePatterns == nil {
@@ -96,7 +95,7 @@ func (service *Service) CreateRoot(
 	if err != nil {
 		return RootDTO{}, err
 	}
-	view, err := service.store.CreateRoot(ctx, actorID, traceID, mutation)
+	view, err := service.store.CreateRoot(ctx, mutation)
 	if err != nil {
 		return RootDTO{}, err
 	}
@@ -105,7 +104,7 @@ func (service *Service) CreateRoot(
 
 func (service *Service) UpdateRoot(
 	ctx context.Context,
-	actorID, traceID, rootID string,
+	rootID string,
 	input UpdateRootInput,
 ) (RootDTO, error) {
 	expectedVersion := int(input.ExpectedVersion)
@@ -126,46 +125,36 @@ func (service *Service) UpdateRoot(
 		IncludePatterns:     cloneStrings(current.IncludePatterns),
 		ExcludePatterns:     cloneStrings(current.ExcludePatterns),
 	}
-	changed := make([]string, 0, 8)
 	if input.Name.Set {
 		mutation.Name = input.Name.Value
-		changed = append(changed, "name")
 	}
 	if input.Path.Set {
 		mutation.Path = input.Path.Value
-		changed = append(changed, "path")
 	}
 	if input.Mode.Set {
 		mutation.Mode = input.Mode.Value
-		changed = append(changed, "mode")
 	}
 	if input.Enabled.Set {
 		mutation.Enabled = input.Enabled.Value
-		changed = append(changed, "enabled")
 	}
 	if input.ScanOnStartup.Set {
 		mutation.ScanOnStartup = input.ScanOnStartup.Value
-		changed = append(changed, "scanOnStartup")
 	}
 	if input.ScanIntervalMinutes.Set {
 		mutation.ScanIntervalMinutes = cloneInt(input.ScanIntervalMinutes.Value)
-		changed = append(changed, "scanIntervalMinutes")
 	}
 	if input.IncludePatterns.Set {
 		mutation.IncludePatterns = cloneStrings(input.IncludePatterns.Value)
-		changed = append(changed, "includePatterns")
 	}
 	if input.ExcludePatterns.Set {
 		mutation.ExcludePatterns = cloneStrings(input.ExcludePatterns.Value)
-		changed = append(changed, "excludePatterns")
 	}
 	mutation, err = validateRootInput(service.rootDirectory, mutation)
 	if err != nil {
 		return RootDTO{}, err
 	}
 	view, err := service.store.UpdateRoot(ctx, UpdateRootCommand{
-		ActorID: actorID, TraceID: traceID, RootID: rootID,
-		ExpectedVersion: expectedVersion, Mutation: mutation, ChangedFields: changed,
+		RootID: rootID, ExpectedVersion: expectedVersion, Mutation: mutation,
 	})
 	if err != nil {
 		return RootDTO{}, err
@@ -175,7 +164,7 @@ func (service *Service) UpdateRoot(
 
 func (service *Service) DeleteRoot(
 	ctx context.Context,
-	actorID, traceID, rootID string,
+	rootID string,
 	input DeleteRootInput,
 ) (DeletedDTO, error) {
 	expectedVersion := int(input.ExpectedVersion)
@@ -183,8 +172,7 @@ func (service *Service) DeleteRoot(
 		return DeletedDTO{}, contractValidationError()
 	}
 	err := service.store.DeleteRoot(ctx, DeleteRootCommand{
-		ActorID: actorID, TraceID: traceID, RootID: rootID,
-		ExpectedVersion: expectedVersion, ArchiveCatalog: *input.ArchiveCatalog,
+		RootID: rootID, ExpectedVersion: expectedVersion, ArchiveCatalog: *input.ArchiveCatalog,
 	})
 	if err != nil {
 		return DeletedDTO{}, err
@@ -263,7 +251,7 @@ func (service *Service) ListRuns(ctx context.Context, rootID string, query PageQ
 
 func (service *Service) EnqueueScan(
 	ctx context.Context,
-	rootID, actorID, traceID string,
+	rootID, actorID string,
 ) (ScanRunDTO, error) {
 	if service.workerAvailability != nil {
 		available, err := service.workerAvailability(ctx)
@@ -274,9 +262,7 @@ func (service *Service) EnqueueScan(
 			return ScanRunDTO{}, apperror.DependencyUnavailable("The background worker is unavailable or has not synchronized the active configuration")
 		}
 	}
-	run, err := service.store.EnqueueScan(ctx, EnqueueScanCommand{
-		RootID: rootID, ActorID: &actorID, TraceID: traceID,
-	})
+	run, err := service.store.EnqueueScan(ctx, EnqueueScanCommand{RootID: rootID, ActorID: &actorID})
 	if err != nil {
 		return ScanRunDTO{}, err
 	}
@@ -293,11 +279,9 @@ func (service *Service) ScanRun(ctx context.Context, rootID, runID string) (Scan
 
 func (service *Service) CancelScan(
 	ctx context.Context,
-	rootID, runID, actorID, traceID string,
+	rootID, runID string,
 ) (CancelledDTO, error) {
-	err := service.store.CancelScan(ctx, CancelScanCommand{
-		RootID: rootID, RunID: runID, ActorID: &actorID, TraceID: traceID,
-	})
+	err := service.store.CancelScan(ctx, CancelScanCommand{RootID: rootID, RunID: runID})
 	if err != nil {
 		return CancelledDTO{}, err
 	}

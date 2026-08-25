@@ -27,7 +27,6 @@ type Store interface {
 	FailCompletion(context.Context, string, string, bool, []string, string, time.Time) error
 	FindJob(context.Context, string) (MediaJob, error)
 	RetryJob(context.Context, RetryJobParams) (MediaJob, error)
-	WriteAudit(context.Context, AuditWrite) error
 }
 
 type ObjectStorage interface {

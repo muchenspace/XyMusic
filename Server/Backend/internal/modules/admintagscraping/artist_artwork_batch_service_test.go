@@ -55,9 +55,9 @@ func TestArtistArtworkBatchExecuteAppliesTrustedAliasMatch(t *testing.T) {
 				Aliases: []string{"周杰伦"}, ImageURL: "https://y.qq.com/avatar.jpg", Score: 2,
 			}}, nil
 		},
-		apply: func(ctx context.Context, actorID, traceID, artistID string, input ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error) {
-			if actorID != "admin-1" || traceID == "" || artistID != "artist-1" {
-				t.Fatalf("apply identity = %q %q %q", actorID, traceID, artistID)
+		apply: func(ctx context.Context, actorID, artistID string, input ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error) {
+			if actorID != "admin-1" || artistID != "artist-1" {
+				t.Fatalf("apply identity = %q %q", actorID, artistID)
 			}
 			if input.ExpectedVersion != 7 || input.Overwrite || input.Reason != "batch reason" || input.Candidate.ID != "artist-1" {
 				t.Fatalf("apply input = %#v", input)
@@ -91,7 +91,7 @@ func TestArtistArtworkBatchExecuteSkipsUntrustedMatch(t *testing.T) {
 				ImageURL: "https://y.qq.com/avatar.jpg", Score: 1,
 			}}, nil
 		},
-		apply: func(context.Context, string, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error) {
+		apply: func(context.Context, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error) {
 			applyCalls++
 			return ArtistArtworkApplyResult{}, nil
 		},
@@ -240,7 +240,7 @@ func TestArtistArtworkBatchUsesClaimWindow(t *testing.T) {
 				ImageURL: "https://y.qq.com/avatar.jpg", Score: 2,
 			}}, nil
 		},
-		apply: func(context.Context, string, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error) {
+		apply: func(context.Context, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error) {
 			return ArtistArtworkApplyResult{Applied: true}, nil
 		},
 	}
@@ -315,7 +315,7 @@ func TestArtistArtworkBatchGroupsCompletionByJob(t *testing.T) {
 				ImageURL: "https://y.qq.com/avatar.jpg", Score: 2,
 			}}, nil
 		},
-		apply: func(context.Context, string, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error) {
+		apply: func(context.Context, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error) {
 			return ArtistArtworkApplyResult{Applied: true}, nil
 		},
 	}
@@ -359,7 +359,7 @@ func TestArtistArtworkBatchFallsBackWhenBatchCompletionIsIncomplete(t *testing.T
 				ImageURL: "https://y.qq.com/avatar.jpg", Score: 2,
 			}}, nil
 		},
-		apply: func(context.Context, string, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error) {
+		apply: func(context.Context, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error) {
 			return ArtistArtworkApplyResult{Applied: true}, nil
 		},
 	}
@@ -384,7 +384,7 @@ func TestArtistArtworkBatchApplyConflictIsSkipped(t *testing.T) {
 				ImageURL: "https://y.qq.com/avatar.jpg", Score: 2,
 			}}, nil
 		},
-		apply: func(context.Context, string, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error) {
+		apply: func(context.Context, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error) {
 			return ArtistArtworkApplyResult{}, apperror.Conflict(
 				apperror.CodeVersionConflict, "Artist version changed", nil,
 			)
@@ -483,7 +483,7 @@ func artistArtworkBatchClaim(
 
 type artistArtworkBatchProcessorStub struct {
 	search func(context.Context, ArtistSearchInput) ([]ArtistCandidate, error)
-	apply  func(context.Context, string, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error)
+	apply  func(context.Context, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error)
 }
 
 type parallelArtistArtworkProcessor struct {
@@ -517,7 +517,7 @@ func (processor *parallelArtistArtworkProcessor) SearchArtists(
 }
 
 func (*parallelArtistArtworkProcessor) ApplyArtistArtwork(
-	context.Context, string, string, string, ArtistArtworkApplyInput,
+	context.Context, string, string, ArtistArtworkApplyInput,
 ) (ArtistArtworkApplyResult, error) {
 	return ArtistArtworkApplyResult{Applied: true}, nil
 }
@@ -535,14 +535,13 @@ func (stub artistArtworkBatchProcessorStub) SearchArtists(
 func (stub artistArtworkBatchProcessorStub) ApplyArtistArtwork(
 	ctx context.Context,
 	actorID string,
-	traceID string,
 	artistID string,
 	input ArtistArtworkApplyInput,
 ) (ArtistArtworkApplyResult, error) {
 	if stub.apply == nil {
 		return ArtistArtworkApplyResult{}, errors.New("unexpected artist artwork apply")
 	}
-	return stub.apply(ctx, actorID, traceID, artistID, input)
+	return stub.apply(ctx, actorID, artistID, input)
 }
 
 type artistArtworkBatchStoreStub struct {

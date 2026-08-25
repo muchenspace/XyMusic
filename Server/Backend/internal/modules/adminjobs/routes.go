@@ -25,8 +25,8 @@ import (
 type API interface {
 	List(context.Context, ListInput) (JobPageDTO, error)
 	Job(context.Context, string) (JobDetailDTO, error)
-	Retry(context.Context, string, string, string, *string) (JobDetailDTO, error)
-	Cancel(context.Context, string, string, string, *string) (JobDetailDTO, error)
+	Retry(context.Context, string, string, *string) (JobDetailDTO, error)
+	Cancel(context.Context, string) (JobDetailDTO, error)
 	EventState(context.Context) (EventStateDTO, error)
 }
 
@@ -157,8 +157,8 @@ func (routes *Routes) retry(c *gin.Context) error {
 	if err != nil {
 		return err
 	}
-	return routes.mutate(c, "admin.job.retry:"+jobID, input, func(actorID, traceID string) (JobDetailDTO, error) {
-		return routes.service.Retry(c.Request.Context(), actorID, traceID, jobID, input.Reason)
+	return routes.mutate(c, "admin.job.retry:"+jobID, input, func(actorID string) (JobDetailDTO, error) {
+		return routes.service.Retry(c.Request.Context(), actorID, jobID, input.Reason)
 	})
 }
 
@@ -167,20 +167,16 @@ func (routes *Routes) cancel(c *gin.Context) error {
 	if err != nil {
 		return err
 	}
-	input, err := decodeOptionalReason(c)
-	if err != nil {
-		return err
-	}
-	return routes.mutate(c, "admin.job.cancel:"+jobID, input, func(actorID, traceID string) (JobDetailDTO, error) {
-		return routes.service.Cancel(c.Request.Context(), actorID, traceID, jobID, input.Reason)
+	return routes.mutate(c, "admin.job.cancel:"+jobID, struct{}{}, func(string) (JobDetailDTO, error) {
+		return routes.service.Cancel(c.Request.Context(), jobID)
 	})
 }
 
 func (routes *Routes) mutate(
 	c *gin.Context,
 	scope string,
-	payload ReasonInput,
-	operation func(actorID, traceID string) (JobDetailDTO, error),
+	payload any,
+	operation func(actorID string) (JobDetailDTO, error),
 ) error {
 	actor, err := adminauth.RequireAdmin(c, routes.identity, true)
 	if err != nil {
@@ -190,11 +186,10 @@ func (routes *Routes) mutate(
 	if !idempotencyKeyPattern.MatchString(key) {
 		return apperror.Validation("Idempotency-Key is invalid")
 	}
-	traceID := httpserver.TraceID(c)
 	result, err := routes.idempotency.Execute(c.Request.Context(), IdempotencyInput{
 		ActorID: actor.UserID, Scope: scope, Key: key, Payload: payload,
 	}, func() (IdempotencyResponse, error) {
-		body, err := operation(actor.UserID, traceID)
+		body, err := operation(actor.UserID)
 		if err != nil {
 			return IdempotencyResponse{}, err
 		}

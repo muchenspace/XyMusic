@@ -67,10 +67,6 @@ func apply(ctx context.Context, executor Executor, now time.Time) (Counts, error
 	if err != nil {
 		return counts, policyError("permanent track deletion batches", err)
 	}
-	counts.Audit, err = drain(ctx, executor, auditStatement, cutoffs.Audit)
-	if err != nil {
-		return counts, policyError("audit logs", err)
-	}
 	return counts, nil
 }
 
@@ -289,18 +285,6 @@ WITH candidates AS (
   LIMIT 500
 )
 DELETE FROM track_delete_batches target
-USING candidates
-WHERE target.id = candidates.id
-RETURNING target.id`
-
-const auditStatement = `
-WITH candidates AS (
-  SELECT id FROM audit_logs
-  WHERE created_at <= $1::timestamptz
-  ORDER BY created_at, id
-  LIMIT 500
-)
-DELETE FROM audit_logs target
 USING candidates
 WHERE target.id = candidates.id
 RETURNING target.id`

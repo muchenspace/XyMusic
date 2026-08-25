@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"testing"
 	"time"
 
@@ -14,52 +13,14 @@ import (
 	"xymusic/server/internal/shared/apperror"
 )
 
-func TestDashboardPresentsCountsActorsAndRedactsSensitiveDetails(t *testing.T) {
-	actorID := "actor-1"
-	username := "admin"
-	store := &managementStoreStub{dashboard: func(context.Context) (DashboardCounts, error) {
-		return DashboardCounts{
-			UsersTotal: 3, UsersActive: 2, UsersAdministrators: 1, Artists: 4, Albums: 5,
-			Tracks: map[string]int{"PROCESSING": 2, "READY": 6},
-			RecentActivity: []AuditRecord{{
-				ID: "audit-1", ActorID: &actorID, ActorUsername: &username,
-				Action: "admin.user.update", TargetType: "user", Result: "SUCCESS", TraceID: "trace-12345678",
-				Details: map[string]any{
-					"password": "visible", "note": "Bearer secret-token",
-					"database": "postgresql://user:password@example.test/db",
-				},
-				CreatedAt: time.Date(2026, 7, 16, 1, 2, 3, 456789000, time.UTC),
-			}},
-		}, nil
-	}}
-	service := newManagementService(t, store)
-	result, err := service.Dashboard(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Users.Total != 3 || result.Catalog.Tracks["PROCESSING"] != 2 || result.Catalog.Tracks["READY"] != 6 || len(result.Sources) != 0 {
-		t.Fatalf("dashboard = %#v", result)
-	}
-	activity := result.RecentActivity[0]
-	if activity.Actor == nil || activity.Actor.DisplayName != username || activity.CreatedAt != "2026-07-16T01:02:03.456Z" {
-		t.Fatalf("activity = %#v", activity)
-	}
-	if activity.Details["password"] != "[REDACTED]" || activity.Details["note"] != "Bearer [REDACTED]" ||
-		activity.Details["database"] != "postgresql://user:[REDACTED]@example.test/db" {
-		t.Fatalf("redacted details = %#v", activity.Details)
-	}
-}
-
-func TestCreateUserNormalizesHashesAuditsAndPresents(t *testing.T) {
+func TestCreateUserNormalizesHashesAndPresents(t *testing.T) {
 	createdAt := time.Date(2026, 7, 16, 2, 0, 0, 0, time.UTC)
 	var created CreateUserParams
-	var audit AuditWrite
 	store := &managementStoreStub{}
 	store.createUser = func(_ context.Context, input CreateUserParams) (string, error) {
 		created = input
 		return "user-1", nil
 	}
-	store.writeAudit = func(_ context.Context, input AuditWrite) error { audit = input; return nil }
 	store.findUser = func(context.Context, string, SessionQuery) (UserRecord, []SessionRecord, int, error) {
 		return UserRecord{
 			ID: "user-1", Username: created.Username, DisplayName: created.DisplayName,
@@ -68,7 +29,7 @@ func TestCreateUserNormalizesHashesAuditsAndPresents(t *testing.T) {
 		}, []SessionRecord{}, 0, nil
 	}
 	service := newManagementServiceWithHasher(t, store, managementHasher{hash: "argon-hash"})
-	result, err := service.CreateUser(context.Background(), "admin-1", "trace-12345678", CreateUserInput{
+	result, err := service.CreateUser(context.Background(), CreateUserInput{
 		Username: "Alice_1", Password: "secret1", DisplayName: " Alice ", Role: RoleUser,
 	})
 	if err != nil {
@@ -77,8 +38,8 @@ func TestCreateUserNormalizesHashesAuditsAndPresents(t *testing.T) {
 	if created.NormalizedUsername != "alice_1" || created.PasswordHash != "argon-hash" || created.DisplayName != "Alice" {
 		t.Fatalf("created = %#v", created)
 	}
-	if result.ID != "user-1" || result.Sessions == nil || audit.Action != "admin.user.create" || audit.ActorID != "admin-1" {
-		t.Fatalf("result/audit = %#v / %#v", result, audit)
+	if result.ID != "user-1" || result.Sessions == nil {
+		t.Fatalf("result = %#v", result)
 	}
 }
 
@@ -89,41 +50,36 @@ func TestUpdateUserRejectsSelfDemotionBeforePersistence(t *testing.T) {
 		return nil
 	}}
 	service := newManagementService(t, store)
-	_, err := service.UpdateUser(context.Background(), "admin-1", "trace-12345678", "admin-1", UpdateUserInput{
-		ExpectedVersion: 1, Role: OptionalRole{Set: true, Value: RoleUser}, Reason: "test",
+	_, err := service.UpdateUser(context.Background(), "admin-1", "admin-1", UpdateUserInput{
+		ExpectedVersion: 1, Role: OptionalRole{Set: true, Value: RoleUser},
 	})
 	if !apperror.IsCode(err, apperror.CodeValidationError) || called {
 		t.Fatalf("error/called = %v / %v", err, called)
 	}
 }
 
-func TestUpdateUserNormalizesOptionalFieldsAndAudits(t *testing.T) {
+func TestUpdateUserNormalizesOptionalFields(t *testing.T) {
 	now := time.Now().UTC()
 	var updated UpdateUserParams
-	var audit AuditWrite
 	store := &managementStoreStub{}
 	store.updateUser = func(_ context.Context, input UpdateUserParams) error { updated = input; return nil }
-	store.writeAudit = func(_ context.Context, input AuditWrite) error { audit = input; return nil }
 	store.findUser = func(context.Context, string, SessionQuery) (UserRecord, []SessionRecord, int, error) {
 		return UserRecord{ID: "user-1", Username: "Alice_2", DisplayName: "Alice", Role: RoleAdmin,
 			Status: StatusActive, Version: 2, CreatedAt: now, UserUpdatedAt: now, ProfileUpdatedAt: now}, nil, 0, nil
 	}
 	service := newManagementService(t, store)
 	emptyBio := "  "
-	_, err := service.UpdateUser(context.Background(), "admin-1", "trace-12345678", "user-1", UpdateUserInput{
+	_, err := service.UpdateUser(context.Background(), "admin-1", "user-1", UpdateUserInput{
 		ExpectedVersion: 1,
 		Username:        OptionalString{Set: true, Value: "Alice_2"},
 		Bio:             OptionalNullableString{Set: true, Value: &emptyBio},
-		Role:            OptionalRole{Set: true, Value: RoleAdmin}, Reason: " maintenance ",
+		Role:            OptionalRole{Set: true, Value: RoleAdmin},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if updated.NormalizedUsername == nil || *updated.NormalizedUsername != "alice_2" || !updated.SetBio || updated.Bio != nil {
 		t.Fatalf("updated = %#v", updated)
-	}
-	if !reflect.DeepEqual(audit.Details["fields"], []string{"username", "bio", "role"}) || audit.Details["reason"] != "maintenance" {
-		t.Fatalf("audit = %#v", audit)
 	}
 }
 
@@ -152,7 +108,7 @@ func TestCreateUserMapsWrappedUniqueViolation(t *testing.T) {
 		return "", fmt.Errorf("insert: %w", &pgconn.PgError{Code: "23505"})
 	}}
 	service := newManagementService(t, store)
-	_, err := service.CreateUser(context.Background(), "admin", "trace-12345678", CreateUserInput{
+	_, err := service.CreateUser(context.Background(), CreateUserInput{
 		Username: "Alice_1", Password: "secret1", DisplayName: "Alice", Role: RoleUser,
 	})
 	if !apperror.IsCode(err, apperror.CodeDuplicateUsername) {
@@ -198,7 +154,6 @@ type managementStoreStub struct {
 	resetPassword func(context.Context, string, int, string) error
 	revokeSession func(context.Context, string, string) error
 	updateStatus  func(context.Context, string, string, int, UserStatus) error
-	writeAudit    func(context.Context, AuditWrite) error
 }
 
 func (stub *managementStoreStub) Dashboard(ctx context.Context) (DashboardCounts, error) {
@@ -248,10 +203,4 @@ func (stub *managementStoreStub) UpdateStatus(ctx context.Context, actorID, user
 		return errors.New("unexpected UpdateStatus call")
 	}
 	return stub.updateStatus(ctx, actorID, userID, version, status)
-}
-func (stub *managementStoreStub) WriteAudit(ctx context.Context, input AuditWrite) error {
-	if stub.writeAudit == nil {
-		return errors.New("unexpected WriteAudit call")
-	}
-	return stub.writeAudit(ctx, input)
 }

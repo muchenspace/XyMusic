@@ -118,7 +118,6 @@ func TestProductionWritebackWorker(t *testing.T) {
 	cleanup := func() {
 		cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cleanupCancel()
-		_, _ = pool.Exec(cleanupContext, `delete from audit_logs where actor_id = $1`, actorID)
 		if trackID != "" {
 			_, _ = pool.Exec(cleanupContext, `delete from tracks where id = $1`, trackID)
 		}
@@ -209,15 +208,14 @@ func TestProductionWritebackWorker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated, err := service.Update(ctx, actorID, "integration:worker-update", trackID, MetadataMutationInput{
+	updated, err := service.Update(ctx, actorID, trackID, MetadataMutationInput{
 		ExpectedVersion: baseline.Version,
 		Patch:           map[string]any{"title": updatedTitle, "genres": []any{"Rock", "Test"}},
-		Reason:          "production writeback worker integration",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	queued, err := service.EnqueueWriteback(ctx, actorID, "integration:worker-enqueue", trackID, VersionReasonInput{
+	queued, err := service.EnqueueWriteback(ctx, actorID, trackID, VersionReasonInput{
 		ExpectedVersion: updated.Version, Reason: "production writeback worker integration",
 	})
 	if err != nil {

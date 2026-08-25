@@ -23,7 +23,6 @@ test.describe("administrator browser contract", () => {
       ["music/artists", "艺术家"],
       ["sources", "音源与扫描"],
       ["jobs", "后台任务"],
-      ["audit", "审计日志"],
       ["settings", "系统设置"],
     ] as const) {
       await page.goto(`./${path}`);
@@ -785,7 +784,6 @@ async function installMockApi(page: Page, initiallyAuthenticated: boolean, setup
     if (path === "/api/v1/admin/jobs") return json(route, pageResult([]));
     if (path === "/api/v1/admin/jobs/events") return route.fulfill({ status: 200, headers: { "Content-Type": "text/event-stream" }, body: "" });
     if (path === "/api/v1/admin/metadata/writeback-jobs") return json(route, pageResult([]));
-    if (path === "/api/v1/admin/audit") return json(route, pageResult([]));
     if (path === "/api/v1/admin/settings") return json(route, settings());
     if (path === "/api/v1/admin/system") return json(route, systemInformation());
     return problem(route, 404, `Unmocked ${method} ${path}`);
@@ -831,7 +829,7 @@ function pagedResult<T>(items: T[], page: number, pageSize: number) {
 }
 
 function dashboard() {
-  return { users: { total: 1, active: 1, administrators: 1 }, catalog: { artists: 0, albums: 0, tracks: { PROCESSING: 0, READY: 1, ERROR: 0, ARCHIVED: 0 } }, sources: {}, jobs: {}, recentActivity: [] };
+  return { users: { total: 1, active: 1, administrators: 1 }, catalog: { artists: 0, albums: 0, tracks: { PROCESSING: 0, READY: 1, ERROR: 0, ARCHIVED: 0 } }, sources: {}, jobs: {} };
 }
 
 function track(

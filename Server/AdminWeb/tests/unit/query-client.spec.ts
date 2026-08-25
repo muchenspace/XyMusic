@@ -33,8 +33,7 @@ describe("query error notifications", () => {
       [["admin", "track"], "active"],
       [["admin", "album"], "active"],
       [["admin", "dashboard"], "active"],
-      [["admin", "audit"], "active"],
     ]));
-    expect(calls).toHaveLength(7);
+    expect(calls).toHaveLength(6);
   });
 });

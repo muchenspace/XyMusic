@@ -422,17 +422,17 @@ func (s *Service) TestAdministrator(_ context.Context, input AdministratorInput)
 	return OKResponse{OK: true}, nil
 }
 
-func (s *Service) Complete(ctx context.Context, input SetupInput, traceID string) (CompletionResponse, error) {
+func (s *Service) Complete(ctx context.Context, input SetupInput) (CompletionResponse, error) {
 	s.transition.Lock()
 	defer s.transition.Unlock()
-	result, err := s.complete(ctx, input, traceID)
+	result, err := s.complete(ctx, input)
 	if err != nil {
 		return CompletionResponse{}, normalizeCompletionError(err)
 	}
 	return result, nil
 }
 
-func (s *Service) complete(ctx context.Context, input SetupInput, traceID string) (CompletionResponse, error) {
+func (s *Service) complete(ctx context.Context, input SetupInput) (CompletionResponse, error) {
 	if err := s.RequireSetup(); err != nil {
 		return CompletionResponse{}, err
 	}
@@ -656,11 +656,6 @@ func (s *Service) complete(ctx context.Context, input SetupInput, traceID string
 			return err
 		}
 		configurationSaved = true
-		if err := runSetupStage("completion_audit", func() error {
-			return connection.RecordSetupSuccess(ctx, provisioned.AdministratorID, traceID, legacyPlatformName())
-		}); err != nil {
-			return err
-		}
 		return nil
 	}()
 	if objects != nil {
@@ -681,7 +676,7 @@ func (s *Service) complete(ctx context.Context, input SetupInput, traceID string
 			}
 		}
 		if provisioned != nil {
-			if err := connection.Compensate(rollbackContext, *provisioned, traceID); err != nil {
+			if err := connection.Compensate(rollbackContext, *provisioned); err != nil {
 				rollbackErrors = append(rollbackErrors, fmt.Errorf("compensate installation data: %w", err))
 			}
 		}
@@ -1322,7 +1317,6 @@ func setupStageDetail(stage string, rollbackIncomplete bool) string {
 		"installation_provision":   "管理员和音源配置",
 		"runtime_initialize":       "服务运行时启动",
 		"configuration_save":       "配置文件保存",
-		"completion_audit":         "初始化审计记录写入",
 	}
 	label := labels[stage]
 	if label == "" {

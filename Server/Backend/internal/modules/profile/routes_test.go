@@ -40,7 +40,6 @@ type routeApplicationStub struct {
 	completed      CompleteAvatarUploadInput
 	uploadID       string
 	idempotencyKey string
-	traceID        string
 }
 
 func (stub *routeApplicationStub) GetCurrentUser(
@@ -64,13 +63,11 @@ func (stub *routeApplicationStub) UpdateCurrentUser(
 func (stub *routeApplicationStub) CreateAvatarUpload(
 	_ context.Context,
 	_ string,
-	traceID string,
 	key string,
 	input CreateAvatarUploadInput,
 ) (MutationResult[AvatarUploadDTO], error) {
 	stub.created = input
 	stub.idempotencyKey = key
-	stub.traceID = traceID
 	return MutationResult[AvatarUploadDTO]{Body: AvatarUploadDTO{
 		ID:       "upload-1",
 		Purpose:  AvatarUploadPurpose,
@@ -83,7 +80,6 @@ func (stub *routeApplicationStub) CreateAvatarUpload(
 func (stub *routeApplicationStub) CompleteAvatarUpload(
 	_ context.Context,
 	_ string,
-	traceID string,
 	uploadID string,
 	key string,
 	input CompleteAvatarUploadInput,
@@ -91,7 +87,6 @@ func (stub *routeApplicationStub) CompleteAvatarUpload(
 	stub.completed = input
 	stub.uploadID = uploadID
 	stub.idempotencyKey = key
-	stub.traceID = traceID
 	return MutationResult[identity.CurrentUserDTO]{Body: compatibleCurrentUser()}, nil
 }
 
@@ -141,8 +136,8 @@ func TestProfileRoutesPreserveFourEndpointContract(t *testing.T) {
 	if response.Code != http.StatusCreated || response.Header().Get("X-Idempotent-Replay") != "false" {
 		t.Fatalf("POST avatar upload = %d %s", response.Code, response.Body.String())
 	}
-	if application.created.ContentType != "image/png" || application.traceID != "profile-trace-1" {
-		t.Fatalf("unexpected avatar create input: %#v trace=%q", application.created, application.traceID)
+	if application.created.ContentType != "image/png" {
+		t.Fatalf("unexpected avatar create input: %#v", application.created)
 	}
 
 	uploadID := "550e8400-e29b-41d4-a716-446655440000"
@@ -157,7 +152,7 @@ func TestProfileRoutesPreserveFourEndpointContract(t *testing.T) {
 		t.Fatalf("POST avatar complete = %d %s", response.Code, response.Body.String())
 	}
 	if application.uploadID != uploadID || !application.completed.ObservedETag.Set ||
-		application.completed.ObservedETag.Value != `"etag-1"` || application.traceID != "profile-trace-2" {
+		application.completed.ObservedETag.Value != `"etag-1"` {
 		t.Fatalf("unexpected completion input: %#v upload=%q", application.completed, application.uploadID)
 	}
 }

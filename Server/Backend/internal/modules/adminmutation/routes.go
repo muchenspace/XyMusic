@@ -19,23 +19,23 @@ import (
 )
 
 type API interface {
-	CreateArtist(context.Context, string, string, CreateArtistInput) (ArtistDTO, error)
-	UpdateArtist(context.Context, string, string, string, UpdateArtistInput) (ArtistDTO, error)
-	CreateAlbum(context.Context, string, string, CreateAlbumInput) (AlbumDTO, error)
-	UpdateAlbum(context.Context, string, string, string, UpdateAlbumInput) (AlbumDTO, error)
-	MergeAlbums(context.Context, string, string, MergeAlbumsInput) (MergeResultDTO, error)
-	CreateTrack(context.Context, string, string, CreateTrackInput) (TrackDTO, error)
-	UpdateTrack(context.Context, string, string, string, UpdateTrackInput) (TrackDTO, error)
-	PublishTrack(context.Context, string, string, string, int) (TrackDTO, error)
-	ArchiveTrack(context.Context, string, string, string, int) (TrackDTO, error)
-	ArchiveTracksBatch(context.Context, string, string, BatchTrackMutationInput) (BatchArchiveDTO, error)
-	RestoreTrack(context.Context, string, string, string, int) (TrackDTO, error)
-	RestoreTracksBatch(context.Context, string, string, BatchTrackMutationInput) (BatchRestoreDTO, error)
-	DeleteTrackPermanently(context.Context, string, string, string, int) (DeleteTrackDTO, error)
-	CreatePermanentDeleteBatch(context.Context, string, string, BatchTrackMutationInput) (PermanentDeleteBatchDTO, error)
+	CreateArtist(context.Context, CreateArtistInput) (ArtistDTO, error)
+	UpdateArtist(context.Context, string, UpdateArtistInput) (ArtistDTO, error)
+	CreateAlbum(context.Context, CreateAlbumInput) (AlbumDTO, error)
+	UpdateAlbum(context.Context, string, UpdateAlbumInput) (AlbumDTO, error)
+	MergeAlbums(context.Context, MergeAlbumsInput) (MergeResultDTO, error)
+	CreateTrack(context.Context, CreateTrackInput) (TrackDTO, error)
+	UpdateTrack(context.Context, string, UpdateTrackInput) (TrackDTO, error)
+	PublishTrack(context.Context, string, int) (TrackDTO, error)
+	ArchiveTrack(context.Context, string, int) (TrackDTO, error)
+	ArchiveTracksBatch(context.Context, BatchTrackMutationInput) (BatchArchiveDTO, error)
+	RestoreTrack(context.Context, string, int) (TrackDTO, error)
+	RestoreTracksBatch(context.Context, BatchTrackMutationInput) (BatchRestoreDTO, error)
+	DeleteTrackPermanently(context.Context, string, int) (DeleteTrackDTO, error)
+	CreatePermanentDeleteBatch(context.Context, BatchTrackMutationInput) (PermanentDeleteBatchDTO, error)
 	PermanentDeleteBatch(context.Context, string) (PermanentDeleteBatchDTO, error)
-	UpsertLyrics(context.Context, string, string, string, LyricsInput) (LyricDTO, error)
-	UpdateUserStatus(context.Context, string, string, string, UserStatusInput) (UserStatusDTO, error)
+	UpsertLyrics(context.Context, string, LyricsInput) (LyricDTO, error)
+	UpdateUserStatus(context.Context, string, string, UserStatusInput) (UserStatusDTO, error)
 }
 
 type Routes struct {
@@ -85,8 +85,8 @@ func (routes *Routes) createArtist(c *gin.Context) error {
 	if !routeText(input.Name, 1, 200) || (input.Description.Set && input.Description.Value != nil && routeLength(*input.Description.Value) > 5000) {
 		return mutationContractError()
 	}
-	return routes.execute(c, "admin.artist.create", artistCreatePayload(input), http.StatusCreated, func(actor, trace string) (any, error) {
-		return routes.service.CreateArtist(c.Request.Context(), actor, trace, input)
+	return routes.execute(c, "admin.artist.create", artistCreatePayload(input), http.StatusCreated, func(string) (any, error) {
+		return routes.service.CreateArtist(c.Request.Context(), input)
 	})
 }
 func (routes *Routes) updateArtist(c *gin.Context) error {
@@ -101,8 +101,8 @@ func (routes *Routes) updateArtist(c *gin.Context) error {
 	if input.ExpectedVersion < 1 || (!input.Name.Set && !input.Description.Set) || (input.Name.Set && !routeText(input.Name.Value, 1, 200)) || (input.Description.Set && input.Description.Value != nil && routeLength(*input.Description.Value) > 5000) {
 		return mutationContractError()
 	}
-	return routes.execute(c, "admin.artist.update:"+id, artistUpdatePayload(input), http.StatusOK, func(actor, trace string) (any, error) {
-		return routes.service.UpdateArtist(c.Request.Context(), actor, trace, id, input)
+	return routes.execute(c, "admin.artist.update:"+id, artistUpdatePayload(input), http.StatusOK, func(string) (any, error) {
+		return routes.service.UpdateArtist(c.Request.Context(), id, input)
 	})
 }
 func (routes *Routes) createAlbum(c *gin.Context) error {
@@ -113,8 +113,8 @@ func (routes *Routes) createAlbum(c *gin.Context) error {
 	if !routeText(input.Title, 1, 300) || !validCreditsRoute(input.ArtistCredits) || !optionalDateRoute(input.ReleaseDate) || (input.Description.Set && input.Description.Value != nil && routeLength(*input.Description.Value) > 5000) {
 		return mutationContractError()
 	}
-	return routes.execute(c, "admin.album.create", albumCreatePayload(input), http.StatusCreated, func(actor, trace string) (any, error) {
-		return routes.service.CreateAlbum(c.Request.Context(), actor, trace, input)
+	return routes.execute(c, "admin.album.create", albumCreatePayload(input), http.StatusCreated, func(string) (any, error) {
+		return routes.service.CreateAlbum(c.Request.Context(), input)
 	})
 }
 func (routes *Routes) updateAlbum(c *gin.Context) error {
@@ -129,8 +129,8 @@ func (routes *Routes) updateAlbum(c *gin.Context) error {
 	if input.ExpectedVersion < 1 || (!input.Title.Set && !input.ArtistCredits.Set && !input.ReleaseDate.Set && !input.Description.Set) || (input.Title.Set && !routeText(input.Title.Value, 1, 300)) || (input.ArtistCredits.Set && !validCreditsRoute(input.ArtistCredits.Values)) || !optionalDateRoute(input.ReleaseDate) || (input.Description.Set && input.Description.Value != nil && routeLength(*input.Description.Value) > 5000) {
 		return mutationContractError()
 	}
-	return routes.execute(c, "admin.album.update:"+id, albumUpdatePayload(input), http.StatusOK, func(actor, trace string) (any, error) {
-		return routes.service.UpdateAlbum(c.Request.Context(), actor, trace, id, input)
+	return routes.execute(c, "admin.album.update:"+id, albumUpdatePayload(input), http.StatusOK, func(string) (any, error) {
+		return routes.service.UpdateAlbum(c.Request.Context(), id, input)
 	})
 }
 func (routes *Routes) mergeAlbums(c *gin.Context) error {
@@ -141,8 +141,8 @@ func (routes *Routes) mergeAlbums(c *gin.Context) error {
 	if !validMergeRoute(input) {
 		return mutationContractError()
 	}
-	return routes.execute(c, "admin.album.merge:"+input.Target.AlbumID, mergePayload(input), http.StatusOK, func(actor, trace string) (any, error) {
-		return routes.service.MergeAlbums(c.Request.Context(), actor, trace, input)
+	return routes.execute(c, "admin.album.merge:"+input.Target.AlbumID, mergePayload(input), http.StatusOK, func(string) (any, error) {
+		return routes.service.MergeAlbums(c.Request.Context(), input)
 	})
 }
 func (routes *Routes) createTrack(c *gin.Context) error {
@@ -156,8 +156,8 @@ func (routes *Routes) createTrack(c *gin.Context) error {
 	if !routeText(input.Title, 1, 300) || !validCreditsRoute(input.ArtistCredits) || (input.AlbumID.Set && input.AlbumID.Value != nil && !isMutationUUID(*input.AlbumID.Value)) || (input.TrackNumber.Set && input.TrackNumber.Value != nil && *input.TrackNumber.Value < 1) || input.DiscNumber.Value < 1 {
 		return mutationContractError()
 	}
-	return routes.execute(c, "admin.track.create", trackCreatePayload(input), http.StatusCreated, func(actor, trace string) (any, error) {
-		return routes.service.CreateTrack(c.Request.Context(), actor, trace, input)
+	return routes.execute(c, "admin.track.create", trackCreatePayload(input), http.StatusCreated, func(string) (any, error) {
+		return routes.service.CreateTrack(c.Request.Context(), input)
 	})
 }
 func (routes *Routes) updateTrack(c *gin.Context) error {
@@ -172,8 +172,8 @@ func (routes *Routes) updateTrack(c *gin.Context) error {
 	if input.ExpectedVersion < 1 || (!input.Title.Set && !input.AlbumID.Set && !input.ArtistCredits.Set && !input.TrackNumber.Set && !input.DiscNumber.Set) || (input.Title.Set && !routeText(input.Title.Value, 1, 300)) || (input.AlbumID.Set && input.AlbumID.Value != nil && !isMutationUUID(*input.AlbumID.Value)) || (input.ArtistCredits.Set && !validCreditsRoute(input.ArtistCredits.Values)) || (input.TrackNumber.Set && input.TrackNumber.Value != nil && *input.TrackNumber.Value < 1) || (input.DiscNumber.Set && input.DiscNumber.Value < 1) {
 		return mutationContractError()
 	}
-	return routes.execute(c, "admin.track.update:"+id, trackUpdatePayload(input), http.StatusOK, func(actor, trace string) (any, error) {
-		return routes.service.UpdateTrack(c.Request.Context(), actor, trace, id, input)
+	return routes.execute(c, "admin.track.update:"+id, trackUpdatePayload(input), http.StatusOK, func(string) (any, error) {
+		return routes.service.UpdateTrack(c.Request.Context(), id, input)
 	})
 }
 func (routes *Routes) publishTrack(c *gin.Context) error {
@@ -190,8 +190,8 @@ func (routes *Routes) archiveTracksBatch(c *gin.Context) error {
 	if err != nil {
 		return err
 	}
-	return routes.execute(c, "admin.track.archive.batch", input, http.StatusOK, func(actor, trace string) (any, error) {
-		return routes.service.ArchiveTracksBatch(c.Request.Context(), actor, trace, input)
+	return routes.execute(c, "admin.track.archive.batch", input, http.StatusOK, func(string) (any, error) {
+		return routes.service.ArchiveTracksBatch(c.Request.Context(), input)
 	})
 }
 func (routes *Routes) restoreTracksBatch(c *gin.Context) error {
@@ -199,8 +199,8 @@ func (routes *Routes) restoreTracksBatch(c *gin.Context) error {
 	if err != nil {
 		return err
 	}
-	return routes.execute(c, "admin.track.restore.batch", input, http.StatusOK, func(actor, trace string) (any, error) {
-		return routes.service.RestoreTracksBatch(c.Request.Context(), actor, trace, input)
+	return routes.execute(c, "admin.track.restore.batch", input, http.StatusOK, func(string) (any, error) {
+		return routes.service.RestoreTracksBatch(c.Request.Context(), input)
 	})
 }
 func (routes *Routes) createPermanentDeleteBatch(c *gin.Context) error {
@@ -208,8 +208,8 @@ func (routes *Routes) createPermanentDeleteBatch(c *gin.Context) error {
 	if err != nil {
 		return err
 	}
-	return routes.execute(c, "admin.track.delete-permanently.batch", input, http.StatusAccepted, func(actor, trace string) (any, error) {
-		return routes.service.CreatePermanentDeleteBatch(c.Request.Context(), actor, trace, input)
+	return routes.execute(c, "admin.track.delete-permanently.batch", input, http.StatusAccepted, func(string) (any, error) {
+		return routes.service.CreatePermanentDeleteBatch(c.Request.Context(), input)
 	})
 }
 func (routes *Routes) permanentDeleteBatch(c *gin.Context) error {
@@ -228,7 +228,7 @@ func (routes *Routes) permanentDeleteBatch(c *gin.Context) error {
 	return nil
 }
 func (routes *Routes) deleteTrack(c *gin.Context) error { return routes.versionMutationDelete(c) }
-func (routes *Routes) versionMutation(c *gin.Context, prefix string, operation func(context.Context, string, string, string, int) (TrackDTO, error)) error {
+func (routes *Routes) versionMutation(c *gin.Context, prefix string, operation func(context.Context, string, int) (TrackDTO, error)) error {
 	id, err := mutationUUID(c.Param("id"))
 	if err != nil {
 		return err
@@ -237,8 +237,8 @@ func (routes *Routes) versionMutation(c *gin.Context, prefix string, operation f
 	if err != nil {
 		return err
 	}
-	return routes.execute(c, prefix+id, map[string]any{"expectedVersion": input.ExpectedVersion}, http.StatusOK, func(actor, trace string) (any, error) {
-		return operation(c.Request.Context(), actor, trace, id, input.ExpectedVersion)
+	return routes.execute(c, prefix+id, map[string]any{"expectedVersion": input.ExpectedVersion}, http.StatusOK, func(string) (any, error) {
+		return operation(c.Request.Context(), id, input.ExpectedVersion)
 	})
 }
 func (routes *Routes) versionMutationDelete(c *gin.Context) error {
@@ -250,8 +250,8 @@ func (routes *Routes) versionMutationDelete(c *gin.Context) error {
 	if err != nil {
 		return err
 	}
-	return routes.execute(c, "admin.track.delete-permanently:"+id, map[string]any{"expectedVersion": input.ExpectedVersion}, http.StatusOK, func(actor, trace string) (any, error) {
-		return routes.service.DeleteTrackPermanently(c.Request.Context(), actor, trace, id, input.ExpectedVersion)
+	return routes.execute(c, "admin.track.delete-permanently:"+id, map[string]any{"expectedVersion": input.ExpectedVersion}, http.StatusOK, func(string) (any, error) {
+		return routes.service.DeleteTrackPermanently(c.Request.Context(), id, input.ExpectedVersion)
 	})
 }
 func (routes *Routes) upsertLyrics(c *gin.Context) error {
@@ -266,8 +266,8 @@ func (routes *Routes) upsertLyrics(c *gin.Context) error {
 	if input.ExpectedVersion < 1 || !routeText(input.Language, 2, 35) || (input.Format != "LRC" && input.Format != "PLAIN") || (input.Timing != "LINE" && input.Timing != "WORD") || !input.Content.Set || routeLength(input.Content.Value) > 1000000 || !input.IsDefault.Set {
 		return mutationContractError()
 	}
-	return routes.execute(c, "admin.track.lyrics:"+id+":"+input.Language, lyricsPayload(input), http.StatusOK, func(actor, trace string) (any, error) {
-		return routes.service.UpsertLyrics(c.Request.Context(), actor, trace, id, input)
+	return routes.execute(c, "admin.track.lyrics:"+id+":"+input.Language, lyricsPayload(input), http.StatusOK, func(string) (any, error) {
+		return routes.service.UpsertLyrics(c.Request.Context(), id, input)
 	})
 }
 func (routes *Routes) updateUserStatus(c *gin.Context) error {
@@ -279,15 +279,15 @@ func (routes *Routes) updateUserStatus(c *gin.Context) error {
 	if err := httpserver.DecodeJSON(c, &input); err != nil {
 		return err
 	}
-	if input.ExpectedVersion < 1 || (input.Status != UserActive && input.Status != UserSuspended) || !routeText(input.Reason, 1, 500) {
+	if input.ExpectedVersion < 1 || (input.Status != UserActive && input.Status != UserSuspended) {
 		return mutationContractError()
 	}
-	return routes.execute(c, "admin.user.status:"+id, map[string]any{"expectedVersion": input.ExpectedVersion, "status": input.Status, "reason": input.Reason}, http.StatusOK, func(actor, trace string) (any, error) {
-		return routes.service.UpdateUserStatus(c.Request.Context(), actor, trace, id, input)
+	return routes.execute(c, "admin.user.status:"+id, map[string]any{"expectedVersion": input.ExpectedVersion, "status": input.Status}, http.StatusOK, func(actor string) (any, error) {
+		return routes.service.UpdateUserStatus(c.Request.Context(), actor, id, input)
 	})
 }
 
-func (routes *Routes) execute(c *gin.Context, scope string, payload any, status int, operation func(string, string) (any, error)) error {
+func (routes *Routes) execute(c *gin.Context, scope string, payload any, status int, operation func(string) (any, error)) error {
 	actor, err := adminauth.RequireAdmin(c, routes.identity, true)
 	if err != nil {
 		return err
@@ -296,9 +296,8 @@ func (routes *Routes) execute(c *gin.Context, scope string, payload any, status 
 	if !mutationIdempotencyPattern.MatchString(key) {
 		return apperror.Validation("Idempotency-Key is invalid")
 	}
-	trace := httpserver.TraceID(c)
 	result, err := routes.idempotency.Execute(c.Request.Context(), IdempotencyInput{ActorID: actor.UserID, Scope: scope, Key: key, Payload: payload}, func() (IdempotencyResponse, error) {
-		body, err := operation(actor.UserID, trace)
+		body, err := operation(actor.UserID)
 		if err != nil {
 			return IdempotencyResponse{}, err
 		}

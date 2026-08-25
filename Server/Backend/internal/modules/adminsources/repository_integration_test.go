@@ -78,7 +78,7 @@ func TestRepositoryRunsLibrarySourceLifecycleInConfiguredDatabase(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := repository.CreateRoot(ctx, actorID, "trace-create-"+short, mutation)
+	created, err := repository.CreateRoot(ctx, mutation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestRepositoryRunsLibrarySourceLifecycleInConfiguredDatabase(t *testing.T) 
 	}
 
 	run1, err := repository.EnqueueScan(ctx, EnqueueScanCommand{
-		RootID: rootID, ActorID: &actorID, TraceID: "trace-scan-" + short,
+		RootID: rootID, ActorID: &actorID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -163,7 +163,7 @@ func TestRepositoryRunsLibrarySourceLifecycleInConfiguredDatabase(t *testing.T) 
 		t.Fatalf("duplicate enqueue err=%v", err)
 	}
 	if err := repository.CancelScan(ctx, CancelScanCommand{
-		RootID: rootID, RunID: run1.ID, ActorID: &actorID, TraceID: "trace-cancel-" + short,
+		RootID: rootID, RunID: run1.ID,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -180,8 +180,8 @@ func TestRepositoryRunsLibrarySourceLifecycleInConfiguredDatabase(t *testing.T) 
 		t.Fatal(err)
 	}
 	updated, err := repository.UpdateRoot(ctx, UpdateRootCommand{
-		ActorID: actorID, TraceID: "trace-update-" + short, RootID: rootID,
-		ExpectedVersion: 1, Mutation: updatedMutation, ChangedFields: []string{"name", "path", "mode"},
+		RootID:          rootID,
+		ExpectedVersion: 1, Mutation: updatedMutation,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -190,7 +190,7 @@ func TestRepositoryRunsLibrarySourceLifecycleInConfiguredDatabase(t *testing.T) 
 		t.Fatalf("updated=%+v", updated.Root)
 	}
 	if _, err := repository.UpdateRoot(ctx, UpdateRootCommand{
-		ActorID: actorID, TraceID: "trace-stale-" + short, RootID: rootID,
+		RootID:          rootID,
 		ExpectedVersion: 1, Mutation: updatedMutation,
 	}); !apperror.IsCode(err, apperror.CodeVersionConflict) {
 		t.Fatalf("stale update err=%v", err)
@@ -250,8 +250,8 @@ func TestRepositoryRunsLibrarySourceLifecycleInConfiguredDatabase(t *testing.T) 
 		IncludePatterns: current.IncludePatterns, ExcludePatterns: current.ExcludePatterns, Status: RootStatusDisabled,
 	}
 	disabled, err := repository.UpdateRoot(ctx, UpdateRootCommand{
-		ActorID: actorID, TraceID: "trace-disable-" + short, RootID: rootID,
-		ExpectedVersion: current.Version, Mutation: disabledMutation, ChangedFields: []string{"enabled"},
+		RootID:          rootID,
+		ExpectedVersion: current.Version, Mutation: disabledMutation,
 	})
 	if err != nil || disabled.Root.Status != RootStatusDisabled {
 		t.Fatalf("disabled=%+v err=%v", disabled.Root, err)
@@ -264,8 +264,8 @@ func TestRepositoryRunsLibrarySourceLifecycleInConfiguredDatabase(t *testing.T) 
 	reenabledMutation.Enabled = true
 	reenabledMutation.Status = RootStatusUnknown
 	reenabled, err := repository.UpdateRoot(ctx, UpdateRootCommand{
-		ActorID: actorID, TraceID: "trace-enable-" + short, RootID: rootID,
-		ExpectedVersion: disabled.Root.Version, Mutation: reenabledMutation, ChangedFields: []string{"enabled"},
+		RootID:          rootID,
+		ExpectedVersion: disabled.Root.Version, Mutation: reenabledMutation,
 	})
 	if err != nil || reenabled.Root.Status != RootStatusUnknown {
 		t.Fatalf("reenabled=%+v err=%v", reenabled.Root, err)
@@ -275,7 +275,7 @@ func TestRepositoryRunsLibrarySourceLifecycleInConfiguredDatabase(t *testing.T) 
 		t.Fatal(err)
 	}
 	if err := repository.DeleteRoot(ctx, DeleteRootCommand{
-		ActorID: actorID, TraceID: "trace-active-delete-" + short, RootID: rootID,
+		RootID:          rootID,
 		ExpectedVersion: reenabled.Root.Version,
 	}); !apperror.IsCode(err, apperror.CodeInvalidStateTransition) {
 		t.Fatalf("active delete err=%v", err)
@@ -288,7 +288,7 @@ func TestRepositoryRunsLibrarySourceLifecycleInConfiguredDatabase(t *testing.T) 
 		t.Fatalf("runs=%d total=%d err=%v", len(runs), total, err)
 	}
 	if err := repository.DeleteRoot(ctx, DeleteRootCommand{
-		ActorID: actorID, TraceID: "trace-delete-" + short, RootID: rootID,
+		RootID:          rootID,
 		ExpectedVersion: reenabled.Root.Version, ArchiveCatalog: true,
 	}); err != nil {
 		t.Fatal(err)
@@ -303,14 +303,7 @@ func TestRepositoryRunsLibrarySourceLifecycleInConfiguredDatabase(t *testing.T) 
 	if trackStatus != "ARCHIVED" {
 		t.Fatalf("track status=%s", trackStatus)
 	}
-	var auditCount int
-	if err := transaction.QueryRow(ctx, `SELECT count(*)::int FROM audit_logs
-		WHERE actor_id=$1 AND target_id=$2 AND action LIKE 'admin.library-root.%'`, actorID, rootID).Scan(&auditCount); err != nil {
-		t.Fatal(err)
-	}
-	if auditCount < 7 {
-		t.Fatalf("audit count=%d", auditCount)
-	}
+
 }
 
 func TestEnsureDefaultRootSynchronizesConfiguredRoot(t *testing.T) {
@@ -437,7 +430,7 @@ func TestProductionSynchronizerPersistsFilesMetadataAndCUEInConfiguredDatabase(t
 		t.Fatal(err)
 	}
 	repository := &Repository{database: transaction}
-	view, err := repository.CreateRoot(ctx, actorID, "trace-sync-"+short, mutation)
+	view, err := repository.CreateRoot(ctx, mutation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -752,12 +745,10 @@ FILE "disc.wav" WAVE
 		status='ARCHIVED',updated_at=$2 WHERE id=$1`, trackID, manualSignatureAt); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := transaction.Exec(ctx, `INSERT INTO audit_logs(
-		actor_id,action,target_type,target_id,result,trace_id,details
-	) VALUES($1,'admin.track.archive','track',$2,'SUCCESS',$3,'{}'::jsonb)`,
-		actorID, trackID, "trace-manual-archive-"+short); err != nil {
+	if _, err := transaction.Exec(ctx, `UPDATE tracks SET archived_manually=true WHERE id=$1`, trackID); err != nil {
 		t.Fatal(err)
 	}
+
 	err = synchronizer.ProcessFile(ctx, rootID, "", DiscoveredFile{
 		AudioPath: renamedPath, RelativePath: "renamed.flac",
 	}, manualSignatureAt.Add(time.Second))
@@ -771,10 +762,6 @@ FILE "disc.wav" WAVE
 		t.Fatalf("manually archived track status=%s", failedTrackStatus)
 	}
 
-	if _, err := transaction.Exec(ctx, `DELETE FROM audit_logs
-		WHERE action='admin.track.archive' AND target_id=$1`, trackID); err != nil {
-		t.Fatal(err)
-	}
 	mismatchedSourceAt := manualSignatureAt.Add(2 * time.Second)
 	if _, err := transaction.Exec(ctx, `UPDATE local_music_sources SET
 		status='MISSING',updated_at=$2 WHERE id=$1`, sourceID, mismatchedSourceAt); err != nil {

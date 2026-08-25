@@ -58,7 +58,6 @@ export type {
   StorageSettingsInput,
   SystemInformation,
 } from "@/features/settings/domain/models";
-export type { AuditEntry } from "@/features/audit/domain/models";
 export type { DashboardData } from "@/features/dashboard/domain/models";
 export type { AdminProfile, AdminSession } from "@/features/auth/domain/models";
 export type {

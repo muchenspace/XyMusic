@@ -40,7 +40,6 @@ test.describe("isolated real backend", () => {
 
     await verifyPage(page, "jobs", "后台任务");
     await expect(page.getByRole("heading", { name: "Tag 写回任务", exact: true })).toBeVisible();
-    await verifyPage(page, "audit", "审计日志");
     await expect(page.locator("tbody tr").first()).toBeVisible();
     await verifySettings(page);
 
@@ -67,7 +66,6 @@ test.describe("isolated real backend", () => {
     await login(page, credentials!.admin);
     await verifyPage(page, "jobs", "后台任务");
     await expect(page.getByRole("heading", { name: "Tag 写回任务", exact: true })).toBeVisible();
-    await verifyPage(page, "audit", "审计日志");
     await expect(page.locator("tbody tr").first()).toBeVisible();
     await verifySettings(page);
   });

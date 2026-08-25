@@ -49,7 +49,7 @@ describe("administrator HTTP API contract", () => {
 
   it("keeps the exported API surface explicit so new methods require contract coverage", () => {
     expect(Object.keys(adminApi).sort()).toEqual([
-      "album", "albumDuplicates", "albums", "archiveTrack", "artists", "audit",
+      "album", "albumDuplicates", "albums", "archiveTrack", "artists",
       "batchArchiveTracks", "batchRestoreTracks", "browseSourceDirectories", "bulkUpdateTracks", "cancelJob", "cancelScan",
       "cancelWritebackJob", "createPermanentDeleteTracksJob", "createSource", "createUser", "dashboard", "deleteSource",
       "deleteTrackPermanently", "deleteUser", "job", "jobEvents", "jobs", "mergeAlbums",
@@ -127,7 +127,7 @@ describe("administrator HTTP API contract", () => {
     await expectRequest(() => adminApi.updateArtist("artist-1", artistUpdate), "/api/v1/admin/artists/artist-1", { method: "PATCH", body: artistUpdate });
   });
 
-  it("maps every jobs, audit, settings, and system API method", async () => {
+  it("maps every jobs, settings, and system API method", async () => {
     const jobsQuery = { page: 2, pageSize: 20, search: "scan", status: "FAILED", type: "SOURCE_SCAN", sort: "createdAt", order: "desc" as const };
     await expectRequest(() => adminApi.jobs(jobsQuery, signal), "/api/v1/admin/jobs", { query: jobsQuery, signal });
     await expectRequest(() => adminApi.job("job-1", signal), "/api/v1/admin/jobs/job-1", { signal });
@@ -139,8 +139,6 @@ describe("administrator HTTP API contract", () => {
     await expectRequest(() => adminApi.retryWritebackJob("write-1", 2, "retry"), "/api/v1/admin/metadata/writeback-jobs/write-1/retry", { method: "POST", body: { expectedVersion: 2, reason: "retry" } });
     await expectRequest(() => adminApi.cancelWritebackJob("write-1", 2, "cancel"), "/api/v1/admin/metadata/writeback-jobs/write-1/cancel", { method: "POST", body: { expectedVersion: 2, reason: "cancel" } });
 
-    const auditQuery = { page: 1, pageSize: 25, search: "user", action: "USER_UPDATE", result: "SUCCESS", actorId: "actor-1", from: "2026-01-01", to: "2026-12-31", sort: "createdAt", order: "desc" as const };
-    await expectRequest(() => adminApi.audit(auditQuery, signal), "/api/v1/admin/audit", { query: auditQuery, signal });
     await expectRequest(() => adminApi.settings(signal), "/api/v1/admin/settings", { signal });
     const settingsUpdate = { expectedVersion: 2, registration: { enabled: false } };
     await expectRequest(() => adminApi.updateSettings(settingsUpdate), "/api/v1/admin/settings", { method: "PATCH", body: settingsUpdate });

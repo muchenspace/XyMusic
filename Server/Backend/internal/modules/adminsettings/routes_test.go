@@ -228,7 +228,7 @@ func (stub *settingsAPIStub) TestLocalLibrary(context.Context, *string) (LocalLi
 	stub.calls++
 	return LocalLibraryTestResponse{OK: true}, nil
 }
-func (stub *settingsAPIStub) ApplyIdempotently(_ context.Context, actorID, _, key string, _ UpdateInput) (IdempotentSettingsResult, error) {
+func (stub *settingsAPIStub) ApplyIdempotently(_ context.Context, actorID, key string, _ UpdateInput) (IdempotentSettingsResult, error) {
 	stub.calls++
 	stub.actorID = actorID
 	stub.key = key

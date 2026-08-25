@@ -18,8 +18,8 @@ import (
 type Application interface {
 	GetCurrentUser(context.Context, string) (identity.CurrentUserDTO, error)
 	UpdateCurrentUser(context.Context, string, string, UpdateProfileInput) (MutationResult[identity.CurrentUserDTO], error)
-	CreateAvatarUpload(context.Context, string, string, string, CreateAvatarUploadInput) (MutationResult[AvatarUploadDTO], error)
-	CompleteAvatarUpload(context.Context, string, string, string, string, CompleteAvatarUploadInput) (MutationResult[identity.CurrentUserDTO], error)
+	CreateAvatarUpload(context.Context, string, string, CreateAvatarUploadInput) (MutationResult[AvatarUploadDTO], error)
+	CompleteAvatarUpload(context.Context, string, string, string, CompleteAvatarUploadInput) (MutationResult[identity.CurrentUserDTO], error)
 }
 
 type Routes struct {
@@ -93,7 +93,6 @@ func (routes *Routes) createAvatarUpload(c *gin.Context) error {
 	result, err := routes.application.CreateAvatarUpload(
 		c.Request.Context(),
 		actor.UserID,
-		httpserver.TraceID(c),
 		c.GetHeader("Idempotency-Key"),
 		input,
 	)
@@ -121,7 +120,6 @@ func (routes *Routes) completeAvatarUpload(c *gin.Context) error {
 	result, err := routes.application.CompleteAvatarUpload(
 		c.Request.Context(),
 		actor.UserID,
-		httpserver.TraceID(c),
 		uploadID,
 		c.GetHeader("Idempotency-Key"),
 		input,

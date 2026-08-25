@@ -41,19 +41,6 @@ describe("source architecture boundaries", () => {
     expect(violations).toEqual([]);
   });
 
-  it("routes every audit-code UI consumer through shared presentation", () => {
-    const consumers = [
-      resolve(sourceRoot, "pages/audit/AuditPage.vue"),
-      resolve(sourceRoot, "pages/dashboard/DashboardPage.vue"),
-    ];
-
-    for (const consumer of consumers) {
-      const source = readFileSync(consumer, "utf8");
-      expect(source).toContain('from "@/shared/presentation/audit"');
-      expect(source).toContain("auditActionLabel(");
-      expect(source).toContain("auditTargetTypeLabel(");
-    }
-  });
 
   it("keeps route rendering single-mounted and preloads navigation targets", () => {
     const layout = readFileSync(resolve(sourceRoot, "layouts/AdminLayout.vue"), "utf8");

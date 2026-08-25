@@ -81,7 +81,6 @@ func TestRepositoryProductionLifecycle(t *testing.T) {
 			args []any
 		}{
 			{"idempotency records", `delete from idempotency_records where actor_id = $1`, []any{userID}},
-			{"audit logs", `delete from audit_logs where actor_id = $1`, []any{userID}},
 			{"cleanup jobs", `delete from object_cleanup_jobs where object_key = any($1::varchar[])`, []any{objectKeys}},
 			{"artist reference", `update artists set artwork_asset_id = null where id = $1`, []any{artistID}},
 			{"uploads", `delete from media_uploads where id = any($1::uuid[])`, []any{[]string{artworkUploadID, trackUploadID, abandonedUploadID, fencedUploadID}}},
@@ -180,7 +179,7 @@ func TestRepositoryProductionLifecycle(t *testing.T) {
 		t.Fatalf("artwork claim = %#v error=%v", claim, err)
 	}
 	completedArtwork, err := repository.FinalizeCompletion(ctx, FinalizeCompletionParams{
-		ActorID: userID, TraceID: "adminmedia-integration-artwork", UploadID: artworkUpload.ID,
+		ActorID: userID, UploadID: artworkUpload.ID,
 		CompletionToken: claim.Token, AssetID: artworkAssetID, JobID: uuid.NewString(),
 		Inspected: InspectedUpload{
 			ObjectKey: objectKeys[1], MIMEType: "image/jpeg", SizeBytes: 96,
@@ -256,7 +255,7 @@ func TestRepositoryProductionLifecycle(t *testing.T) {
 	}
 	fenceErr := errors.New("integration completion fence lost")
 	_, err = repository.FinalizeCompletion(ctx, FinalizeCompletionParams{
-		ActorID: userID, TraceID: "adminmedia-integration-fenced", UploadID: fencedUpload.ID,
+		ActorID: userID, UploadID: fencedUpload.ID,
 		CompletionToken: fencedClaim.Token, AssetID: fencedAssetID,
 		Inspected: InspectedUpload{
 			ObjectKey: objectKeys[5], MIMEType: "image/jpeg", SizeBytes: 48,
@@ -324,7 +323,7 @@ func TestRepositoryProductionLifecycle(t *testing.T) {
 		t.Fatalf("track claim = %#v error=%v", trackClaim, err)
 	}
 	completedTrack, err := repository.FinalizeCompletion(ctx, FinalizeCompletionParams{
-		ActorID: userID, TraceID: "adminmedia-integration-track", UploadID: trackUpload.ID,
+		ActorID: userID, UploadID: trackUpload.ID,
 		CompletionToken: trackClaim.Token, AssetID: trackAssetID, JobID: jobID,
 		Inspected: InspectedUpload{
 			ObjectKey: objectKeys[2], MIMEType: "audio/flac", SizeBytes: 256,
@@ -347,10 +346,9 @@ func TestRepositoryProductionLifecycle(t *testing.T) {
 		where id = $1`, jobID); err != nil {
 		t.Fatal(err)
 	}
-	reason := "integration retry"
 	retried, err := repository.RetryJob(ctx, RetryJobParams{
-		ActorID: userID, TraceID: "adminmedia-integration-retry", JobID: jobID,
-		ExpectedVersion: 1, Reason: &reason, Now: now.Add(3 * time.Second),
+		JobID:           jobID,
+		ExpectedVersion: 1, Now: now.Add(3 * time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)

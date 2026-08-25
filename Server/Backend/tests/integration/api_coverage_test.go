@@ -159,6 +159,6 @@ func (coverageSetupAPI) TestSource(context.Context, setup.SourceInput) (setup.So
 func (coverageSetupAPI) TestAdministrator(context.Context, setup.AdministratorInput) (setup.OKResponse, error) {
 	return setup.OKResponse{}, nil
 }
-func (coverageSetupAPI) Complete(context.Context, setup.SetupInput, string) (setup.CompletionResponse, error) {
+func (coverageSetupAPI) Complete(context.Context, setup.SetupInput) (setup.CompletionResponse, error) {
 	return setup.CompletionResponse{}, nil
 }

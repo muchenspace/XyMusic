@@ -215,7 +215,7 @@ func TestCreateAvatarUploadReservesOnlyActorAndReturnsSignedHeaderContract(t *te
 	service := newProfileTestService(t, store, &currentUserReaderStub{}, &directProfileIdempotency{}, storage, &avatarInspectorStub{}, now)
 	service.newID = func() string { return "upload-1" }
 	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	result, err := service.CreateAvatarUpload(context.Background(), "user-1", "trace-123", "avatar-key-1", CreateAvatarUploadInput{
+	result, err := service.CreateAvatarUpload(context.Background(), "user-1", "avatar-key-1", CreateAvatarUploadInput{
 		FileName:       "avatar.PNG",
 		ContentType:    "image/png",
 		SizeBytes:      1024,
@@ -271,7 +271,7 @@ func TestAvatarReservationValidationMatchesLegacyLimits(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := service.CreateAvatarUpload(context.Background(), "user-1", "trace", "avatar-key", test.input)
+			_, err := service.CreateAvatarUpload(context.Background(), "user-1", "avatar-key", test.input)
 			if !apperror.IsCode(err, test.code) {
 				t.Fatalf("error = %v, want %s", err, test.code)
 			}
@@ -301,7 +301,7 @@ func TestCompleteAvatarUploadInspectsAndAtomicallyAttachesAvatar(t *testing.T) {
 	}
 	store.finalizeCompletion = func(_ context.Context, input FinalizeAvatarParams) error {
 		if input.ActorID != "user-1" || input.UploadID != "upload-1" || input.CompletionToken != "completion-token" ||
-			input.AssetID != "asset-1" || input.Inspected.ObjectKey != "media/avatar.jpg" || input.TraceID != "trace-complete" {
+			input.AssetID != "asset-1" || input.Inspected.ObjectKey != "media/avatar.jpg" {
 			t.Fatalf("finalize = %#v", input)
 		}
 		return nil
@@ -323,7 +323,7 @@ func TestCompleteAvatarUploadInspectsAndAtomicallyAttachesAvatar(t *testing.T) {
 		ids = ids[1:]
 		return value
 	}
-	result, err := service.CompleteAvatarUpload(context.Background(), "user-1", "trace-complete", "upload-1", "complete-key", CompleteAvatarUploadInput{
+	result, err := service.CompleteAvatarUpload(context.Background(), "user-1", "upload-1", "complete-key", CompleteAvatarUploadInput{
 		ObservedETag: OptionalString{Set: true, Value: `"etag"`},
 	})
 	if err != nil {
@@ -352,7 +352,7 @@ func TestCompleteAvatarUploadQueuesFailedObjectAndDoesNotAttach(t *testing.T) {
 	inspector := &avatarInspectorStub{err: apperror.Unprocessable(apperror.CodeMediaUploadMismatch, "bad image", nil)}
 	service := newProfileTestService(t, store, &currentUserReaderStub{}, &directProfileIdempotency{}, &avatarStorageStub{}, inspector, now)
 	service.newID = func() string { return "token" }
-	_, err := service.CompleteAvatarUpload(context.Background(), "user-1", "trace", "upload-1", "complete-key", CompleteAvatarUploadInput{})
+	_, err := service.CompleteAvatarUpload(context.Background(), "user-1", "upload-1", "complete-key", CompleteAvatarUploadInput{})
 	if !apperror.IsCode(err, apperror.CodeMediaUploadMismatch) || !failed {
 		t.Fatalf("error = %v failed=%v", err, failed)
 	}

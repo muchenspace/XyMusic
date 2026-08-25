@@ -26,7 +26,7 @@ type API interface {
 	TestMedia(context.Context, MediaInput) (MediaTestResponse, error)
 	TestSource(context.Context, SourceInput) (SourceTestResponse, error)
 	TestAdministrator(context.Context, AdministratorInput) (OKResponse, error)
-	Complete(context.Context, SetupInput, string) (CompletionResponse, error)
+	Complete(context.Context, SetupInput) (CompletionResponse, error)
 }
 
 var _ API = (*Service)(nil)
@@ -53,7 +53,7 @@ func RegisterRoutes(router gin.IRouter, service API) {
 		if err := service.RequireSetup(); err != nil {
 			return err
 		}
-		response, err := service.Complete(c.Request.Context(), input, httpserver.TraceID(c))
+		response, err := service.Complete(c.Request.Context(), input)
 		if err != nil {
 			return err
 		}

@@ -64,23 +64,6 @@ type UserPageDTO struct {
 	TotalPages int       `json:"totalPages"`
 }
 
-type ActorDTO struct {
-	ID          string `json:"id"`
-	Username    string `json:"username"`
-	DisplayName string `json:"displayName"`
-}
-
-type DashboardActivityDTO struct {
-	ID         string         `json:"id"`
-	Action     string         `json:"action"`
-	TargetType string         `json:"targetType"`
-	TargetID   *string        `json:"targetId"`
-	Result     string         `json:"result"`
-	TraceID    string         `json:"traceId"`
-	Details    map[string]any `json:"details"`
-	Actor      *ActorDTO      `json:"actor"`
-	CreatedAt  string         `json:"createdAt"`
-}
 
 type DashboardDTO struct {
 	Users struct {
@@ -93,9 +76,8 @@ type DashboardDTO struct {
 		Albums  int            `json:"albums"`
 		Tracks  map[string]int `json:"tracks"`
 	} `json:"catalog"`
-	Sources        map[string]int         `json:"sources"`
-	Jobs           map[string]int         `json:"jobs"`
-	RecentActivity []DashboardActivityDTO `json:"recentActivity"`
+	Sources map[string]int `json:"sources"`
+	Jobs    map[string]int `json:"jobs"`
 }
 
 type ListUsersInput struct {
@@ -174,29 +156,17 @@ type UpdateUserInput struct {
 	Bio             OptionalNullableString `json:"bio"`
 	Role            OptionalRole           `json:"role"`
 	Status          OptionalStatus         `json:"status"`
-	Reason          string                 `json:"reason"`
 }
 
 type PasswordInput struct {
 	ExpectedVersion int    `json:"expectedVersion"`
 	Password        string `json:"password"`
-	Reason          string `json:"reason"`
 }
 
-type VersionReasonInput struct {
-	ExpectedVersion int    `json:"expectedVersion"`
-	Reason          string `json:"reason"`
+type VersionInput struct {
+	ExpectedVersion int `json:"expectedVersion"`
 }
 
-type ReasonInput struct {
-	Reason string `json:"reason"`
-}
-
-type StatusInput struct {
-	ExpectedVersion int        `json:"expectedVersion"`
-	Status          UserStatus `json:"status"`
-	Reason          string     `json:"reason"`
-}
 
 type UpdatedDTO struct {
 	Updated bool `json:"updated"`

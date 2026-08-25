@@ -60,7 +60,7 @@ func TestAdminManagementProductionLifecycle(t *testing.T) {
 	}
 	suffix := strings.ReplaceAll(uuid.NewString()[:18], "-", "")
 	username := "admin_it_" + suffix
-	created, err := service.CreateUser(ctx, actorID, "admin-it-create", CreateUserInput{
+	created, err := service.CreateUser(ctx, CreateUserInput{
 		Username: username, Password: "integration-password", DisplayName: "Admin Integration", Role: RoleUser,
 	})
 	if err != nil {
@@ -70,7 +70,6 @@ func TestAdminManagementProductionLifecycle(t *testing.T) {
 	t.Cleanup(func() {
 		cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cleanupCancel()
-		_, _ = pool.Exec(cleanupContext, `DELETE FROM audit_logs WHERE target_id = $1`, userID)
 		_, _ = pool.Exec(cleanupContext, `DELETE FROM users WHERE id = $1`, userID)
 	})
 
@@ -93,17 +92,16 @@ func TestAdminManagementProductionLifecycle(t *testing.T) {
 		t.Fatalf("ListUsers = %#v, %v", page, err)
 	}
 	bio := "production integration"
-	updated, err := service.UpdateUser(ctx, actorID, "admin-it-update", userID, UpdateUserInput{
+	updated, err := service.UpdateUser(ctx, actorID, userID, UpdateUserInput{
 		ExpectedVersion: created.Version,
 		DisplayName:     OptionalString{Set: true, Value: "Admin Integration Updated"},
 		Bio:             OptionalNullableString{Set: true, Value: &bio},
-		Reason:          "production integration",
 	})
 	if err != nil || updated.Version != created.Version+1 || updated.Bio == nil || *updated.Bio != bio {
 		t.Fatalf("UpdateUser = %#v, %v", updated, err)
 	}
-	passwordResult, err := service.ResetPassword(ctx, actorID, "admin-it-password", userID, PasswordInput{
-		ExpectedVersion: updated.Version, Password: "integration-password-2", Reason: "production integration",
+	passwordResult, err := service.ResetPassword(ctx, userID, PasswordInput{
+		ExpectedVersion: updated.Version, Password: "integration-password-2",
 	})
 	if err != nil || !passwordResult.Updated {
 		t.Fatalf("ResetPassword = %#v, %v", passwordResult, err)
@@ -112,7 +110,7 @@ func TestAdminManagementProductionLifecycle(t *testing.T) {
 	if err != nil || len(detail.Sessions) != 1 || detail.Sessions[0].Active {
 		t.Fatalf("User after reset = %#v, %v", detail, err)
 	}
-	revoked, err := service.RevokeSession(ctx, actorID, "admin-it-revoke", userID, sessionID, "production integration")
+	revoked, err := service.RevokeSession(ctx, userID, sessionID)
 	if err != nil || !revoked.Revoked {
 		t.Fatalf("RevokeSession = %#v, %v", revoked, err)
 	}

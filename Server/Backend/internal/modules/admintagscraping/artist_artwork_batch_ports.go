@@ -35,5 +35,5 @@ type ArtistArtworkBatchCompleteStore interface {
 
 type ArtistArtworkBatchProcessor interface {
 	SearchArtists(context.Context, ArtistSearchInput) ([]ArtistCandidate, error)
-	ApplyArtistArtwork(context.Context, string, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error)
+	ApplyArtistArtwork(context.Context, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error)
 }

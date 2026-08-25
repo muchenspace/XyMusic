@@ -93,7 +93,7 @@ func TestApplyArtistArtworkDownloadsAndCarriesAtomicFenceDetails(t *testing.T) {
 		Aliases:  []string{}, Score: 2,
 	}
 	result, err := service.ApplyArtistArtwork(
-		context.Background(), "admin", "trace", "artist-local",
+		context.Background(), "admin", "artist-local",
 		ArtistArtworkApplyInput{
 			ExpectedVersion: 4, Candidate: candidate, Overwrite: true, Reason: "operator scrape",
 		},
@@ -122,7 +122,7 @@ func TestApplyArtistArtworkRejectsRemovedNeteaseCandidate(t *testing.T) {
 		Store: &storeStub{}, Music: music, Artwork: artwork, DefaultLibraryDirectory: "music",
 	})
 	_, err := service.ApplyArtistArtwork(
-		context.Background(), "admin", "trace", "artist-local",
+		context.Background(), "admin", "artist-local",
 		ArtistArtworkApplyInput{
 			ExpectedVersion: 1,
 			Candidate: ArtistCandidate{

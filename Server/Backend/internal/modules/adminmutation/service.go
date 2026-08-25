@@ -34,7 +34,7 @@ func NewService(store Store, artworks ArtworkPresenter, defaultLibraryDirectory 
 	return &Service{store: store, artworks: artworks, defaultLibraryDirectory: defaultLibraryDirectory}, nil
 }
 
-func (service *Service) CreateArtist(ctx context.Context, actorID, traceID string, input CreateArtistInput) (ArtistDTO, error) {
+func (service *Service) CreateArtist(ctx context.Context, input CreateArtistInput) (ArtistDTO, error) {
 	name, err := requireText(input.Name, 200, "name")
 	if err != nil {
 		return ArtistDTO{}, err
@@ -52,13 +52,10 @@ func (service *Service) CreateArtist(ctx context.Context, actorID, traceID strin
 	if err != nil {
 		return ArtistDTO{}, err
 	}
-	if err := service.audit(ctx, actorID, "admin.artist.create", "artist", id, traceID, nil); err != nil {
-		return ArtistDTO{}, err
-	}
 	return service.artist(ctx, id)
 }
 
-func (service *Service) UpdateArtist(ctx context.Context, actorID, traceID, id string, input UpdateArtistInput) (ArtistDTO, error) {
+func (service *Service) UpdateArtist(ctx context.Context, id string, input UpdateArtistInput) (ArtistDTO, error) {
 	if input.ExpectedVersion < 1 || (!input.Name.Set && !input.Description.Set) {
 		return ArtistDTO{}, apperror.Validation("At least one field must change")
 	}
@@ -81,13 +78,10 @@ func (service *Service) UpdateArtist(ctx context.Context, actorID, traceID, id s
 	if err := service.store.UpdateArtist(ctx, params); err != nil {
 		return ArtistDTO{}, err
 	}
-	if err := service.audit(ctx, actorID, "admin.artist.update", "artist", id, traceID, nil); err != nil {
-		return ArtistDTO{}, err
-	}
 	return service.artist(ctx, id)
 }
 
-func (service *Service) CreateAlbum(ctx context.Context, actorID, traceID string, input CreateAlbumInput) (AlbumDTO, error) {
+func (service *Service) CreateAlbum(ctx context.Context, input CreateAlbumInput) (AlbumDTO, error) {
 	title, err := requireText(input.Title, 300, "title")
 	if err != nil {
 		return AlbumDTO{}, err
@@ -112,13 +106,10 @@ func (service *Service) CreateAlbum(ctx context.Context, actorID, traceID string
 	if err != nil {
 		return AlbumDTO{}, err
 	}
-	if err := service.audit(ctx, actorID, "admin.album.create", "album", id, traceID, nil); err != nil {
-		return AlbumDTO{}, err
-	}
 	return service.album(ctx, id)
 }
 
-func (service *Service) UpdateAlbum(ctx context.Context, actorID, traceID, id string, input UpdateAlbumInput) (AlbumDTO, error) {
+func (service *Service) UpdateAlbum(ctx context.Context, id string, input UpdateAlbumInput) (AlbumDTO, error) {
 	if input.ExpectedVersion < 1 || (!input.Title.Set && !input.ArtistCredits.Set && !input.ReleaseDate.Set && !input.Description.Set) {
 		return AlbumDTO{}, apperror.Validation("At least one field must change")
 	}
@@ -150,13 +141,10 @@ func (service *Service) UpdateAlbum(ctx context.Context, actorID, traceID, id st
 	if err := service.store.UpdateAlbum(ctx, params); err != nil {
 		return AlbumDTO{}, err
 	}
-	if err := service.audit(ctx, actorID, "admin.album.update", "album", id, traceID, nil); err != nil {
-		return AlbumDTO{}, err
-	}
 	return service.album(ctx, id)
 }
 
-func (service *Service) MergeAlbums(ctx context.Context, actorID, traceID string, input MergeAlbumsInput) (MergeResultDTO, error) {
+func (service *Service) MergeAlbums(ctx context.Context, input MergeAlbumsInput) (MergeResultDTO, error) {
 	if len(input.Sources) < 1 || len(input.Sources) > 100 {
 		return MergeResultDTO{}, apperror.Validation("sources must contain 1 to 100 albums")
 	}
@@ -181,10 +169,10 @@ func (service *Service) MergeAlbums(ctx context.Context, actorID, traceID string
 			}
 		}
 	}
-	return service.store.MergeAlbums(ctx, actorID, traceID, input)
+	return service.store.MergeAlbums(ctx, input)
 }
 
-func (service *Service) CreateTrack(ctx context.Context, actorID, traceID string, input CreateTrackInput) (TrackDTO, error) {
+func (service *Service) CreateTrack(ctx context.Context, input CreateTrackInput) (TrackDTO, error) {
 	title, err := requireText(input.Title, 300, "title")
 	if err != nil {
 		return TrackDTO{}, err
@@ -211,13 +199,10 @@ func (service *Service) CreateTrack(ctx context.Context, actorID, traceID string
 	if err != nil {
 		return TrackDTO{}, err
 	}
-	if err := service.audit(ctx, actorID, "admin.track.create", "track", id, traceID, nil); err != nil {
-		return TrackDTO{}, err
-	}
 	return service.track(ctx, id)
 }
 
-func (service *Service) UpdateTrack(ctx context.Context, actorID, traceID, id string, input UpdateTrackInput) (TrackDTO, error) {
+func (service *Service) UpdateTrack(ctx context.Context, id string, input UpdateTrackInput) (TrackDTO, error) {
 	if input.ExpectedVersion < 1 || (!input.Title.Set && !input.AlbumID.Set && !input.ArtistCredits.Set && !input.TrackNumber.Set && !input.DiscNumber.Set) {
 		return TrackDTO{}, apperror.Validation("At least one field must change")
 	}
@@ -256,33 +241,24 @@ func (service *Service) UpdateTrack(ctx context.Context, actorID, traceID, id st
 	if err := service.store.UpdateTrack(ctx, params); err != nil {
 		return TrackDTO{}, err
 	}
-	if err := service.audit(ctx, actorID, "admin.track.update", "track", id, traceID, nil); err != nil {
-		return TrackDTO{}, err
-	}
 	return service.track(ctx, id)
 }
 
-func (service *Service) PublishTrack(ctx context.Context, actorID, traceID, id string, expectedVersion int) (TrackDTO, error) {
+func (service *Service) PublishTrack(ctx context.Context, id string, expectedVersion int) (TrackDTO, error) {
 	if expectedVersion < 1 {
 		return TrackDTO{}, apperror.Validation("expectedVersion is invalid")
 	}
 	if err := service.store.PublishTrack(ctx, id, expectedVersion); err != nil {
 		return TrackDTO{}, err
 	}
-	if err := service.audit(ctx, actorID, "admin.track.publish", "track", id, traceID, nil); err != nil {
-		return TrackDTO{}, err
-	}
 	return service.track(ctx, id)
 }
 
-func (service *Service) ArchiveTrack(ctx context.Context, actorID, traceID, id string, expectedVersion int) (TrackDTO, error) {
+func (service *Service) ArchiveTrack(ctx context.Context, id string, expectedVersion int) (TrackDTO, error) {
 	if expectedVersion < 1 {
 		return TrackDTO{}, apperror.Validation("expectedVersion is invalid")
 	}
 	if err := service.store.ArchiveTrack(ctx, id, expectedVersion); err != nil {
-		return TrackDTO{}, err
-	}
-	if err := service.audit(ctx, actorID, "admin.track.archive", "track", id, traceID, nil); err != nil {
 		return TrackDTO{}, err
 	}
 	return service.track(ctx, id)
@@ -290,14 +266,12 @@ func (service *Service) ArchiveTrack(ctx context.Context, actorID, traceID, id s
 
 func (service *Service) ArchiveTracksBatch(
 	ctx context.Context,
-	actorID string,
-	traceID string,
 	input BatchTrackMutationInput,
 ) (BatchArchiveDTO, error) {
 	if err := validateBatchTrackItems(input.Items); err != nil {
 		return BatchArchiveDTO{}, err
 	}
-	records, err := service.store.ArchiveTracksBatch(ctx, actorID, traceID, input.Items)
+	records, err := service.store.ArchiveTracksBatch(ctx, input.Items)
 	if err != nil {
 		return BatchArchiveDTO{}, err
 	}
@@ -310,14 +284,11 @@ func (service *Service) ArchiveTracksBatch(
 	return BatchArchiveDTO{Archived: len(items), Items: items}, nil
 }
 
-func (service *Service) RestoreTrack(ctx context.Context, actorID, traceID, id string, expectedVersion int) (TrackDTO, error) {
+func (service *Service) RestoreTrack(ctx context.Context, id string, expectedVersion int) (TrackDTO, error) {
 	if expectedVersion < 1 {
 		return TrackDTO{}, apperror.Validation("expectedVersion is invalid")
 	}
 	if err := service.store.RestoreTrack(ctx, id, expectedVersion); err != nil {
-		return TrackDTO{}, err
-	}
-	if err := service.audit(ctx, actorID, "admin.track.restore", "track", id, traceID, nil); err != nil {
 		return TrackDTO{}, err
 	}
 	return service.track(ctx, id)
@@ -325,14 +296,12 @@ func (service *Service) RestoreTrack(ctx context.Context, actorID, traceID, id s
 
 func (service *Service) RestoreTracksBatch(
 	ctx context.Context,
-	actorID string,
-	traceID string,
 	input BatchTrackMutationInput,
 ) (BatchRestoreDTO, error) {
 	if err := validateBatchTrackItems(input.Items); err != nil {
 		return BatchRestoreDTO{}, err
 	}
-	records, err := service.store.RestoreTracksBatch(ctx, actorID, traceID, input.Items)
+	records, err := service.store.RestoreTracksBatch(ctx, input.Items)
 	if err != nil {
 		return BatchRestoreDTO{}, err
 	}
@@ -347,14 +316,12 @@ func (service *Service) RestoreTracksBatch(
 
 func (service *Service) CreatePermanentDeleteBatch(
 	ctx context.Context,
-	actorID string,
-	traceID string,
 	input BatchTrackMutationInput,
 ) (PermanentDeleteBatchDTO, error) {
 	if err := validateBatchTrackItems(input.Items); err != nil {
 		return PermanentDeleteBatchDTO{}, err
 	}
-	job, items, err := service.store.CreatePermanentDeleteBatch(ctx, actorID, traceID, input.Items)
+	job, items, err := service.store.CreatePermanentDeleteBatch(ctx, input.Items)
 	if err != nil {
 		return PermanentDeleteBatchDTO{}, err
 	}
@@ -369,16 +336,12 @@ func (service *Service) PermanentDeleteBatch(ctx context.Context, jobID string) 
 	return presentPermanentDeleteBatch(job, items), nil
 }
 
-func (service *Service) DeleteTrackPermanently(ctx context.Context, actorID, traceID, id string, expectedVersion int) (DeleteTrackDTO, error) {
+func (service *Service) DeleteTrackPermanently(ctx context.Context, id string, expectedVersion int) (DeleteTrackDTO, error) {
 	if expectedVersion < 1 {
 		return DeleteTrackDTO{}, apperror.Validation("expectedVersion is invalid")
 	}
 	result, err := service.store.DeleteTrackPermanently(ctx, id, expectedVersion, service.defaultLibraryDirectory)
 	if err != nil {
-		return DeleteTrackDTO{}, err
-	}
-	details := map[string]any{"deletedFiles": result.DeletedFiles, "quarantinedFiles": result.QuarantinedFiles, "scheduledObjects": result.ScheduledObjects}
-	if err := service.audit(ctx, actorID, "admin.track.delete_permanently", "track", id, traceID, details); err != nil {
 		return DeleteTrackDTO{}, err
 	}
 	return DeleteTrackDTO{Deleted: true, DeletedFiles: result.DeletedFiles, QuarantinedFiles: result.QuarantinedFiles, ScheduledObjects: result.ScheduledObjects}, nil
@@ -435,7 +398,7 @@ func optionalBatchTimestamp(value *time.Time) *string {
 	return &formatted
 }
 
-func (service *Service) UpsertLyrics(ctx context.Context, actorID, traceID, trackID string, input LyricsInput) (LyricDTO, error) {
+func (service *Service) UpsertLyrics(ctx context.Context, trackID string, input LyricsInput) (LyricDTO, error) {
 	if input.ExpectedVersion < 1 || (input.Format != "LRC" && input.Format != "PLAIN") || !input.Content.Set || !input.IsDefault.Set {
 		return LyricDTO{}, apperror.Validation("Lyrics request is invalid")
 	}
@@ -457,28 +420,18 @@ func (service *Service) UpsertLyrics(ctx context.Context, actorID, traceID, trac
 	if err != nil {
 		return LyricDTO{}, err
 	}
-	if err := service.audit(ctx, actorID, "admin.track.lyrics.upsert", "track", trackID, traceID, nil); err != nil {
-		return LyricDTO{}, err
-	}
 	return LyricDTO{ID: stored.ID, TrackID: trackID, Language: stored.Language, Format: stored.Format, Timing: stored.Timing, Content: stored.Content,
 		IsDefault: stored.IsDefault, TrackVersion: stored.TrackVersion, UpdatedAt: formatTimestamp(stored.UpdatedAt)}, nil
 }
 
-func (service *Service) UpdateUserStatus(ctx context.Context, actorID, traceID, userID string, input UserStatusInput) (UserStatusDTO, error) {
+func (service *Service) UpdateUserStatus(ctx context.Context, actorID, userID string, input UserStatusInput) (UserStatusDTO, error) {
 	if input.ExpectedVersion < 1 || (input.Status != UserActive && input.Status != UserSuspended) {
 		return UserStatusDTO{}, apperror.Validation("User status request is invalid")
-	}
-	reason, err := requireText(input.Reason, 500, "reason")
-	if err != nil {
-		return UserStatusDTO{}, err
 	}
 	if actorID == userID && input.Status == UserSuspended {
 		return UserStatusDTO{}, apperror.Validation("Administrators cannot suspend their own account")
 	}
 	if err := service.store.UpdateUserStatus(ctx, actorID, userID, input.ExpectedVersion, input.Status); err != nil {
-		return UserStatusDTO{}, err
-	}
-	if err := service.audit(ctx, actorID, "admin.user.status.update", "user", userID, traceID, map[string]any{"status": input.Status, "reason": reason}); err != nil {
 		return UserStatusDTO{}, err
 	}
 	record, err := service.store.FindUser(ctx, userID)
@@ -582,12 +535,6 @@ func (service *Service) track(ctx context.Context, id string) (TrackDTO, error) 
 	return TrackDTO{ID: record.ID, Title: record.Title, Album: album, ArtistCredits: creditsDTO(record.Credits), Artwork: artwork(artworks, record.AlbumCoverAssetID), DurationMS: duration, TrackNumber: record.TrackNumber, DiscNumber: disc, Status: record.Status, ActiveMediaJobID: record.ActiveMediaJobID, Version: record.Version, CreatedAt: formatTimestamp(record.CreatedAt), UpdatedAt: formatTimestamp(record.UpdatedAt)}, nil
 }
 
-func (service *Service) audit(ctx context.Context, actorID, action, targetType, targetID, traceID string, details map[string]any) error {
-	if details == nil {
-		details = map[string]any{}
-	}
-	return service.store.WriteAudit(ctx, actorID, action, targetType, targetID, traceID, details)
-}
 func creditsDTO(records []CreditRecord) []CreditDTO {
 	result := make([]CreditDTO, 0, len(records))
 	for _, r := range records {

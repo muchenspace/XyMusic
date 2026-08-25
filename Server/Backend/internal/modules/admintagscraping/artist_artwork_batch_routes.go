@@ -24,7 +24,7 @@ func (routes *Routes) createArtistArtworkBatch(c *gin.Context) error {
 		"admin.tag-scraping.artist-artwork.batch.create",
 		input,
 		http.StatusAccepted,
-		func(actorID, _ string) (any, error) {
+		func(actorID string) (any, error) {
 			return routes.artistArtworkBatches.Create(c.Request.Context(), actorID, input)
 		},
 	)
@@ -60,7 +60,7 @@ func (routes *Routes) cancelArtistArtworkBatch(c *gin.Context) error {
 		"admin.tag-scraping.artist-artwork.batch.cancel:"+jobID,
 		map[string]any{},
 		http.StatusAccepted,
-		func(_, _ string) (any, error) {
+		func(string) (any, error) {
 			return routes.artistArtworkBatches.Cancel(c.Request.Context(), jobID)
 		},
 	)
@@ -76,7 +76,7 @@ func (routes *Routes) retryArtistArtworkBatch(c *gin.Context) error {
 		"admin.tag-scraping.artist-artwork.batch.retry:"+jobID,
 		map[string]any{},
 		http.StatusAccepted,
-		func(_, _ string) (any, error) {
+		func(string) (any, error) {
 			return routes.artistArtworkBatches.Retry(c.Request.Context(), jobID)
 		},
 	)

@@ -111,9 +111,6 @@ func TestCompleteRouteForwardsTraceIDAndOriginalResponseShape(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("complete route failed: %d %s", recorder.Code, recorder.Body.String())
 	}
-	if api.traceID != "trace-client-setup" {
-		t.Fatalf("trace id was not forwarded: %q", api.traceID)
-	}
 	var response map[string]any
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
@@ -245,7 +242,6 @@ func performRawJSON(engine http.Handler, path string, body []byte) *httptest.Res
 type fakeSetupAPI struct {
 	paths        PathsInput
 	database     DatabaseTestInput
-	traceID      string
 	calls        []string
 	requireCalls int
 	requireErr   error
@@ -293,9 +289,8 @@ func (api *fakeSetupAPI) TestAdministrator(context.Context, AdministratorInput) 
 	api.calls = append(api.calls, "administrator")
 	return OKResponse{OK: true}, nil
 }
-func (api *fakeSetupAPI) Complete(_ context.Context, _ SetupInput, traceID string) (CompletionResponse, error) {
+func (api *fakeSetupAPI) Complete(_ context.Context, _ SetupInput) (CompletionResponse, error) {
 	api.calls = append(api.calls, "complete")
-	api.traceID = traceID
 	return CompletionResponse{
 		Configured: true, RuntimeGeneration: 1,
 		ActualListener: ActualListener{

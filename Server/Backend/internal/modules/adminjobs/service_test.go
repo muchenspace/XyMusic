@@ -5,8 +5,6 @@ import (
 	"reflect"
 	"testing"
 	"time"
-
-	"xymusic/server/internal/shared/apperror"
 )
 
 func TestServiceListsUnifiedJobsAndPresentsSafeErrors(t *testing.T) {
@@ -64,18 +62,17 @@ func TestServiceDelegatesMetadataMutationsWithCurrentVersionAndDefaults(t *testi
 	}
 	metadata := &metadataMutatorStub{}
 	service, _ := NewService(store, metadata)
-	if _, err := service.Retry(context.Background(), "actor", "trace", "job-1", nil); err != nil {
+	if _, err := service.Retry(context.Background(), "actor", "job-1", nil); err != nil {
 		t.Fatal(err)
 	}
 	if metadata.retryCalls != 1 || metadata.retryInput.ExpectedVersion != 7 ||
 		metadata.retryInput.Reason != defaultRetryReason {
 		t.Fatalf("metadata retry=%d/%+v", metadata.retryCalls, metadata.retryInput)
 	}
-	reason := "  stop now  "
-	if _, err := service.Cancel(context.Background(), "actor", "trace", "job-1", &reason); err != nil {
+	if _, err := service.Cancel(context.Background(), "job-1"); err != nil {
 		t.Fatal(err)
 	}
-	if metadata.cancelCalls != 1 || metadata.cancelInput.ExpectedVersion != 7 || metadata.cancelInput.Reason != "stop now" {
+	if metadata.cancelCalls != 1 || metadata.cancelInput.ExpectedVersion != 7 {
 		t.Fatalf("metadata cancel=%d/%+v", metadata.cancelCalls, metadata.cancelInput)
 	}
 	if store.retryCalls != 0 || store.cancelCalls != 0 {
@@ -83,30 +80,24 @@ func TestServiceDelegatesMetadataMutationsWithCurrentVersionAndDefaults(t *testi
 	}
 }
 
-func TestServiceDelegatesMediaOrScanMutationsAndRejectsBlankReason(t *testing.T) {
+func TestServiceDelegatesMediaOrScanMutations(t *testing.T) {
 	now := time.Now().UTC()
 	store := &jobStoreStub{findRecord: JobRecord{
 		ID: "job-2", Type: JobTypeMediaProcess, Status: JobStatusQueued, Source: JobSourceMedia,
 		Title: "Track", MaxAttempts: 5, CreatedAt: now, UpdatedAt: now,
 	}}
 	service, _ := NewService(store, &metadataMutatorStub{})
-	reason := "  retry source  "
-	if _, err := service.Retry(context.Background(), "actor", "trace", "job-2", &reason); err != nil {
+	if _, err := service.Retry(context.Background(), "actor", "job-2", nil); err != nil {
 		t.Fatal(err)
 	}
-	if store.retryCalls != 1 || store.retryReason == nil || *store.retryReason != "retry source" {
-		t.Fatalf("retry=%d/%v", store.retryCalls, store.retryReason)
+	if store.retryCalls != 1 {
+		t.Fatalf("retry=%d", store.retryCalls)
 	}
-	if _, err := service.Cancel(context.Background(), "actor", "trace", "job-2", nil); err != nil {
+	if _, err := service.Cancel(context.Background(), "job-2"); err != nil {
 		t.Fatal(err)
 	}
-	if store.cancelCalls != 1 || store.cancelReason != nil {
-		t.Fatalf("cancel=%d/%v", store.cancelCalls, store.cancelReason)
-	}
-	blank := "   "
-	_, err := service.Retry(context.Background(), "actor", "trace", "job-2", &blank)
-	if !apperror.IsCode(err, apperror.CodeValidationError) || store.retryCalls != 1 {
-		t.Fatalf("blank reason err/calls=%v/%d", err, store.retryCalls)
+	if store.cancelCalls != 1 {
+		t.Fatalf("cancel=%d", store.cancelCalls)
 	}
 }
 
@@ -125,18 +116,17 @@ func TestServiceBuildsEventFingerprint(t *testing.T) {
 }
 
 type jobStoreStub struct {
-	listRecords               []JobRecord
-	listTotal                 int
-	listQuery                 ListQuery
-	findRecord                JobRecord
-	findErr                   error
-	metadataVersion           int
-	metadataFound             bool
-	metadataErr               error
-	retryCalls, cancelCalls   int
-	retryReason, cancelReason *string
-	eventRecord               EventRecord
-	eventErr                  error
+	listRecords             []JobRecord
+	listTotal               int
+	listQuery               ListQuery
+	findRecord              JobRecord
+	findErr                 error
+	metadataVersion         int
+	metadataFound           bool
+	metadataErr             error
+	retryCalls, cancelCalls int
+	eventRecord             EventRecord
+	eventErr                error
 }
 
 func (stub *jobStoreStub) ListJobs(_ context.Context, query ListQuery) ([]JobRecord, int, error) {
@@ -152,15 +142,13 @@ func (stub *jobStoreStub) FindMetadataVersion(context.Context, string) (int, boo
 	return stub.metadataVersion, stub.metadataFound, stub.metadataErr
 }
 
-func (stub *jobStoreStub) RetryMediaOrScan(_ context.Context, _, _, _ string, reason *string) error {
+func (stub *jobStoreStub) RetryMediaOrScan(_ context.Context, _ string) error {
 	stub.retryCalls++
-	stub.retryReason = cloneString(reason)
 	return nil
 }
 
-func (stub *jobStoreStub) CancelMediaOrScan(_ context.Context, _, _, _ string, reason *string) error {
+func (stub *jobStoreStub) CancelMediaOrScan(_ context.Context, _ string) error {
 	stub.cancelCalls++
-	stub.cancelReason = cloneString(reason)
 	return nil
 }
 
@@ -170,12 +158,13 @@ func (stub *jobStoreStub) EventState(context.Context) (EventRecord, error) {
 
 type metadataMutatorStub struct {
 	retryCalls, cancelCalls int
-	retryInput, cancelInput MetadataMutationInput
+	retryInput              MetadataMutationInput
+	cancelInput             MetadataCancelInput
 	err                     error
 }
 
 func (stub *metadataMutatorStub) Retry(
-	_ context.Context, _, _, _ string, input MetadataMutationInput,
+	_ context.Context, _, _ string, input MetadataMutationInput,
 ) error {
 	stub.retryCalls++
 	stub.retryInput = input
@@ -183,17 +172,9 @@ func (stub *metadataMutatorStub) Retry(
 }
 
 func (stub *metadataMutatorStub) Cancel(
-	_ context.Context, _, _, _ string, input MetadataMutationInput,
+	_ context.Context, _ string, input MetadataCancelInput,
 ) error {
 	stub.cancelCalls++
 	stub.cancelInput = input
 	return stub.err
-}
-
-func cloneString(value *string) *string {
-	if value == nil {
-		return nil
-	}
-	copy := *value
-	return &copy
 }

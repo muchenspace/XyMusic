@@ -159,7 +159,6 @@ async function refreshCatalog(): Promise<void> {
     queryClient.invalidateQueries({ queryKey: ["admin", "albums"] }),
     queryClient.invalidateQueries({ queryKey: ["admin", "artists"] }),
     queryClient.invalidateQueries({ queryKey: ["admin", "jobs"] }),
-    queryClient.invalidateQueries({ queryKey: ["admin", "audit"] }),
   ]);
 }
 function upsertScan(sourceId: string, scan: SourceScan): void {

@@ -338,7 +338,7 @@ func (synchronizer *ProductionSynchronizer) storeCueTracks(ctx context.Context, 
 			return false, err
 		}
 		if _, err := transaction.Exec(ctx, `UPDATE tracks SET
-			status='ARCHIVED',version=version+1,updated_at=now() WHERE id=ANY($1::uuid[])`, stale); err != nil {
+			status='ARCHIVED',archived_manually=false,version=version+1,updated_at=now() WHERE id=ANY($1::uuid[])`, stale); err != nil {
 			return false, err
 		}
 	}

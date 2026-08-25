@@ -235,11 +235,10 @@ func (service *Service) TrackMetadataBatch(
 func (service *Service) Apply(
 	ctx context.Context,
 	actorID string,
-	traceID string,
 	trackID string,
 	input ApplyInput,
 ) (ApplyResult, error) {
-	return service.apply(ctx, actorID, traceID, trackID, input, nil)
+	return service.apply(ctx, actorID, trackID, input, nil)
 }
 
 // applyWithMetadata is used by the batch worker when the claim transaction
@@ -248,18 +247,16 @@ func (service *Service) Apply(
 func (service *Service) applyWithMetadata(
 	ctx context.Context,
 	actorID string,
-	traceID string,
 	trackID string,
 	input ApplyInput,
 	currentMetadata TrackMetadata,
 ) (ApplyResult, error) {
-	return service.apply(ctx, actorID, traceID, trackID, input, &currentMetadata)
+	return service.apply(ctx, actorID, trackID, input, &currentMetadata)
 }
 
 func (service *Service) apply(
 	ctx context.Context,
 	actorID string,
-	traceID string,
 	trackID string,
 	input ApplyInput,
 	claimedMetadata *TrackMetadata,
@@ -381,7 +378,7 @@ func (service *Service) apply(
 		if err := checkApplyCancellation(ctx, input); err != nil {
 			return ApplyResult{}, err
 		}
-		metadata, err = service.store.UpdateMetadata(ctx, actorID, traceID, trackID, input.ExpectedVersion, patch, reason)
+		metadata, err = service.store.UpdateMetadata(ctx, actorID, trackID, input.ExpectedVersion, patch, reason)
 		if err != nil {
 			if apperror.IsCode(err, apperror.CodeResourceConflict) && strings.Contains(strings.ToLower(err.Error()), "does not change") {
 				appliedFields = appliedFields[:0]
@@ -408,7 +405,7 @@ func (service *Service) apply(
 				artworkErr = checkApplyCancellation(ctx, input)
 			}
 			if artworkErr == nil {
-				artworkErr = service.artwork.ApplyAlbumArtwork(ctx, actorID, traceID, *albumID, artwork)
+				artworkErr = service.artwork.ApplyAlbumArtwork(ctx, actorID, *albumID, artwork)
 			}
 			if artworkErr != nil {
 				warnings = append(warnings, "Cover application failed: "+messageOf(artworkErr))
@@ -426,7 +423,7 @@ func (service *Service) apply(
 		if err := checkApplyCancellation(ctx, input); err != nil {
 			return ApplyResult{}, err
 		}
-		job, enqueueErr := service.store.EnqueueWriteback(ctx, actorID, traceID, trackID, metadata.Version, reason)
+		job, enqueueErr := service.store.EnqueueWriteback(ctx, actorID, trackID, metadata.Version, reason)
 		if enqueueErr != nil {
 			return ApplyResult{}, enqueueErr
 		}

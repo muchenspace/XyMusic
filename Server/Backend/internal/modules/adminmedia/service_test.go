@@ -21,11 +21,10 @@ import (
 	"xymusic/server/internal/shared/apperror"
 )
 
-func TestCreateUploadReservesSignsAuditsAndPresentsRequiredHeaders(t *testing.T) {
+func TestCreateUploadReservesAndPresentsRequiredHeaders(t *testing.T) {
 	now := time.Date(2026, 7, 16, 1, 2, 3, 456789000, time.UTC)
 	checksum := stringOf('a', 64)
 	var created CreateUploadParams
-	var audit AuditWrite
 	store := &mediaStoreStub{}
 	store.createUpload = func(_ context.Context, input CreateUploadParams) (MediaUpload, error) {
 		created = input
@@ -37,7 +36,6 @@ func TestCreateUploadReservesSignsAuditsAndPresentsRequiredHeaders(t *testing.T)
 			Status: UploadStatusCreated, ExpiresAt: input.ExpiresAt, CreatedAt: input.Now,
 		}, nil
 	}
-	store.writeAudit = func(_ context.Context, input AuditWrite) error { audit = input; return nil }
 	storage := &mediaStorageStub{createURL: func(_ context.Context, input UploadURLRequest) (string, error) {
 		if input.ContentLength != 123 || input.ChecksumSHA256 != checksum || input.Expires != 5*time.Minute {
 			t.Fatalf("upload URL request = %#v", input)
@@ -45,7 +43,7 @@ func TestCreateUploadReservesSignsAuditsAndPresentsRequiredHeaders(t *testing.T)
 		return "https://storage.test/signed", nil
 	}}
 	service := newMediaService(t, store, storage, &mediaInspectorStub{}, fixedClock{now}, ids("upload-1"))
-	result, err := service.CreateUpload(context.Background(), "admin-1", "trace-12345678", CreateUploadInput{
+	result, err := service.CreateUpload(context.Background(), "admin-1", CreateUploadInput{
 		Purpose:        PurposeTrackSource,
 		TargetID:       "00000000-0000-0000-0000-000000000001",
 		FileName:       "source.FLAC",
@@ -67,10 +65,6 @@ func TestCreateUploadReservesSignsAuditsAndPresentsRequiredHeaders(t *testing.T)
 	}
 	if _, present := result.RequiredHeaders["content-length"]; present {
 		t.Fatalf("content-length must not be a required signed header: %#v", result.RequiredHeaders)
-	}
-	if audit.Action != "media.upload.create" || audit.TargetID != "upload-1" ||
-		audit.Details["purpose"] != PurposeTrackSource {
-		t.Fatalf("audit = %#v", audit)
 	}
 }
 
@@ -96,7 +90,7 @@ func TestCreateUploadMarksReservationFailedWhenSigningFails(t *testing.T) {
 		return "", errors.New("storage down")
 	}}
 	service := newMediaService(t, store, storage, &mediaInspectorStub{}, fixedClock{now}, ids("upload-1"))
-	_, err := service.CreateUpload(context.Background(), "admin-1", "trace-12345678", validImageUpload())
+	_, err := service.CreateUpload(context.Background(), "admin-1", validImageUpload())
 	if !apperror.IsCode(err, apperror.CodeDependencyUnavailable) ||
 		failedActor != "admin-1" || failedUpload != "upload-1" {
 		t.Fatalf("error/failed = %v / %q %q", err, failedActor, failedUpload)
@@ -235,7 +229,7 @@ func TestCompleteTrackUploadInspectsFinalizesAndReturnsProcessingJob(t *testing.
 	}}
 	service := newMediaService(t, store, &mediaStorageStub{}, inspector, fixedClock{now},
 		ids("claim-generated", "asset-1", "job-generated"))
-	result, err := service.CompleteUpload(context.Background(), "admin-1", "trace-12345678", "upload-1", CompleteUploadInput{
+	result, err := service.CompleteUpload(context.Background(), "admin-1", "upload-1", CompleteUploadInput{
 		ObservedETag:    OptionalString{Set: true, Value: `"etag-value"`},
 		CompletionFence: fence,
 	})
@@ -247,7 +241,7 @@ func TestCompleteTrackUploadInspectsFinalizesAndReturnsProcessingJob(t *testing.
 		t.Fatalf("result = %#v", result)
 	}
 	if finalized.CompletionToken != "claim-1" || finalized.JobID != "job-generated" ||
-		finalized.TraceID != "trace-12345678" || finalized.Now != now || finalized.CompletionFence != fence {
+		finalized.Now != now || finalized.CompletionFence != fence {
 		t.Fatalf("finalized = %#v", finalized)
 	}
 }
@@ -288,7 +282,7 @@ func TestCompleteUploadRecoversCommittedResultWithCancelledRequestContext(t *tes
 	}}
 	service := newMediaService(t, store, &mediaStorageStub{}, inspector, fixedClock{now},
 		ids("claim-generated", "asset-generated", "job-generated"))
-	result, err := service.CompleteUpload(requestContext, "admin-1", "trace-12345678", upload.ID, CompleteUploadInput{})
+	result, err := service.CompleteUpload(requestContext, "admin-1", upload.ID, CompleteUploadInput{})
 	if err != nil || result.AssetID != assetID || cleanupCalled {
 		t.Fatalf("result/error/cleanup = %#v / %v / %v", result, err, cleanupCalled)
 	}
@@ -339,7 +333,7 @@ func TestCompleteUploadCleansAllStagingObjectsAfterFenceFailure(t *testing.T) {
 	}}
 	service := newMediaService(t, store, &mediaStorageStub{}, inspector, fixedClock{now},
 		ids("claim-generated", "asset-generated", "job-generated"))
-	_, err := service.CompleteUpload(requestContext, "admin-1", "trace-12345678", upload.ID, CompleteUploadInput{
+	_, err := service.CompleteUpload(requestContext, "admin-1", upload.ID, CompleteUploadInput{
 		CompletionFence: &completionFenceStub{},
 	})
 	if !errors.Is(err, fenceErr) {
@@ -376,7 +370,7 @@ func TestCompleteUploadReleasesDependencyFailureForRetry(t *testing.T) {
 		return InspectedUpload{}, apperror.DependencyUnavailable("storage unavailable")
 	}}
 	service := newMediaService(t, store, &mediaStorageStub{}, inspector, fixedClock{now}, ids("claim-generated"))
-	_, err := service.CompleteUpload(context.Background(), "admin-1", "trace-12345678", "upload-1", CompleteUploadInput{})
+	_, err := service.CompleteUpload(context.Background(), "admin-1", "upload-1", CompleteUploadInput{})
 	if !apperror.IsCode(err, apperror.CodeDependencyUnavailable) || !retryable ||
 		!reflect.DeepEqual(cleanup, []string{upload.ObjectKey}) {
 		t.Fatalf("error/retry/cleanup = %v / %v / %#v", err, retryable, cleanup)
@@ -409,7 +403,7 @@ func TestCompleteUploadWithBatchFenceCleansDependencyFailureInsteadOfRetrying(t 
 		}
 	}}
 	service := newMediaService(t, store, &mediaStorageStub{}, inspector, fixedClock{now}, ids("claim-generated"))
-	_, err := service.CompleteUpload(context.Background(), "admin-1", "trace-12345678", upload.ID, CompleteUploadInput{
+	_, err := service.CompleteUpload(context.Background(), "admin-1", upload.ID, CompleteUploadInput{
 		CompletionFence: &completionFenceStub{},
 	})
 	if !apperror.IsCode(err, apperror.CodeDependencyUnavailable) || retryable ||
@@ -431,7 +425,7 @@ func TestCompleteUploadReturnsPersistedCompletionWithoutInspection(t *testing.T)
 		inspected = true
 		return InspectedUpload{}, nil
 	}}, fixedClock{time.Now()}, ids("claim-generated"))
-	result, err := service.CompleteUpload(context.Background(), "admin-1", "trace-12345678", "upload-1", CompleteUploadInput{})
+	result, err := service.CompleteUpload(context.Background(), "admin-1", "upload-1", CompleteUploadInput{})
 	if err != nil || inspected || result.JobID == nil || *result.JobID != jobID {
 		t.Fatalf("result/error/inspected = %#v / %v / %v", result, err, inspected)
 	}
@@ -469,15 +463,13 @@ func TestJobPresentationAndRetryPreserveOptimisticVersion(t *testing.T) {
 		presented.UpdatedAt != "2026-07-16T03:04:05.987Z" {
 		t.Fatalf("presented = %#v", presented)
 	}
-	retried, err := service.RetryJob(context.Background(), "admin-1", "trace-12345678", "job-1", RetryJobInput{
+	retried, err := service.RetryJob(context.Background(), "job-1", RetryJobInput{
 		ExpectedVersion: 3,
-		Reason:          OptionalString{Set: true, Value: "operator retry"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if retry.ExpectedVersion != 3 || retry.Reason == nil || *retry.Reason != "operator retry" ||
-		retried.Status != JobStatusPending || retried.NextAttemptAt == nil {
+	if retry.ExpectedVersion != 3 || retried.Status != JobStatusPending || retried.NextAttemptAt == nil {
 		t.Fatalf("retry/result = %#v / %#v", retry, retried)
 	}
 }
@@ -570,7 +562,6 @@ type mediaStoreStub struct {
 	failCompletion       func(context.Context, string, string, bool, []string, string, time.Time) error
 	findJob              func(context.Context, string) (MediaJob, error)
 	retryJob             func(context.Context, RetryJobParams) (MediaJob, error)
-	writeAudit           func(context.Context, AuditWrite) error
 }
 
 func (stub *mediaStoreStub) CreateUpload(ctx context.Context, input CreateUploadParams) (MediaUpload, error) {
@@ -632,12 +623,6 @@ func (stub *mediaStoreStub) RetryJob(ctx context.Context, input RetryJobParams) 
 		return MediaJob{}, errors.New("unexpected RetryJob call")
 	}
 	return stub.retryJob(ctx, input)
-}
-func (stub *mediaStoreStub) WriteAudit(ctx context.Context, input AuditWrite) error {
-	if stub.writeAudit == nil {
-		return errors.New("unexpected WriteAudit call")
-	}
-	return stub.writeAudit(ctx, input)
 }
 
 type mediaStorageStub struct {

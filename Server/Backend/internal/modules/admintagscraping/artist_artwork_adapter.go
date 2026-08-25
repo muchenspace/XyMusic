@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -18,7 +17,6 @@ import (
 func (adapter *AdminMediaArtworkApplier) ApplyArtistArtwork(
 	ctx context.Context,
 	actorID string,
-	traceID string,
 	artistID string,
 	expectedVersion int,
 	overwrite bool,
@@ -31,7 +29,7 @@ func (adapter *AdminMediaArtworkApplier) ApplyArtistArtwork(
 		return apperror.Validation("Artist artwork apply context is invalid")
 	}
 	digest := sha256.Sum256(artwork.Bytes)
-	upload, err := adapter.media.CreateUpload(ctx, actorID, traceID, adminmedia.CreateUploadInput{
+	upload, err := adapter.media.CreateUpload(ctx, actorID, adminmedia.CreateUploadInput{
 		Purpose:        adminmedia.PurposeArtistArtwork,
 		TargetID:       artistID,
 		FileName:       "scraped-artist." + artwork.Extension,
@@ -56,13 +54,10 @@ func (adapter *AdminMediaArtworkApplier) ApplyArtistArtwork(
 	_, err = adapter.media.CompleteUpload(
 		completionContext,
 		actorID,
-		traceID,
 		upload.ID,
 		adminmedia.CompleteUploadInput{CompletionFence: &artistArtworkCompletionFence{
 			executionContext: ctx,
 			mutationFence:    completionMutationFenceFromContext(ctx),
-			actorID:          actorID,
-			traceID:          traceID,
 			artistID:         artistID,
 			expectedVersion:  expectedVersion,
 			overwrite:        overwrite,
@@ -80,8 +75,6 @@ func (adapter *AdminMediaArtworkApplier) ApplyArtistArtwork(
 type artistArtworkCompletionFence struct {
 	executionContext context.Context
 	mutationFence    artworkMutationFence
-	actorID          string
-	traceID          string
 	artistID         string
 	expectedVersion  int
 	overwrite        bool
@@ -131,21 +124,6 @@ func (fence *artistArtworkCompletionFence) Lock(ctx context.Context, tx pgx.Tx) 
 			"Artist already has artwork; enable overwrite to replace it",
 			map[string]any{"artistId": fence.artistID},
 		)
-	}
-	details, err := json.Marshal(map[string]any{
-		"provider":   fence.candidate.Source,
-		"externalId": fence.candidate.ID,
-		"reason":     fence.reason,
-		"overwrite":  fence.overwrite,
-	})
-	if err != nil {
-		return fmt.Errorf("encode artist artwork scrape audit: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO audit_logs (actor_id, action, target_type, target_id, result, trace_id, details)
-		VALUES ($1, 'ARTIST_ARTWORK_SCRAPED', 'artist', $2, 'SUCCESS', $3, $4::jsonb)`,
-		fence.actorID, fence.artistID, fence.traceID, details); err != nil {
-		return fmt.Errorf("audit artist artwork scrape: %w", err)
 	}
 	if successFence, ok := fence.mutationFence.(artistArtworkSuccessFence); ok {
 		if err := successFence.CommitSuccess(ctx, tx, fence.candidate); err != nil {

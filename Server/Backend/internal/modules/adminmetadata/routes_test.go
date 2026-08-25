@@ -297,16 +297,16 @@ func (stub *metadataAPIStub) Metadata(context.Context, string) (MetadataDTO, err
 	stub.calls["metadata"]++
 	return MetadataDTO{}, nil
 }
-func (stub *metadataAPIStub) Update(_ context.Context, _, _, _ string, input MetadataMutationInput) (MetadataDTO, error) {
+func (stub *metadataAPIStub) Update(_ context.Context, _, _ string, input MetadataMutationInput) (MetadataDTO, error) {
 	stub.calls["update"]++
 	stub.updateInput = input
 	return MetadataDTO{}, nil
 }
-func (stub *metadataAPIStub) BatchUpdate(context.Context, string, string, BatchMetadataMutationInput) (BatchUpdateDTO, error) {
+func (stub *metadataAPIStub) BatchUpdate(context.Context, string, BatchMetadataMutationInput) (BatchUpdateDTO, error) {
 	stub.calls["batch"]++
 	return BatchUpdateDTO{Items: []BatchUpdateItemDTO{}}, nil
 }
-func (stub *metadataAPIStub) EnqueueWriteback(context.Context, string, string, string, VersionReasonInput) (WritebackJobDTO, error) {
+func (stub *metadataAPIStub) EnqueueWriteback(context.Context, string, string, VersionReasonInput) (WritebackJobDTO, error) {
 	stub.calls["enqueue"]++
 	return WritebackJobDTO{}, nil
 }
@@ -319,11 +319,11 @@ func (stub *metadataAPIStub) WritebackJob(context.Context, string) (WritebackJob
 	stub.calls["writeback"]++
 	return WritebackJobDTO{}, nil
 }
-func (stub *metadataAPIStub) RetryWriteback(context.Context, string, string, string, VersionReasonInput) (WritebackJobDTO, error) {
+func (stub *metadataAPIStub) RetryWriteback(context.Context, string, string, VersionReasonInput) (WritebackJobDTO, error) {
 	stub.calls["retry"]++
 	return WritebackJobDTO{}, nil
 }
-func (stub *metadataAPIStub) CancelWriteback(context.Context, string, string, string, VersionReasonInput) (WritebackJobDTO, error) {
+func (stub *metadataAPIStub) CancelWriteback(context.Context, string, VersionInput) (WritebackJobDTO, error) {
 	stub.calls["cancel"]++
 	return WritebackJobDTO{}, nil
 }

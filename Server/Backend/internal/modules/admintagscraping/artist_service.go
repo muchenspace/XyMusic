@@ -122,7 +122,6 @@ func (service *Service) SearchArtists(
 func (service *Service) ApplyArtistArtwork(
 	ctx context.Context,
 	actorID string,
-	traceID string,
 	artistID string,
 	input ArtistArtworkApplyInput,
 ) (ArtistArtworkApplyResult, error) {
@@ -150,7 +149,6 @@ func (service *Service) ApplyArtistArtwork(
 	if err := service.artwork.ApplyArtistArtwork(
 		applyContext,
 		actorID,
-		traceID,
 		artistID,
 		input.ExpectedVersion,
 		input.Overwrite,

@@ -23,13 +23,13 @@ import (
 
 type API interface {
 	Metadata(context.Context, string) (MetadataDTO, error)
-	Update(context.Context, string, string, string, MetadataMutationInput) (MetadataDTO, error)
-	BatchUpdate(context.Context, string, string, BatchMetadataMutationInput) (BatchUpdateDTO, error)
-	EnqueueWriteback(context.Context, string, string, string, VersionReasonInput) (WritebackJobDTO, error)
+	Update(context.Context, string, string, MetadataMutationInput) (MetadataDTO, error)
+	BatchUpdate(context.Context, string, BatchMetadataMutationInput) (BatchUpdateDTO, error)
+	EnqueueWriteback(context.Context, string, string, VersionReasonInput) (WritebackJobDTO, error)
 	ListWritebacks(context.Context, WritebackListInput) (WritebackJobPageDTO, error)
 	WritebackJob(context.Context, string) (WritebackJobDTO, error)
-	RetryWriteback(context.Context, string, string, string, VersionReasonInput) (WritebackJobDTO, error)
-	CancelWriteback(context.Context, string, string, string, VersionReasonInput) (WritebackJobDTO, error)
+	RetryWriteback(context.Context, string, string, VersionReasonInput) (WritebackJobDTO, error)
+	CancelWriteback(context.Context, string, VersionInput) (WritebackJobDTO, error)
 }
 
 type Routes struct {
@@ -89,9 +89,9 @@ func (routes *Routes) update(c *gin.Context) error {
 		return err
 	}
 	return mutateJSON(routes, c, "admin.track.metadata.update:"+trackID, request, http.StatusOK,
-		func(actorID, traceID string) (MetadataDTO, error) {
+		func(actorID string) (MetadataDTO, error) {
 			return routes.service.Update(
-				c.Request.Context(), actorID, traceID, trackID, MetadataMutationInput(request),
+				c.Request.Context(), actorID, trackID, MetadataMutationInput(request),
 			)
 		})
 }
@@ -102,9 +102,9 @@ func (routes *Routes) batchUpdate(c *gin.Context) error {
 		return err
 	}
 	return mutateJSON(routes, c, "admin.track.metadata.batch", request, http.StatusOK,
-		func(actorID, traceID string) (BatchUpdateDTO, error) {
+		func(actorID string) (BatchUpdateDTO, error) {
 			return routes.service.BatchUpdate(
-				c.Request.Context(), actorID, traceID, BatchMetadataMutationInput(request),
+				c.Request.Context(), actorID, BatchMetadataMutationInput(request),
 			)
 		})
 }
@@ -119,9 +119,9 @@ func (routes *Routes) enqueueWriteback(c *gin.Context) error {
 		return err
 	}
 	return mutateJSON(routes, c, "admin.track.metadata.writeback:"+trackID, request, http.StatusAccepted,
-		func(actorID, traceID string) (WritebackJobDTO, error) {
+		func(actorID string) (WritebackJobDTO, error) {
 			return routes.service.EnqueueWriteback(
-				c.Request.Context(), actorID, traceID, trackID, VersionReasonInput(request),
+				c.Request.Context(), actorID, trackID, VersionReasonInput(request),
 			)
 		})
 }
@@ -168,9 +168,9 @@ func (routes *Routes) retryWriteback(c *gin.Context) error {
 		return err
 	}
 	return mutateJSON(routes, c, "admin.track.metadata.writeback.retry:"+jobID, request, http.StatusAccepted,
-		func(actorID, traceID string) (WritebackJobDTO, error) {
+		func(actorID string) (WritebackJobDTO, error) {
 			return routes.service.RetryWriteback(
-				c.Request.Context(), actorID, traceID, jobID, VersionReasonInput(request),
+				c.Request.Context(), actorID, jobID, VersionReasonInput(request),
 			)
 		})
 }
@@ -180,14 +180,14 @@ func (routes *Routes) cancelWriteback(c *gin.Context) error {
 	if err != nil {
 		return err
 	}
-	request, err := decodeVersionReason(c.Request.Body)
+	request, err := decodeVersion(c.Request.Body)
 	if err != nil {
 		return err
 	}
 	return mutateJSON(routes, c, "admin.track.metadata.writeback.cancel:"+jobID, request, http.StatusAccepted,
-		func(actorID, traceID string) (WritebackJobDTO, error) {
+		func(string) (WritebackJobDTO, error) {
 			return routes.service.CancelWriteback(
-				c.Request.Context(), actorID, traceID, jobID, VersionReasonInput(request),
+				c.Request.Context(), jobID, VersionInput(request),
 			)
 		})
 }
@@ -198,7 +198,7 @@ func mutateJSON[T any, P any](
 	scope string,
 	payload P,
 	status int,
-	operation func(string, string) (T, error),
+	operation func(string) (T, error),
 ) error {
 	actor, err := adminauth.RequireAdmin(c, routes.identity, true)
 	if err != nil {
@@ -208,11 +208,10 @@ func mutateJSON[T any, P any](
 	if !idempotencyKeyPattern.MatchString(key) {
 		return apperror.Validation("Idempotency-Key is invalid")
 	}
-	traceID := httpserver.TraceID(c)
 	result, err := routes.idempotency.Execute(c.Request.Context(), IdempotencyInput{
 		ActorID: actor.UserID, Scope: scope, Key: key, Payload: payload,
 	}, func() (IdempotencyResponse, error) {
-		body, err := operation(actor.UserID, traceID)
+		body, err := operation(actor.UserID)
 		if err != nil {
 			return IdempotencyResponse{}, err
 		}
@@ -226,7 +225,6 @@ func mutateJSON[T any, P any](
 		return err
 	}
 	c.Header("X-Idempotent-Replay", strconv.FormatBool(result.Replayed))
-	c.Header("X-Trace-Id", traceID)
 	c.Data(result.Status, "application/json; charset=utf-8", result.Body)
 	return nil
 }
@@ -234,18 +232,20 @@ func mutateJSON[T any, P any](
 type metadataMutationRequest struct {
 	ExpectedVersion int            `json:"expectedVersion"`
 	Patch           map[string]any `json:"patch"`
-	Reason          string         `json:"reason"`
 }
 
 type batchMutationRequest struct {
 	Items  []BatchMutationItem `json:"items"`
 	Patch  map[string]any      `json:"patch"`
-	Reason string              `json:"reason"`
 }
 
 type versionReasonRequest struct {
 	ExpectedVersion int    `json:"expectedVersion"`
 	Reason          string `json:"reason"`
+}
+
+type versionRequest struct {
+	ExpectedVersion int `json:"expectedVersion"`
 }
 
 func decodeMetadataMutation(body io.Reader) (metadataMutationRequest, error) {
@@ -265,12 +265,8 @@ func decodeMetadataMutation(body io.Reader) (metadataMutationRequest, error) {
 	if err != nil {
 		return metadataMutationRequest{}, err
 	}
-	reason, err := requiredRouteString(object, "reason", 1, 500, nil)
-	if err != nil {
-		return metadataMutationRequest{}, err
-	}
 	return metadataMutationRequest{
-		ExpectedVersion: expectedVersion, Patch: patch, Reason: reason,
+		ExpectedVersion: expectedVersion, Patch: patch,
 	}, nil
 }
 
@@ -307,12 +303,8 @@ func decodeBatchMutation(body io.Reader) (batchMutationRequest, error) {
 	if err != nil {
 		return batchMutationRequest{}, err
 	}
-	reason, err := requiredRouteString(object, "reason", 1, 500, nil)
-	if err != nil {
-		return batchMutationRequest{}, err
-	}
 	return batchMutationRequest{
-		Items: items, Patch: patch, Reason: reason,
+		Items: items, Patch: patch,
 	}, nil
 }
 
@@ -330,6 +322,18 @@ func decodeVersionReason(body io.Reader) (versionReasonRequest, error) {
 		return versionReasonRequest{}, err
 	}
 	return versionReasonRequest{ExpectedVersion: expectedVersion, Reason: reason}, nil
+}
+
+func decodeVersion(body io.Reader) (versionRequest, error) {
+	object, err := decodeBodyObject(body)
+	if err != nil {
+		return versionRequest{}, err
+	}
+	expectedVersion, err := requiredIntegerField(object, "expectedVersion", 1, math.MaxInt)
+	if err != nil {
+		return versionRequest{}, err
+	}
+	return versionRequest{ExpectedVersion: expectedVersion}, nil
 }
 
 func decodeBodyObject(body io.Reader) (map[string]any, error) {

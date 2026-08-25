@@ -186,7 +186,7 @@ func TestCompleteRunsProbesMigrationsProvisioningRuntimeAndAtomicConfiguration(t
 		SecretGenerator: fixedSecret,
 	})
 
-	result, err := service.Complete(context.Background(), validSetupInput(), "trace-setup-complete")
+	result, err := service.Complete(context.Background(), validSetupInput())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestCompleteRunsProbesMigrationsProvisioningRuntimeAndAtomicConfiguration(t
 		"store.load",
 		"database.open", "storage.open", "storage.inspect", "storage.ensure", "storage.verify",
 		"database.inspect", "database.migrate", "password.hash", "database.provision",
-		"runtime.initialize", "store.save", "database.audit",
+		"runtime.initialize", "store.save",
 	})
 	if _, err := service.TestAdministrator(context.Background(), validSetupInput().Administrator); !apperror.IsCode(err, apperror.CodeForbidden) {
 		t.Fatalf("setup probes must be disabled after completion, got %v", err)
@@ -273,49 +273,6 @@ func fieldErrorExists(err *apperror.Error, field string) bool {
 	return ok && len(fieldErrors[field]) > 0
 }
 
-func TestCompleteCompensatesConfigurationRuntimeDataAndCreatedBucket(t *testing.T) {
-	root := prepareSetupRoot(t)
-	events := &eventLog{}
-	runtime := newFakeRuntime()
-	runtime.events = events
-	store := &fakeStore{events: events}
-	db := &fakeDatabase{events: events, auditErr: errors.New("audit unavailable")}
-	objects := &fakeStorage{events: events, createBucket: true}
-	service := mustService(t, Options{
-		RootDirectory:   root,
-		Runtime:         runtime,
-		Store:           store,
-		Databases:       &fakeDatabaseFactory{database: db, events: events},
-		ObjectStorage:   &fakeStorageFactory{storage: objects, events: events},
-		MediaTool:       &fakeMediaTool{events: events},
-		ListenerProbe:   &fakeListener{events: events},
-		Passwords:       fakePasswords{events: events},
-		SecretGenerator: fixedSecret,
-	})
-
-	_, err := service.Complete(context.Background(), validSetupInput(), "trace-rollback")
-	applicationError, ok := err.(*apperror.Error)
-	if !ok || applicationError.Code != apperror.CodeSetupFailed {
-		t.Fatalf("expected normalized setup failure, got %#v", err)
-	}
-	if applicationError.Metadata["setupStage"] != "completion_audit" || applicationError.Metadata["rollbackIncomplete"] != false {
-		t.Fatalf("unexpected setup failure metadata: %#v", applicationError.Metadata)
-	}
-	if store.exists || runtime.Status().Phase != "SETUP_REQUIRED" {
-		t.Fatalf("configuration/runtime rollback was incomplete: store=%v runtime=%#v", store.exists, runtime.Status())
-	}
-	if !db.compensated || !objects.bucketRemoved {
-		t.Fatalf("database/storage compensation was incomplete: database=%v bucket=%v", db.compensated, objects.bucketRemoved)
-	}
-	assertEventOrder(t, events.snapshot(), []string{
-		"runtime.initialize", "store.save", "database.audit",
-		"runtime.close", "store.clear", "database.compensate", "storage.removeBucket",
-	})
-	if _, probeErr := service.TestAdministrator(context.Background(), validSetupInput().Administrator); probeErr != nil {
-		t.Fatalf("failed setup must remain retryable, got %v", probeErr)
-	}
-}
-
 func TestCompleteReportsMalformedEnvironmentAsConflict(t *testing.T) {
 	store := &fakeStore{loadErr: fmtInvalidConfiguration()}
 	service := mustService(t, Options{
@@ -329,7 +286,7 @@ func TestCompleteReportsMalformedEnvironmentAsConflict(t *testing.T) {
 		Passwords:       fakePasswords{},
 		SecretGenerator: fixedSecret,
 	})
-	_, err := service.Complete(context.Background(), validSetupInput(), "trace-invalid-env")
+	_, err := service.Complete(context.Background(), validSetupInput())
 	if !apperror.IsCode(err, apperror.CodeResourceConflict) {
 		t.Fatalf("invalid environment should be a conflict, got %v", err)
 	}
@@ -347,7 +304,7 @@ func TestCompleteMapsUnknownProbeFailureToSafeStageError(t *testing.T) {
 		Passwords:       fakePasswords{},
 		SecretGenerator: fixedSecret,
 	})
-	_, err := service.Complete(context.Background(), validSetupInput(), "trace-stage")
+	_, err := service.Complete(context.Background(), validSetupInput())
 	applicationError, ok := err.(*apperror.Error)
 	if !ok || applicationError.Code != apperror.CodeSetupFailed {
 		t.Fatalf("unknown probe failure was not normalized: %#v", err)
@@ -375,35 +332,9 @@ func TestCompleteRequiresFingerprintExecutableAndAcoustIDTogether(t *testing.T) 
 	input := validSetupInput()
 	fpcalc := "tools/fpcalc.exe"
 	input.Media.FPcalcPath = &fpcalc
-	_, err := service.Complete(context.Background(), input, "trace-fingerprint")
+	_, err := service.Complete(context.Background(), input)
 	if !apperror.IsCode(err, apperror.CodeValidationError) {
 		t.Fatalf("incomplete fingerprint configuration should fail validation, got %v", err)
-	}
-}
-
-func TestRollbackFailureIsReportedWithoutClaimingSuccess(t *testing.T) {
-	root := prepareSetupRoot(t)
-	runtime := newFakeRuntime()
-	store := &fakeStore{clearErr: errors.New("configuration cannot be removed")}
-	db := &fakeDatabase{auditErr: errors.New("audit unavailable")}
-	service := mustService(t, Options{
-		RootDirectory:   root,
-		Runtime:         runtime,
-		Store:           store,
-		Databases:       &fakeDatabaseFactory{database: db},
-		ObjectStorage:   &fakeStorageFactory{storage: &fakeStorage{createBucket: true}},
-		MediaTool:       &fakeMediaTool{},
-		ListenerProbe:   &fakeListener{},
-		Passwords:       fakePasswords{},
-		SecretGenerator: fixedSecret,
-	})
-	_, err := service.Complete(context.Background(), validSetupInput(), "trace-incomplete-rollback")
-	applicationError, ok := err.(*apperror.Error)
-	if !ok || applicationError.Code != apperror.CodeSetupFailed || applicationError.Metadata["rollbackIncomplete"] != true {
-		t.Fatalf("rollback failure must be explicit, got %#v", err)
-	}
-	if service.Status().Configured {
-		t.Fatal("failed completion reported a configured installation")
 	}
 }
 
@@ -422,7 +353,7 @@ func TestCompleteRejectsRuntimeThatDidNotActivateCandidate(t *testing.T) {
 		Passwords:       fakePasswords{},
 		SecretGenerator: fixedSecret,
 	})
-	_, err := service.Complete(context.Background(), validSetupInput(), "trace-runtime-noop")
+	_, err := service.Complete(context.Background(), validSetupInput())
 	applicationError, ok := err.(*apperror.Error)
 	if !ok || applicationError.Code != apperror.CodeSetupFailed || applicationError.Metadata["setupStage"] != "runtime_initialize" {
 		t.Fatalf("non-activating runtime was not rejected: %#v", err)
@@ -449,7 +380,7 @@ func TestConfiguredRuntimeDisablesEverySetupOperation(t *testing.T) {
 	if _, err := service.TestHTTP(context.Background(), validSetupInput().HTTP); !apperror.IsCode(err, apperror.CodeForbidden) {
 		t.Fatalf("configured HTTP probe should be forbidden, got %v", err)
 	}
-	if _, err := service.Complete(context.Background(), validSetupInput(), "trace-disabled"); !apperror.IsCode(err, apperror.CodeForbidden) {
+	if _, err := service.Complete(context.Background(), validSetupInput()); !apperror.IsCode(err, apperror.CodeForbidden) {
 		t.Fatalf("configured completion should be forbidden, got %v", err)
 	}
 }
@@ -509,7 +440,7 @@ func TestCompletePreservesSpecificDatabaseFailureAndSetupStage(t *testing.T) {
 		ObjectStorage: &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
-	_, err := service.Complete(context.Background(), validSetupInput(), "trace-database-auth")
+	_, err := service.Complete(context.Background(), validSetupInput())
 	applicationError, ok := apperror.As(err)
 	if !ok {
 		t.Fatalf("expected classified completion error, got %T", err)
@@ -585,7 +516,7 @@ func TestCompleteRequiresExistingDataDecisionWhenAdministratorExists(t *testing.
 		ObjectStorage: &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
-	_, err := service.Complete(context.Background(), validSetupInput(), "trace-existing-decision")
+	_, err := service.Complete(context.Background(), validSetupInput())
 	applicationError, ok := err.(*apperror.Error)
 	if !ok || applicationError.Code != apperror.CodeSetupDecisionRequired {
 		t.Fatalf("existing administrator did not require a decision: %#v", err)
@@ -610,7 +541,7 @@ func TestCompleteReusesExistingInstallationAndFillsMissingParts(t *testing.T) {
 	input := validSetupInput()
 	input.DatabaseAction = databaseActionMigrate
 	input.Administrator = AdministratorInput{}
-	if _, err := service.Complete(context.Background(), input, "trace-existing-reuse"); err != nil {
+	if _, err := service.Complete(context.Background(), input); err != nil {
 		t.Fatal(err)
 	}
 	if !db.provisioned.ReuseExisting || db.reset {
@@ -635,7 +566,7 @@ func TestDatabaseResetDoesNotClearObjectStorage(t *testing.T) {
 	})
 	input := validSetupInput()
 	input.DatabaseAction = databaseActionReset
-	if _, err := service.Complete(context.Background(), input, "trace-existing-reset"); err != nil {
+	if _, err := service.Complete(context.Background(), input); err != nil {
 		t.Fatal(err)
 	}
 	if !db.reset || db.provisioned.ReuseExisting || slices.Contains(objects.calls, "clear") {
@@ -654,7 +585,7 @@ func TestCompleteRequiresIndependentStorageDecision(t *testing.T) {
 		ObjectStorage: &fakeStorageFactory{storage: objects}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
-	_, err := service.Complete(context.Background(), validSetupInput(), "trace-storage-decision")
+	_, err := service.Complete(context.Background(), validSetupInput())
 	applicationError, ok := err.(*apperror.Error)
 	if !ok || applicationError.Code != apperror.CodeSetupDecisionRequired || applicationError.Metadata["decisionResource"] != "storage" {
 		t.Fatalf("nonempty storage did not require an independent decision: %#v", err)
@@ -677,7 +608,7 @@ func TestStorageResetDoesNotClearDatabase(t *testing.T) {
 	})
 	input := validSetupInput()
 	input.StorageAction = storageActionReset
-	if _, err := service.Complete(context.Background(), input, "trace-storage-reset"); err != nil {
+	if _, err := service.Complete(context.Background(), input); err != nil {
 		t.Fatal(err)
 	}
 	if db.reset || !slices.Contains(objects.calls, "clear") {
@@ -932,7 +863,6 @@ type fakeDatabase struct {
 	provisioned         ProvisionInput
 	migrationsDirectory string
 	compensated         bool
-	auditErr            error
 	inspection          InstallationInspection
 	reset               bool
 }
@@ -983,15 +913,10 @@ func (database *fakeDatabase) Provision(_ context.Context, input ProvisionInput)
 	}, nil
 }
 
-func (database *fakeDatabase) Compensate(context.Context, ProvisionedInstallation, string) error {
+func (database *fakeDatabase) Compensate(context.Context, ProvisionedInstallation) error {
 	database.events.add("database.compensate")
 	database.compensated = true
 	return nil
-}
-
-func (database *fakeDatabase) RecordSetupSuccess(context.Context, string, string, string) error {
-	database.events.add("database.audit")
-	return database.auditErr
 }
 
 func (database *fakeDatabase) Close() { database.events.add("database.close") }

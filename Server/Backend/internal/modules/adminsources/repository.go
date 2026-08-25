@@ -99,7 +99,6 @@ func (repository *Repository) FindRoot(ctx context.Context, rootID string) (Root
 
 func (repository *Repository) CreateRoot(
 	ctx context.Context,
-	actorID, traceID string,
 	mutation RootMutation,
 ) (RootView, error) {
 	includePatterns, excludePatterns, err := encodePatterns(mutation)
@@ -126,11 +125,6 @@ func (repository *Repository) CreateRoot(
 			return RootView{}, apperror.Conflict(apperror.CodeResourceConflict, "Music source path already exists", nil)
 		}
 		return RootView{}, fmt.Errorf("create music source: %w", err)
-	}
-	if err := writeAudit(ctx, transaction, actorID, "admin.library-root.create", root.ID, traceID, map[string]any{
-		"path": mutation.Path, "mode": mutation.Mode,
-	}); err != nil {
-		return RootView{}, err
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return RootView{}, fmt.Errorf("commit music source creation: %w", err)
@@ -232,10 +226,6 @@ func (repository *Repository) UpdateRoot(ctx context.Context, command UpdateRoot
 		}
 		return RootView{}, fmt.Errorf("update music source: %w", err)
 	}
-	if err := writeAudit(ctx, transaction, command.ActorID, "admin.library-root.update", root.ID, command.TraceID,
-		map[string]any{"fields": command.ChangedFields}); err != nil {
-		return RootView{}, err
-	}
 	if err := transaction.Commit(ctx); err != nil {
 		return RootView{}, fmt.Errorf("commit music source update: %w", err)
 	}
@@ -281,7 +271,7 @@ func (repository *Repository) DeleteRoot(ctx context.Context, command DeleteRoot
 	}
 	if command.ArchiveCatalog {
 		if _, err := transaction.Exec(ctx, `UPDATE tracks SET
-			status='ARCHIVED',version=version+1,updated_at=now()
+			status='ARCHIVED',archived_manually=false,version=version+1,updated_at=now()
 			WHERE id IN (
 				SELECT mapping.track_id FROM local_music_source_tracks mapping
 				JOIN local_music_sources source ON source.id=mapping.source_id WHERE source.root_id=$1
@@ -291,10 +281,6 @@ func (repository *Repository) DeleteRoot(ctx context.Context, command DeleteRoot
 	}
 	if _, err := transaction.Exec(ctx, `DELETE FROM library_roots WHERE id=$1`, command.RootID); err != nil {
 		return fmt.Errorf("delete music source: %w", err)
-	}
-	if err := writeAudit(ctx, transaction, command.ActorID, "admin.library-root.delete", command.RootID,
-		command.TraceID, map[string]any{"archiveCatalog": command.ArchiveCatalog}); err != nil {
-		return err
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return fmt.Errorf("commit music source deletion: %w", err)
@@ -526,12 +512,6 @@ func (repository *Repository) EnqueueScan(ctx context.Context, command EnqueueSc
 	if err != nil {
 		return ScanRun{}, fmt.Errorf("enqueue music source scan: %w", err)
 	}
-	if command.ActorID != nil && command.TraceID != "" {
-		if err := writeAudit(ctx, transaction, *command.ActorID, "admin.library-root.scan", command.RootID,
-			command.TraceID, map[string]any{"runId": run.ID}); err != nil {
-			return ScanRun{}, err
-		}
-	}
 	if err := transaction.Commit(ctx); err != nil {
 		return ScanRun{}, fmt.Errorf("commit music source scan enqueue: %w", err)
 	}
@@ -567,12 +547,6 @@ func (repository *Repository) CancelScan(ctx context.Context, command CancelScan
 	} else if _, err := transaction.Exec(ctx,
 		`UPDATE library_scan_runs SET cancel_requested=true,updated_at=$2 WHERE id=$1`, run.ID, now); err != nil {
 		return fmt.Errorf("request running music source scan cancellation: %w", err)
-	}
-	if command.ActorID != nil && command.TraceID != "" {
-		if err := writeAudit(ctx, transaction, *command.ActorID, "admin.library-root.scan.cancel", command.RootID,
-			command.TraceID, map[string]any{"runId": command.RunID}); err != nil {
-			return err
-		}
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return fmt.Errorf("commit music source scan cancellation: %w", err)
@@ -1099,27 +1073,6 @@ func encodePatterns(mutation RootMutation) (string, string, error) {
 		return "", "", fmt.Errorf("encode music source exclude patterns: %w", err)
 	}
 	return string(includePatterns), string(excludePatterns), nil
-}
-
-func writeAudit(
-	ctx context.Context,
-	executor interface {
-		Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
-	},
-	actorID, action, targetID, traceID string,
-	details map[string]any,
-) error {
-	encoded, err := json.Marshal(details)
-	if err != nil {
-		return fmt.Errorf("encode music source audit details: %w", err)
-	}
-	_, err = executor.Exec(ctx, `INSERT INTO audit_logs(
-		actor_id,action,target_type,target_id,result,trace_id,details
-	) VALUES($1,$2,'library_root',$3,'SUCCESS',$4,$5::jsonb)`, actorID, action, targetID, traceID, encoded)
-	if err != nil {
-		return fmt.Errorf("write music source audit: %w", err)
-	}
-	return nil
 }
 
 func isUniqueViolation(err error) bool {

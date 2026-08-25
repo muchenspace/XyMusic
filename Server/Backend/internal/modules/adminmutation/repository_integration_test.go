@@ -58,7 +58,6 @@ func TestAdminMutationProductionLifecycle(t *testing.T) {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cleanupCancel()
 		if len(createdIDs) > 0 {
-			_, _ = pool.Exec(cleanupCtx, `DELETE FROM audit_logs WHERE target_id=ANY($1::uuid[])`, createdIDs)
 		}
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM tracks WHERE title LIKE '__admin_mutation_it_%'`)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM media_assets WHERE object_key LIKE 'integration/admin-mutation/%'`)
@@ -68,75 +67,75 @@ func TestAdminMutationProductionLifecycle(t *testing.T) {
 	}
 	t.Cleanup(cleanup)
 	suffix := strings.ReplaceAll(uuid.NewString()[:12], "-", "")
-	artist, err := service.CreateArtist(ctx, actorID, "mutation-create-artist", CreateArtistInput{Name: "__admin_mutation_it_artist_" + suffix})
+	artist, err := service.CreateArtist(ctx, CreateArtistInput{Name: "__admin_mutation_it_artist_" + suffix})
 	if err != nil {
 		t.Fatal(err)
 	}
 	createdIDs = append(createdIDs, artist.ID)
-	artist, err = service.UpdateArtist(ctx, actorID, "mutation-update-artist", artist.ID, UpdateArtistInput{ExpectedVersion: artist.Version, Description: OptionalNullableString{Set: true, Value: stringPointer("integration")}})
+	artist, err = service.UpdateArtist(ctx, artist.ID, UpdateArtistInput{ExpectedVersion: artist.Version, Description: OptionalNullableString{Set: true, Value: stringPointer("integration")}})
 	if err != nil || artist.Version != 2 {
 		t.Fatalf("UpdateArtist=%#v,%v", artist, err)
 	}
 	credit := CreditInput{ArtistID: artist.ID, Role: CreditPrimary, SortOrder: 0, SortOrderSet: true}
 	title := "__admin_mutation_it_album_" + suffix
-	target, err := service.CreateAlbum(ctx, actorID, "mutation-create-album-1", CreateAlbumInput{Title: title, ArtistCredits: []CreditInput{credit}})
+	target, err := service.CreateAlbum(ctx, CreateAlbumInput{Title: title, ArtistCredits: []CreditInput{credit}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, err := service.CreateAlbum(ctx, actorID, "mutation-create-album-2", CreateAlbumInput{Title: title, ArtistCredits: []CreditInput{credit}})
+	source, err := service.CreateAlbum(ctx, CreateAlbumInput{Title: title, ArtistCredits: []CreditInput{credit}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	createdIDs = append(createdIDs, target.ID, source.ID)
-	targetTrack, err := service.CreateTrack(ctx, actorID, "mutation-create-track-1", CreateTrackInput{Title: "__admin_mutation_it_target_" + suffix, AlbumID: OptionalNullableString{Set: true, Value: &target.ID}, ArtistCredits: []CreditInput{credit}, DiscNumber: OptionalInt{Set: true, Value: 1}})
+	targetTrack, err := service.CreateTrack(ctx, CreateTrackInput{Title: "__admin_mutation_it_target_" + suffix, AlbumID: OptionalNullableString{Set: true, Value: &target.ID}, ArtistCredits: []CreditInput{credit}, DiscNumber: OptionalInt{Set: true, Value: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sourceTrack, err := service.CreateTrack(ctx, actorID, "mutation-create-track-2", CreateTrackInput{Title: "__admin_mutation_it_source_" + suffix, AlbumID: OptionalNullableString{Set: true, Value: &source.ID}, ArtistCredits: []CreditInput{credit}, DiscNumber: OptionalInt{Set: true, Value: 1}})
+	sourceTrack, err := service.CreateTrack(ctx, CreateTrackInput{Title: "__admin_mutation_it_source_" + suffix, AlbumID: OptionalNullableString{Set: true, Value: &source.ID}, ArtistCredits: []CreditInput{credit}, DiscNumber: OptionalInt{Set: true, Value: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	createdIDs = append(createdIDs, targetTrack.ID, sourceTrack.ID)
 	content := "[00:00.00] integration"
-	lyric, err := service.UpsertLyrics(ctx, actorID, "mutation-lyrics", targetTrack.ID, LyricsInput{ExpectedVersion: targetTrack.Version, Language: "zh", Format: "LRC", Timing: "LINE", Content: OptionalString{Set: true, Value: content}, IsDefault: OptionalBool{Set: true, Value: true}})
+	lyric, err := service.UpsertLyrics(ctx, targetTrack.ID, LyricsInput{ExpectedVersion: targetTrack.Version, Language: "zh", Format: "LRC", Timing: "LINE", Content: OptionalString{Set: true, Value: content}, IsDefault: OptionalBool{Set: true, Value: true}})
 	if err != nil || lyric.TrackVersion != 2 {
 		t.Fatalf("UpsertLyrics=%#v,%v", lyric, err)
 	}
 	newTitle := "__admin_mutation_it_target_updated_" + suffix
-	targetTrack, err = service.UpdateTrack(ctx, actorID, "mutation-update-track", targetTrack.ID, UpdateTrackInput{ExpectedVersion: lyric.TrackVersion, Title: OptionalString{Set: true, Value: newTitle}})
+	targetTrack, err = service.UpdateTrack(ctx, targetTrack.ID, UpdateTrackInput{ExpectedVersion: lyric.TrackVersion, Title: OptionalString{Set: true, Value: newTitle}})
 	if err != nil || targetTrack.Version != 3 {
 		t.Fatalf("UpdateTrack=%#v,%v", targetTrack, err)
 	}
-	merge, err := service.MergeAlbums(ctx, actorID, "mutation-merge", MergeAlbumsInput{Target: AlbumVersionInput{AlbumID: target.ID, ExpectedVersion: target.Version}, Sources: []AlbumVersionInput{{AlbumID: source.ID, ExpectedVersion: source.Version}}, FieldSources: AlbumMergeFieldSources{Title: target.ID, Cover: OptionalNullableString{Set: true}, ArtistCredits: target.ID, ReleaseDate: OptionalNullableString{Set: true}, Description: OptionalNullableString{Set: true}}})
+	merge, err := service.MergeAlbums(ctx, MergeAlbumsInput{Target: AlbumVersionInput{AlbumID: target.ID, ExpectedVersion: target.Version}, Sources: []AlbumVersionInput{{AlbumID: source.ID, ExpectedVersion: source.Version}}, FieldSources: AlbumMergeFieldSources{Title: target.ID, Cover: OptionalNullableString{Set: true}, ArtistCredits: target.ID, ReleaseDate: OptionalNullableString{Set: true}, Description: OptionalNullableString{Set: true}}})
 	if err != nil || merge.MovedTracks != 1 || merge.MergedAlbums != 1 {
 		t.Fatalf("MergeAlbums=%#v,%v", merge, err)
 	}
-	if _, err := service.PublishTrack(ctx, actorID, "mutation-publish", targetTrack.ID, targetTrack.Version); !apperror.IsCode(err, apperror.CodeTrackNotPlayable) {
+	if _, err := service.PublishTrack(ctx, targetTrack.ID, targetTrack.Version); !apperror.IsCode(err, apperror.CodeTrackNotPlayable) {
 		t.Fatalf("PublishTrack error=%v", err)
 	}
-	sourceTrack, err = service.ArchiveTrack(ctx, actorID, "mutation-archive", sourceTrack.ID, sourceTrack.Version+1)
+	sourceTrack, err = service.ArchiveTrack(ctx, sourceTrack.ID, sourceTrack.Version+1)
 	if err != nil {
 		t.Fatalf("ArchiveTrack=%v", err)
 	}
-	if _, err := service.ArchiveTrack(ctx, actorID, "mutation-archive-repeat", sourceTrack.ID, sourceTrack.Version); !apperror.IsCode(err, apperror.CodeInvalidStateTransition) {
+	if _, err := service.ArchiveTrack(ctx, sourceTrack.ID, sourceTrack.Version); !apperror.IsCode(err, apperror.CodeInvalidStateTransition) {
 		t.Fatalf("ArchiveTrack repeated error=%v", err)
 	}
-	if _, err := service.PublishTrack(ctx, actorID, "mutation-publish-archived", sourceTrack.ID, sourceTrack.Version); !apperror.IsCode(err, apperror.CodeInvalidStateTransition) {
+	if _, err := service.PublishTrack(ctx, sourceTrack.ID, sourceTrack.Version); !apperror.IsCode(err, apperror.CodeInvalidStateTransition) {
 		t.Fatalf("PublishTrack archived error=%v", err)
 	}
-	if _, err := service.UpdateTrack(ctx, actorID, "mutation-update-archived", sourceTrack.ID, UpdateTrackInput{
+	if _, err := service.UpdateTrack(ctx, sourceTrack.ID, UpdateTrackInput{
 		ExpectedVersion: sourceTrack.Version,
 		Title:           OptionalString{Set: true, Value: "Archived title must not change"},
 	}); !apperror.IsCode(err, apperror.CodeInvalidStateTransition) {
 		t.Fatalf("UpdateTrack archived error=%v", err)
 	}
-	if _, err := service.UpsertLyrics(ctx, actorID, "mutation-lyrics-archived", sourceTrack.ID, LyricsInput{
+	if _, err := service.UpsertLyrics(ctx, sourceTrack.ID, LyricsInput{
 		ExpectedVersion: sourceTrack.Version, Language: "zh", Format: "LRC", Timing: "LINE",
 		Content: OptionalString{Set: true, Value: "[00:00.00] archived"}, IsDefault: OptionalBool{Set: true, Value: true},
 	}); !apperror.IsCode(err, apperror.CodeInvalidStateTransition) {
 		t.Fatalf("UpsertLyrics archived error=%v", err)
 	}
-	if _, err := service.RestoreTrack(ctx, actorID, "mutation-restore-not-playable", sourceTrack.ID, sourceTrack.Version); !apperror.IsCode(err, apperror.CodeTrackNotPlayable) {
+	if _, err := service.RestoreTrack(ctx, sourceTrack.ID, sourceTrack.Version); !apperror.IsCode(err, apperror.CodeTrackNotPlayable) {
 		t.Fatalf("RestoreTrack unplayable error=%v", err)
 	}
 	playableAssetID := uuid.NewString()
@@ -154,25 +153,17 @@ func TestAdminMutationProductionLifecycle(t *testing.T) {
 	) VALUES($1,$2,'STANDARD','audio/ogg','opus','ogg',128000,'READY')`, sourceTrack.ID, playableAssetID); err != nil {
 		t.Fatal(err)
 	}
-	sourceTrack, err = service.RestoreTrack(ctx, actorID, "mutation-restore", sourceTrack.ID, sourceTrack.Version)
+	sourceTrack, err = service.RestoreTrack(ctx, sourceTrack.ID, sourceTrack.Version)
 	if err != nil || sourceTrack.Status != "READY" {
 		t.Fatalf("RestoreTrack=%#v,%v", sourceTrack, err)
 	}
-	var restoreAudited bool
-	if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM audit_logs
-		WHERE action='admin.track.restore' AND target_id=$1 AND trace_id='mutation-restore')`, sourceTrack.ID).Scan(&restoreAudited); err != nil {
-		t.Fatal(err)
-	}
-	if !restoreAudited {
-		t.Fatal("RestoreTrack audit was not written")
-	}
-	if _, err := service.RestoreTrack(ctx, actorID, "mutation-restore-repeat", sourceTrack.ID, sourceTrack.Version); !apperror.IsCode(err, apperror.CodeInvalidStateTransition) {
+	if _, err := service.RestoreTrack(ctx, sourceTrack.ID, sourceTrack.Version); !apperror.IsCode(err, apperror.CodeInvalidStateTransition) {
 		t.Fatalf("RestoreTrack repeated error=%v", err)
 	}
-	if _, err := service.ArchiveTrack(ctx, actorID, "mutation-archive-stale", sourceTrack.ID, sourceTrack.Version-1); !apperror.IsCode(err, apperror.CodeVersionConflict) {
+	if _, err := service.ArchiveTrack(ctx, sourceTrack.ID, sourceTrack.Version-1); !apperror.IsCode(err, apperror.CodeVersionConflict) {
 		t.Fatalf("ArchiveTrack stale error=%v", err)
 	}
-	sourceTrack, err = service.ArchiveTrack(ctx, actorID, "mutation-archive-after-restore", sourceTrack.ID, sourceTrack.Version)
+	sourceTrack, err = service.ArchiveTrack(ctx, sourceTrack.ID, sourceTrack.Version)
 	if err != nil || sourceTrack.Status != "ARCHIVED" {
 		t.Fatalf("ArchiveTrack after restore=%#v,%v", sourceTrack, err)
 	}
@@ -190,7 +181,7 @@ func TestAdminMutationProductionLifecycle(t *testing.T) {
 		probeJobID, probeAssetID, sourceTrack.ID, "admin-mutation-probe-"+probeJobID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.DeleteTrackPermanently(ctx, actorID, "mutation-delete-conflict", sourceTrack.ID, sourceTrack.Version); !apperror.IsCode(err, apperror.CodeResourceConflict) {
+	if _, err := service.DeleteTrackPermanently(ctx, sourceTrack.ID, sourceTrack.Version); !apperror.IsCode(err, apperror.CodeResourceConflict) {
 		t.Fatalf("DeleteTrack active media error=%v", err)
 	} else if applicationError, ok := apperror.As(err); !ok || applicationError.Metadata["conflictResourceType"] != "media_job" {
 		t.Fatalf("DeleteTrack active media metadata=%v", err)
@@ -201,7 +192,7 @@ func TestAdminMutationProductionLifecycle(t *testing.T) {
 	if _, err := pool.Exec(ctx, `DELETE FROM media_assets WHERE id=$1`, probeAssetID); err != nil {
 		t.Fatal(err)
 	}
-	deleted, err := service.DeleteTrackPermanently(ctx, actorID, "mutation-delete", sourceTrack.ID, sourceTrack.Version)
+	deleted, err := service.DeleteTrackPermanently(ctx, sourceTrack.ID, sourceTrack.Version)
 	if err != nil || !deleted.Deleted {
 		t.Fatalf("DeleteTrack=%#v,%v", deleted, err)
 	}
@@ -218,7 +209,7 @@ func TestAdminMutationProductionLifecycle(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO user_profiles(user_id,display_name) VALUES($1,'Mutation Integration')`, userID); err != nil {
 		t.Fatal(err)
 	}
-	user, err := service.UpdateUserStatus(ctx, actorID, "mutation-user-status", userID, UserStatusInput{ExpectedVersion: 1, Status: UserSuspended, Reason: "integration"})
+	user, err := service.UpdateUserStatus(ctx, actorID, userID, UserStatusInput{ExpectedVersion: 1, Status: UserSuspended})
 	if err != nil || user.Status != UserSuspended || user.Version != 2 {
 		t.Fatalf("UpdateUserStatus=%#v,%v", user, err)
 	}

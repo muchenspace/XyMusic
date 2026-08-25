@@ -24,7 +24,7 @@ func TestCreatePermanentDeleteBatchPresentsAtomicRepositoryResultWithoutSecondRe
 		}},
 	}
 	service := newBatchServiceForTest(t, store)
-	result, err := service.CreatePermanentDeleteBatch(context.Background(), "admin", "trace", BatchTrackMutationInput{
+	result, err := service.CreatePermanentDeleteBatch(context.Background(), BatchTrackMutationInput{
 		Items: []BatchTrackItemInput{{TrackID: "00000000-0000-4000-8000-000000000001", ExpectedVersion: 3}},
 	})
 	if err != nil {
@@ -42,7 +42,7 @@ func TestCreatePermanentDeleteBatchDoesNotRetryRepositoryFailure(t *testing.T) {
 	expected := errors.New("commit failed")
 	store := &batchServiceStoreStub{createErr: expected}
 	service := newBatchServiceForTest(t, store)
-	_, err := service.CreatePermanentDeleteBatch(context.Background(), "admin", "trace", BatchTrackMutationInput{
+	_, err := service.CreatePermanentDeleteBatch(context.Background(), BatchTrackMutationInput{
 		Items: []BatchTrackItemInput{{TrackID: "00000000-0000-4000-8000-000000000001", ExpectedVersion: 3}},
 	})
 	if !errors.Is(err, expected) || store.createCalls != 1 || store.findCalls != 0 {
@@ -53,7 +53,7 @@ func TestCreatePermanentDeleteBatchDoesNotRetryRepositoryFailure(t *testing.T) {
 func TestBatchServiceRejectsMalformedTrackUUIDBeforeStore(t *testing.T) {
 	store := &batchServiceStoreStub{}
 	service := newBatchServiceForTest(t, store)
-	_, err := service.RestoreTracksBatch(context.Background(), "admin", "trace", BatchTrackMutationInput{
+	_, err := service.RestoreTracksBatch(context.Background(), BatchTrackMutationInput{
 		Items: []BatchTrackItemInput{{TrackID: "not-a-uuid", ExpectedVersion: 1}},
 	})
 	if !apperror.IsCode(err, apperror.CodeValidationError) || store.restoreCalls != 0 {
@@ -65,7 +65,7 @@ func TestBatchServiceRejectsCaseVariantDuplicateTrackUUIDs(t *testing.T) {
 	store := &batchServiceStoreStub{}
 	service := newBatchServiceForTest(t, store)
 	trackID := "a0000000-0000-4000-8000-000000000001"
-	_, err := service.CreatePermanentDeleteBatch(context.Background(), "admin", "trace", BatchTrackMutationInput{
+	_, err := service.CreatePermanentDeleteBatch(context.Background(), BatchTrackMutationInput{
 		Items: []BatchTrackItemInput{
 			{TrackID: trackID, ExpectedVersion: 1},
 			{TrackID: strings.ToUpper(trackID), ExpectedVersion: 1},
@@ -103,8 +103,6 @@ type batchServiceStoreStub struct {
 
 func (store *batchServiceStoreStub) CreatePermanentDeleteBatch(
 	context.Context,
-	string,
-	string,
 	[]BatchTrackItemInput,
 ) (PermanentDeleteBatchRecord, []PermanentDeleteBatchItemRecord, error) {
 	store.createCalls++
@@ -121,8 +119,6 @@ func (store *batchServiceStoreStub) FindPermanentDeleteBatch(
 
 func (store *batchServiceStoreStub) RestoreTracksBatch(
 	context.Context,
-	string,
-	string,
 	[]BatchTrackItemInput,
 ) ([]BatchRestoreItemRecord, error) {
 	store.restoreCalls++

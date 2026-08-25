@@ -194,7 +194,6 @@ type LyricsInput struct {
 type UserStatusInput struct {
 	ExpectedVersion int        `json:"expectedVersion"`
 	Status          UserStatus `json:"status"`
-	Reason          string     `json:"reason"`
 }
 
 type ArtistRecord struct {

@@ -9,13 +9,13 @@ import (
 type Store interface {
 	EnsureMetadata(context.Context, []string) error
 	FindMetadata(context.Context, string) (MetadataRecord, error)
-	UpdateMetadata(context.Context, string, string, string, MetadataMutationInput) (MetadataRecord, error)
-	BatchUpdateMetadata(context.Context, string, string, BatchMetadataMutationInput) ([]BatchUpdateRecord, error)
-	EnqueueWriteback(context.Context, string, string, string, VersionReasonInput) (WritebackJob, error)
+	UpdateMetadata(context.Context, string, string, MetadataMutationInput) (MetadataRecord, error)
+	BatchUpdateMetadata(context.Context, string, BatchMetadataMutationInput) ([]BatchUpdateRecord, error)
+	EnqueueWriteback(context.Context, string, string, VersionReasonInput) (WritebackJob, error)
 	ListWritebacks(context.Context, WritebackListQuery) ([]WritebackJob, int, error)
 	FindWriteback(context.Context, string) (WritebackJob, error)
-	RetryWriteback(context.Context, string, string, string, VersionReasonInput) (WritebackJob, error)
-	CancelWriteback(context.Context, string, string, string, VersionReasonInput) (WritebackJob, error)
+	RetryWriteback(context.Context, string, string, VersionReasonInput) (WritebackJob, error)
+	CancelWriteback(context.Context, string, VersionInput) (WritebackJob, error)
 }
 
 type WorkerStore interface {

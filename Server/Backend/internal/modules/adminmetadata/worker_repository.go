@@ -12,13 +12,6 @@ import (
 	"xymusic/server/internal/shared/apperror"
 )
 
-type expiredWritebackAudit struct {
-	ID       string
-	TrackID  string
-	ActorID  *string
-	Attempts int
-}
-
 func (repository *Repository) ClaimWriteback(
 	ctx context.Context,
 	workerID string,
@@ -34,7 +27,7 @@ func (repository *Repository) ClaimWriteback(
 	}
 	defer tx.Rollback(ctx)
 
-	cancelled, err := tx.Query(ctx, `
+	if _, err := tx.Exec(ctx, `
 		update metadata_writeback_jobs set
 			status = 'CANCELLED', locked_by = null, locked_until = null,
 			completed_at = now(), last_error_code = null, last_error = null,
@@ -49,41 +42,11 @@ func (repository *Repository) ClaimWriteback(
 		      and output_checksum_sha256 is not null
 		    )
 		  )
-		)
-		returning id::text, track_id::text, requested_by::text, attempts`)
-	if err != nil {
+		)`); err != nil {
 		return nil, fmt.Errorf("cancel exhausted metadata writebacks: %w", err)
 	}
-	cancelledAudits := make([]expiredWritebackAudit, 0)
-	for cancelled.Next() {
-		var id, trackID string
-		var actorID *string
-		var attempts int
-		if err := cancelled.Scan(&id, &trackID, &actorID, &attempts); err != nil {
-			cancelled.Close()
-			return nil, fmt.Errorf("scan cancelled exhausted metadata writeback: %w", err)
-		}
-		cancelledAudits = append(cancelledAudits, expiredWritebackAudit{
-			ID: id, TrackID: trackID, ActorID: actorID, Attempts: attempts,
-		})
-	}
-	if err := cancelled.Err(); err != nil {
-		cancelled.Close()
-		return nil, fmt.Errorf("iterate cancelled exhausted metadata writebacks: %w", err)
-	}
-	cancelled.Close()
-	for _, item := range cancelledAudits {
-		if err := insertAudit(ctx, tx, auditWrite{
-			ActorID: item.ActorID, Action: "TRACK_METADATA_WRITEBACK_CANCELLED",
-			TargetType: "metadata_writeback_job", TargetID: &item.ID, Result: "SUCCESS",
-			TraceID: "worker:" + item.ID,
-			Details: map[string]any{"trackId": item.TrackID, "attempts": item.Attempts},
-		}); err != nil {
-			return nil, err
-		}
-	}
 
-	exhausted, err := tx.Query(ctx, `
+	if _, err := tx.Exec(ctx, `
 		update metadata_writeback_jobs set
 			status = 'FAILED', locked_by = null, locked_until = null,
 			completed_at = now(), last_error_code = 'WORKER_LEASE_EXPIRED',
@@ -99,40 +62,8 @@ func (repository *Repository) ClaimWriteback(
 		      and output_checksum_sha256 is not null
 		    )
 		  )
-		)
-		returning id::text, track_id::text, requested_by::text, attempts`)
-	if err != nil {
+		)`); err != nil {
 		return nil, fmt.Errorf("fail exhausted metadata writebacks: %w", err)
-	}
-	exhaustedAudits := make([]expiredWritebackAudit, 0)
-	for exhausted.Next() {
-		var id, trackID string
-		var actorID *string
-		var attempts int
-		if err := exhausted.Scan(&id, &trackID, &actorID, &attempts); err != nil {
-			exhausted.Close()
-			return nil, fmt.Errorf("scan exhausted metadata writeback: %w", err)
-		}
-		exhaustedAudits = append(exhaustedAudits, expiredWritebackAudit{
-			ID: id, TrackID: trackID, ActorID: actorID, Attempts: attempts,
-		})
-	}
-	if err := exhausted.Err(); err != nil {
-		exhausted.Close()
-		return nil, fmt.Errorf("iterate exhausted metadata writebacks: %w", err)
-	}
-	exhausted.Close()
-	for _, item := range exhaustedAudits {
-		if err := insertAudit(ctx, tx, auditWrite{
-			ActorID: item.ActorID, Action: "TRACK_METADATA_WRITEBACK_FAILED",
-			TargetType: "metadata_writeback_job", TargetID: &item.ID, Result: "FAILURE",
-			TraceID: "worker:" + item.ID,
-			Details: map[string]any{
-				"trackId": item.TrackID, "code": "WORKER_LEASE_EXPIRED", "attempts": item.Attempts,
-			},
-		}); err != nil {
-			return nil, err
-		}
 	}
 
 	candidate, err := scanWriteback(tx.QueryRow(ctx, `
@@ -346,19 +277,6 @@ func (repository *Repository) CompleteTransientRollback(
 	if command.RowsAffected() != 1 {
 		return NewWritebackError("WRITEBACK_LEASE_LOST", "Transient rollback recovery ownership was lost")
 	}
-	if nextStatus != WritebackPending {
-		action, result := "TRACK_METADATA_WRITEBACK_FAILED", "FAILURE"
-		if nextStatus == WritebackCancelled {
-			action, result = "TRACK_METADATA_WRITEBACK_CANCELLED", "SUCCESS"
-		}
-		if err := insertAudit(ctx, tx, auditWrite{
-			ActorID: job.RequestedBy, Action: action, TargetType: "metadata_writeback_job",
-			TargetID: &job.ID, Result: result, TraceID: "worker:" + job.ID,
-			Details: map[string]any{"trackId": job.TrackID, "code": code, "attempts": job.Attempts},
-		}); err != nil {
-			return err
-		}
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit transient writeback rollback completion: %w", err)
 	}
@@ -546,14 +464,6 @@ func (repository *Repository) CompleteCommittedRollback(
 	if command.RowsAffected() != 1 {
 		return NewWritebackError("WRITEBACK_LEASE_LOST", "Committed rollback cleanup ownership was lost")
 	}
-	if err := insertAudit(ctx, tx, auditWrite{
-		ActorID: job.RequestedBy,
-		Action:  "TRACK_METADATA_WRITEBACK_COMPLETED", TargetType: "metadata_writeback_job",
-		TargetID: &job.ID, Result: "SUCCESS", TraceID: "worker:" + job.ID,
-		Details: map[string]any{"trackId": job.TrackID, "sourceId": job.SourceID},
-	}); err != nil {
-		return err
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit completed writeback rollback cleanup: %w", err)
 	}
@@ -679,7 +589,7 @@ func (repository *Repository) FailWriteback(
 		nextStatus = WritebackFailed
 	}
 	message := decision.Message
-	command, err := tx.Exec(ctx, `
+	_, err = tx.Exec(ctx, `
 		update metadata_writeback_jobs set status = $4::metadata_writeback_status,
 			attempt_id = case when $4 = 'PENDING' then null else attempt_id end,
 			stage = 'QUEUED',
@@ -696,19 +606,6 @@ func (repository *Repository) FailWriteback(
 		decision.RetryDelay.Microseconds(), code, message)
 	if err != nil {
 		return fmt.Errorf("persist failed metadata writeback: %w", err)
-	}
-	if command.RowsAffected() == 1 && nextStatus != WritebackPending {
-		action, result := "TRACK_METADATA_WRITEBACK_FAILED", "FAILURE"
-		if cancelled {
-			action, result = "TRACK_METADATA_WRITEBACK_CANCELLED", "SUCCESS"
-		}
-		if err := insertAudit(ctx, tx, auditWrite{
-			ActorID: job.RequestedBy, Action: action, TargetType: "metadata_writeback_job",
-			TargetID: &job.ID, Result: result, TraceID: "worker:" + job.ID,
-			Details: map[string]any{"trackId": job.TrackID, "code": code, "attempts": job.Attempts},
-		}); err != nil {
-			return err
-		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit failed metadata writeback: %w", err)

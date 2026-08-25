@@ -16,7 +16,6 @@ type Store interface {
 	ResetPassword(context.Context, string, int, string) error
 	RevokeSession(context.Context, string, string) error
 	UpdateStatus(context.Context, string, string, int, UserStatus) error
-	WriteAudit(context.Context, AuditWrite) error
 }
 
 type ArtworkPresenter interface {

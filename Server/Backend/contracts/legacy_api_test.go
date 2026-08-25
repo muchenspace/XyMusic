@@ -78,8 +78,8 @@ func TestLegacyAPIManifest(t *testing.T) {
 	if manifest.ContractName != "xymusic-legacy-http-api" {
 		t.Fatalf("contractName = %q", manifest.ContractName)
 	}
-	if manifest.CountingRules.ExpectedAPIEndpoints != 134 {
-		t.Fatalf("declared endpoint count = %d, want 134", manifest.CountingRules.ExpectedAPIEndpoints)
+	if manifest.CountingRules.ExpectedAPIEndpoints != 133 {
+		t.Fatalf("declared endpoint count = %d, want 133", manifest.CountingRules.ExpectedAPIEndpoints)
 	}
 	if got := len(manifest.APIs); got != manifest.CountingRules.ExpectedAPIEndpoints {
 		t.Fatalf("manifest contains %d APIs, declared %d", got, manifest.CountingRules.ExpectedAPIEndpoints)
@@ -150,16 +150,16 @@ func TestLegacyAPIManifest(t *testing.T) {
 	}
 
 	assertCounts(t, "method", methodCounts, map[string]int{
-		"GET": 48, "POST": 65, "PUT": 4, "PATCH": 11, "DELETE": 6,
+		"GET": 47, "POST": 65, "PUT": 4, "PATCH": 11, "DELETE": 6,
 	})
 	assertCounts(t, "auth", authCounts, map[string]int{
-		"none": 14, "bearer": 29, "refresh-token": 1, "admin-session": 89, "admin-refresh-cookie": 1,
+		"none": 14, "bearer": 29, "refresh-token": 1, "admin-session": 88, "admin-refresh-cookie": 1,
 	})
 	assertCounts(t, "idempotency", idempotencyCounts, map[string]int{
-		"none": 76, "required": 58,
+		"none": 75, "required": 58,
 	})
 	assertCounts(t, "bodyKind", bodyCounts, map[string]int{
-		"none": 63, "json": 68, "json-optional": 2, "binary": 1,
+		"none": 62, "json": 68, "json-optional": 2, "binary": 1,
 	})
 
 	keyContracts := []apiContract{
@@ -202,8 +202,8 @@ func TestLegacyAPIManifestMatchesAuthoritativeRoutes(t *testing.T) {
 		sourcePath := filepath.Join(legacyRoot, filepath.FromSlash(source.File))
 		addExtractedRoutes(t, extracted, sourcePath, source.Scope)
 	}
-	if got := len(extracted); got != 134 {
-		t.Fatalf("authoritative Go route extraction found %d APIs, want 134", got)
+	if got := len(extracted); got != 133 {
+		t.Fatalf("authoritative Go route extraction found %d APIs, want 133", got)
 	}
 
 	manifestRoutes := make(map[string]string, len(manifest.APIs))
