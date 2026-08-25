@@ -22,7 +22,6 @@ type ProfileChanges struct {
 type CreateUploadParams struct {
 	ID             string
 	ActorID        string
-	TraceID        string
 	ObjectKey      string
 	FileName       string
 	ContentType    string
@@ -86,7 +85,6 @@ type InspectedAvatar struct {
 
 type FinalizeAvatarParams struct {
 	ActorID         string
-	TraceID         string
 	UploadID        string
 	CompletionToken string
 	AssetID         string

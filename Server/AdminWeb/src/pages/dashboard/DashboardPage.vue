@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Activity, AlertTriangle, Album, CheckCircle2, Disc3, ListMusic, RefreshCw, Shield, Users } from "lucide-vue-next";
+import { Activity, Album, Disc3, ListMusic, RefreshCw, Shield, Users } from "lucide-vue-next";
 import { useQuery } from "@tanstack/vue-query";
 import { computed } from "vue";
 import { apiErrorMessage } from "@/shared/application/api-error";
@@ -12,7 +12,6 @@ import PageHeader from "@/components/PageHeader.vue";
 import StatePanel from "@/components/StatePanel.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
 import { useDashboard } from "@/app/services/dashboard";
-import { auditActionLabel, auditTargetTypeLabel } from "@/shared/presentation/audit";
 import type { AudioStatus } from "@/shared/domain/audio-status";
 import {
   audioStatuses,
@@ -20,7 +19,6 @@ import {
   mediaProcessingStatusPresentation,
   sourceFileStatusPresentation,
 } from "@/shared/presentation/audio-status";
-import { formatRelative } from "@/utils/format";
 
 const dashboard = useDashboard();
 const query = useQuery({
@@ -85,8 +83,6 @@ function trackPercentage(state: typeof trackStates[number]): number {
           <article class="ui-card p-5 sm:p-6"><h2 class="font-bold">媒体任务状态</h2><p class="mt-1 text-xs text-[var(--muted)]">转码、封面和媒体处理任务</p><StatePanel v-if="!Object.keys(query.data.value?.jobs ?? {}).length" state="empty" compact title="暂无媒体任务" /><div v-else class="mt-5 space-y-3"><div v-for="(count, state) in query.data.value?.jobs" :key="state" class="flex items-center justify-between"><StatusBadge :status="state" :label="mediaProcessingStatusPresentation(state).label" :tone="mediaProcessingStatusPresentation(state).tone" /><span class="font-bold"><AnimatedNumber :value="count" /></span></div></div></article>
         </div>
       </section>
-      <section v-if="query.isPending.value" class="ui-card min-h-64 p-5" aria-hidden="true"><div class="skeleton h-5 w-28" /><div class="mt-7 space-y-5"><div v-for="index in 3" :key="index" class="flex gap-3"><div class="skeleton h-9 w-9 shrink-0" /><div class="flex-1"><div class="skeleton h-4 w-40" /><div class="skeleton mt-2 h-3 w-64 max-w-full" /></div></div></div></section>
-      <section v-else class="ui-card motion-item overflow-hidden" style="--motion-index: 3"><div class="flex items-center justify-between border-b border-[var(--border)] px-5 py-4"><div><h2 class="font-bold">近期操作</h2><p class="mt-1 text-xs text-[var(--muted)]">最近 12 条服务端审计记录</p></div><RouterLink class="pressable rounded px-1 py-1 text-xs font-bold text-[var(--primary)]" to="/audit">查看审计</RouterLink></div><StatePanel v-if="!query.data.value?.recentActivity.length" state="empty" compact title="暂无操作记录" /><div v-else class="divide-y divide-[var(--border)]"><div v-for="item in query.data.value?.recentActivity" :key="item.id" class="flex items-start gap-3 px-5 py-4"><span class="grid h-9 w-9 shrink-0 place-items-center rounded-md" :class="item.result === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'"><CheckCircle2 v-if="item.result === 'SUCCESS'" :size="16" /><AlertTriangle v-else :size="16" /></span><div class="min-w-0 flex-1"><div class="min-w-0"><p class="break-all font-semibold leading-5">{{ auditActionLabel(item.action) }}</p><code v-if="auditActionLabel(item.action) !== item.action" class="mt-1 block break-all text-[10px] text-[var(--muted)]">{{ item.action }}</code></div><p class="mt-1 text-xs font-medium text-[var(--muted)]">{{ auditTargetTypeLabel(item.targetType) }}</p><p class="mt-1 break-all text-xs text-[var(--muted)]">{{ item.actor?.displayName ?? '系统' }} · {{ formatRelative(item.createdAt) }} · {{ item.traceId }}</p></div><div class="shrink-0"><StatusBadge :status="item.result" /></div></div></div></section>
     </template>
   </div>
 </template>

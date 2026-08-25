@@ -3,8 +3,6 @@ CREATE TYPE track_delete_batch_item_status AS ENUM ('PENDING', 'RUNNING', 'SUCCE
 
 CREATE TABLE track_delete_batches (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  requested_by uuid REFERENCES users(id) ON DELETE SET NULL,
-  trace_id varchar(128) NOT NULL,
   status track_delete_batch_status NOT NULL DEFAULT 'PENDING',
   total integer NOT NULL CHECK (total > 0 AND total <= 200),
   processed integer NOT NULL DEFAULT 0 CHECK (processed >= 0),

@@ -59,10 +59,6 @@
         "scope": "admin-operations"
       },
       {
-        "file": "internal/modules/adminaudit/routes.go",
-        "scope": "admin-operations"
-      },
-      {
         "file": "internal/modules/adminsettings/routes.go",
         "scope": "admin-operations"
       },
@@ -81,7 +77,7 @@
     ]
   },
   "countingRules": {
-    "expectedAPIEndpoints": 134,
+    "expectedAPIEndpoints": 133,
     "includes": [
       "Two health endpoints exposed by both control and configured runtime modes, counted once by method and path.",
       "Setup endpoints exposed by the control application while setup is required.",
@@ -841,14 +837,6 @@
       "auth": "admin-session",
       "idempotency": "required",
       "bodyKind": "json-optional"
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/admin/audit",
-      "scope": "admin-operations",
-      "auth": "admin-session",
-      "idempotency": "none",
-      "bodyKind": "none"
     },
     {
       "method": "GET",

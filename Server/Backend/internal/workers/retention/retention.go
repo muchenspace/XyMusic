@@ -22,7 +22,6 @@ type Cutoffs struct {
 	RevokedSessions time.Time
 	Uploads         time.Time
 	OperationalJobs time.Time
-	Audit           time.Time
 }
 
 func RetentionCutoffs(now time.Time) Cutoffs {
@@ -31,7 +30,6 @@ func RetentionCutoffs(now time.Time) Cutoffs {
 		RevokedSessions: now.Add(-90 * 24 * time.Hour),
 		Uploads:         now.Add(-30 * 24 * time.Hour),
 		OperationalJobs: now.Add(-90 * 24 * time.Hour),
-		Audit:           now.Add(-365 * 24 * time.Hour),
 	}
 }
 
@@ -48,7 +46,6 @@ type Counts struct {
 	Writebacks         int64
 	ObjectCleanupJobs  int64
 	TrackDeleteBatches int64
-	Audit              int64
 }
 
 func (counts Counts) Fields() map[string]any {
@@ -65,7 +62,6 @@ func (counts Counts) Fields() map[string]any {
 		"writebacks":         counts.Writebacks,
 		"objectCleanupJobs":  counts.ObjectCleanupJobs,
 		"trackDeleteBatches": counts.TrackDeleteBatches,
-		"audit":              counts.Audit,
 	}
 }
 

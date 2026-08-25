@@ -26,16 +26,16 @@ import (
 type API interface {
 	Browse(context.Context, string, PageQuery) (BrowseDTO, error)
 	ListRoots(context.Context, PageQuery) (RootListDTO, error)
-	CreateRoot(context.Context, string, string, CreateRootInput) (RootDTO, error)
+	CreateRoot(context.Context, CreateRootInput) (RootDTO, error)
 	Root(context.Context, string) (RootDTO, error)
-	UpdateRoot(context.Context, string, string, string, UpdateRootInput) (RootDTO, error)
-	DeleteRoot(context.Context, string, string, string, DeleteRootInput) (DeletedDTO, error)
+	UpdateRoot(context.Context, string, UpdateRootInput) (RootDTO, error)
+	DeleteRoot(context.Context, string, DeleteRootInput) (DeletedDTO, error)
 	ListFiles(context.Context, string, FileQuery) (SourceFilePageDTO, error)
 	ProcessingSummary(context.Context, string) (ProcessingSummaryDTO, error)
 	ListRuns(context.Context, string, PageQuery) (ScanRunPageDTO, error)
-	EnqueueScan(context.Context, string, string, string) (ScanRunDTO, error)
+	EnqueueScan(context.Context, string, string) (ScanRunDTO, error)
 	ScanRun(context.Context, string, string) (ScanRunDTO, error)
-	CancelScan(context.Context, string, string, string, string) (CancelledDTO, error)
+	CancelScan(context.Context, string, string) (CancelledDTO, error)
 }
 
 type Routes struct {
@@ -127,8 +127,8 @@ func (routes *Routes) createRoot(c *gin.Context) error {
 	}
 	payload := createRootPayload(input, shape)
 	return mutate(routes, c, "admin.library-source.create", payload, http.StatusCreated,
-		func(actorID, traceID string) (RootDTO, error) {
-			return routes.service.CreateRoot(c.Request.Context(), actorID, traceID, input)
+		func(string) (RootDTO, error) {
+			return routes.service.CreateRoot(c.Request.Context(), input)
 		})
 }
 
@@ -160,8 +160,8 @@ func (routes *Routes) updateRoot(c *gin.Context) error {
 	}
 	payload := updateRootPayload(input, shape)
 	return mutate(routes, c, "admin.library-source.update:"+rootID, payload, http.StatusOK,
-		func(actorID, traceID string) (RootDTO, error) {
-			return routes.service.UpdateRoot(c.Request.Context(), actorID, traceID, rootID, input)
+		func(string) (RootDTO, error) {
+			return routes.service.UpdateRoot(c.Request.Context(), rootID, input)
 		})
 }
 
@@ -177,8 +177,8 @@ func (routes *Routes) deleteRoot(c *gin.Context) error {
 	}
 	payload := map[string]any{"expectedVersion": int(input.ExpectedVersion), "archiveCatalog": *input.ArchiveCatalog}
 	return mutate(routes, c, "admin.library-source.delete:"+rootID, payload, http.StatusOK,
-		func(actorID, traceID string) (DeletedDTO, error) {
-			return routes.service.DeleteRoot(c.Request.Context(), actorID, traceID, rootID, input)
+		func(string) (DeletedDTO, error) {
+			return routes.service.DeleteRoot(c.Request.Context(), rootID, input)
 		})
 }
 
@@ -247,8 +247,8 @@ func (routes *Routes) enqueueScan(c *gin.Context) error {
 		SourceID string `json:"sourceId"`
 	}{SourceID: rootID}
 	return mutate(routes, c, "admin.library-source.scan:"+rootID, payload, http.StatusAccepted,
-		func(actorID, traceID string) (ScanRunDTO, error) {
-			return routes.service.EnqueueScan(c.Request.Context(), rootID, actorID, traceID)
+		func(actorID string) (ScanRunDTO, error) {
+			return routes.service.EnqueueScan(c.Request.Context(), rootID, actorID)
 		})
 }
 
@@ -278,8 +278,8 @@ func (routes *Routes) cancelScan(c *gin.Context) error {
 		ScanID   string `json:"scanId"`
 	}{SourceID: rootID, ScanID: runID}
 	return mutate(routes, c, "admin.library-source.scan.cancel:"+runID, payload, http.StatusAccepted,
-		func(actorID, traceID string) (CancelledDTO, error) {
-			return routes.service.CancelScan(c.Request.Context(), rootID, runID, actorID, traceID)
+		func(string) (CancelledDTO, error) {
+			return routes.service.CancelScan(c.Request.Context(), rootID, runID)
 		})
 }
 
@@ -346,7 +346,7 @@ func mutate[T any](
 	scope string,
 	payload any,
 	status int,
-	operation func(string, string) (T, error),
+	operation func(string) (T, error),
 ) error {
 	actor, err := adminauth.RequireAdmin(c, routes.identity, true)
 	if err != nil {
@@ -356,11 +356,10 @@ func mutate[T any](
 	if !idempotencyKeyPattern.MatchString(key) {
 		return apperror.Validation("Idempotency-Key is invalid")
 	}
-	traceID := httpserver.TraceID(c)
 	result, err := routes.idempotency.Execute(c.Request.Context(), IdempotencyInput{
 		ActorID: actor.UserID, Scope: scope, Key: key, Payload: payload,
 	}, func() (IdempotencyResponse, error) {
-		body, err := operation(actor.UserID, traceID)
+		body, err := operation(actor.UserID)
 		if err != nil {
 			return IdempotencyResponse{}, err
 		}

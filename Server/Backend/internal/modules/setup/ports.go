@@ -47,8 +47,7 @@ type InstallationDatabase interface {
 	Inspect(context.Context, string) (InstallationInspection, error)
 	Reset(context.Context) error
 	Provision(context.Context, ProvisionInput) (ProvisionedInstallation, error)
-	Compensate(context.Context, ProvisionedInstallation, string) error
-	RecordSetupSuccess(context.Context, string, string, string) error
+	Compensate(context.Context, ProvisionedInstallation) error
 	Close()
 }
 

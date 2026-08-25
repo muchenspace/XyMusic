@@ -9,15 +9,4 @@ export interface DashboardData {
   };
   sources: Record<string, number>;
   jobs: Record<string, number>;
-  recentActivity: Array<{
-    id: string;
-    action: string;
-    targetType: string;
-    targetId?: string | null;
-    result: "SUCCESS" | "FAILURE";
-    traceId: string;
-    details?: Record<string, unknown> | null;
-    actor: { id: string; username: string; displayName: string } | null;
-    createdAt: string;
-  }>;
 }

@@ -107,12 +107,11 @@ func TestProductionFingerprintUsesConfiguredToolAndAcoustID(t *testing.T) {
 
 type integrationArtworkNoop struct{}
 
-func (*integrationArtworkNoop) ApplyAlbumArtwork(context.Context, string, string, string, DownloadedArtwork) error {
+func (*integrationArtworkNoop) ApplyAlbumArtwork(context.Context, string, string, DownloadedArtwork) error {
 	return nil
 }
 func (*integrationArtworkNoop) ApplyArtistArtwork(
 	context.Context,
-	string,
 	string,
 	string,
 	int,

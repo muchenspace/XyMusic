@@ -77,7 +77,7 @@ func TestPostgresRetentionPoliciesAgainstConfiguredDatabase(t *testing.T) {
 		SessionsRevoked: 1, SessionsDeleted: 1,
 		UploadsExpired: 2, UploadsDeleted: 2, MediaJobs: 1,
 		LibraryScans: 1, Writebacks: 2, ObjectCleanupJobs: 1,
-		TrackDeleteBatches: 1, Audit: 1,
+		TrackDeleteBatches: 1,
 	}
 	if !result.Ran || result.Counts != expected {
 		t.Fatalf("result=%+v, want %+v", result, expected)
@@ -91,7 +91,7 @@ func assertTemporarySchemaShadowing(t *testing.T, ctx context.Context, pool *pgx
 	for _, relation := range []string{
 		"idempotency_records", "rate_limit_buckets", "refresh_tokens", "auth_sessions",
 		"media_uploads", "media_jobs", "library_scan_runs", "metadata_writeback_jobs",
-		"object_cleanup_jobs", "track_delete_batches", "track_delete_batch_items", "audit_logs",
+		"object_cleanup_jobs", "track_delete_batches", "track_delete_batch_items",
 	} {
 		var schema string
 		if err := pool.QueryRow(ctx, `
@@ -151,9 +151,6 @@ func createTemporaryRetentionTables(ctx context.Context, connection *pgx.Conn) e
 		)`,
 		`CREATE TEMP TABLE track_delete_batch_items (
 			id text PRIMARY KEY, job_id text NOT NULL REFERENCES track_delete_batches(id) ON DELETE CASCADE
-		)`,
-		`CREATE TEMP TABLE audit_logs (
-			id text PRIMARY KEY, created_at timestamptz NOT NULL
 		)`,
 	}
 	for _, statement := range statements {
@@ -227,9 +224,6 @@ func seedTemporaryRetentionRows(t *testing.T, ctx context.Context, pool *pgxpool
 		{`INSERT INTO track_delete_batch_items (id, job_id) VALUES
 			('track-delete-item-old', 'track-delete-old'),
 			('track-delete-item-live', 'track-delete-live')`, nil},
-		{`INSERT INTO audit_logs (id, created_at) VALUES
-			('audit-old', $1::timestamptz - interval '400 days'),
-			('audit-live', $1::timestamptz - interval '1 day')`, []any{now}},
 	}
 	for _, statement := range statements {
 		if _, err := pool.Exec(ctx, statement.query, statement.arguments...); err != nil {
@@ -277,8 +271,6 @@ func assertTemporaryRetentionState(t *testing.T, ctx context.Context, pool *pgxp
 	assertRows(t, ctx, pool, `SELECT count(*) FROM track_delete_batches WHERE id = 'track-delete-old'`, 0)
 	assertRows(t, ctx, pool, `SELECT count(*) FROM track_delete_batch_items WHERE id = 'track-delete-item-old'`, 0)
 	assertRows(t, ctx, pool, `SELECT count(*) FROM track_delete_batches WHERE id IN ('track-delete-live', 'track-delete-running')`, 2)
-	assertRows(t, ctx, pool, `SELECT count(*) FROM audit_logs WHERE id = 'audit-old'`, 0)
-	assertRows(t, ctx, pool, `SELECT count(*) FROM audit_logs WHERE id = 'audit-live'`, 1)
 }
 
 func assertPostgresAdvisoryLockLifecycle(

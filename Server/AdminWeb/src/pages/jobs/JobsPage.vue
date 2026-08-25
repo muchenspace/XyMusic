@@ -78,7 +78,7 @@ onBeforeUnmount(() => { eventSource?.close(); if (invalidationTimer) window.clea
 function details(job: JobSummary): void { selectedId.value = job.id; detailOpen.value = true; }
 function changePageSize(value: number): void { pageSize.value = value; page.value = 1; }
 function changeWritebackPageSize(value: number): void { writebackPageSize.value = value; writebackPage.value = 1; }
-async function refresh(): Promise<void> { await Promise.all([queryClient.invalidateQueries({ queryKey: ["admin", "jobs"] }), queryClient.invalidateQueries({ queryKey: ["admin", "dashboard"] }), queryClient.invalidateQueries({ queryKey: ["admin", "audit"] })]); }
+async function refresh(): Promise<void> { await Promise.all([queryClient.invalidateQueries({ queryKey: ["admin", "jobs"] }), queryClient.invalidateQueries({ queryKey: ["admin", "dashboard"] })]); }
 const retryMutation = useMutation({ mutationFn: (job: JobSummary) => jobAdmin.retry(job.id), onSuccess: async () => { ui.notify("success", "任务已重新入队"); await refresh(); }, onError: (error) => ui.notify("error", "任务重试失败", error instanceof ApiError ? error.message : undefined) });
 const cancelMutation = useMutation({ mutationFn: (job: JobSummary) => jobAdmin.cancel(job.id), onSuccess: async () => { ui.notify("success", "任务取消请求已提交"); await refresh(); }, onError: (error) => ui.notify("error", "取消任务失败", error instanceof ApiError ? error.message : undefined) });
 function percent(job: JobSummary): number { return Math.max(0, Math.min(100, job.progress)); }

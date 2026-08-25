@@ -177,7 +177,6 @@ type ArtworkReference struct {
 type MetadataMutationInput struct {
 	ExpectedVersion int
 	Patch           map[string]any
-	Reason          string
 }
 
 type BatchMutationItem struct {
@@ -186,14 +185,17 @@ type BatchMutationItem struct {
 }
 
 type BatchMetadataMutationInput struct {
-	Items  []BatchMutationItem
-	Patch  map[string]any
-	Reason string
+	Items []BatchMutationItem
+	Patch map[string]any
 }
 
 type VersionReasonInput struct {
 	ExpectedVersion int    `json:"expectedVersion"`
 	Reason          string `json:"reason"`
+}
+
+type VersionInput struct {
+	ExpectedVersion int `json:"expectedVersion"`
 }
 
 type BatchUpdateRecord struct {

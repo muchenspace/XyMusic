@@ -15,9 +15,9 @@ import (
 )
 
 type AdminMediaAPI interface {
-	CreateUpload(context.Context, string, string, adminmedia.CreateUploadInput) (adminmedia.UploadReservationDTO, error)
+	CreateUpload(context.Context, string, adminmedia.CreateUploadInput) (adminmedia.UploadReservationDTO, error)
 	UploadContent(context.Context, string, string, string, int64, io.Reader) error
-	CompleteUpload(context.Context, string, string, string, adminmedia.CompleteUploadInput) (adminmedia.UploadCompletionDTO, error)
+	CompleteUpload(context.Context, string, string, adminmedia.CompleteUploadInput) (adminmedia.UploadCompletionDTO, error)
 	AbandonUpload(context.Context, string, string) error
 }
 
@@ -40,12 +40,11 @@ func NewAdminMediaArtworkApplier(media AdminMediaAPI) (*AdminMediaArtworkApplier
 func (adapter *AdminMediaArtworkApplier) ApplyAlbumArtwork(
 	ctx context.Context,
 	actorID string,
-	traceID string,
 	albumID string,
 	artwork DownloadedArtwork,
 ) error {
 	digest := sha256.Sum256(artwork.Bytes)
-	upload, err := adapter.media.CreateUpload(ctx, actorID, traceID, adminmedia.CreateUploadInput{
+	upload, err := adapter.media.CreateUpload(ctx, actorID, adminmedia.CreateUploadInput{
 		Purpose:        adminmedia.PurposeAlbumArtwork,
 		TargetID:       albumID,
 		FileName:       "scraped-cover." + artwork.Extension,
@@ -65,7 +64,6 @@ func (adapter *AdminMediaArtworkApplier) ApplyAlbumArtwork(
 	_, err = adapter.media.CompleteUpload(
 		completionContext,
 		actorID,
-		traceID,
 		upload.ID,
 		adminmedia.CompleteUploadInput{CompletionFence: &artworkCompletionFence{
 			executionContext: ctx,

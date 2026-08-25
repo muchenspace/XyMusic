@@ -361,14 +361,13 @@ func (stub *scrapingAPIStub) Fingerprint(context.Context, string) ([]Candidate, 
 	stub.fingerprintCalls++
 	return []Candidate{}, nil
 }
-func (stub *scrapingAPIStub) Apply(_ context.Context, _ string, _ string, _ string, input ApplyInput) (ApplyResult, error) {
+func (stub *scrapingAPIStub) Apply(_ context.Context, _ string, _ string, input ApplyInput) (ApplyResult, error) {
 	stub.applyCalls++
 	stub.applyVerbatim = input.Verbatim
 	return ApplyResult{Warnings: []string{}}, nil
 }
 func (stub *scrapingAPIStub) ApplyArtistArtwork(
 	context.Context,
-	string,
 	string,
 	string,
 	ArtistArtworkApplyInput,

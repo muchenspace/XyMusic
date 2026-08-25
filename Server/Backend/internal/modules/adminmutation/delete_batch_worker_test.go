@@ -198,9 +198,8 @@ func newPermanentDeleteWorkerForTest(
 }
 
 func permanentDeleteClaim(batchID, itemID, trackID, attemptID string, position int) *ClaimedPermanentDeleteItem {
-	requestedBy := "admin-1"
 	return &ClaimedPermanentDeleteItem{
-		Job: PermanentDeleteBatchRecord{ID: batchID, RequestedBy: &requestedBy, TraceID: "trace-1", Total: 2},
+		Job: PermanentDeleteBatchRecord{ID: batchID, Total: 2},
 		Item: PermanentDeleteBatchItemRecord{
 			ID: itemID, JobID: batchID, TrackID: trackID, ExpectedVersion: 3,
 			Position: position, Status: DeleteBatchItemRunning, Attempts: 1, AttemptID: &attemptID,

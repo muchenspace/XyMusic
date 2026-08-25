@@ -154,42 +154,29 @@ func TestRepositoryRunsJobProjectionAndMutationsInConfiguredDatabase(t *testing.
 		t.Fatal(err)
 	}
 
-	retryReason := "integration media retry"
-	if err := repository.RetryMediaOrScan(ctx, actorID, "trace-integration", mediaJobID, &retryReason); err != nil {
+	if err := repository.RetryMediaOrScan(ctx, mediaJobID); err != nil {
 		t.Fatal(err)
 	}
 	assertMediaState(t, ctx, transaction, mediaJobID, "PENDING", 0, false, 2)
 	assertTrackGeneration(t, ctx, transaction, trackID, 1, 2)
 	assertSourceState(t, ctx, transaction, sourceID, "PROCESSING", nil)
 
-	if err := repository.CancelMediaOrScan(ctx, actorID, "trace-integration", mediaJobID, nil); err != nil {
+	if err := repository.CancelMediaOrScan(ctx, mediaJobID); err != nil {
 		t.Fatal(err)
 	}
 	assertMediaState(t, ctx, transaction, mediaJobID, "CANCELLED", 0, true, 3)
 	cancelled := "Cancelled by an administrator"
 	assertSourceState(t, ctx, transaction, sourceID, "FAILED", &cancelled)
 
-	if err := repository.RetryMediaOrScan(ctx, actorID, "trace-integration", scanJobID, nil); err != nil {
+	if err := repository.RetryMediaOrScan(ctx, scanJobID); err != nil {
 		t.Fatal(err)
 	}
 	assertScanState(t, ctx, transaction, scanJobID, "PENDING", false, false)
-	if err := repository.CancelMediaOrScan(ctx, actorID, "trace-integration", scanJobID, nil); err != nil {
+	if err := repository.CancelMediaOrScan(ctx, scanJobID); err != nil {
 		t.Fatal(err)
 	}
 	assertScanState(t, ctx, transaction, scanJobID, "CANCELLED", true, true)
 
-	var auditCount int
-	if err := transaction.QueryRow(ctx, `
-		SELECT count(*)::int FROM audit_logs
-		WHERE actor_id = $1 AND target_id IN ($2, $3)
-		  AND action IN ('admin.job.retry', 'admin.job.cancel')`,
-		actorID, mediaJobID, scanJobID,
-	).Scan(&auditCount); err != nil {
-		t.Fatal(err)
-	}
-	if auditCount != 4 {
-		t.Fatalf("audit count=%d", auditCount)
-	}
 }
 
 func containsJob(items []JobRecord, id string, jobType JobType, status JobStatus) bool {

@@ -2,7 +2,6 @@ package adminsettings
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -202,7 +201,7 @@ func (service *Service) TestLocalLibrary(_ context.Context, directory *string) (
 
 func (service *Service) ApplyIdempotently(
 	ctx context.Context,
-	actorID, traceID, key string,
+	actorID, key string,
 	input UpdateInput,
 ) (IdempotentSettingsResult, error) {
 	current, _, err := service.activeConfig()
@@ -238,7 +237,7 @@ func (service *Service) ApplyIdempotently(
 	result, err := sharedidempotency.Execute(ctx, idempotency, sharedidempotency.Input{
 		ActorID: actorID, Scope: "admin.system.settings.apply", Key: key, Payload: input,
 	}, func() (sharedidempotency.HTTPResult[SettingsDTO], error) {
-		body, applyErr := service.Apply(ctx, actorID, traceID, input)
+		body, applyErr := service.Apply(ctx, actorID, input)
 		return sharedidempotency.HTTPResult[SettingsDTO]{Status: 200, Body: body}, applyErr
 	})
 	if err != nil {
@@ -247,7 +246,7 @@ func (service *Service) ApplyIdempotently(
 	return IdempotentSettingsResult{Status: result.Status, Body: result.Body, Replayed: result.Replayed}, nil
 }
 
-func (service *Service) Apply(ctx context.Context, actorID, traceID string, input UpdateInput) (SettingsDTO, error) {
+func (service *Service) Apply(ctx context.Context, actorID string, input UpdateInput) (SettingsDTO, error) {
 	service.transition.Lock()
 	defer service.transition.Unlock()
 	previous, status, err := service.activeConfig()
@@ -284,14 +283,7 @@ func (service *Service) Apply(ctx context.Context, actorID, traceID string, inpu
 			return SettingsDTO{}, normalizeConfigurationError(err)
 		}
 	}
-	auditID, err := createApplyingAudit(ctx, candidatePool, actorID, traceID, changed)
-	if err != nil {
-		return SettingsDTO{}, normalizeConfigurationError(err)
-	}
 	failure := func(cause error) (SettingsDTO, error) {
-		_ = updateSettingsAudit(context.WithoutCancel(ctx), candidatePool, auditID, "FAILURE", map[string]any{
-			"state": "FAILED", "changedFields": changed, "error": safeError(cause),
-		})
 		active, ok := service.runtime.ActiveConfig()
 		if ok && reflect.DeepEqual(active, candidate) {
 			_ = service.runtime.Initialize(context.WithoutCancel(ctx), previous, status.Source)
@@ -320,11 +312,6 @@ func (service *Service) Apply(ctx context.Context, actorID, traceID string, inpu
 		return failure(err)
 	}
 	newStatus := service.runtime.Status()
-	if err := updateSettingsAudit(ctx, candidatePool, auditID, "SUCCESS", map[string]any{
-		"state": "APPLIED", "changedFields": changed, "runtimeGeneration": newStatus.Generation,
-	}); err != nil {
-		return failure(err)
-	}
 	result, err := presentSettings(candidate, newStatus.Generation, setup.RuntimeSourceManaged, service.listener)
 	if err != nil {
 		return failure(err)
@@ -442,34 +429,6 @@ func requireAdministrator(ctx context.Context, pool *database.Pool, actorID stri
 	return err
 }
 
-func createApplyingAudit(ctx context.Context, pool *database.Pool, actorID, traceID string, changed []string) (string, error) {
-	details, err := json.Marshal(map[string]any{"state": "APPLYING", "changedFields": changed})
-	if err != nil {
-		return "", err
-	}
-	var id string
-	err = pool.QueryRow(ctx, `
-		insert into audit_logs(actor_id,action,target_type,target_id,result,trace_id,details)
-		values($1,'admin.system.settings.apply','system',null,'FAILURE',$2,$3::jsonb)
-		returning id
-	`, actorID, traceID, string(details)).Scan(&id)
-	return id, err
-}
-
-func updateSettingsAudit(ctx context.Context, pool *database.Pool, auditID, result string, details map[string]any) error {
-	encoded, err := json.Marshal(details)
-	if err != nil {
-		return err
-	}
-	command, err := pool.Exec(ctx, `update audit_logs set result=$1, details=$2::jsonb where id=$3`, result, string(encoded), auditID)
-	if err != nil {
-		return err
-	}
-	if command.RowsAffected() != 1 {
-		return errors.New("configuration audit record could not be updated")
-	}
-	return nil
-}
 
 func migrationInformation(ctx context.Context, pool *database.Pool) string {
 	var count int
@@ -547,13 +506,3 @@ var (
 	secretPattern     = regexp.MustCompile(`(?i)\b(password|secret(?:Access)?Key|authorization)\s*[=:]\s*[^,;\s]+`)
 	tokenPattern      = regexp.MustCompile(`\b[A-Za-z0-9_-]{64,}\b`)
 )
-
-func safeError(err error) string {
-	value := err.Error()
-	if len(value) > 1000 {
-		value = value[:1000]
-	}
-	value = credentialPattern.ReplaceAllString(value, "$1[REDACTED]@")
-	value = secretPattern.ReplaceAllString(value, "$1=[REDACTED]")
-	return tokenPattern.ReplaceAllString(value, "[REDACTED]")
-}

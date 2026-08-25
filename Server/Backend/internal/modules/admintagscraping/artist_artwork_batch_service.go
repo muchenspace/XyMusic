@@ -832,7 +832,7 @@ func (service *ArtistArtworkBatchService) executeItem(
 		return artistArtworkBatchExecution{status: ItemSkipped, message: message}
 	}
 	result, err := service.processor.ApplyArtistArtwork(
-		ctx, *claim.Job.RequestedBy, uuid.NewString(), claim.Item.ArtistID,
+		ctx, *claim.Job.RequestedBy, claim.Item.ArtistID,
 		ArtistArtworkApplyInput{
 			ExpectedVersion: claim.Item.ExpectedVersion,
 			Candidate:       *selected, Overwrite: claim.Job.Options.Overwrite,

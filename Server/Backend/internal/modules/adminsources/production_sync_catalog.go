@@ -100,11 +100,7 @@ func (synchronizer *ProductionSynchronizer) storeStandardFile(
 					SELECT 1 FROM local_music_source_tracks mapping
 					WHERE mapping.source_id=$1 AND mapping.track_id=track.id
 				)
-				AND NOT EXISTS(
-					SELECT 1 FROM audit_logs audit
-					WHERE audit.action='admin.track.archive' AND audit.target_type='track'
-					AND audit.target_id=track.id AND audit.result='SUCCESS'
-				)`, locked.ID, locked.UpdatedAt, now); err != nil {
+				AND NOT track.archived_manually`, locked.ID, locked.UpdatedAt, now); err != nil {
 				return localSourceRecord{}, false, fmt.Errorf("restore incorrectly archived local library tracks: %w", err)
 			}
 		}
@@ -228,7 +224,7 @@ func (synchronizer *ProductionSynchronizer) storeStandardFile(
 		rows.Close()
 		if len(staleTrackIDs) > 0 {
 			if _, err := transaction.Exec(ctx, `UPDATE tracks SET
-				status='ARCHIVED',version=version+1,updated_at=now() WHERE id=ANY($1::uuid[])`, staleTrackIDs); err != nil {
+				status='ARCHIVED',archived_manually=false,version=version+1,updated_at=now() WHERE id=ANY($1::uuid[])`, staleTrackIDs); err != nil {
 				return localSourceRecord{}, false, fmt.Errorf("archive stale CUE tracks: %w", err)
 			}
 		}

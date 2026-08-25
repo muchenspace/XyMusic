@@ -59,7 +59,6 @@ type activeUserCredential struct {
 
 type adminForbiddenSideEffectSnapshot struct {
 	idempotencyRecords int64
-	auditLogs          int64
 }
 
 func TestLegacyAndGoRejectActiveUsersFromEveryAdminSessionAPI(t *testing.T) {
@@ -423,9 +422,7 @@ func snapshotAdminForbiddenSideEffects(
 		select
 			(select count(*) from idempotency_records
 			 where actor_id = $1 and key like 'active-user-forbidden-admin-user-forbidden-%'),
-			(select count(*) from audit_logs
-			 where actor_id = $1 and trace_id like 'admin-user-forbidden-%')
-	`, userID).Scan(&snapshot.idempotencyRecords, &snapshot.auditLogs)
+	`, userID).Scan(&snapshot.idempotencyRecords)
 	if err != nil {
 		t.Fatalf("snapshot forbidden-request side effects: %v", err)
 	}

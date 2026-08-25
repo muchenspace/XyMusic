@@ -2,7 +2,6 @@ package adminmutation
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -14,7 +13,7 @@ import (
 	"xymusic/server/internal/shared/apperror"
 )
 
-const deleteBatchJobColumns = `id,requested_by,trace_id,status::text,total,processed,succeeded,failed,
+const deleteBatchJobColumns = `id,status::text,total,processed,succeeded,failed,
 	started_at,completed_at,created_at,updated_at`
 
 const deleteBatchItemColumns = `id,job_id,track_id,expected_version,position,status::text,attempts,
@@ -23,8 +22,6 @@ const deleteBatchItemColumns = `id,job_id,track_id,expected_version,position,sta
 
 func (repository *Repository) CreatePermanentDeleteBatch(
 	ctx context.Context,
-	actorID string,
-	traceID string,
 	input []BatchTrackItemInput,
 ) (PermanentDeleteBatchRecord, []PermanentDeleteBatchItemRecord, error) {
 	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
@@ -52,9 +49,9 @@ func (repository *Repository) CreatePermanentDeleteBatch(
 	}
 	jobID := uuid.NewString()
 	job, err := scanPermanentDeleteBatch(tx.QueryRow(ctx, `INSERT INTO track_delete_batches(
-		id,requested_by,trace_id,total
-	) VALUES($1,$2,$3,$4) RETURNING `+deleteBatchJobColumns,
-		jobID, actorID, traceID, len(input)))
+		id,total
+	) VALUES($1,$2) RETURNING `+deleteBatchJobColumns,
+		jobID, len(input)))
 	if err != nil {
 		return PermanentDeleteBatchRecord{}, nil, fmt.Errorf("create permanent delete batch: %w", err)
 	}
@@ -308,12 +305,10 @@ func (repository *Repository) completePermanentDeleteBatchItem(
 		return ErrPermanentDeleteLeaseLost
 	}
 	succeededIncrement, failedIncrement := 0, 0
-	auditResult := "SUCCESS"
 	if status == DeleteBatchItemSucceeded {
 		succeededIncrement = 1
 	} else {
 		failedIncrement = 1
-		auditResult = "FAILURE"
 	}
 	if _, err := tx.Exec(ctx, `UPDATE track_delete_batches SET
 		processed=processed+1,succeeded=succeeded+$2,failed=failed+$3,
@@ -325,46 +320,8 @@ func (repository *Repository) completePermanentDeleteBatchItem(
 		WHERE id=$1`, claim.Job.ID, succeededIncrement, failedIncrement, now); err != nil {
 		return fmt.Errorf("update permanent delete batch counts: %w", err)
 	}
-	details := map[string]any{
-		"batchId": claim.Job.ID, "batchSize": claim.Job.Total,
-		"deletedFiles": result.DeletedFiles, "quarantinedFiles": result.QuarantinedFiles,
-		"scheduledObjects": result.ScheduledObjects,
-	}
-	if errorCode != "" {
-		details["errorCode"] = errorCode
-	}
-	if message != nil {
-		details["message"] = *message
-	}
-	if err := insertPermanentDeleteBatchAudit(
-		ctx, tx, claim.Job.RequestedBy, claim.Job.TraceID, claim.Item.TrackID, auditResult, details,
-	); err != nil {
-		return err
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit permanent delete item completion: %w", err)
-	}
-	return nil
-}
-
-func insertPermanentDeleteBatchAudit(
-	ctx context.Context,
-	tx pgx.Tx,
-	actorID *string,
-	traceID string,
-	trackID string,
-	result string,
-	details map[string]any,
-) error {
-	encoded, err := json.Marshal(details)
-	if err != nil {
-		return fmt.Errorf("encode permanent delete batch audit: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `INSERT INTO audit_logs(
-		actor_id,action,target_type,target_id,result,trace_id,details
-	) VALUES($1,'admin.track.delete_permanently','track',$2,$3::audit_result,$4,$5::jsonb)`,
-		actorID, trackID, result, traceID, encoded); err != nil {
-		return fmt.Errorf("write permanent delete batch audit: %w", err)
 	}
 	return nil
 }
@@ -372,7 +329,7 @@ func insertPermanentDeleteBatchAudit(
 func scanPermanentDeleteBatch(row pgx.Row) (PermanentDeleteBatchRecord, error) {
 	var record PermanentDeleteBatchRecord
 	err := row.Scan(
-		&record.ID, &record.RequestedBy, &record.TraceID, &record.Status,
+		&record.ID, &record.Status,
 		&record.Total, &record.Processed, &record.Succeeded, &record.Failed,
 		&record.StartedAt, &record.CompletedAt, &record.CreatedAt, &record.UpdatedAt,
 	)

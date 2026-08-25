@@ -18,7 +18,6 @@ try {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     & (Join-Path $PSScriptRoot 'go.ps1') test '-v' `
-        ./internal/modules/adminaudit `
         ./internal/modules/admincatalog `
         ./internal/modules/adminsettings `
         -count=1

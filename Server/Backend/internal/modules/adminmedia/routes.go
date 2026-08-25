@@ -18,11 +18,11 @@ import (
 )
 
 type API interface {
-	CreateUpload(context.Context, string, string, CreateUploadInput) (UploadReservationDTO, error)
+	CreateUpload(context.Context, string, CreateUploadInput) (UploadReservationDTO, error)
 	UploadContent(context.Context, string, string, string, int64, io.Reader) error
-	CompleteUpload(context.Context, string, string, string, CompleteUploadInput) (UploadCompletionDTO, error)
+	CompleteUpload(context.Context, string, string, CompleteUploadInput) (UploadCompletionDTO, error)
 	GetJob(context.Context, string) (MediaJobDTO, error)
-	RetryJob(context.Context, string, string, string, RetryJobInput) (MediaJobDTO, error)
+	RetryJob(context.Context, string, RetryJobInput) (MediaJobDTO, error)
 }
 
 type Routes struct {
@@ -69,8 +69,8 @@ func (routes *Routes) createUpload(c *gin.Context) error {
 		"admin.media.upload.create",
 		input,
 		http.StatusCreated,
-		func(actorID, traceID string) (any, error) {
-			return routes.service.CreateUpload(c.Request.Context(), actorID, traceID, input)
+		func(actorID string) (any, error) {
+			return routes.service.CreateUpload(c.Request.Context(), actorID, input)
 		},
 	)
 }
@@ -123,8 +123,8 @@ func (routes *Routes) completeUpload(c *gin.Context) error {
 		"admin.media.upload.complete:"+uploadID,
 		payload,
 		http.StatusAccepted,
-		func(actorID, traceID string) (any, error) {
-			return routes.service.CompleteUpload(c.Request.Context(), actorID, traceID, uploadID, input)
+		func(actorID string) (any, error) {
+			return routes.service.CompleteUpload(c.Request.Context(), actorID, uploadID, input)
 		},
 	)
 }
@@ -154,21 +154,17 @@ func (routes *Routes) retryJob(c *gin.Context) error {
 	if err := decodeStrictJSON(c, &input); err != nil {
 		return err
 	}
-	if input.ExpectedVersion < 1 ||
-		(input.Reason.Set && !routeStringLength(input.Reason.Value, 1, 500)) {
+	if input.ExpectedVersion < 1 {
 		return routeContractError()
 	}
 	payload := map[string]any{"expectedVersion": input.ExpectedVersion}
-	if input.Reason.Set {
-		payload["reason"] = input.Reason.Value
-	}
 	return routes.mutate(
 		c,
 		"admin.media.job.retry:"+jobID,
 		payload,
 		http.StatusAccepted,
-		func(actorID, traceID string) (any, error) {
-			return routes.service.RetryJob(c.Request.Context(), actorID, traceID, jobID, input)
+		func(string) (any, error) {
+			return routes.service.RetryJob(c.Request.Context(), jobID, input)
 		},
 	)
 }
@@ -178,7 +174,7 @@ func (routes *Routes) mutate(
 	scope string,
 	payload any,
 	status int,
-	operation func(string, string) (any, error),
+	operation func(string) (any, error),
 ) error {
 	actor, err := adminauth.RequireAdmin(c, routes.identity, true)
 	if err != nil {
@@ -188,14 +184,13 @@ func (routes *Routes) mutate(
 	if !routeIdempotencyKey.MatchString(key) {
 		return apperror.Validation("Idempotency-Key is invalid")
 	}
-	traceID := httpserver.TraceID(c)
 	result, err := routes.idempotency.Execute(c.Request.Context(), IdempotencyInput{
 		ActorID: actor.UserID,
 		Scope:   scope,
 		Key:     key,
 		Payload: payload,
 	}, func() (IdempotencyResponse, error) {
-		body, operationErr := operation(actor.UserID, traceID)
+		body, operationErr := operation(actor.UserID)
 		if operationErr != nil {
 			return IdempotencyResponse{}, operationErr
 		}

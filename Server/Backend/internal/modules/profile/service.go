@@ -144,7 +144,6 @@ func (service *Service) UpdateCurrentUser(
 func (service *Service) CreateAvatarUpload(
 	ctx context.Context,
 	userID string,
-	traceID string,
 	idempotencyKey string,
 	input CreateAvatarUploadInput,
 ) (MutationResult[AvatarUploadDTO], error) {
@@ -164,7 +163,6 @@ func (service *Service) CreateAvatarUpload(
 		upload, err := service.repository.CreateAvatarUpload(ctx, CreateUploadParams{
 			ID:             uploadID,
 			ActorID:        userID,
-			TraceID:        traceID,
 			ObjectKey:      objectKey,
 			FileName:       normalized.FileName,
 			ContentType:    normalized.ContentType,
@@ -207,7 +205,6 @@ func (service *Service) CreateAvatarUpload(
 func (service *Service) CompleteAvatarUpload(
 	ctx context.Context,
 	userID string,
-	traceID string,
 	uploadID string,
 	idempotencyKey string,
 	input CompleteAvatarUploadInput,
@@ -272,7 +269,6 @@ func (service *Service) CompleteAvatarUpload(
 		}
 		finalizeErr := service.repository.FinalizeAvatarCompletion(ctx, FinalizeAvatarParams{
 			ActorID:         userID,
-			TraceID:         traceID,
 			UploadID:        uploadID,
 			CompletionToken: claim.Token,
 			AssetID:         service.newID(),

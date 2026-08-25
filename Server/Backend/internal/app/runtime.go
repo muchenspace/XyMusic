@@ -12,7 +12,6 @@ import (
 	"github.com/google/uuid"
 
 	"xymusic/server/internal/config"
-	"xymusic/server/internal/modules/adminaudit"
 	"xymusic/server/internal/modules/adminauth"
 	"xymusic/server/internal/modules/admincatalog"
 	"xymusic/server/internal/modules/adminjobs"
@@ -53,7 +52,6 @@ type Runtime struct {
 	DB                        *database.Pool
 	Storage                   *storage.Client
 	Identity                  *identity.Service
-	AdminAudit                *adminaudit.Service
 	AdminCatalog              *admincatalog.Service
 	AdminJobs                 *adminjobs.Service
 	AdminManagement           *adminmanagement.Service
@@ -506,14 +504,6 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	if err != nil {
 		return nil, fmt.Errorf("create admin mutation routes: %w", err)
 	}
-	adminAuditService, err := adminaudit.NewService(db.Pool)
-	if err != nil {
-		return nil, fmt.Errorf("create admin audit service: %w", err)
-	}
-	adminAuditRoutes, err := adminaudit.NewRoutes(adminAuditService, identityService)
-	if err != nil {
-		return nil, fmt.Errorf("create admin audit routes: %w", err)
-	}
 	var adminSettingsService *adminsettings.Service
 	var adminSettingsRoutes *adminsettings.Routes
 	if administration := options.Administration; administration != nil {
@@ -584,7 +574,6 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 			adminManagementRoutes.Register(engine)
 			adminCatalogRoutes.Register(engine)
 			adminMutationRoutes.Register(engine)
-			adminAuditRoutes.Register(engine)
 			if adminSettingsRoutes != nil {
 				adminSettingsRoutes.Register(engine)
 			}
@@ -670,7 +659,7 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	failed = false
 	return &Runtime{
 		Config: resolved, DB: db, Storage: objects, Identity: identityService,
-		AdminAudit: adminAuditService, AdminCatalog: adminCatalogService, AdminJobs: adminJobsService,
+		AdminCatalog: adminCatalogService, AdminJobs: adminJobsService,
 		AdminManagement: adminManagementService, AdminMedia: adminMediaService,
 		AdminMetadata: adminMetadataService, AdminMutation: adminMutationService,
 		AdminSettings: adminSettingsService, AdminSources: adminSourcesService,

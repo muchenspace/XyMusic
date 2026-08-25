@@ -49,9 +49,9 @@ func (routes *Routes) applyArtistArtwork(c *gin.Context) error {
 		"admin.tag-scraping.artist-artwork.apply:"+artistID,
 		input,
 		http.StatusOK,
-		func(actorID, traceID string) (any, error) {
+		func(actorID string) (any, error) {
 			return routes.scraping.ApplyArtistArtwork(
-				c.Request.Context(), actorID, traceID, artistID, input,
+				c.Request.Context(), actorID, artistID, input,
 			)
 		},
 	)

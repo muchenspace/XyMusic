@@ -7,7 +7,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"xymusic/server/internal/shared/apperror"
@@ -15,8 +14,6 @@ import (
 
 func (repository *Repository) RestoreTracksBatch(
 	ctx context.Context,
-	actorID string,
-	traceID string,
 	input []BatchTrackItemInput,
 ) ([]BatchRestoreItemRecord, error) {
 	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
@@ -71,11 +68,10 @@ func (repository *Repository) RestoreTracksBatch(
 	}
 
 	now := time.Now().UTC()
-	batchID := uuid.NewString()
 	versions := make(map[string]int, len(prepared))
 	for _, restore := range prepared {
 		var version int
-		err := tx.QueryRow(ctx, `UPDATE tracks SET status='READY',published_at=$3,
+		err := tx.QueryRow(ctx, `UPDATE tracks SET status='READY',archived_manually=false,published_at=$3,
 			version=version+1,updated_at=$3
 			WHERE id=$1 AND version=$2 AND status='ARCHIVED' RETURNING version`,
 			restore.item.TrackID, restore.item.ExpectedVersion, now).Scan(&version)
@@ -88,11 +84,6 @@ func (repository *Repository) RestoreTracksBatch(
 		}
 		if err != nil {
 			return nil, fmt.Errorf("restore batch track: %w", err)
-		}
-		if err := writeAudit(ctx, tx, actorID, "admin.track.restore", "track", restore.item.TrackID, traceID, map[string]any{
-			"batchId": batchID, "batchSize": len(prepared),
-		}); err != nil {
-			return nil, err
 		}
 		versions[restore.item.TrackID] = version
 	}

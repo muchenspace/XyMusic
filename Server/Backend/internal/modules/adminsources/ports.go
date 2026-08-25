@@ -10,7 +10,7 @@ type Store interface {
 	ListRootViews(context.Context, RootQuery) ([]RootView, int, error)
 	FindRootView(context.Context, string) (RootView, error)
 	FindRoot(context.Context, string) (Root, error)
-	CreateRoot(context.Context, string, string, RootMutation) (RootView, error)
+	CreateRoot(context.Context, RootMutation) (RootView, error)
 	UpdateRoot(context.Context, UpdateRootCommand) (RootView, error)
 	DeleteRoot(context.Context, DeleteRootCommand) error
 	ListFiles(context.Context, string, FileQuery) ([]SourceFile, int, error)

@@ -9,14 +9,14 @@ type Store interface {
 	ListJobs(context.Context, ListQuery) ([]JobRecord, int, error)
 	FindJob(context.Context, string) (JobRecord, error)
 	FindMetadataVersion(context.Context, string) (int, bool, error)
-	RetryMediaOrScan(context.Context, string, string, string, *string) error
-	CancelMediaOrScan(context.Context, string, string, string, *string) error
+	RetryMediaOrScan(context.Context, string) error
+	CancelMediaOrScan(context.Context, string) error
 	EventState(context.Context) (EventRecord, error)
 }
 
 type MetadataMutator interface {
-	Retry(context.Context, string, string, string, MetadataMutationInput) error
-	Cancel(context.Context, string, string, string, MetadataMutationInput) error
+	Retry(context.Context, string, string, MetadataMutationInput) error
+	Cancel(context.Context, string, MetadataCancelInput) error
 }
 
 type IdempotencyInput struct {

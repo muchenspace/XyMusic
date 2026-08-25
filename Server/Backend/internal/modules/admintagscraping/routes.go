@@ -25,8 +25,8 @@ type ScrapingAPI interface {
 	CandidateDetails(context.Context, Candidate, bool) (CandidateDetailsDTO, error)
 	SearchArtists(context.Context, ArtistSearchInput) ([]ArtistCandidate, error)
 	Fingerprint(context.Context, string) ([]Candidate, error)
-	Apply(context.Context, string, string, string, ApplyInput) (ApplyResult, error)
-	ApplyArtistArtwork(context.Context, string, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error)
+	Apply(context.Context, string, string, ApplyInput) (ApplyResult, error)
+	ApplyArtistArtwork(context.Context, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error)
 	Artwork(context.Context, string) (DownloadedArtwork, error)
 }
 
@@ -168,8 +168,8 @@ func (routes *Routes) apply(c *gin.Context) error {
 	if err := validateApplyInput(input, shape); err != nil {
 		return err
 	}
-	return routes.mutate(c, "admin.tag-scraping.apply:"+trackID, input, http.StatusOK, func(actorID, traceID string) (any, error) {
-		return routes.scraping.Apply(c.Request.Context(), actorID, traceID, trackID, input)
+	return routes.mutate(c, "admin.tag-scraping.apply:"+trackID, input, http.StatusOK, func(actorID string) (any, error) {
+		return routes.scraping.Apply(c.Request.Context(), actorID, trackID, input)
 	})
 }
 
@@ -201,7 +201,7 @@ func (routes *Routes) createBatch(c *gin.Context) error {
 	if err := validateBatchInput(input, shape); err != nil {
 		return err
 	}
-	return routes.mutate(c, "admin.tag-scraping.batch.create", input, http.StatusAccepted, func(actorID, _ string) (any, error) {
+	return routes.mutate(c, "admin.tag-scraping.batch.create", input, http.StatusAccepted, func(actorID string) (any, error) {
 		return routes.batches.Create(c.Request.Context(), actorID, input)
 	})
 }
@@ -248,7 +248,7 @@ func (routes *Routes) cancelBatch(c *gin.Context) error {
 	if err != nil {
 		return err
 	}
-	return routes.mutate(c, "admin.tag-scraping.batch.cancel:"+jobID, map[string]any{}, http.StatusAccepted, func(_, _ string) (any, error) {
+	return routes.mutate(c, "admin.tag-scraping.batch.cancel:"+jobID, map[string]any{}, http.StatusAccepted, func(string) (any, error) {
 		return routes.batches.Cancel(c.Request.Context(), jobID)
 	})
 }
@@ -258,7 +258,7 @@ func (routes *Routes) retryBatch(c *gin.Context) error {
 	if err != nil {
 		return err
 	}
-	return routes.mutate(c, "admin.tag-scraping.batch.retry:"+jobID, map[string]any{}, http.StatusAccepted, func(_, _ string) (any, error) {
+	return routes.mutate(c, "admin.tag-scraping.batch.retry:"+jobID, map[string]any{}, http.StatusAccepted, func(string) (any, error) {
 		return routes.batches.Retry(c.Request.Context(), jobID)
 	})
 }
@@ -268,7 +268,7 @@ func (routes *Routes) mutate(
 	scope string,
 	payload any,
 	status int,
-	operation func(string, string) (any, error),
+	operation func(string) (any, error),
 ) error {
 	actor, err := adminauth.RequireAdmin(c, routes.identity, true)
 	if err != nil {
@@ -278,14 +278,13 @@ func (routes *Routes) mutate(
 	if !idempotencyKeyPattern.MatchString(key) {
 		return apperror.Validation("Idempotency-Key is invalid")
 	}
-	traceID := httpserver.TraceID(c)
 	result, err := routes.idempotency.Execute(c.Request.Context(), IdempotencyInput{
 		ActorID: actor.UserID,
 		Scope:   scope,
 		Key:     key,
 		Payload: payload,
 	}, func() (IdempotencyResponse, error) {
-		body, operationErr := operation(actor.UserID, traceID)
+		body, operationErr := operation(actor.UserID)
 		if operationErr != nil {
 			return IdempotencyResponse{}, operationErr
 		}

@@ -70,8 +70,8 @@ func TestRoutesExposeJobQueriesAndIdempotentMutations(t *testing.T) {
 		api.listInput.Order != SortAscending || api.listInput.Status != JobStatusFailed {
 		t.Fatalf("list input=%+v", api.listInput)
 	}
-	if api.retryReason != nil || api.cancelReason == nil || *api.cancelReason != "stop" {
-		t.Fatalf("reasons=%v/%v", api.retryReason, api.cancelReason)
+	if api.retryReason != nil {
+		t.Fatalf("retry reason=%v", api.retryReason)
 	}
 	expectedScopes := []string{"admin.job.retry:" + jobID, "admin.job.cancel:" + jobID}
 	if !reflect.DeepEqual(idempotency.scopes, expectedScopes) {
@@ -202,7 +202,7 @@ func TestJobListQueryIgnoresUnknownFieldsAndUsesLastRepeatedValue(t *testing.T) 
 type jobsAPIStub struct {
 	listCalls, jobCalls, retryCalls, cancelCalls int
 	listInput                                    ListInput
-	retryReason, cancelReason                    *string
+	retryReason                                  *string
 	eventState                                   EventStateDTO
 	eventMu                                      sync.Mutex
 	events                                       int
@@ -219,15 +219,14 @@ func (stub *jobsAPIStub) Job(context.Context, string) (JobDetailDTO, error) {
 	return JobDetailDTO{}, nil
 }
 
-func (stub *jobsAPIStub) Retry(_ context.Context, _, _, _ string, reason *string) (JobDetailDTO, error) {
+func (stub *jobsAPIStub) Retry(_ context.Context, _, _ string, reason *string) (JobDetailDTO, error) {
 	stub.retryCalls++
 	stub.retryReason = cloneString(reason)
 	return JobDetailDTO{}, nil
 }
 
-func (stub *jobsAPIStub) Cancel(_ context.Context, _, _, _ string, reason *string) (JobDetailDTO, error) {
+func (stub *jobsAPIStub) Cancel(_ context.Context, _ string) (JobDetailDTO, error) {
 	stub.cancelCalls++
-	stub.cancelReason = cloneString(reason)
 	return JobDetailDTO{}, nil
 }
 
@@ -286,4 +285,12 @@ func (stub *jobsIdempotencyStub) Execute(
 	stub.payloads = append(stub.payloads, input.Payload)
 	response, err := operation()
 	return IdempotencyResult{Status: response.Status, Body: response.Body, Replayed: stub.replayed}, err
+}
+
+func cloneString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }

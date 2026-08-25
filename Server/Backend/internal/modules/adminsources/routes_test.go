@@ -143,7 +143,7 @@ func (stub *sourceAPIStub) ListRoots(_ context.Context, page PageQuery) (RootLis
 	stub.rootPage = page
 	return RootListDTO{Items: []RootDTO{}}, nil
 }
-func (stub *sourceAPIStub) CreateRoot(context.Context, string, string, CreateRootInput) (RootDTO, error) {
+func (stub *sourceAPIStub) CreateRoot(context.Context, CreateRootInput) (RootDTO, error) {
 	stub.calls["create"]++
 	return RootDTO{IncludePatterns: []string{}, ExcludePatterns: []string{}}, nil
 }
@@ -151,11 +151,11 @@ func (stub *sourceAPIStub) Root(context.Context, string) (RootDTO, error) {
 	stub.calls["root"]++
 	return RootDTO{IncludePatterns: []string{}, ExcludePatterns: []string{}}, nil
 }
-func (stub *sourceAPIStub) UpdateRoot(context.Context, string, string, string, UpdateRootInput) (RootDTO, error) {
+func (stub *sourceAPIStub) UpdateRoot(context.Context, string, UpdateRootInput) (RootDTO, error) {
 	stub.calls["update"]++
 	return RootDTO{IncludePatterns: []string{}, ExcludePatterns: []string{}}, nil
 }
-func (stub *sourceAPIStub) DeleteRoot(context.Context, string, string, string, DeleteRootInput) (DeletedDTO, error) {
+func (stub *sourceAPIStub) DeleteRoot(context.Context, string, DeleteRootInput) (DeletedDTO, error) {
 	stub.calls["delete"]++
 	return DeletedDTO{Deleted: true}, nil
 }
@@ -172,7 +172,7 @@ func (stub *sourceAPIStub) ListRuns(context.Context, string, PageQuery) (ScanRun
 	stub.calls["runs"]++
 	return ScanRunPageDTO{Items: []ScanRunDTO{}}, nil
 }
-func (stub *sourceAPIStub) EnqueueScan(context.Context, string, string, string) (ScanRunDTO, error) {
+func (stub *sourceAPIStub) EnqueueScan(context.Context, string, string) (ScanRunDTO, error) {
 	stub.calls["enqueue"]++
 	return ScanRunDTO{ID: testRunID, RootID: testRootID, Status: ScanStatusPending}, nil
 }
@@ -180,7 +180,7 @@ func (stub *sourceAPIStub) ScanRun(context.Context, string, string) (ScanRunDTO,
 	stub.calls["run"]++
 	return ScanRunDTO{ID: testRunID, RootID: testRootID, Status: ScanStatusCompleted}, nil
 }
-func (stub *sourceAPIStub) CancelScan(context.Context, string, string, string, string) (CancelledDTO, error) {
+func (stub *sourceAPIStub) CancelScan(context.Context, string, string) (CancelledDTO, error) {
 	stub.calls["cancel"]++
 	return CancelledDTO{Cancelled: true}, nil
 }

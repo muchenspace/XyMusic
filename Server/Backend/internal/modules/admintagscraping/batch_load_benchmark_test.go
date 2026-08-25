@@ -341,7 +341,7 @@ func (processor *batchLoadProcessor) Search(ctx context.Context, input SearchInp
 }
 
 func (*batchLoadProcessor) Apply(
-	ctx context.Context, _, _, _ string, _ ApplyInput,
+	ctx context.Context, _, _ string, _ ApplyInput,
 ) (ApplyResult, error) {
 	if err := ctx.Err(); err != nil {
 		return ApplyResult{}, err

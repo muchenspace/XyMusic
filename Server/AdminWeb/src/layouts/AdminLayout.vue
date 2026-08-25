@@ -11,7 +11,6 @@ import {
   LogOut,
   Menu,
   Moon,
-  ScrollText,
   Search,
   Settings,
   Sun,
@@ -58,7 +57,6 @@ const catalog = [
 const operations = [
   { label: "音源与扫描", icon: FolderSync, to: "/sources" },
   { label: "后台任务", icon: ListTodo, to: "/jobs" },
-  { label: "审计日志", icon: ScrollText, to: "/audit" },
   { label: "系统设置", icon: Settings, to: "/settings" },
 ] as const;
 const preloadedRoutes = new Set<string>();

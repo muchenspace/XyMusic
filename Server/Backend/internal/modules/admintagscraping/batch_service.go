@@ -30,7 +30,7 @@ const (
 type BatchProcessor interface {
 	TrackMetadata(context.Context, string) (TrackMetadata, error)
 	Search(context.Context, SearchInput) ([]Candidate, error)
-	Apply(context.Context, string, string, string, ApplyInput) (ApplyResult, error)
+	Apply(context.Context, string, string, ApplyInput) (ApplyResult, error)
 }
 
 type BatchMetadataProcessor interface {
@@ -38,7 +38,7 @@ type BatchMetadataProcessor interface {
 }
 
 type batchMetadataApplyProcessor interface {
-	applyWithMetadata(context.Context, string, string, string, ApplyInput, TrackMetadata) (ApplyResult, error)
+	applyWithMetadata(context.Context, string, string, ApplyInput, TrackMetadata) (ApplyResult, error)
 }
 
 type BatchServiceDependencies struct {
@@ -962,11 +962,11 @@ func (service *BatchService) executeItem(
 	var result ApplyResult
 	if batchProcessor, ok := service.processor.(batchMetadataApplyProcessor); ok && claim.Metadata != nil {
 		result, err = batchProcessor.applyWithMetadata(
-			ctx, *claim.Job.RequestedBy, uuid.NewString(), claim.Item.TrackID, applyInput, *claim.Metadata,
+			ctx, *claim.Job.RequestedBy, claim.Item.TrackID, applyInput, *claim.Metadata,
 		)
 	} else {
 		result, err = service.processor.Apply(
-			ctx, *claim.Job.RequestedBy, uuid.NewString(), claim.Item.TrackID, applyInput,
+			ctx, *claim.Job.RequestedBy, claim.Item.TrackID, applyInput,
 		)
 	}
 	if err != nil {

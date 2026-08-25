@@ -120,8 +120,6 @@ func adminOperationsSuccessTest(path string) (testReference, bool) {
 	switch {
 	case strings.HasPrefix(path, "/api/v1/admin/jobs"):
 		return testReference{"internal/modules/adminjobs/routes_test.go", "TestRoutesExposeJobQueriesAndIdempotentMutations"}, true
-	case path == "/api/v1/admin/audit":
-		return testReference{"internal/modules/adminaudit/routes_test.go", "TestAuditQueryIgnoresUnknownFieldsAndUsesLastRepeatedValue"}, true
 	case path == "/api/v1/admin/settings" || strings.HasPrefix(path, "/api/v1/admin/settings/") || path == "/api/v1/admin/system":
 		return testReference{"internal/modules/adminsettings/routes_test.go", "TestRoutesExposeSevenSystemSettingsEndpoints"}, true
 	default:

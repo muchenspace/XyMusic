@@ -14,10 +14,7 @@ import (
 	"xymusic/server/internal/shared/pagination"
 )
 
-const (
-	defaultRetryReason  = "Retried by an administrator from the job center"
-	defaultCancelReason = "Cancelled by an administrator from the job center"
-)
+const defaultRetryReason = "Retried by an administrator from the job center"
 
 type Service struct {
 	store    Store
@@ -79,7 +76,7 @@ func (service *Service) Job(ctx context.Context, jobID string) (JobDetailDTO, er
 
 func (service *Service) Retry(
 	ctx context.Context,
-	actorID, traceID, jobID string,
+	actorID, jobID string,
 	reason *string,
 ) (JobDetailDTO, error) {
 	validated, err := optionalReason(reason)
@@ -95,41 +92,27 @@ func (service *Service) Retry(
 		if validated != nil {
 			value = *validated
 		}
-		if err := service.metadata.Retry(ctx, actorID, traceID, jobID, MetadataMutationInput{
+		if err := service.metadata.Retry(ctx, actorID, jobID, MetadataMutationInput{
 			ExpectedVersion: version, Reason: value,
 		}); err != nil {
 			return JobDetailDTO{}, err
 		}
-	} else if err := service.store.RetryMediaOrScan(ctx, actorID, traceID, jobID, validated); err != nil {
+	} else if err := service.store.RetryMediaOrScan(ctx, jobID); err != nil {
 		return JobDetailDTO{}, err
 	}
 	return service.Job(ctx, jobID)
 }
 
-func (service *Service) Cancel(
-	ctx context.Context,
-	actorID, traceID, jobID string,
-	reason *string,
-) (JobDetailDTO, error) {
-	validated, err := optionalReason(reason)
-	if err != nil {
-		return JobDetailDTO{}, err
-	}
+func (service *Service) Cancel(ctx context.Context, jobID string) (JobDetailDTO, error) {
 	version, metadataJob, err := service.store.FindMetadataVersion(ctx, jobID)
 	if err != nil {
 		return JobDetailDTO{}, err
 	}
 	if metadataJob {
-		value := defaultCancelReason
-		if validated != nil {
-			value = *validated
-		}
-		if err := service.metadata.Cancel(ctx, actorID, traceID, jobID, MetadataMutationInput{
-			ExpectedVersion: version, Reason: value,
-		}); err != nil {
+		if err := service.metadata.Cancel(ctx, jobID, MetadataCancelInput{ExpectedVersion: version}); err != nil {
 			return JobDetailDTO{}, err
 		}
-	} else if err := service.store.CancelMediaOrScan(ctx, actorID, traceID, jobID, validated); err != nil {
+	} else if err := service.store.CancelMediaOrScan(ctx, jobID); err != nil {
 		return JobDetailDTO{}, err
 	}
 	return service.Job(ctx, jobID)

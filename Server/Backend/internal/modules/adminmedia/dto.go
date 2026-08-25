@@ -36,8 +36,7 @@ type CompleteUploadInput struct {
 }
 
 type RetryJobInput struct {
-	ExpectedVersion int            `json:"expectedVersion"`
-	Reason          OptionalString `json:"reason"`
+	ExpectedVersion int `json:"expectedVersion"`
 }
 
 type UploadReservationDTO struct {

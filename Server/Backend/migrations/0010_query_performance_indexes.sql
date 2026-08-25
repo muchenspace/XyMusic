@@ -35,21 +35,3 @@ CREATE INDEX IF NOT EXISTS "users_username_trgm_index"
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "user_profiles_display_name_trgm_index"
   ON "user_profiles" USING gin ("display_name" gin_trgm_ops);
---> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "audit_logs_created_id_index"
-  ON "audit_logs" ("created_at" DESC, "id" DESC);
---> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "audit_logs_target_time_index"
-  ON "audit_logs" ("target_id", "created_at" DESC, "id" DESC);
---> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "audit_logs_result_time_index"
-  ON "audit_logs" ("result", "created_at" DESC, "id" DESC);
---> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "audit_logs_action_trgm_index"
-  ON "audit_logs" USING gin ("action" gin_trgm_ops);
---> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "audit_logs_target_type_trgm_index"
-  ON "audit_logs" USING gin ("target_type" gin_trgm_ops);
---> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "audit_logs_trace_id_trgm_index"
-  ON "audit_logs" USING gin ("trace_id" gin_trgm_ops);

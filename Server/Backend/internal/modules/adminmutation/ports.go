@@ -15,16 +15,16 @@ type Store interface {
 	UpdateArtist(context.Context, UpdateArtistParams) error
 	CreateAlbum(context.Context, CreateAlbumParams) (string, error)
 	UpdateAlbum(context.Context, UpdateAlbumParams) error
-	MergeAlbums(context.Context, string, string, MergeAlbumsInput) (MergeResultDTO, error)
+	MergeAlbums(context.Context, MergeAlbumsInput) (MergeResultDTO, error)
 	CreateTrack(context.Context, CreateTrackParams) (string, error)
 	UpdateTrack(context.Context, UpdateTrackParams) error
 	PublishTrack(context.Context, string, int) error
 	ArchiveTrack(context.Context, string, int) error
 	RestoreTrack(context.Context, string, int) error
-	ArchiveTracksBatch(context.Context, string, string, []BatchTrackItemInput) ([]BatchArchiveItemRecord, error)
-	RestoreTracksBatch(context.Context, string, string, []BatchTrackItemInput) ([]BatchRestoreItemRecord, error)
+	ArchiveTracksBatch(context.Context, []BatchTrackItemInput) ([]BatchArchiveItemRecord, error)
+	RestoreTracksBatch(context.Context, []BatchTrackItemInput) ([]BatchRestoreItemRecord, error)
 	DeleteTrackPermanently(context.Context, string, int, string) (DeleteResult, error)
-	CreatePermanentDeleteBatch(context.Context, string, string, []BatchTrackItemInput) (PermanentDeleteBatchRecord, []PermanentDeleteBatchItemRecord, error)
+	CreatePermanentDeleteBatch(context.Context, []BatchTrackItemInput) (PermanentDeleteBatchRecord, []PermanentDeleteBatchItemRecord, error)
 	FindPermanentDeleteBatch(context.Context, string) (PermanentDeleteBatchRecord, []PermanentDeleteBatchItemRecord, error)
 	UpsertLyrics(context.Context, string, LyricsInput) (StoredLyric, error)
 	UpdateUserStatus(context.Context, string, string, int, UserStatus) error
@@ -32,7 +32,6 @@ type Store interface {
 	FindAlbum(context.Context, string) (AlbumRecord, error)
 	FindTrack(context.Context, string) (TrackRecord, error)
 	FindUser(context.Context, string) (UserRecord, error)
-	WriteAudit(context.Context, string, string, string, string, string, map[string]any) error
 }
 
 type PermanentDeleteBatchWorkerStore interface {

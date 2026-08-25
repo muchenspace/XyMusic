@@ -1,9 +1,6 @@
 package adminmanagement
 
-import (
-	"encoding/json"
-	"time"
-)
+import "time"
 
 type UserRecord struct {
 	ID               string
@@ -53,7 +50,6 @@ type CreateUserParams struct {
 }
 
 type UpdateUserParams struct {
-	ActorID            string
 	UserID             string
 	ExpectedVersion    int
 	Username           *string
@@ -74,31 +70,4 @@ type DashboardCounts struct {
 	Tracks              map[string]int
 	Sources             map[string]int
 	Jobs                map[string]int
-	RecentActivity      []AuditRecord
-}
-
-type AuditRecord struct {
-	ID               string
-	ActorID          *string
-	ActorUsername    *string
-	ActorDisplayName *string
-	Action           string
-	TargetType       string
-	TargetID         *string
-	Result           string
-	TraceID          string
-	Details          map[string]any
-	CreatedAt        time.Time
-}
-
-type AuditWrite struct {
-	ActorID  string
-	Action   string
-	TargetID string
-	TraceID  string
-	Details  map[string]any
-}
-
-func (write AuditWrite) JSONDetails() ([]byte, error) {
-	return json.Marshal(write.Details)
 }

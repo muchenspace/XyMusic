@@ -178,9 +178,9 @@ func fetchFirstSSEEvent(t *testing.T, client *http.Client, target, accessToken s
 	return result
 }
 
-func (parityMetadataMutator) Retry(context.Context, string, string, string, adminjobs.MetadataMutationInput) error {
+func (parityMetadataMutator) Retry(context.Context, string, string, adminjobs.MetadataMutationInput) error {
 	return nil
 }
-func (parityMetadataMutator) Cancel(context.Context, string, string, string, adminjobs.MetadataMutationInput) error {
+func (parityMetadataMutator) Cancel(context.Context, string, adminjobs.MetadataCancelInput) error {
 	return nil
 }

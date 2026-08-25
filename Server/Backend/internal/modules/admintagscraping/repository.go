@@ -107,7 +107,6 @@ func (repository *Repository) Metadata(ctx context.Context, trackID string) (Tra
 func (repository *Repository) UpdateMetadata(
 	ctx context.Context,
 	actorID string,
-	traceID string,
 	trackID string,
 	expectedVersion int,
 	patch MetadataPatch,
@@ -194,18 +193,6 @@ func (repository *Repository) UpdateMetadata(
 	if err := repository.projectMetadata(ctx, tx, trackID, nextEffective, previousEffective); err != nil {
 		return TrackMetadata{}, err
 	}
-	changedFields := changedMetadataFields(previousEffective, nextEffective)
-	details, _ := json.Marshal(map[string]any{
-		"metadataVersion": nextVersion,
-		"changedFields":   changedFields,
-		"reason":          reason,
-	})
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO audit_logs (actor_id, action, target_type, target_id, result, trace_id, details)
-		VALUES ($1, 'TRACK_METADATA_UPDATED', 'track_metadata', $2, 'SUCCESS', $3, $4::jsonb)`,
-		actorID, trackID, traceID, details); err != nil {
-		return TrackMetadata{}, fmt.Errorf("audit track metadata update: %w", err)
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return TrackMetadata{}, fmt.Errorf("commit metadata update: %w", err)
 	}
@@ -227,7 +214,6 @@ func (repository *Repository) TrackAlbumID(ctx context.Context, trackID string) 
 func (repository *Repository) EnqueueWriteback(
 	ctx context.Context,
 	actorID string,
-	traceID string,
 	trackID string,
 	expectedVersion int,
 	reason string,
@@ -360,13 +346,6 @@ func (repository *Repository) EnqueueWriteback(
 			return WritebackJob{}, apperror.Conflict(apperror.CodeResourceConflict, "A metadata writeback is already active for this source", nil)
 		}
 		return WritebackJob{}, fmt.Errorf("insert metadata writeback job: %w", err)
-	}
-	details, _ := json.Marshal(map[string]any{"trackId": trackID, "sourceId": sourceID, "metadataVersion": version, "reason": reason})
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO audit_logs (actor_id, action, target_type, target_id, result, trace_id, details)
-		VALUES ($1, 'TRACK_METADATA_WRITEBACK_QUEUED', 'metadata_writeback_job', $2, 'SUCCESS', $3, $4::jsonb)`,
-		actorID, job.ID, traceID, details); err != nil {
-		return WritebackJob{}, fmt.Errorf("audit metadata writeback enqueue: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return WritebackJob{}, fmt.Errorf("commit metadata writeback enqueue: %w", err)

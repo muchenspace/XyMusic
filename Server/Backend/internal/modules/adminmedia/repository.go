@@ -390,21 +390,6 @@ func (repository *Repository) FinalizeCompletion(
 			}
 		}
 	}
-	if err := insertAudit(ctx, tx, AuditWrite{
-		ActorID:    input.ActorID,
-		Action:     "media.upload.complete",
-		TargetType: "media_upload",
-		TargetID:   upload.ID,
-		TraceID:    input.TraceID,
-		Details: map[string]any{
-			"assetId":  input.AssetID,
-			"jobId":    jobID,
-			"purpose":  upload.Purpose,
-			"targetId": upload.TargetID,
-		},
-	}); err != nil {
-		return CompletedUpload{}, err
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return CompletedUpload{}, fmt.Errorf("commit media upload completion: %w", err)
 	}
@@ -559,27 +544,10 @@ func (repository *Repository) RetryJob(
 	if err != nil {
 		return MediaJob{}, fmt.Errorf("retry media job: %w", err)
 	}
-	if err := insertAudit(ctx, tx, AuditWrite{
-		ActorID:    input.ActorID,
-		Action:     "media.job.retry",
-		TargetType: "media_job",
-		TargetID:   current.ID,
-		TraceID:    input.TraceID,
-		Details:    map[string]any{"reason": input.Reason, "generation": generation},
-	}); err != nil {
-		return MediaJob{}, err
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return MediaJob{}, fmt.Errorf("commit media job retry: %w", err)
 	}
 	return updated, nil
-}
-
-func (repository *Repository) WriteAudit(ctx context.Context, input AuditWrite) error {
-	if err := insertAudit(ctx, repository.pool, input); err != nil {
-		return err
-	}
-	return nil
 }
 
 func requireUploadTarget(
@@ -853,32 +821,6 @@ func queueObjectCleanup(
 			last_error = null, updated_at = excluded.updated_at`, objectKey, reason, now)
 	if err != nil {
 		return fmt.Errorf("queue object cleanup: %w", err)
-	}
-	return nil
-}
-
-func insertAudit(
-	ctx context.Context,
-	database interface {
-		Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
-	},
-	input AuditWrite,
-) error {
-	details, err := json.Marshal(input.Details)
-	if err != nil {
-		return fmt.Errorf("encode media audit details: %w", err)
-	}
-	if _, err := database.Exec(ctx, `
-		insert into audit_logs (actor_id, action, target_type, target_id, result, trace_id, details)
-		values ($1, $2, $3, $4, 'SUCCESS', $5, $6::jsonb)`,
-		input.ActorID,
-		input.Action,
-		input.TargetType,
-		input.TargetID,
-		input.TraceID,
-		string(details),
-	); err != nil {
-		return fmt.Errorf("write media audit log: %w", err)
 	}
 	return nil
 }

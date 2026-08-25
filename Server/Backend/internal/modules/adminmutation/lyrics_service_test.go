@@ -24,7 +24,7 @@ func TestUpsertLyricsRejectsMissingOrInconsistentTimingBeforeStore(t *testing.T)
 		t.Run(test.name, func(t *testing.T) {
 			store := &lyricsValidationStoreStub{}
 			service := newBatchServiceForTest(t, store)
-			_, err := service.UpsertLyrics(context.Background(), "admin", "trace", "track", LyricsInput{
+			_, err := service.UpsertLyrics(context.Background(), "track", LyricsInput{
 				ExpectedVersion: 1,
 				Language:        "und",
 				Format:          test.format,
@@ -44,7 +44,7 @@ func TestUpsertLyricsRejectsNonCanonicalTimingBeforeStore(t *testing.T) {
 		t.Run(timing, func(t *testing.T) {
 			store := &lyricsValidationStoreStub{}
 			service := newBatchServiceForTest(t, store)
-			_, err := service.UpsertLyrics(context.Background(), "admin", "trace", "track", LyricsInput{
+			_, err := service.UpsertLyrics(context.Background(), "track", LyricsInput{
 				ExpectedVersion: 1,
 				Language:        "und",
 				Format:          "LRC",

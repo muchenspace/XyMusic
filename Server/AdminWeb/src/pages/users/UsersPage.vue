@@ -99,7 +99,6 @@ async function refreshUsers(): Promise<void> {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: ["admin", "users"] }),
     queryClient.invalidateQueries({ queryKey: ["admin", "dashboard"] }),
-    queryClient.invalidateQueries({ queryKey: ["admin", "audit"] }),
   ]);
 }
 async function avatarCompleted(): Promise<void> {

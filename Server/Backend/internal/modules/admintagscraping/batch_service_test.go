@@ -1161,7 +1161,7 @@ func (processor *parallelFallbackProcessor) Search(ctx context.Context, input Se
 	}}, nil
 }
 
-func (*parallelFallbackProcessor) Apply(context.Context, string, string, string, ApplyInput) (ApplyResult, error) {
+func (*parallelFallbackProcessor) Apply(context.Context, string, string, ApplyInput) (ApplyResult, error) {
 	return ApplyResult{}, nil
 }
 
@@ -1192,7 +1192,7 @@ func (processor *blockingBatchProcessor) Search(ctx context.Context, _ SearchInp
 	}}, nil
 }
 
-func (processor *blockingBatchProcessor) Apply(context.Context, string, string, string, ApplyInput) (ApplyResult, error) {
+func (processor *blockingBatchProcessor) Apply(context.Context, string, string, ApplyInput) (ApplyResult, error) {
 	processor.applyCalls.Add(1)
 	return ApplyResult{}, nil
 }
@@ -1240,7 +1240,7 @@ func (stub *batchProcessorStub) Search(context.Context, SearchInput) ([]Candidat
 	stub.searchCalls++
 	return stub.matches, stub.searchErr
 }
-func (stub *batchProcessorStub) Apply(_ context.Context, _, _, _ string, input ApplyInput) (ApplyResult, error) {
+func (stub *batchProcessorStub) Apply(_ context.Context, _, _ string, input ApplyInput) (ApplyResult, error) {
 	stub.applyCalls++
 	stub.applyInput = input
 	return stub.applyResult, stub.applyErr

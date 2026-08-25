@@ -2,7 +2,6 @@ package adminjobs
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -101,11 +100,7 @@ func (repository *Repository) FindMetadataVersion(ctx context.Context, jobID str
 	return version, true, nil
 }
 
-func (repository *Repository) RetryMediaOrScan(
-	ctx context.Context,
-	actorID, traceID, jobID string,
-	reason *string,
-) error {
+func (repository *Repository) RetryMediaOrScan(ctx context.Context, jobID string) error {
 	transaction, err := repository.database.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin administrator job retry: %w", err)
@@ -119,11 +114,11 @@ func (repository *Repository) RetryMediaOrScan(
 		FROM media_jobs WHERE id = $1 FOR UPDATE`, jobID,
 	).Scan(&trackID, &status, &version)
 	if err == nil {
-		if err := retryMediaJob(ctx, transaction, actorID, traceID, jobID, trackID, status, version, reason); err != nil {
+		if err := retryMediaJob(ctx, transaction, jobID, trackID, status, version); err != nil {
 			return err
 		}
 	} else if errors.Is(err, pgx.ErrNoRows) {
-		if err := retryScanJob(ctx, transaction, actorID, traceID, jobID, reason); err != nil {
+		if err := retryScanJob(ctx, transaction, jobID); err != nil {
 			return err
 		}
 	} else {
@@ -135,11 +130,7 @@ func (repository *Repository) RetryMediaOrScan(
 	return nil
 }
 
-func (repository *Repository) CancelMediaOrScan(
-	ctx context.Context,
-	actorID, traceID, jobID string,
-	reason *string,
-) error {
+func (repository *Repository) CancelMediaOrScan(ctx context.Context, jobID string) error {
 	transaction, err := repository.database.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin administrator job cancellation: %w", err)
@@ -152,11 +143,11 @@ func (repository *Repository) CancelMediaOrScan(
 		SELECT status::text, version FROM media_jobs WHERE id = $1 FOR UPDATE`, jobID,
 	).Scan(&status, &version)
 	if err == nil {
-		if err := cancelMediaJob(ctx, transaction, actorID, traceID, jobID, status, version, reason); err != nil {
+		if err := cancelMediaJob(ctx, transaction, jobID, status, version); err != nil {
 			return err
 		}
 	} else if errors.Is(err, pgx.ErrNoRows) {
-		if err := cancelScanJob(ctx, transaction, actorID, traceID, jobID, reason); err != nil {
+		if err := cancelScanJob(ctx, transaction, jobID); err != nil {
 			return err
 		}
 	} else {
@@ -195,9 +186,8 @@ func (repository *Repository) EventState(ctx context.Context) (EventRecord, erro
 func retryMediaJob(
 	ctx context.Context,
 	transaction pgx.Tx,
-	actorID, traceID, jobID, trackID, previousStatus string,
+	jobID, trackID, previousStatus string,
 	jobVersion int,
-	reason *string,
 ) error {
 	if previousStatus != "FAILED" && previousStatus != "CANCELLED" {
 		return apperror.Conflict(
@@ -272,17 +262,10 @@ func retryMediaJob(
 		)`, now, jobID); err != nil {
 		return fmt.Errorf("reset linked local music sources after media retry: %w", err)
 	}
-	details := map[string]any{"previousStatus": previousStatus}
-	addReason(details, reason)
-	return writeJobAudit(ctx, transaction, actorID, "admin.job.retry", "media_job", jobID, traceID, details)
+	return nil
 }
 
-func retryScanJob(
-	ctx context.Context,
-	transaction pgx.Tx,
-	actorID, traceID, jobID string,
-	reason *string,
-) error {
+func retryScanJob(ctx context.Context, transaction pgx.Tx, jobID string) error {
 	var rootID, previousStatus string
 	err := transaction.QueryRow(ctx, `
 		SELECT root_id, status::text FROM library_scan_runs WHERE id = $1 FOR UPDATE`, jobID,
@@ -344,17 +327,14 @@ func retryScanJob(
 	if err != nil {
 		return fmt.Errorf("retry library scan: %w", err)
 	}
-	details := map[string]any{"sourceId": rootID, "previousStatus": previousStatus}
-	addReason(details, reason)
-	return writeJobAudit(ctx, transaction, actorID, "admin.job.retry", "library_scan", jobID, traceID, details)
+	return nil
 }
 
 func cancelMediaJob(
 	ctx context.Context,
 	transaction pgx.Tx,
-	actorID, traceID, jobID, previousStatus string,
+	jobID, previousStatus string,
 	jobVersion int,
-	reason *string,
 ) error {
 	if previousStatus != "PENDING" && previousStatus != "PROCESSING" {
 		return apperror.Conflict(
@@ -402,21 +382,14 @@ func cancelMediaJob(
 			return fmt.Errorf("cancel linked local music source processing: %w", err)
 		}
 	}
-	details := map[string]any{"previousStatus": previousStatus}
-	addReason(details, reason)
-	return writeJobAudit(ctx, transaction, actorID, "admin.job.cancel", "media_job", jobID, traceID, details)
+	return nil
 }
 
-func cancelScanJob(
-	ctx context.Context,
-	transaction pgx.Tx,
-	actorID, traceID, jobID string,
-	reason *string,
-) error {
-	var rootID, previousStatus string
+func cancelScanJob(ctx context.Context, transaction pgx.Tx, jobID string) error {
+	var previousStatus string
 	err := transaction.QueryRow(ctx, `
-		SELECT root_id, status::text FROM library_scan_runs WHERE id = $1 FOR UPDATE`, jobID,
-	).Scan(&rootID, &previousStatus)
+		SELECT status::text FROM library_scan_runs WHERE id = $1 FOR UPDATE`, jobID,
+	).Scan(&previousStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return apperror.NotFound("Background job was not found")
 	}
@@ -445,38 +418,7 @@ func cancelScanJob(
 		WHERE id = $4`, status, completedAt, now, jobID); err != nil {
 		return fmt.Errorf("cancel library scan: %w", err)
 	}
-	details := map[string]any{"sourceId": rootID, "previousStatus": previousStatus}
-	addReason(details, reason)
-	return writeJobAudit(ctx, transaction, actorID, "admin.job.cancel", "library_scan", jobID, traceID, details)
-}
-
-func writeJobAudit(
-	ctx context.Context,
-	executor interface {
-		Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
-	},
-	actorID, action, targetType, targetID, traceID string,
-	details map[string]any,
-) error {
-	encoded, err := json.Marshal(details)
-	if err != nil {
-		return fmt.Errorf("encode administrator job audit details: %w", err)
-	}
-	_, err = executor.Exec(ctx, `
-		INSERT INTO audit_logs (
-			actor_id, action, target_type, target_id, result, trace_id, details
-		) VALUES ($1, $2, $3, $4, 'SUCCESS', $5, $6::jsonb)`,
-		actorID, action, targetType, targetID, traceID, encoded)
-	if err != nil {
-		return fmt.Errorf("write administrator job audit: %w", err)
-	}
 	return nil
-}
-
-func addReason(details map[string]any, reason *string) {
-	if reason != nil {
-		details["reason"] = *reason
-	}
 }
 
 func jobWhere(input ListQuery) (string, []any) {

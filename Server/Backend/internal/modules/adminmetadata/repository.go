@@ -2,7 +2,6 @@ package adminmetadata
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -120,7 +119,7 @@ func (repository *Repository) FindMetadata(ctx context.Context, trackID string) 
 
 func (repository *Repository) UpdateMetadata(
 	ctx context.Context,
-	actorID, traceID, trackID string,
+	actorID, trackID string,
 	input MetadataMutationInput,
 ) (MetadataRecord, error) {
 	tx, err := repository.pool.Begin(ctx)
@@ -149,8 +148,7 @@ func (repository *Repository) UpdateMetadata(
 	}
 	nextVersion := row.Version + 1
 	if err := persistMetadataMutation(ctx, tx, mutationWrite{
-		TrackID: trackID, ActorID: actorID, TraceID: traceID,
-		AuditAction: "TRACK_METADATA_UPDATED", Reason: input.Reason,
+		TrackID: trackID, ActorID: actorID,
 		PreviousVersion: row.Version, NextVersion: nextVersion,
 		Overrides: nextOverrides, PreviousEffective: previousEffective, Effective: nextEffective,
 	}); err != nil {
@@ -164,7 +162,7 @@ func (repository *Repository) UpdateMetadata(
 
 func (repository *Repository) BatchUpdateMetadata(
 	ctx context.Context,
-	actorID, traceID string,
+	actorID string,
 	input BatchMetadataMutationInput,
 ) ([]BatchUpdateRecord, error) {
 	tx, err := repository.pool.Begin(ctx)
@@ -193,7 +191,7 @@ func (repository *Repository) BatchUpdateMetadata(
 		}
 		_, currentOverrides, previousEffective, nextOverrides, nextEffective, err := mutationSnapshots(row, MetadataMutationInput{
 			ExpectedVersion: item.ExpectedVersion,
-			Patch:           input.Patch, Reason: input.Reason,
+			Patch:           input.Patch,
 		})
 		if err != nil {
 			return nil, err
@@ -215,11 +213,10 @@ func (repository *Repository) BatchUpdateMetadata(
 	for _, change := range prepared {
 		nextVersion := change.row.Version + 1
 		if err := persistMetadataMutation(ctx, tx, mutationWrite{
-			TrackID: change.row.TrackID, ActorID: actorID, TraceID: traceID,
-			AuditAction: "TRACK_METADATA_BATCH_UPDATED", Reason: input.Reason,
+			TrackID: change.row.TrackID, ActorID: actorID,
 			PreviousVersion: change.row.Version, NextVersion: nextVersion,
 			Overrides: change.overrides, PreviousEffective: change.previousEffective,
-			Effective: change.effective, BatchSize: len(prepared),
+			Effective: change.effective,
 		}); err != nil {
 			return nil, err
 		}
@@ -235,7 +232,7 @@ func (repository *Repository) BatchUpdateMetadata(
 
 func (repository *Repository) EnqueueWriteback(
 	ctx context.Context,
-	actorID, traceID, trackID string,
+	actorID, trackID string,
 	input VersionReasonInput,
 ) (WritebackJob, error) {
 	tx, err := repository.pool.Begin(ctx)
@@ -370,16 +367,6 @@ func (repository *Repository) EnqueueWriteback(
 		}
 		return WritebackJob{}, fmt.Errorf("enqueue metadata writeback: %w", err)
 	}
-	if err := insertAudit(ctx, tx, auditWrite{
-		ActorID: &actorID, Action: "TRACK_METADATA_WRITEBACK_QUEUED",
-		TargetType: "metadata_writeback_job", TargetID: &job.ID, Result: "SUCCESS",
-		TraceID: traceID, Details: map[string]any{
-			"trackId": trackID, "sourceId": source.ID,
-			"metadataVersion": metadata.Version, "reason": input.Reason,
-		},
-	}); err != nil {
-		return WritebackJob{}, err
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return WritebackJob{}, fmt.Errorf("commit metadata writeback enqueue: %w", err)
 	}
@@ -447,8 +434,8 @@ func (repository *Repository) FindWriteback(ctx context.Context, jobID string) (
 
 func (repository *Repository) CancelWriteback(
 	ctx context.Context,
-	actorID, traceID, jobID string,
-	input VersionReasonInput,
+	jobID string,
+	input VersionInput,
 ) (WritebackJob, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
@@ -480,15 +467,6 @@ func (repository *Repository) CancelWriteback(
 		where id = $1 and version = $2`, jobID, job.Version, immediate); err != nil {
 		return WritebackJob{}, fmt.Errorf("cancel metadata writeback job: %w", err)
 	}
-	if err := insertAudit(ctx, tx, auditWrite{
-		ActorID: &actorID, Action: "TRACK_METADATA_WRITEBACK_CANCELLED",
-		TargetType: "metadata_writeback_job", TargetID: &jobID, Result: "SUCCESS",
-		TraceID: traceID, Details: map[string]any{
-			"trackId": job.TrackID, "reason": input.Reason, "cancellationPending": !immediate,
-		},
-	}); err != nil {
-		return WritebackJob{}, err
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return WritebackJob{}, fmt.Errorf("commit metadata writeback cancellation: %w", err)
 	}
@@ -497,7 +475,7 @@ func (repository *Repository) CancelWriteback(
 
 func (repository *Repository) RetryWriteback(
 	ctx context.Context,
-	actorID, traceID, jobID string,
+	actorID, jobID string,
 	input VersionReasonInput,
 ) (WritebackJob, error) {
 	tx, err := repository.pool.Begin(ctx)
@@ -646,15 +624,6 @@ func (repository *Repository) RetryWriteback(
 	if command.RowsAffected() != 1 {
 		return WritebackJob{}, writebackVersionConflict(input.ExpectedVersion, job.Version)
 	}
-	if err := insertAudit(ctx, tx, auditWrite{
-		ActorID: &actorID, Action: "TRACK_METADATA_WRITEBACK_RETRIED",
-		TargetType: "metadata_writeback_job", TargetID: &jobID, Result: "SUCCESS",
-		TraceID: traceID, Details: map[string]any{
-			"trackId": job.TrackID, "metadataVersion": metadata.Version, "reason": input.Reason,
-		},
-	}); err != nil {
-		return WritebackJob{}, err
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return WritebackJob{}, fmt.Errorf("commit metadata writeback retry: %w", err)
 	}
@@ -664,15 +633,11 @@ func (repository *Repository) RetryWriteback(
 type mutationWrite struct {
 	TrackID           string
 	ActorID           string
-	TraceID           string
-	AuditAction       string
-	Reason            string
 	PreviousVersion   int
 	NextVersion       int
 	Overrides         MetadataOverrides
 	PreviousEffective MetadataSnapshot
 	Effective         MetadataSnapshot
-	BatchSize         int
 }
 
 func persistMetadataMutation(ctx context.Context, tx pgx.Tx, input mutationWrite) error {
@@ -692,21 +657,6 @@ func persistMetadataMutation(ctx context.Context, tx pgx.Tx, input mutationWrite
 		return metadataVersionConflict(input.PreviousVersion, input.PreviousVersion+1, "")
 	}
 	if err := projectMetadata(ctx, tx, input.TrackID, input.Effective, input.PreviousEffective, "MANUAL"); err != nil {
-		return err
-	}
-	details := map[string]any{
-		"metadataVersion": input.NextVersion,
-		"changedFields":   MetadataChangedFields(input.PreviousEffective, input.Effective),
-		"reason":          input.Reason,
-	}
-	if input.BatchSize > 0 {
-		details["batchSize"] = input.BatchSize
-	}
-	targetID := input.TrackID
-	if err := insertAudit(ctx, tx, auditWrite{
-		ActorID: &input.ActorID, Action: input.AuditAction, TargetType: "track_metadata",
-		TargetID: &targetID, Result: "SUCCESS", TraceID: input.TraceID, Details: details,
-	}); err != nil {
 		return err
 	}
 	return nil
@@ -1118,31 +1068,6 @@ func deleteAlbumIfEmpty(ctx context.Context, tx pgx.Tx, albumID string) error {
 			locked_by = null, locked_until = null, next_attempt_at = now(),
 			last_error = null, updated_at = now()`, objectKey); err != nil {
 		return fmt.Errorf("queue empty album artwork cleanup: %w", err)
-	}
-	return nil
-}
-
-type auditWrite struct {
-	ActorID    *string
-	Action     string
-	TargetType string
-	TargetID   *string
-	Result     string
-	TraceID    string
-	Details    map[string]any
-}
-
-func insertAudit(ctx context.Context, database executor, input auditWrite) error {
-	details, err := json.Marshal(input.Details)
-	if err != nil {
-		return fmt.Errorf("encode metadata audit details: %w", err)
-	}
-	if _, err := database.Exec(ctx, `
-		insert into audit_logs (actor_id, action, target_type, target_id, result, trace_id, details)
-		values ($1, $2, $3, $4, $5::audit_result, $6, $7::jsonb)`,
-		input.ActorID, input.Action, input.TargetType, input.TargetID,
-		input.Result, input.TraceID, string(details)); err != nil {
-		return fmt.Errorf("write metadata audit log: %w", err)
 	}
 	return nil
 }

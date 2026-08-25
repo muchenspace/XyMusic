@@ -22,10 +22,10 @@ type API interface {
 	Dashboard(context.Context) (DashboardDTO, error)
 	ListUsers(context.Context, ListUsersInput) (UserPageDTO, error)
 	User(context.Context, string, SessionPageInput) (UserDetailDTO, error)
-	CreateUser(context.Context, string, string, CreateUserInput) (UserDetailDTO, error)
-	UpdateUser(context.Context, string, string, string, UpdateUserInput) (UserDetailDTO, error)
-	ResetPassword(context.Context, string, string, string, PasswordInput) (UpdatedDTO, error)
-	RevokeSession(context.Context, string, string, string, string, string) (RevokedDTO, error)
+	CreateUser(context.Context, CreateUserInput) (UserDetailDTO, error)
+	UpdateUser(context.Context, string, string, UpdateUserInput) (UserDetailDTO, error)
+	ResetPassword(context.Context, string, PasswordInput) (UpdatedDTO, error)
+	RevokeSession(context.Context, string, string) (RevokedDTO, error)
 }
 
 type Routes struct {
@@ -96,8 +96,8 @@ func (routes *Routes) createUser(c *gin.Context) error {
 	if err := validateCreateUserRoute(input); err != nil {
 		return err
 	}
-	return routes.mutate(c, "admin.user.create", input, http.StatusCreated, func(actorID, traceID string) (any, error) {
-		return routes.service.CreateUser(c.Request.Context(), actorID, traceID, input)
+	return routes.mutate(c, "admin.user.create", input, http.StatusCreated, func(string) (any, error) {
+		return routes.service.CreateUser(c.Request.Context(), input)
 	})
 }
 
@@ -145,8 +145,8 @@ func (routes *Routes) updateUser(c *gin.Context) error {
 	if err := validateUpdateUserRoute(input); err != nil {
 		return err
 	}
-	return routes.mutate(c, "admin.user.update:"+userID, input, http.StatusOK, func(actorID, traceID string) (any, error) {
-		return routes.service.UpdateUser(c.Request.Context(), actorID, traceID, userID, input)
+	return routes.mutate(c, "admin.user.update:"+userID, input, http.StatusOK, func(actorID string) (any, error) {
+		return routes.service.UpdateUser(c.Request.Context(), actorID, userID, input)
 	})
 }
 
@@ -162,8 +162,8 @@ func (routes *Routes) resetPassword(c *gin.Context) error {
 	if err := validatePasswordRoute(input); err != nil {
 		return err
 	}
-	return routes.mutate(c, "admin.user.password:"+userID, input, http.StatusOK, func(actorID, traceID string) (any, error) {
-		return routes.service.ResetPassword(c.Request.Context(), actorID, traceID, userID, input)
+	return routes.mutate(c, "admin.user.password:"+userID, input, http.StatusOK, func(string) (any, error) {
+		return routes.service.ResetPassword(c.Request.Context(), userID, input)
 	})
 }
 
@@ -176,17 +176,10 @@ func (routes *Routes) revokeSession(c *gin.Context) error {
 	if err != nil {
 		return err
 	}
-	var input ReasonInput
-	if err := httpserver.DecodeJSON(c, &input); err != nil {
-		return err
-	}
-	if err := validateReasonRoute(input.Reason); err != nil {
-		return err
-	}
 	return routes.mutate(
-		c, "admin.user.session.revoke:"+sessionID, input, http.StatusOK,
-		func(actorID, traceID string) (any, error) {
-			return routes.service.RevokeSession(c.Request.Context(), actorID, traceID, userID, sessionID, input.Reason)
+		c, "admin.user.session.revoke:"+sessionID, struct{}{}, http.StatusOK,
+		func(string) (any, error) {
+			return routes.service.RevokeSession(c.Request.Context(), userID, sessionID)
 		},
 	)
 }
@@ -196,16 +189,15 @@ func (routes *Routes) deleteUser(c *gin.Context) error {
 	if err != nil {
 		return err
 	}
-	input, err := decodeVersionReason(c)
+	input, err := decodeVersion(c)
 	if err != nil {
 		return err
 	}
 	payload := input
-	return routes.mutate(c, "admin.user.delete:"+userID, payload, http.StatusOK, func(actorID, traceID string) (any, error) {
-		return routes.service.UpdateUser(c.Request.Context(), actorID, traceID, userID, UpdateUserInput{
+	return routes.mutate(c, "admin.user.delete:"+userID, payload, http.StatusOK, func(actorID string) (any, error) {
+		return routes.service.UpdateUser(c.Request.Context(), actorID, userID, UpdateUserInput{
 			ExpectedVersion: input.ExpectedVersion,
 			Status:          OptionalStatus{Set: true, Value: StatusDeleted},
-			Reason:          input.Reason,
 		})
 	})
 }
@@ -215,16 +207,15 @@ func (routes *Routes) restoreUser(c *gin.Context) error {
 	if err != nil {
 		return err
 	}
-	input, err := decodeVersionReason(c)
+	input, err := decodeVersion(c)
 	if err != nil {
 		return err
 	}
 	payload := input
-	return routes.mutate(c, "admin.user.restore:"+userID, payload, http.StatusOK, func(actorID, traceID string) (any, error) {
-		return routes.service.UpdateUser(c.Request.Context(), actorID, traceID, userID, UpdateUserInput{
+	return routes.mutate(c, "admin.user.restore:"+userID, payload, http.StatusOK, func(actorID string) (any, error) {
+		return routes.service.UpdateUser(c.Request.Context(), actorID, userID, UpdateUserInput{
 			ExpectedVersion: input.ExpectedVersion,
 			Status:          OptionalStatus{Set: true, Value: StatusActive},
-			Reason:          input.Reason,
 		})
 	})
 }
@@ -234,7 +225,7 @@ func (routes *Routes) mutate(
 	scope string,
 	payload any,
 	status int,
-	operation func(actorID, traceID string) (any, error),
+	operation func(actorID string) (any, error),
 ) error {
 	actor, err := adminauth.RequireAdmin(c, routes.identity, true)
 	if err != nil {
@@ -244,11 +235,10 @@ func (routes *Routes) mutate(
 	if !routeIdempotencyKey.MatchString(key) {
 		return apperror.Validation("Idempotency-Key is invalid")
 	}
-	traceID := httpserver.TraceID(c)
 	result, err := routes.idempotency.Execute(c.Request.Context(), IdempotencyInput{
 		ActorID: actor.UserID, Scope: scope, Key: key, Payload: payload,
 	}, func() (IdempotencyResponse, error) {
-		body, err := operation(actor.UserID, traceID)
+		body, err := operation(actor.UserID)
 		if err != nil {
 			return IdempotencyResponse{}, err
 		}
@@ -321,7 +311,7 @@ func validateCreateUserRoute(input CreateUserInput) error {
 }
 
 func validateUpdateUserRoute(input UpdateUserInput) error {
-	if input.ExpectedVersion < 1 || !routeStringLength(input.Reason, 1, 500) {
+	if input.ExpectedVersion < 1 {
 		return routeContractError()
 	}
 	if input.Username.Set && !usernamePattern.MatchString(input.Username.Value) {
@@ -343,29 +333,21 @@ func validateUpdateUserRoute(input UpdateUserInput) error {
 }
 
 func validatePasswordRoute(input PasswordInput) error {
-	if input.ExpectedVersion < 1 || !routeStringLength(input.Password, 6, 128) ||
-		!routeStringLength(input.Reason, 1, 500) {
+	if input.ExpectedVersion < 1 || !routeStringLength(input.Password, 6, 128) {
 		return routeContractError()
 	}
 	return nil
 }
 
-func decodeVersionReason(c *gin.Context) (VersionReasonInput, error) {
-	var input VersionReasonInput
+func decodeVersion(c *gin.Context) (VersionInput, error) {
+	var input VersionInput
 	if err := httpserver.DecodeJSON(c, &input); err != nil {
-		return VersionReasonInput{}, err
+		return VersionInput{}, err
 	}
-	if input.ExpectedVersion < 1 || !routeStringLength(input.Reason, 1, 500) {
-		return VersionReasonInput{}, routeContractError()
+	if input.ExpectedVersion < 1 {
+		return VersionInput{}, routeContractError()
 	}
 	return input, nil
-}
-
-func validateReasonRoute(reason string) error {
-	if !routeStringLength(reason, 1, 500) {
-		return routeContractError()
-	}
-	return nil
 }
 
 func routeStringLength(value string, minimum, maximum int) bool {

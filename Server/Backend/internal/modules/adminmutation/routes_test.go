@@ -251,11 +251,11 @@ func TestAdminMutationRoutesExecuteReplayAndRejectPayloadConflicts(t *testing.T)
 			scope: "admin.user.status:" + userID, status: http.StatusOK,
 			initialBody:      `{"expectedVersion":2,"status":"SUSPENDED","reason":"maintenance","unknown":"first"}`,
 			replayBody:       `{"expectedVersion":2,"status":"SUSPENDED","reason":"maintenance","unknown":"second","another":true}`,
-			conflictBody:     `{"expectedVersion":2,"status":"SUSPENDED","reason":"different reason","unknown":"second"}`,
+			conflictBody:     `{"expectedVersion":2,"status":"ACTIVE","unknown":"second"}`,
 			responseContains: `"status":"SUSPENDED"`,
 			assertCall: func(t *testing.T, call mutationCall) {
 				input := call.input.(UserStatusInput)
-				if call.operation != "updateUserStatus" || call.id != userID || input.ExpectedVersion != 2 || input.Status != UserSuspended || input.Reason != "maintenance" {
+				if call.operation != "updateUserStatus" || call.id != userID || input.ExpectedVersion != 2 || input.Status != UserSuspended {
 					t.Fatalf("call=%+v input=%+v", call, input)
 				}
 			},
@@ -285,9 +285,6 @@ func TestAdminMutationRoutesExecuteReplayAndRejectPayloadConflicts(t *testing.T)
 			}
 			if len(api.calls) != 1 {
 				t.Fatalf("service calls=%+v", api.calls)
-			}
-			if api.calls[0].actor != "admin" || api.calls[0].trace == "" {
-				t.Fatalf("service actor/trace=%q/%q", api.calls[0].actor, api.calls[0].trace)
 			}
 			test.assertCall(t, api.calls[0])
 			assertMutationBoundary(t, auth, idempotency, 1, test.scope, key)
@@ -408,80 +405,80 @@ func (stub *mutationAPIStub) append(operation, actor, trace, id string, version 
 	stub.calls = append(stub.calls, mutationCall{operation: operation, actor: actor, trace: trace, id: id, version: version, input: input})
 }
 
-func (stub *mutationAPIStub) CreateArtist(_ context.Context, actor, trace string, input CreateArtistInput) (ArtistDTO, error) {
-	stub.append("createArtist", actor, trace, "", 0, input)
+func (stub *mutationAPIStub) CreateArtist(_ context.Context, input CreateArtistInput) (ArtistDTO, error) {
+	stub.append("createArtist", "", "", "", 0, input)
 	return ArtistDTO{ID: "artist-created", Name: input.Name, Version: 1}, nil
 }
-func (stub *mutationAPIStub) UpdateArtist(_ context.Context, actor, trace, id string, input UpdateArtistInput) (ArtistDTO, error) {
-	stub.append("updateArtist", actor, trace, id, 0, input)
+func (stub *mutationAPIStub) UpdateArtist(_ context.Context, id string, input UpdateArtistInput) (ArtistDTO, error) {
+	stub.append("updateArtist", "", "", id, 0, input)
 	return ArtistDTO{ID: id, Name: input.Name.Value, Version: input.ExpectedVersion + 1}, nil
 }
-func (stub *mutationAPIStub) CreateAlbum(_ context.Context, actor, trace string, input CreateAlbumInput) (AlbumDTO, error) {
-	stub.append("createAlbum", actor, trace, "", 0, input)
+func (stub *mutationAPIStub) CreateAlbum(_ context.Context, input CreateAlbumInput) (AlbumDTO, error) {
+	stub.append("createAlbum", "", "", "", 0, input)
 	return AlbumDTO{ID: "album-created", Title: input.Title, Version: 1}, nil
 }
-func (stub *mutationAPIStub) UpdateAlbum(_ context.Context, actor, trace, id string, input UpdateAlbumInput) (AlbumDTO, error) {
-	stub.append("updateAlbum", actor, trace, id, 0, input)
+func (stub *mutationAPIStub) UpdateAlbum(_ context.Context, id string, input UpdateAlbumInput) (AlbumDTO, error) {
+	stub.append("updateAlbum", "", "", id, 0, input)
 	return AlbumDTO{ID: id, Title: input.Title.Value, Version: input.ExpectedVersion + 1}, nil
 }
-func (stub *mutationAPIStub) MergeAlbums(_ context.Context, actor, trace string, input MergeAlbumsInput) (MergeResultDTO, error) {
-	stub.append("mergeAlbums", actor, trace, "", 0, input)
+func (stub *mutationAPIStub) MergeAlbums(_ context.Context, input MergeAlbumsInput) (MergeResultDTO, error) {
+	stub.append("mergeAlbums", "", "", "", 0, input)
 	return MergeResultDTO{TargetAlbumID: input.Target.AlbumID, MergedAlbums: len(input.Sources), MovedTracks: 4, TargetVersion: input.Target.ExpectedVersion + 1}, nil
 }
-func (stub *mutationAPIStub) CreateTrack(_ context.Context, actor, trace string, input CreateTrackInput) (TrackDTO, error) {
-	stub.append("createTrack", actor, trace, "", 0, input)
+func (stub *mutationAPIStub) CreateTrack(_ context.Context, input CreateTrackInput) (TrackDTO, error) {
+	stub.append("createTrack", "", "", "", 0, input)
 	return TrackDTO{ID: "track-created", Title: input.Title, DiscNumber: input.DiscNumber.Value, Status: "DRAFT", Version: 1}, nil
 }
-func (stub *mutationAPIStub) UpdateTrack(_ context.Context, actor, trace, id string, input UpdateTrackInput) (TrackDTO, error) {
-	stub.append("updateTrack", actor, trace, id, 0, input)
+func (stub *mutationAPIStub) UpdateTrack(_ context.Context, id string, input UpdateTrackInput) (TrackDTO, error) {
+	stub.append("updateTrack", "", "", id, 0, input)
 	return TrackDTO{ID: id, Title: input.Title.Value, DiscNumber: input.DiscNumber.Value, Status: "DRAFT", Version: input.ExpectedVersion + 1}, nil
 }
-func (stub *mutationAPIStub) PublishTrack(_ context.Context, actor, trace, id string, version int) (TrackDTO, error) {
-	stub.append("publishTrack", actor, trace, id, version, nil)
+func (stub *mutationAPIStub) PublishTrack(_ context.Context, id string, version int) (TrackDTO, error) {
+	stub.append("publishTrack", "", "", id, version, nil)
 	return TrackDTO{ID: id, Status: "READY", Version: version + 1}, nil
 }
-func (stub *mutationAPIStub) ArchiveTrack(_ context.Context, actor, trace, id string, version int) (TrackDTO, error) {
-	stub.append("archiveTrack", actor, trace, id, version, nil)
+func (stub *mutationAPIStub) ArchiveTrack(_ context.Context, id string, version int) (TrackDTO, error) {
+	stub.append("archiveTrack", "", "", id, version, nil)
 	return TrackDTO{ID: id, Status: "ARCHIVED", Version: version + 1}, nil
 }
-func (stub *mutationAPIStub) ArchiveTracksBatch(_ context.Context, actor, trace string, input BatchTrackMutationInput) (BatchArchiveDTO, error) {
-	stub.append("archiveTracksBatch", actor, trace, "", 0, input)
+func (stub *mutationAPIStub) ArchiveTracksBatch(_ context.Context, input BatchTrackMutationInput) (BatchArchiveDTO, error) {
+	stub.append("archiveTracksBatch", "", "", "", 0, input)
 	items := make([]BatchArchiveItemDTO, 0, len(input.Items))
 	for _, item := range input.Items {
 		items = append(items, BatchArchiveItemDTO{TrackID: item.TrackID, Status: "ARCHIVED", Version: item.ExpectedVersion + 1})
 	}
 	return BatchArchiveDTO{Archived: len(items), Items: items}, nil
 }
-func (stub *mutationAPIStub) RestoreTrack(_ context.Context, actor, trace, id string, version int) (TrackDTO, error) {
-	stub.append("restoreTrack", actor, trace, id, version, nil)
+func (stub *mutationAPIStub) RestoreTrack(_ context.Context, id string, version int) (TrackDTO, error) {
+	stub.append("restoreTrack", "", "", id, version, nil)
 	return TrackDTO{ID: id, Status: "READY", Version: version + 1}, nil
 }
-func (stub *mutationAPIStub) RestoreTracksBatch(_ context.Context, actor, trace string, input BatchTrackMutationInput) (BatchRestoreDTO, error) {
-	stub.append("restoreTracksBatch", actor, trace, "", 0, input)
+func (stub *mutationAPIStub) RestoreTracksBatch(_ context.Context, input BatchTrackMutationInput) (BatchRestoreDTO, error) {
+	stub.append("restoreTracksBatch", "", "", "", 0, input)
 	items := make([]BatchRestoreItemDTO, 0, len(input.Items))
 	for _, item := range input.Items {
 		items = append(items, BatchRestoreItemDTO{TrackID: item.TrackID, Status: "READY", Version: item.ExpectedVersion + 1})
 	}
 	return BatchRestoreDTO{Restored: len(items), Items: items}, nil
 }
-func (stub *mutationAPIStub) DeleteTrackPermanently(_ context.Context, actor, trace, id string, version int) (DeleteTrackDTO, error) {
-	stub.append("deleteTrack", actor, trace, id, version, nil)
+func (stub *mutationAPIStub) DeleteTrackPermanently(_ context.Context, id string, version int) (DeleteTrackDTO, error) {
+	stub.append("deleteTrack", "", "", id, version, nil)
 	return DeleteTrackDTO{Deleted: true, DeletedFiles: 2, QuarantinedFiles: 1, ScheduledObjects: 3}, nil
 }
-func (stub *mutationAPIStub) CreatePermanentDeleteBatch(_ context.Context, actor, trace string, input BatchTrackMutationInput) (PermanentDeleteBatchDTO, error) {
-	stub.append("createPermanentDeleteBatch", actor, trace, "", 0, input)
+func (stub *mutationAPIStub) CreatePermanentDeleteBatch(_ context.Context, input BatchTrackMutationInput) (PermanentDeleteBatchDTO, error) {
+	stub.append("createPermanentDeleteBatch", "", "", "", 0, input)
 	return PermanentDeleteBatchDTO{ID: "00000000-0000-4000-8000-000000000099", Status: DeleteBatchPending, Total: len(input.Items), Items: []PermanentDeleteBatchItemDTO{}}, nil
 }
 func (stub *mutationAPIStub) PermanentDeleteBatch(_ context.Context, id string) (PermanentDeleteBatchDTO, error) {
 	stub.append("permanentDeleteBatch", "", "", id, 0, nil)
 	return PermanentDeleteBatchDTO{ID: id, Status: DeleteBatchPending, Total: 2, Items: []PermanentDeleteBatchItemDTO{}}, nil
 }
-func (stub *mutationAPIStub) UpsertLyrics(_ context.Context, actor, trace, id string, input LyricsInput) (LyricDTO, error) {
-	stub.append("upsertLyrics", actor, trace, id, 0, input)
+func (stub *mutationAPIStub) UpsertLyrics(_ context.Context, id string, input LyricsInput) (LyricDTO, error) {
+	stub.append("upsertLyrics", "", "", id, 0, input)
 	return LyricDTO{ID: "lyric-1", TrackID: id, Language: input.Language, Format: input.Format, Timing: input.Timing, Content: input.Content.Value, IsDefault: input.IsDefault.Value, TrackVersion: input.ExpectedVersion + 1}, nil
 }
-func (stub *mutationAPIStub) UpdateUserStatus(_ context.Context, actor, trace, id string, input UserStatusInput) (UserStatusDTO, error) {
-	stub.append("updateUserStatus", actor, trace, id, 0, input)
+func (stub *mutationAPIStub) UpdateUserStatus(_ context.Context, actor, id string, input UserStatusInput) (UserStatusDTO, error) {
+	stub.append("updateUserStatus", actor, "", id, 0, input)
 	return UserStatusDTO{ID: id, Username: "listener", Status: input.Status, Version: input.ExpectedVersion + 1}, nil
 }
 

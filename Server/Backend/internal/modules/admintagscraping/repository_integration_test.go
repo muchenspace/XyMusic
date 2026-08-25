@@ -442,7 +442,6 @@ func TestProductionArchivedTrackScrapingGuards(t *testing.T) {
 	cleanup := func() {
 		cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cleanupCancel()
-		_, _ = pool.Exec(cleanupContext, "DELETE FROM audit_logs WHERE actor_id = $1", actorID)
 		_, _ = pool.Exec(cleanupContext, "DELETE FROM local_music_source_tracks WHERE track_id = $1", trackID)
 		_, _ = pool.Exec(cleanupContext, "DELETE FROM local_music_sources WHERE id = $1", sourceID)
 		_, _ = pool.Exec(cleanupContext, "DELETE FROM track_metadata WHERE track_id = $1", trackID)
@@ -502,22 +501,18 @@ func TestProductionArchivedTrackScrapingGuards(t *testing.T) {
 		t.Fatalf("fingerprint error = %#v", err)
 	}
 	if _, err := repository.UpdateMetadata(
-		ctx, actorID, "integration:archived-update", trackID, 1,
+		ctx, actorID, trackID, 1,
 		MetadataPatch{"title": "Must not change"}, "archived track guard",
 	); !apperror.IsCode(err, apperror.CodeInvalidStateTransition) || !isArchivedTrackError(err) {
 		t.Fatalf("metadata update error = %#v", err)
 	}
-	var version, audits int
+	var version int
 	var overrides string
-	if err := pool.QueryRow(ctx, `SELECT version,overrides::text,
-		(SELECT count(*)::int FROM audit_logs WHERE actor_id=$2 AND target_id=$1)
-		FROM track_metadata WHERE track_id=$1`, trackID, actorID).Scan(
-		&version, &overrides, &audits,
-	); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT version,overrides::text FROM track_metadata WHERE track_id=$1`, trackID).Scan(&version, &overrides); err != nil {
 		t.Fatal(err)
 	}
-	if version != 1 || overrides != "{}" || audits != 0 {
-		t.Fatalf("version/overrides/audits = %d/%s/%d", version, overrides, audits)
+	if version != 1 || overrides != "{}" {
+		t.Fatalf("version/overrides = %d/%s", version, overrides)
 	}
 }
 
@@ -640,13 +635,13 @@ func TestProductionBatchCancellationAcrossServiceInstances(t *testing.T) {
 		WorkerID:  workerID,
 	})
 	if _, err := repository.UpdateMetadata(
-		fencedContext, actorID, "integration:cancelled-metadata", trackID, 1,
+		fencedContext, actorID, trackID, 1,
 		MetadataPatch{"title": "Must not be applied"}, "cancelled batch",
 	); !errors.Is(err, errBatchCancellationRequested) {
 		t.Fatalf("cancelled metadata update error = %v", err)
 	}
 	if _, err := repository.EnqueueWriteback(
-		fencedContext, actorID, "integration:cancelled-writeback", trackID, 1, "cancelled batch",
+		fencedContext, actorID, trackID, 1, "cancelled batch",
 	); !errors.Is(err, errBatchCancellationRequested) {
 		t.Fatalf("cancelled writeback enqueue error = %v", err)
 	}
@@ -719,7 +714,6 @@ func TestProductionBatchAttemptFenceAndCancelledCompletion(t *testing.T) {
 		for _, jobID := range jobIDs {
 			_, _ = pool.Exec(cleanupContext, "DELETE FROM tag_scraping_jobs WHERE id = $1", jobID)
 		}
-		_, _ = pool.Exec(cleanupContext, "DELETE FROM audit_logs WHERE actor_id = $1", actorID)
 		_, _ = pool.Exec(cleanupContext, "DELETE FROM tracks WHERE id = $1", trackID)
 		_, _ = pool.Exec(cleanupContext, "DELETE FROM artists WHERE id = $1", artistID)
 		_, _ = pool.Exec(cleanupContext, "DELETE FROM users WHERE id = $1", actorID)
@@ -785,7 +779,7 @@ func TestProductionBatchAttemptFenceAndCancelledCompletion(t *testing.T) {
 		t.Fatalf("stale Metadata error = %v", err)
 	}
 	if _, err := repository.UpdateMetadata(
-		fenceAContext, actorID, "integration:stale-update", trackID, 1,
+		fenceAContext, actorID, trackID, 1,
 		MetadataPatch{"title": "Stale attempt must not apply"}, "stale attempt",
 	); !errors.Is(err, ErrBatchLeaseLost) {
 		t.Fatalf("stale UpdateMetadata error = %v", err)
@@ -816,7 +810,7 @@ func TestProductionBatchAttemptFenceAndCancelledCompletion(t *testing.T) {
 	}
 	updatedTitle := "Attempt Fence Updated " + suffix[:8]
 	updated, err := repository.UpdateMetadata(
-		fenceBContext, actorID, "integration:current-update", trackID, baseline.Version,
+		fenceBContext, actorID, trackID, baseline.Version,
 		MetadataPatch{"title": updatedTitle}, "current attempt",
 	)
 	if err != nil || updated.Version != 2 || updated.Effective.Title != updatedTitle {
@@ -1000,7 +994,6 @@ func TestProductionStaleBatchAttemptCannotCommitMutations(t *testing.T) {
 	if _, err := repository.UpdateMetadata(
 		staleContext,
 		actorID,
-		"integration:stale-metadata",
 		trackID,
 		1,
 		MetadataPatch{"title": "Must not be applied"},
@@ -1028,7 +1021,6 @@ func TestProductionStaleBatchAttemptCannotCommitMutations(t *testing.T) {
 	if _, err := repository.EnqueueWriteback(
 		staleContext,
 		actorID,
-		"integration:stale-writeback",
 		trackID,
 		1,
 		"stale attempt",
@@ -1060,7 +1052,7 @@ func TestProductionStaleBatchAttemptCannotCommitMutations(t *testing.T) {
 		t.Fatalf("media completion claim = %+v error=%v", completion, err)
 	}
 	_, err = mediaRepository.FinalizeCompletion(ctx, adminmedia.FinalizeCompletionParams{
-		ActorID: actorID, TraceID: "integration:stale-artwork", UploadID: upload.ID,
+		ActorID: actorID, UploadID: upload.ID,
 		CompletionToken: completion.Token, AssetID: assetID,
 		Inspected: adminmedia.InspectedUpload{
 			ObjectKey: objectKeys[1], MIMEType: "image/jpeg", SizeBytes: 48,
@@ -1136,7 +1128,6 @@ func TestProductionStaleBatchAttemptCannotCommitMutations(t *testing.T) {
 		_, completeErr := mediaService.CompleteUpload(
 			completionContext,
 			actorID,
-			"integration:cancel-artwork-race",
 			raceUpload.ID,
 			adminmedia.CompleteUploadInput{CompletionFence: &artworkCompletionFence{
 				executionContext: currentContext,

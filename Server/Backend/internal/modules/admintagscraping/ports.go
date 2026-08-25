@@ -18,8 +18,8 @@ type Fingerprinter interface {
 }
 
 type ArtworkApplier interface {
-	ApplyAlbumArtwork(context.Context, string, string, string, DownloadedArtwork) error
-	ApplyArtistArtwork(context.Context, string, string, string, int, bool, DownloadedArtwork) error
+	ApplyAlbumArtwork(context.Context, string, string, DownloadedArtwork) error
+	ApplyArtistArtwork(context.Context, string, string, int, bool, DownloadedArtwork) error
 }
 
 type Logger interface {
@@ -45,9 +45,9 @@ type BatchCompleteStore interface {
 type Store interface {
 	FingerprintSource(context.Context, string) (FingerprintSource, error)
 	Metadata(context.Context, string) (TrackMetadata, error)
-	UpdateMetadata(context.Context, string, string, string, int, MetadataPatch, string) (TrackMetadata, error)
+	UpdateMetadata(context.Context, string, string, int, MetadataPatch, string) (TrackMetadata, error)
 	TrackAlbumID(context.Context, string) (*string, error)
-	EnqueueWriteback(context.Context, string, string, string, int, string) (WritebackJob, error)
+	EnqueueWriteback(context.Context, string, string, int, string) (WritebackJob, error)
 
 	ValidateBatchWriteback(context.Context, []BatchItemInput) error
 	CreateBatch(context.Context, string, CreateBatchInput) (string, error)

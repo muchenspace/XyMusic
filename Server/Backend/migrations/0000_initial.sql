@@ -26,8 +26,6 @@ CREATE TYPE media_job_status AS ENUM ('PENDING', 'PROCESSING', 'READY', 'FAILED'
 --> statement-breakpoint
 CREATE TYPE media_job_type AS ENUM ('INGEST_TRACK');
 --> statement-breakpoint
-CREATE TYPE audit_result AS ENUM ('SUCCESS', 'FAILURE');
---> statement-breakpoint
 CREATE TABLE users (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   username varchar(32) NOT NULL,
@@ -148,6 +146,7 @@ CREATE TABLE albums (
   cover_asset_id uuid REFERENCES media_assets(id) ON DELETE SET NULL,
   release_date date,
   status catalog_status NOT NULL DEFAULT 'DRAFT',
+  archived_manually boolean NOT NULL DEFAULT false,
   version integer NOT NULL DEFAULT 1 CHECK (version >= 1),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
@@ -335,17 +334,3 @@ ALTER TABLE media_uploads ADD CONSTRAINT media_uploads_job_id_fk FOREIGN KEY (jo
 CREATE UNIQUE INDEX media_jobs_idempotency_unique ON media_jobs (idempotency_key);
 --> statement-breakpoint
 CREATE INDEX media_jobs_claim_index ON media_jobs (status, next_attempt_at, locked_until);
---> statement-breakpoint
-CREATE TABLE audit_logs (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  actor_id uuid REFERENCES users(id) ON DELETE SET NULL,
-  action varchar(120) NOT NULL,
-  target_type varchar(80) NOT NULL,
-  target_id uuid,
-  result audit_result NOT NULL,
-  trace_id varchar(128) NOT NULL,
-  details jsonb NOT NULL DEFAULT '{}'::jsonb,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
---> statement-breakpoint
-CREATE INDEX audit_actor_time_index ON audit_logs (actor_id, created_at);

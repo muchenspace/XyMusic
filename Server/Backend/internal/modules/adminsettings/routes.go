@@ -21,7 +21,7 @@ type API interface {
 	TestStorage(context.Context, StorageInput) (StorageTestResponse, error)
 	TestMediaTools(context.Context, MediaToolsInput) (TestResponse, error)
 	TestLocalLibrary(context.Context, *string) (LocalLibraryTestResponse, error)
-	ApplyIdempotently(context.Context, string, string, string, UpdateInput) (IdempotentSettingsResult, error)
+	ApplyIdempotently(context.Context, string, string, UpdateInput) (IdempotentSettingsResult, error)
 	SystemInformation(context.Context) (SystemInformationDTO, error)
 }
 
@@ -78,13 +78,12 @@ func (routes *Routes) apply(c *gin.Context) error {
 		return apperror.Validation("Idempotency-Key is invalid")
 	}
 	result, err := routes.service.ApplyIdempotently(
-		c.Request.Context(), actor.UserID, httpserver.TraceID(c), key, input,
+		c.Request.Context(), actor.UserID, key, input,
 	)
 	if err != nil {
 		return err
 	}
 	c.Header("X-Idempotent-Replay", boolText(result.Replayed))
-	c.Header("X-Trace-Id", httpserver.TraceID(c))
 	c.JSON(result.Status, result.Body)
 	return nil
 }

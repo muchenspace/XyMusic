@@ -143,17 +143,12 @@ type RootMutation struct {
 }
 
 type UpdateRootCommand struct {
-	ActorID         string
-	TraceID         string
 	RootID          string
 	ExpectedVersion int
 	Mutation        RootMutation
-	ChangedFields   []string
 }
 
 type DeleteRootCommand struct {
-	ActorID         string
-	TraceID         string
 	RootID          string
 	ExpectedVersion int
 	ArchiveCatalog  bool
@@ -162,15 +157,12 @@ type DeleteRootCommand struct {
 type EnqueueScanCommand struct {
 	RootID      string
 	ActorID     *string
-	TraceID     string
 	Deduplicate bool
 }
 
 type CancelScanCommand struct {
 	RootID  string
 	RunID   string
-	ActorID *string
-	TraceID string
 }
 
 type FileQuery struct {
