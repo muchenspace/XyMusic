@@ -52,7 +52,7 @@ class SearchScreenComposeTest {
         var selected: SearchHistoryUi? = null
         var deleted: SearchHistoryUi? = null
         var cleared = false
-        val historyItem = SearchHistoryUi("First Track", SearchScope.TRACKS, "2026/7/11 10:00")
+        val historyItem = SearchHistoryUi("First Track", SearchScope.TRACKS)
         composeRule.setSearchContent(
             state = SearchUiState(input = "First Track", history = listOf(historyItem)),
             onSubmit = { submitted = true },

@@ -18,11 +18,6 @@ import com.xymusic.app.feature.search.domain.model.SearchOverview
 import com.xymusic.app.feature.search.domain.model.SearchQuery
 import com.xymusic.app.feature.search.domain.model.SearchScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
-import java.util.Locale
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -357,11 +352,6 @@ private fun SearchOverview.toUi(): SearchOverviewUi = SearchOverviewUi(
 private fun SearchHistoryItem.toUi(): SearchHistoryUi = SearchHistoryUi(
     query = query.value,
     scope = scope,
-    searchedAt =
-    DateTimeFormatter
-        .ofLocalizedDateTime(FormatStyle.SHORT)
-        .withLocale(Locale.getDefault())
-        .format(Instant.ofEpochMilli(searchedAtEpochMillis).atZone(ZoneId.systemDefault())),
 )
 
 private fun String.toScope(): SearchScope = SearchScope.entries

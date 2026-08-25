@@ -271,7 +271,7 @@ private fun PlayerOptionsMenu(
         shape = PlayerOptionsMenuShape,
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 0.dp,
-        shadowElevation = 18.dp,
+        shadowElevation = 4.dp,
     ) {
         PlayerDropdownMenuItem(
             text = favoriteLabel,
