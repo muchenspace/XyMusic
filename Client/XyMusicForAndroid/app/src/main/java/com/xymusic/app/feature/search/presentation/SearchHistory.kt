@@ -3,7 +3,6 @@ package com.xymusic.app.feature.search.presentation
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -168,22 +167,13 @@ private fun SearchHistoryRow(
 
 @Composable
 private fun SearchHistoryText(item: SearchHistoryUi, modifier: Modifier = Modifier) {
-    Column(modifier = modifier) {
-        Text(
-            text = item.query,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = MaterialTheme.typography.bodyLarge,
-        )
-        if (item.searchedAt.isNotBlank()) {
-            Text(
-                text = item.searchedAt,
-                maxLines = 1,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-    }
+    Text(
+        text = item.query,
+        modifier = modifier,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        style = MaterialTheme.typography.bodyLarge,
+    )
 }
 
 private fun LazyListScope.browseCategorySection(

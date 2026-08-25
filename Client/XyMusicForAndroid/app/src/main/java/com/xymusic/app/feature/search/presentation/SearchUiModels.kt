@@ -17,7 +17,7 @@ data class SearchOverviewUi(
 }
 
 @Immutable
-data class SearchHistoryUi(val query: String, val scope: SearchScope, val searchedAt: String)
+data class SearchHistoryUi(val query: String, val scope: SearchScope)
 
 enum class SearchQueryErrorUi {
     TooLong,
