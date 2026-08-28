@@ -380,6 +380,28 @@ func TestFilesystemScannerFlushesBeforeArchivingMissingSources(t *testing.T) {
 	}
 }
 
+func TestFilesystemScannerTimesOutBlockedFinalization(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "song.flac"), []byte("flac"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	synchronizer := &blockingFinalizationSynchronizer{}
+	scanner, err := NewFilesystemScannerWithOptions(FilesystemScannerOptions{
+		Synchronizer: synchronizer, Workers: 1, FinalizeTimeout: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	_, err = scanner.Scan(context.Background(), ScanInput{RootID: testRootID, Directory: root})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("scan finalization error=%v", err)
+	}
+	if time.Since(started) > time.Second {
+		t.Fatalf("scan finalization timeout took too long: %s", time.Since(started))
+	}
+}
+
 func BenchmarkFilesystemScanner(b *testing.B) {
 	root := b.TempDir()
 	for index := 0; index < 2_000; index++ {
@@ -681,6 +703,17 @@ type fileSynchronizerStub struct {
 	files      []DiscoveredFile
 	scanRunIDs []string
 	archived   int
+}
+
+type blockingFinalizationSynchronizer struct{}
+
+func (*blockingFinalizationSynchronizer) ProcessFile(context.Context, string, string, DiscoveredFile, time.Time) error {
+	return nil
+}
+
+func (*blockingFinalizationSynchronizer) ArchiveMissing(ctx context.Context, _ string, _, _ time.Time) (int, error) {
+	<-ctx.Done()
+	return 0, ctx.Err()
 }
 
 type finalizingFileSynchronizer struct {

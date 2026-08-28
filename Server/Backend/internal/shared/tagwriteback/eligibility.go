@@ -18,7 +18,7 @@ const (
 	BlockCueOrSharedSource BlockReason = "CUE_OR_SHARED_SOURCE"
 	BlockReadOnly          BlockReason = "READ_ONLY"
 	BlockRootDisabled      BlockReason = "ROOT_DISABLED"
-	BlockRootNotReady      BlockReason = "ROOT_NOT_READY"
+	BlockScanActive        BlockReason = "SCAN_ACTIVE"
 	BlockSourceNotReady    BlockReason = "SOURCE_NOT_READY"
 	BlockUnsupportedFormat BlockReason = "UNSUPPORTED_FORMAT"
 )
@@ -28,7 +28,7 @@ type SourceContext struct {
 	TrackStatus  string
 	RootMode     string
 	RootEnabled  bool
-	RootStatus   string
+	ScanActive   bool
 	SourceStatus string
 	SourcePath   string
 	MappingCount int
@@ -52,8 +52,8 @@ func Evaluate(source SourceContext) Decision {
 		return blocked(BlockReadOnly)
 	case !source.RootEnabled:
 		return blocked(BlockRootDisabled)
-	case source.RootStatus != "READY":
-		return blocked(BlockRootNotReady)
+	case source.ScanActive:
+		return blocked(BlockScanActive)
 	case source.SourceStatus != "READY":
 		return blocked(BlockSourceNotReady)
 	case source.SourcePath != "" && !Supports(source.SourcePath):
@@ -84,8 +84,8 @@ func (decision Decision) Message() string {
 		return "The music source is read-only"
 	case BlockRootDisabled:
 		return "The music source is disabled"
-	case BlockRootNotReady:
-		return "The music source must be ready before writing tags"
+	case BlockScanActive:
+		return "The music source is currently being scanned"
 	case BlockSourceNotReady:
 		return "The source file must be ready before writing tags"
 	case BlockUnsupportedFormat:

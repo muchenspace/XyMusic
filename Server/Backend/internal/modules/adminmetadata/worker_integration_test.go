@@ -221,6 +221,11 @@ func TestProductionWritebackWorker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var queuedScanID string
+	if err := pool.QueryRow(ctx, `INSERT INTO library_scan_runs(root_id,root_version,status)
+		VALUES($1,1,'PENDING') RETURNING id::text`, rootID).Scan(&queuedScanID); err != nil {
+		t.Fatal(err)
+	}
 	worker, err := NewWritebackWorker(WorkerDependencies{
 		Store: repository, FFmpegPath: cfg.Media.FFmpegPath, FFprobePath: cfg.Media.FFprobePath,
 		Artwork: objects, SourceStorage: sourceObjects, Runner: OSProcessRunner{}, Logger: NoopLogger{}, Clock: SystemClock{},
@@ -256,6 +261,13 @@ func TestProductionWritebackWorker(t *testing.T) {
 	if job.Status != WritebackReady || job.Stage != StageCommitted ||
 		job.OutputChecksumSHA256 == nil || job.BackupPath != nil || job.BackupExpiresAt != nil {
 		t.Fatalf("completed job=%+v", job)
+	}
+	var queuedScanStatus string
+	if err := pool.QueryRow(ctx, `SELECT status::text FROM library_scan_runs WHERE id=$1`, queuedScanID).Scan(&queuedScanStatus); err != nil {
+		t.Fatal(err)
+	}
+	if queuedScanStatus != "PENDING" {
+		t.Fatalf("queued scan status=%s, want PENDING while writeback completes first", queuedScanStatus)
 	}
 	outputChecksum, err := sha256File(sourcePath)
 	if err != nil {

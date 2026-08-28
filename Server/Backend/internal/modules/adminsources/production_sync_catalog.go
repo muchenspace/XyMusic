@@ -71,6 +71,9 @@ func (synchronizer *ProductionSynchronizer) storeStandardFile(
 	if exists {
 		input.Existing = locked
 		input.ExistingFound = true
+		if locked.RootID != input.RootID {
+			return localSourceRecord{}, false, fmt.Errorf("local library source belongs to another music root")
+		}
 		input.TrackID = locked.TrackID
 		pathChanging := locked.RootID != input.RootID ||
 			locked.NormalizedPath != normalizePlatformPath(input.File.RelativePath)
@@ -876,15 +879,20 @@ func upsertScanTrack(
 		roles[index] = string(artist.Role)
 		artistOrders[index] = int32(artist.Order)
 	}
-	trackArtistSQL := `INSERT INTO track_artists(track_id,artist_id,role,sort_order)
-		SELECT $1,requested.artist_id,requested.role::artist_credit_role,requested.sort_order
-		FROM unnest($2::uuid[],$3::text[],$4::int4[]) AS requested(artist_id,role,sort_order)`
+	// Data-modifying CTEs share the statement snapshot with the INSERT. Using
+	// `WITH deleted AS (DELETE ...) INSERT ...` can therefore see the old
+	// track_artists row and fail with a duplicate-key error on rescans. Delete
+	// and insert as separate commands in the same transaction so the new
+	// artist links are visible to the INSERT.
 	if exists {
-		trackArtistSQL = `WITH deleted AS (
-			DELETE FROM track_artists WHERE track_id=$1
-		) ` + trackArtistSQL
+		if _, err := transaction.Exec(ctx, `DELETE FROM track_artists WHERE track_id=$1`, trackID); err != nil {
+			return fmt.Errorf("clear local library track artists: %w", err)
+		}
 	}
-	if _, err := transaction.Exec(ctx, trackArtistSQL, trackID, artistIDs, roles, artistOrders); err != nil {
+	if _, err := transaction.Exec(ctx, `INSERT INTO track_artists(track_id,artist_id,role,sort_order)
+		SELECT $1,requested.artist_id,requested.role::artist_credit_role,requested.sort_order
+		FROM unnest($2::uuid[],$3::text[],$4::int4[]) AS requested(artist_id,role,sort_order)`,
+		trackID, artistIDs, roles, artistOrders); err != nil {
 		return fmt.Errorf("link local library track artists: %w", err)
 	}
 	if exists && !sameOptionalString(previousAlbum, albumID) {

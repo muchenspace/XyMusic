@@ -40,23 +40,27 @@ const (
 )
 
 type Root struct {
-	ID                  string
-	Name                string
-	Path                string
-	NormalizedPath      string
-	Mode                RootMode
-	TagWritebackEnabled bool
-	Enabled             bool
-	ScanOnStartup       bool
-	ScanIntervalMinutes *int
-	IncludePatterns     []string
-	ExcludePatterns     []string
-	Status              RootStatus
-	LastScanAt          *time.Time
-	LastError           *string
-	Version             int
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	ID             string
+	Name           string
+	Path           string
+	NormalizedPath string
+	Mode           RootMode
+	// ConfigurationManaged is true for the legacy/default root that is owned by
+	// LOCAL_MUSIC_* settings. Roots created or edited through the admin source
+	// API are database-owned and must not be overwritten when the runtime is
+	// rebuilt for an unrelated settings change.
+	ConfigurationManaged bool
+	Enabled              bool
+	ScanOnStartup        bool
+	ScanIntervalMinutes  *int
+	IncludePatterns      []string
+	ExcludePatterns      []string
+	Status               RootStatus
+	LastScanAt           *time.Time
+	LastError            *string
+	Version              int
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 type RootCounts struct {
@@ -67,9 +71,10 @@ type RootCounts struct {
 }
 
 type RootView struct {
-	Root      Root
-	Counts    RootCounts
-	LatestRun *ScanRun
+	Root       Root
+	Counts     RootCounts
+	LatestRun  *ScanRun
+	ScanActive bool
 }
 
 type ScanRun struct {
@@ -161,8 +166,8 @@ type EnqueueScanCommand struct {
 }
 
 type CancelScanCommand struct {
-	RootID  string
-	RunID   string
+	RootID string
+	RunID  string
 }
 
 type FileQuery struct {

@@ -25,7 +25,8 @@ var supportedAudioExtensions = map[string]struct{}{
 }
 
 const (
-	scanControlFileInterval = 256
+	scanControlFileInterval    = 256
+	defaultScanFinalizeTimeout = 5 * time.Minute
 	// A short fill window lets fast preparation workers form useful database
 	// batches without adding noticeable latency to a small scan.
 	scanCommitBatchWait = 2 * time.Millisecond
@@ -86,6 +87,7 @@ type FilesystemScanner struct {
 	workers         int
 	commitWorkers   int
 	commitBatchSize int
+	finalizeTimeout time.Duration
 	now             func() time.Time
 }
 
@@ -94,6 +96,7 @@ type FilesystemScannerOptions struct {
 	Workers         int
 	CommitWorkers   int
 	CommitBatchSize int
+	FinalizeTimeout time.Duration
 }
 
 func NewFilesystemScanner(synchronizer FileSynchronizer) (*FilesystemScanner, error) {
@@ -126,10 +129,17 @@ func NewFilesystemScannerWithOptions(options FilesystemScannerOptions) (*Filesys
 	if commitBatchSize > 64 {
 		return nil, errors.New("local library scanner commit batch size must not exceed 64")
 	}
+	finalizeTimeout := options.FinalizeTimeout
+	if finalizeTimeout == 0 {
+		finalizeTimeout = defaultScanFinalizeTimeout
+	}
+	if finalizeTimeout < 0 {
+		return nil, errors.New("local library scanner finalization timeout is invalid")
+	}
 	return &FilesystemScanner{
 		synchronizer: synchronizer, workers: workers, commitWorkers: commitWorkers,
-		commitBatchSize: commitBatchSize,
-		now:             func() time.Time { return time.Now().UTC() },
+		commitBatchSize: commitBatchSize, finalizeTimeout: finalizeTimeout,
+		now: func() time.Time { return time.Now().UTC() },
 	}, nil
 }
 
@@ -730,21 +740,27 @@ func (scanner *FilesystemScanner) finalizeScan(
 	progress ScanProgress,
 	scanSnapshot *sourceScanSnapshot,
 ) (ScanResult, error) {
-	if cancelled, err := scanCancelled(ctx, input.IsCancelled); err != nil {
+	finalizeContext := ctx
+	cancel := func() {}
+	if scanner.finalizeTimeout > 0 {
+		finalizeContext, cancel = context.WithTimeout(ctx, scanner.finalizeTimeout)
+	}
+	defer cancel()
+	if cancelled, err := scanCancelled(finalizeContext, input.IsCancelled); err != nil {
 		return ScanResult{}, err
 	} else if cancelled {
 		return ScanResult{}, ErrScanCancelled
 	}
 	if finalizer, ok := scanner.synchronizer.(ScanFinalizer); ok {
-		finalizerContext := ctx
+		finalizerContext := finalizeContext
 		if scanSnapshot != nil {
-			finalizerContext = context.WithValue(ctx, sourceScanSnapshotContextKey{}, scanSnapshot)
+			finalizerContext = context.WithValue(finalizeContext, sourceScanSnapshotContextKey{}, scanSnapshot)
 		}
 		if err := finalizer.FlushScan(finalizerContext, input.RootID, startedAt); err != nil {
 			return ScanResult{}, err
 		}
 	}
-	archived, err := scanner.synchronizer.ArchiveMissing(ctx, input.RootID, startedAt, scanner.now())
+	archived, err := scanner.synchronizer.ArchiveMissing(finalizeContext, input.RootID, startedAt, scanner.now())
 	if err != nil {
 		return ScanResult{}, err
 	}

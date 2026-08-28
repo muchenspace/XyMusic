@@ -1,6 +1,7 @@
 package adminsettings
 
 import (
+	"encoding/json"
 	"reflect"
 	"runtime"
 	"testing"
@@ -77,6 +78,144 @@ func TestMergeSettingsPreservesLegacyConfigurationContract(t *testing.T) {
 	}
 }
 
+// Redacted settings responses must survive the actual JSON contract. A client
+// that updates only the library section must not manufacture nil/empty
+// database or object-storage credentials while the request is decoded.
+func TestMergeSettingsPreservesCredentialsWhenRedactedFieldsAreOmittedFromJSON(t *testing.T) {
+	current := settingsTestConfig(t)
+	encoded := []byte(`{"expectedVersion":1,"localLibrary":{"name":"Updated library"}}`)
+	var decoded UpdateInput
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Database != nil || decoded.Storage != nil {
+		t.Fatalf("redacted sections unexpectedly appeared in payload: %#v", decoded)
+	}
+	candidate, err := mergeSettings(current, decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if candidate.Database.URL != current.Database.URL {
+		t.Fatalf("database credentials changed after JSON decode: before=%q after=%q", current.Database.URL, candidate.Database.URL)
+	}
+	if candidate.Storage.AccessKeyID != current.Storage.AccessKeyID || candidate.Storage.SecretAccessKey != current.Storage.SecretAccessKey {
+		t.Fatalf("storage credentials changed after JSON decode: before=%q/%q after=%q/%q",
+			current.Storage.AccessKeyID, current.Storage.SecretAccessKey,
+			candidate.Storage.AccessKeyID, candidate.Storage.SecretAccessKey)
+	}
+}
+func TestMergeSettingsLocalLibraryOnlyPreservesExternalDependencies(t *testing.T) {
+	current := settingsTestConfig(t)
+	name := "Second library"
+	directory := "second-library"
+	mode := "READ_WRITE"
+	enabled := true
+	syncOnStartup := false
+	include := []string{"**/*.flac"}
+	exclude := []string{"**/tmp/**"}
+	candidate, err := mergeSettings(current, UpdateInput{
+		ExpectedVersion: 1,
+		LocalLibrary: &LocalLibraryInput{
+			Name: &name, Directory: &directory, Mode: &mode, Enabled: &enabled,
+			SyncOnStartup: &syncOnStartup, IncludePatterns: &include, ExcludePatterns: &exclude,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if candidate.Database != current.Database {
+		t.Fatalf("database changed during local-library-only update: before=%#v after=%#v", current.Database, candidate.Database)
+	}
+	if candidate.Storage != current.Storage {
+		t.Fatalf("storage changed during local-library-only update: before=%#v after=%#v", current.Storage, candidate.Storage)
+	}
+	if candidate.LocalLibrary.Name != name || candidate.LocalLibrary.Directory != directory ||
+		candidate.LocalLibrary.Mode != mode || candidate.LocalLibrary.Enabled != enabled ||
+		candidate.LocalLibrary.SyncOnStartup != syncOnStartup {
+		t.Fatalf("local library was not updated: %#v", candidate.LocalLibrary)
+	}
+}
+func TestMergeSettingsEverySectionPreservesExternalCredentials(t *testing.T) {
+	current := settingsTestConfig(t)
+	cases := []struct {
+		name  string
+		input func() UpdateInput
+	}{
+		{
+			name: "database",
+			input: func() UpdateInput {
+				maximumConnections := 11
+				return UpdateInput{Database: &DatabaseInput{MaximumConnections: &maximumConnections}}
+			},
+		},
+		{
+			name: "storage",
+			input: func() UpdateInput {
+				region := "eu-west-1"
+				return UpdateInput{Storage: &StorageInput{Region: &region}}
+			},
+		},
+		{
+			name: "media tools",
+			input: func() UpdateInput {
+				directory := "media-tools"
+				return UpdateInput{MediaTools: &MediaToolsInput{Directory: &directory}}
+			},
+		},
+		{
+			name: "scraping",
+			input: func() UpdateInput {
+				fpcalcPath, clientID := "fpcalc", "client-id"
+				return UpdateInput{Scraping: &ScrapingInput{FPcalcPath: &fpcalcPath, AcoustIDClient: &clientID}}
+			},
+		},
+		{
+			name: "local library",
+			input: func() UpdateInput {
+				name := "Updated library"
+				return UpdateInput{LocalLibrary: &LocalLibraryInput{Name: &name}}
+			},
+		},
+		{
+			name: "registration",
+			input: func() UpdateInput {
+				enabled := true
+				return UpdateInput{Registration: &RegistrationInput{Enabled: &enabled}}
+			},
+		},
+		{
+			name: "security",
+			input: func() UpdateInput {
+				ttl := 901
+				return UpdateInput{Security: &SecurityInput{AccessTokenTTLSeconds: &ttl}}
+			},
+		},
+		{
+			name: "http",
+			input: func() UpdateInput {
+				port := 3001
+				return UpdateInput{HTTP: &HTTPInput{IPv4Port: &port}}
+			},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			candidate, err := mergeSettings(current, testCase.input())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if candidate.Database.URL != current.Database.URL {
+				t.Fatalf("database credentials changed: before=%q after=%q", current.Database.URL, candidate.Database.URL)
+			}
+			if candidate.Storage.AccessKeyID != current.Storage.AccessKeyID ||
+				candidate.Storage.SecretAccessKey != current.Storage.SecretAccessKey {
+				t.Fatalf("storage credentials changed: before=%q/%q after=%q/%q",
+					current.Storage.AccessKeyID, current.Storage.SecretAccessKey,
+					candidate.Storage.AccessKeyID, candidate.Storage.SecretAccessKey)
+			}
+		})
+	}
+}
 func TestMergeSettingsValidatesBoundsAndNullableFields(t *testing.T) {
 	current := settingsTestConfig(t)
 	invalidPort := 0

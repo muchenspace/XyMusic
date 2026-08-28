@@ -162,6 +162,10 @@ func TestRepositoryRunsLibrarySourceLifecycleInConfiguredDatabase(t *testing.T) 
 	if _, err := repository.EnqueueScan(ctx, EnqueueScanCommand{RootID: rootID}); !apperror.IsCode(err, apperror.CodeResourceConflict) {
 		t.Fatalf("duplicate enqueue err=%v", err)
 	}
+	queuedView, err := repository.FindRootView(ctx, rootID)
+	if err != nil || !queuedView.ScanActive || presentRoot(queuedView).Status != RootStatusScanning {
+		t.Fatalf("queued root view=%+v err=%v", queuedView, err)
+	}
 	if err := repository.CancelScan(ctx, CancelScanCommand{
 		RootID: rootID, RunID: run1.ID,
 	}); err != nil {
@@ -171,10 +175,16 @@ func TestRepositoryRunsLibrarySourceLifecycleInConfiguredDatabase(t *testing.T) 
 	if err != nil || cancelledRun.Status != ScanStatusCancelled || !cancelledRun.CancelRequested {
 		t.Fatalf("cancelled run=%+v err=%v", cancelledRun, err)
 	}
+	cancelledView, err := repository.FindRootView(ctx, rootID)
+	if err != nil || cancelledView.ScanActive || presentRoot(cancelledView).Status == RootStatusScanning {
+		t.Fatalf("cancelled root view=%+v err=%v", cancelledView, err)
+	}
 
+	interval := 60
 	updatedMutation, err := validateRootInput(rootDirectory, RootMutation{
 		Name: "Updated " + short, Path: secondDirectory, Mode: RootModeReadWrite,
-		Enabled: true, ScanOnStartup: true, IncludePatterns: []string{"**/*.flac"}, ExcludePatterns: []string{"tmp/**"},
+		Enabled: true, ScanOnStartup: true, ScanIntervalMinutes: &interval,
+		IncludePatterns: []string{"**/*.flac"}, ExcludePatterns: []string{"tmp/**"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -196,11 +206,27 @@ func TestRepositoryRunsLibrarySourceLifecycleInConfiguredDatabase(t *testing.T) 
 		t.Fatalf("stale update err=%v", err)
 	}
 
+	var blockingWritebackID string
+	if err := transaction.QueryRow(ctx, `INSERT INTO metadata_writeback_jobs(
+		track_id,source_id,requested_by,reason,metadata_snapshot,metadata_version,
+		expected_source_checksum,root_path_snapshot,source_path_snapshot
+	) VALUES($1,$2,$3,'scan claim ordering','{}'::jsonb,1,$4,$5,$6) RETURNING id`,
+		trackID, sourceID, actorID, strings.Repeat("b", 64), secondDirectory, "album/track-"+short+".flac").Scan(&blockingWritebackID); err != nil {
+		t.Fatal(err)
+	}
 	run2, err := repository.EnqueueScan(ctx, EnqueueScanCommand{RootID: rootID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
+	deferredClaim, err := repository.ClaimNextScan(ctx, "integration-worker", now, 2*time.Minute)
+	if err != nil || deferredClaim != nil {
+		t.Fatalf("writeback-blocked scan claim=%+v err=%v", deferredClaim, err)
+	}
+	if _, err := transaction.Exec(ctx, `UPDATE metadata_writeback_jobs SET
+		status='READY',completed_at=$2,updated_at=$2 WHERE id=$1`, blockingWritebackID, now); err != nil {
+		t.Fatal(err)
+	}
 	claim, err := repository.ClaimNextScan(ctx, "integration-worker", now, 2*time.Minute)
 	if err != nil || claim == nil || claim.Run.ID != run2.ID || claim.Run.AttemptID == nil {
 		t.Fatalf("claim=%+v err=%v", claim, err)
@@ -220,24 +246,111 @@ func TestRepositoryRunsLibrarySourceLifecycleInConfiguredDatabase(t *testing.T) 
 	if err != nil || completedRun.Status != ScanStatusCompleted || completedRun.ProcessedFiles != 5 {
 		t.Fatalf("completed run=%+v err=%v", completedRun, err)
 	}
+	readyRoot, err := repository.FindRoot(ctx, rootID)
+	if err != nil || readyRoot.Status != RootStatusReady || readyRoot.LastScanAt == nil {
+		t.Fatalf("completed root=%+v err=%v", readyRoot, err)
+	}
+	if err := repository.EnqueueScheduledScans(ctx, now.Add(30*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var activeScheduled int
+	if err := transaction.QueryRow(ctx, `SELECT count(*)::int FROM library_scan_runs
+		WHERE root_id=$1 AND status IN ('PENDING','RUNNING')`, rootID).Scan(&activeScheduled); err != nil {
+		t.Fatal(err)
+	}
+	if activeScheduled != 0 {
+		t.Fatalf("scheduled scan was requeued before its interval: %d", activeScheduled)
+	}
+	// Keep the legacy failure mode in the fixture: a completed run must still
+	// prevent an endless schedule loop even if an old database has no root
+	// last_scan_at value yet.
+	if _, err := transaction.Exec(ctx, `UPDATE library_roots SET last_scan_at=NULL WHERE id=$1`, rootID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.EnqueueScheduledScans(ctx, now.Add(30*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := transaction.QueryRow(ctx, `SELECT count(*)::int FROM library_scan_runs
+		WHERE root_id=$1 AND status IN ('PENDING','RUNNING')`, rootID).Scan(&activeScheduled); err != nil {
+		t.Fatal(err)
+	}
+	if activeScheduled != 0 {
+		t.Fatalf("scheduled scan ignored completed current-version run: %d", activeScheduled)
+	}
+	// A configuration synchronization can advance the root version while a
+	// scan is running. Completion must still leave the root out of SCANNING;
+	// otherwise scheduled scans can be re-enqueued forever and the admin UI
+	// never becomes ready.
+	staleRun, err := repository.EnqueueScan(ctx, EnqueueScanCommand{RootID: rootID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleClaim, err := repository.ClaimNextScan(ctx, "stale-version-worker", now.Add(3*time.Second), time.Minute)
+	if err != nil || staleClaim == nil || staleClaim.Run.ID != staleRun.ID || staleClaim.Run.AttemptID == nil {
+		t.Fatalf("stale claim=%+v err=%v", staleClaim, err)
+	}
+	if _, err := transaction.Exec(ctx, `UPDATE library_roots SET version=version+1,status='SCANNING',updated_at=$2 WHERE id=$1`, rootID, now.Add(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	staleCompleted, err := repository.CompleteScan(ctx, *staleClaim, *staleClaim.Run.AttemptID,
+		"stale-version-worker", ScanResult{DiscoveredFiles: 5, ProcessedFiles: 5}, now.Add(4*time.Second))
+	if err != nil || !staleCompleted {
+		t.Fatalf("stale completed=%v err=%v", staleCompleted, err)
+	}
+	staleRoot, err := repository.FindRoot(ctx, rootID)
+	if err != nil || staleRoot.Status != RootStatusUnknown || staleRoot.LastScanAt == nil {
+		t.Fatalf("stale completed root=%+v err=%v", staleRoot, err)
+	}
 
+	cancelRun, err := repository.EnqueueScan(ctx, EnqueueScanCommand{RootID: rootID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelClaim, err := repository.ClaimNextScan(ctx, "cancel-worker", now.Add(5*time.Second), time.Minute)
+	if err != nil || cancelClaim == nil || cancelClaim.Run.ID != cancelRun.ID || cancelClaim.Run.AttemptID == nil {
+		t.Fatalf("cancel claim=%+v err=%v", cancelClaim, err)
+	}
+	cancelAttemptID := *cancelClaim.Run.AttemptID
+	if err := repository.CancelScan(ctx, CancelScanCommand{RootID: rootID, RunID: cancelRun.ID}); err != nil {
+		t.Fatal(err)
+	}
+	owned, err = repository.HeartbeatScan(ctx, cancelRun.ID, cancelAttemptID, "cancel-worker", now.Add(6*time.Second), time.Minute)
+	if err != nil || !owned {
+		t.Fatalf("cancelled heartbeat owned=%v err=%v", owned, err)
+	}
+	cancelRequested, controlOwned, err := repository.ScanControl(ctx, cancelRun.ID, cancelAttemptID, "cancel-worker")
+	if err != nil || !cancelRequested || !controlOwned {
+		t.Fatalf("cancel control requested=%v owned=%v err=%v", cancelRequested, controlOwned, err)
+	}
+	finalized, err := repository.FinalizeScanFailure(ctx, *cancelClaim, cancelAttemptID, "cancel-worker", ScanStatusCancelled, nil, now.Add(7*time.Second))
+	if err != nil || !finalized {
+		t.Fatalf("cancel finalized=%v err=%v", finalized, err)
+	}
+	cancelledRunningRun, err := repository.FindRun(ctx, rootID, cancelRun.ID)
+	if err != nil || cancelledRunningRun.Status != ScanStatusCancelled {
+		t.Fatalf("cancelled running scan=%+v err=%v", cancelledRunningRun, err)
+	}
 	run3, err := repository.EnqueueScan(ctx, EnqueueScanCommand{RootID: rootID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claim, err = repository.ClaimNextScan(ctx, "expired-worker", now.Add(3*time.Second), time.Minute)
+	claim, err = repository.ClaimNextScan(ctx, "expired-worker", now.Add(8*time.Second), time.Minute)
 	if err != nil || claim == nil || claim.Run.ID != run3.ID {
 		t.Fatalf("expired claim=%+v err=%v", claim, err)
 	}
 	if _, err := transaction.Exec(ctx, `UPDATE library_scan_runs SET locked_until=$2 WHERE id=$1`, run3.ID, now.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.InitializeScans(ctx, now.Add(4*time.Second)); err != nil {
+	if err := repository.InitializeScans(ctx, now.Add(9*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	expiredRun, err := repository.FindRun(ctx, rootID, run3.ID)
 	if err != nil || expiredRun.Status != ScanStatusFailed {
 		t.Fatalf("expired run=%+v err=%v", expiredRun, err)
+	}
+	expiredRoot, err := repository.FindRoot(ctx, rootID)
+	if err != nil || expiredRoot.Status != RootStatusError {
+		t.Fatalf("expired root=%+v err=%v", expiredRoot, err)
 	}
 
 	current, err := repository.FindRoot(ctx, rootID)
@@ -349,6 +462,71 @@ func TestEnsureDefaultRootSynchronizesConfiguredRoot(t *testing.T) {
 	created, err := repository.EnsureDefaultRoot(ctx, initial)
 	if err != nil {
 		t.Fatal(err)
+	}
+	var orphanTrackID string
+	orphanPath := "legacy/orphan-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:8] + ".flac"
+	if err := transaction.QueryRow(ctx, `INSERT INTO tracks(
+		title,normalized_title,duration_ms,status
+	) VALUES($1,$2,1000,'READY') RETURNING id`, "Legacy orphan "+uuid.NewString(), "legacy orphan "+uuid.NewString()).Scan(&orphanTrackID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := transaction.Exec(ctx, `INSERT INTO local_music_sources(
+		root_id,source_path,normalized_source_path,checksum_sha256,size_bytes,modified_at,track_id,status
+	) VALUES(NULL,$1,$1,$2,1,now(),$3,'READY')`, orphanPath, strings.Repeat("c", 64), orphanTrackID); err != nil {
+		t.Fatal(err)
+	}
+	secondDirectory := t.TempDir()
+	secondMutation, err := validateRootInput(directory, RootMutation{
+		Name: "Second configured root", Path: secondDirectory, Mode: RootModeReadOnly,
+		Enabled: true, ScanOnStartup: false, IncludePatterns: []string{}, ExcludePatterns: []string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repository.EnsureDefaultRoot(ctx, secondMutation)
+	if err != nil || second.ID == created.ID {
+		t.Fatalf("second root=%+v err=%v", second, err)
+	}
+	var orphanRootID *string
+	if err := transaction.QueryRow(ctx, `SELECT root_id::text FROM local_music_sources WHERE track_id=$1`, orphanTrackID).Scan(&orphanRootID); err != nil {
+		t.Fatal(err)
+	}
+	if orphanRootID != nil {
+		t.Fatalf("orphan source was reassigned to new root %s", *orphanRootID)
+	}
+	if !created.ConfigurationManaged || !second.ConfigurationManaged {
+		t.Fatalf("configured roots must be configuration-managed: created=%+v second=%+v", created, second)
+	}
+	thirdDirectory := t.TempDir()
+	thirdMutation, err := validateRootInput(directory, RootMutation{
+		Name: "Admin-managed root", Path: thirdDirectory, Mode: RootModeReadOnly,
+		Enabled: true, ScanOnStartup: false, IncludePatterns: []string{}, ExcludePatterns: []string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminRoot, err := repository.CreateRoot(ctx, thirdMutation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adminRoot.Root.ConfigurationManaged {
+		t.Fatalf("admin-created root unexpectedly follows runtime configuration: %+v", adminRoot.Root)
+	}
+	adminOverride, err := validateRootInput(directory, RootMutation{
+		Name: "Must not overwrite", Path: thirdDirectory, Mode: RootModeReadWrite,
+		Enabled: true, ScanOnStartup: true, IncludePatterns: []string{"*.flac"}, ExcludePatterns: []string{"tmp/**"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preserved, err := repository.EnsureDefaultRoot(ctx, adminOverride)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preserved.ID != adminRoot.Root.ID || preserved.Name != adminRoot.Root.Name ||
+		preserved.Mode != adminRoot.Root.Mode || preserved.ScanOnStartup != adminRoot.Root.ScanOnStartup ||
+		preserved.ConfigurationManaged {
+		t.Fatalf("admin-managed root was overwritten by runtime synchronization: %+v", preserved)
 	}
 	updatedMutation, err := validateRootInput(directory, RootMutation{
 		Name: "Configured default updated", Path: directory, Mode: RootModeReadWrite, Enabled: true,

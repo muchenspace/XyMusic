@@ -290,6 +290,7 @@ func (service *Service) CancelScan(
 
 func presentRoot(view RootView) RootDTO {
 	root := view.Root
+	root.Status, root.LastScanAt, root.LastError = effectiveRootState(root, view.LatestRun, view.ScanActive)
 	var latest *ScanRunDTO
 	if view.LatestRun != nil {
 		value := presentRun(*view.LatestRun)
@@ -307,6 +308,58 @@ func presentRoot(view RootView) RootDTO {
 		LatestRun: latest, Version: root.Version,
 		CreatedAt: formatTimestamp(root.CreatedAt), UpdatedAt: formatTimestamp(root.UpdatedAt),
 	}
+}
+
+func effectiveRootState(root Root, latest *ScanRun, scanActive bool) (RootStatus, *time.Time, *string) {
+	if !root.Enabled {
+		return RootStatusDisabled, root.LastScanAt, root.LastError
+	}
+	// The active-run query is the authority for busy state. Root.Status and
+	// LatestRun are persisted/display snapshots and can be stale across the
+	// separate list queries or after an older failed run is retried.
+	if scanActive {
+		return RootStatusScanning, root.LastScanAt, nil
+	}
+	settled := func() RootStatus {
+		if root.LastError != nil {
+			return RootStatusError
+		}
+		if root.LastScanAt != nil {
+			return RootStatusReady
+		}
+		return RootStatusUnknown
+	}
+	status, lastScanAt, lastError := root.Status, root.LastScanAt, root.LastError
+	if latest == nil {
+		if status == RootStatusScanning {
+			status = settled()
+		}
+		return status, lastScanAt, lastError
+	}
+	if latest.RootVersion != root.Version {
+		return RootStatusUnknown, lastScanAt, nil
+	}
+	switch latest.Status {
+	case ScanStatusCompleted:
+		completedAt := latest.UpdatedAt
+		if latest.CompletedAt != nil {
+			completedAt = *latest.CompletedAt
+		}
+		return RootStatusReady, &completedAt, nil
+	case ScanStatusFailed:
+		completedAt := latest.UpdatedAt
+		if latest.CompletedAt != nil {
+			completedAt = *latest.CompletedAt
+		}
+		return RootStatusError, &completedAt, latest.LastError
+	case ScanStatusPending, ScanStatusRunning, ScanStatusCancelled:
+		// scanActive=false means these values are either a stale read or a
+		// terminal/requeued transition observed between repository queries.
+		if status == RootStatusScanning {
+			status = settled()
+		}
+	}
+	return status, lastScanAt, lastError
 }
 
 func presentRun(run ScanRun) ScanRunDTO {

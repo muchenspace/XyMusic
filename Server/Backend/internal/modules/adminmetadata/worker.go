@@ -251,7 +251,7 @@ func (worker *WritebackWorker) process(
 		return err
 	}
 	if err := assertWritableSource(
-		contextRecord.RootMode, contextRecord.Enabled, contextRecord.Status, contextRecord.Source.Status,
+		contextRecord.RootMode, contextRecord.Enabled, contextRecord.ScanRunning, contextRecord.Source.Status,
 	); err != nil {
 		return err
 	}
@@ -429,7 +429,7 @@ func (worker *WritebackWorker) process(
 	if locked.Job.CancelRequested {
 		return NewWritebackError("WRITEBACK_CANCELLED", "Metadata writeback was cancelled")
 	}
-	if err := assertWritableSource(locked.RootMode, locked.Enabled, locked.Status, locked.Source.Status); err != nil {
+	if err := assertWritableSource(locked.RootMode, locked.Enabled, locked.ScanRunning, locked.Source.Status); err != nil {
 		return err
 	}
 	if err := assertWritebackPathSnapshot(locked); err != nil {

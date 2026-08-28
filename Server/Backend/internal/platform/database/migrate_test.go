@@ -7,23 +7,90 @@ import (
 	"testing"
 )
 
-func TestLegacyMigrationsCanBeRead(t *testing.T) {
+func TestMigrationsCanBeRead(t *testing.T) {
 	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(migrations) != 34 {
-		t.Fatalf("expected 34 migrations, got %d", len(migrations))
+	if len(migrations) != 37 {
+		t.Fatalf("expected 37 migrations, got %d", len(migrations))
 	}
 	if migrations[0].Tag != "0000_initial" || migrations[25].Tag != "0025_track_permanent_delete_batches" ||
 		migrations[26].Tag != "0026_remove_writeback_backup_references" ||
 		migrations[27].Tag != "0027_artist_artwork_scraping_jobs" || migrations[28].Tag != "0028_lyrics_timing" ||
 		migrations[29].Tag != "0029_media_variant_reuse" || migrations[30].Tag != "0030_tag_scraping_claim_indexes" ||
-		migrations[31].Tag != "0031_local_music_scan_indexes" || migrations[32].Tag != "0032_tag_scraping_large_batches" || migrations[33].Tag != "0033_tag_scraping_item_retries" {
-		t.Fatalf("unexpected migration boundaries: %s - %s - %s - %s - %s - %s - %s - %s - %s - %s", migrations[0].Tag, migrations[25].Tag, migrations[26].Tag, migrations[27].Tag, migrations[28].Tag, migrations[29].Tag, migrations[30].Tag, migrations[31].Tag, migrations[32].Tag, migrations[33].Tag)
+		migrations[31].Tag != "0031_local_music_scan_indexes" || migrations[32].Tag != "0032_tag_scraping_large_batches" ||
+		migrations[33].Tag != "0033_tag_scraping_item_retries" || migrations[34].Tag != "0034_scan_state_and_writeback_authority" || migrations[35].Tag != "0035_configuration_managed_library_roots" || migrations[36].Tag != "0036_track_manual_archive_flag" {
+		t.Fatalf("unexpected migration boundaries: %s - %s - %s - %s - %s - %s - %s - %s - %s - %s - %s - %s - %s", migrations[0].Tag, migrations[25].Tag, migrations[26].Tag, migrations[27].Tag, migrations[28].Tag, migrations[29].Tag, migrations[30].Tag, migrations[31].Tag, migrations[32].Tag, migrations[33].Tag, migrations[34].Tag, migrations[35].Tag, migrations[36].Tag)
 	}
 	if len(migrations[0].SQL) < 2 || len(migrations[0].Hash) != 64 {
 		t.Fatalf("migration parsing is incompatible: %#v", migrations[0])
+	}
+}
+
+func TestTrackManualArchiveFlagMigrationAddsTrackColumn(t *testing.T) {
+	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(migrations) <= 36 || migrations[36].Tag != "0036_track_manual_archive_flag" {
+		t.Fatalf("track archive flag migration is unavailable: count=%d", len(migrations))
+	}
+	sql := strings.ToUpper(strings.Join(migrations[36].SQL, "\n"))
+	if !strings.Contains(sql, "ALTER TABLE TRACKS ADD COLUMN ARCHIVED_MANUALLY BOOLEAN NOT NULL DEFAULT FALSE") {
+		t.Fatalf("track archive flag migration does not add the track column: %s", sql)
+	}
+}
+func TestConfigurationManagedRootMigrationAddsOwnershipColumn(t *testing.T) {
+	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(migrations) <= 35 || migrations[35].Tag != "0035_configuration_managed_library_roots" {
+		t.Fatalf("configuration-managed root migration is unavailable: count=%d", len(migrations))
+	}
+	sql := strings.ToUpper(strings.Join(migrations[35].SQL, "\n"))
+	for _, expected := range []string{
+		"ADD COLUMN CONFIGURATION_MANAGED BOOLEAN NOT NULL DEFAULT FALSE",
+		"SET CONFIGURATION_MANAGED = TRUE",
+		"ORDER BY CREATED_AT ASC, ID ASC",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("configuration-managed root migration does not contain %q: %s", expected, sql)
+		}
+	}
+}
+func TestScanStateWritebackAuthorityMigrationRepairsExistingDatabases(t *testing.T) {
+	migrations, err := ReadMigrations(filepath.Join("..", "..", "..", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacySchema := strings.ToUpper(strings.Join(migrations[5].SQL, "\n"))
+	if strings.Contains(legacySchema, "XYMUSIC_SYNC_LIBRARY_ROOT_SCAN_STATE") {
+		t.Fatalf("historical managed library migration was rewritten: %s", legacySchema)
+	}
+	legacyFencing := strings.ToUpper(strings.Join(migrations[7].SQL, "\n"))
+	if !strings.Contains(legacyFencing, `ALTER TABLE "LIBRARY_SCAN_RUNS"`) {
+		t.Fatalf("historical worker fencing migration was rewritten: %s", legacyFencing)
+	}
+	fix := strings.ToUpper(strings.Join(migrations[34].SQL, "\n"))
+	for _, expected := range []string{
+		"XYMUSIC_SYNC_LIBRARY_ROOT_SCAN_STATE",
+		"LIBRARY_SCAN_RUNS_ROOT_STATE_TRIGGER",
+		"AFTER INSERT OR UPDATE OF STATUS",
+		"NEW.STATUS IN ('PENDING', 'RUNNING')",
+		"ACTIVE.STATUS IN ('PENDING', 'RUNNING')",
+		"NEW.STATUS IN ('COMPLETED', 'FAILED', 'CANCELLED')",
+		"ROOT.VERSION <> NEW.ROOT_VERSION THEN NULL",
+		"STATE.LATEST_ROOT_VERSION <> ROOT.VERSION",
+		"ROOT.STATUS = 'SCANNING'",
+	} {
+		if !strings.Contains(fix, expected) {
+			t.Fatalf("scan state authority migration does not contain %q: %s", expected, fix)
+		}
+	}
+	if strings.Contains(fix, "DROP COLUMN TAG_WRITEBACK_ENABLED") {
+		t.Fatalf("scan state repair must not destructively drop the legacy writeback column: %s", fix)
 	}
 }
 

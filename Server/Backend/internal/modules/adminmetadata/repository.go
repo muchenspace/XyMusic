@@ -95,7 +95,12 @@ func (repository *Repository) FindMetadata(ctx context.Context, trackID string) 
 	record, err := scanMetadata(repository.pool.QueryRow(ctx, `
 		select `+metadataColumns+`,
 			source.id::text, source.root_id::text, source.source_path, source.status,
-			source.checksum_sha256, root.path, root.mode::text, root.enabled, root.status::text,
+			source.checksum_sha256, root.path, root.mode::text, root.enabled,
+			EXISTS (
+				SELECT 1 FROM library_scan_runs active_scan
+				WHERE active_scan.root_id = root.id
+				  AND active_scan.status = 'RUNNING' AND active_scan.locked_until > now()
+			),
 			track.status::text, coalesce(mapping_stats.mapping_count, 0),
 			coalesce(mapping_stats.cue, false)
 		from track_metadata metadata
@@ -266,12 +271,17 @@ func (repository *Repository) EnqueueWriteback(
 
 	var metadata MetadataRecord
 	var source MetadataSourceRecord
-	var rootPath, rootMode, rootStatus, trackStatus string
-	var rootEnabled bool
+	var rootPath, rootMode, trackStatus string
+	var rootEnabled, scanActive bool
 	err = tx.QueryRow(ctx, `
 		select `+metadataColumns+`, source.id::text, source.root_id::text,
 			source.source_path, source.status, source.checksum_sha256,
-			root.path, root.mode::text, root.enabled, root.status::text,
+			root.path, root.mode::text, root.enabled,
+			EXISTS (
+				SELECT 1 FROM library_scan_runs active_scan
+				WHERE active_scan.root_id = root.id
+				  AND active_scan.status = 'RUNNING' AND active_scan.locked_until > now()
+			),
 			track.status::text
 		from track_metadata metadata
 		join tracks track on track.id = metadata.track_id
@@ -283,7 +293,7 @@ func (repository *Repository) EnqueueWriteback(
 		&metadata.RawChecksum, &metadata.LastScannedAt, &metadata.UpdatedBy,
 		&metadata.Version, &metadata.CreatedAt, &metadata.UpdatedAt,
 		&source.ID, &source.RootID, &source.SourcePath, &source.Status,
-		&source.ChecksumSHA256, &rootPath, &rootMode, &rootEnabled, &rootStatus,
+		&source.ChecksumSHA256, &rootPath, &rootMode, &rootEnabled, &scanActive,
 		&trackStatus,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -311,7 +321,7 @@ func (repository *Repository) EnqueueWriteback(
 	}
 	if err := tagwriteback.Evaluate(tagwriteback.SourceContext{
 		HasSource: true, TrackStatus: trackStatus, RootMode: rootMode,
-		RootEnabled: rootEnabled, RootStatus: rootStatus, SourceStatus: source.Status,
+		RootEnabled: rootEnabled, ScanActive: scanActive, SourceStatus: source.Status,
 		SourcePath: source.SourcePath, MappingCount: mappingCount, Cue: cue,
 	}).Error(trackID); err != nil {
 		return WritebackJob{}, err
@@ -530,12 +540,17 @@ func (repository *Repository) RetryWriteback(
 	}
 	var metadata MetadataRecord
 	var source MetadataSourceRecord
-	var rootPath, rootMode, rootStatus, trackStatus string
-	var rootEnabled bool
+	var rootPath, rootMode, trackStatus string
+	var rootEnabled, scanActive bool
 	err = tx.QueryRow(ctx, `
 		select `+metadataColumns+`, source.id::text, source.root_id::text,
 			source.source_path, source.status, source.checksum_sha256,
-			root.path, root.mode::text, root.enabled, root.status::text,
+			root.path, root.mode::text, root.enabled,
+			EXISTS (
+				SELECT 1 FROM library_scan_runs active_scan
+				WHERE active_scan.root_id = root.id
+				  AND active_scan.status = 'RUNNING' AND active_scan.locked_until > now()
+			),
 			track.status::text
 		from track_metadata metadata
 		join tracks track on track.id = metadata.track_id
@@ -547,7 +562,7 @@ func (repository *Repository) RetryWriteback(
 		&metadata.RawChecksum, &metadata.LastScannedAt, &metadata.UpdatedBy,
 		&metadata.Version, &metadata.CreatedAt, &metadata.UpdatedAt,
 		&source.ID, &source.RootID, &source.SourcePath, &source.Status,
-		&source.ChecksumSHA256, &rootPath, &rootMode, &rootEnabled, &rootStatus,
+		&source.ChecksumSHA256, &rootPath, &rootMode, &rootEnabled, &scanActive,
 		&trackStatus,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -572,7 +587,7 @@ func (repository *Repository) RetryWriteback(
 	}
 	if err := tagwriteback.Evaluate(tagwriteback.SourceContext{
 		HasSource: true, TrackStatus: trackStatus, RootMode: rootMode,
-		RootEnabled: rootEnabled, RootStatus: rootStatus, SourceStatus: source.Status,
+		RootEnabled: rootEnabled, ScanActive: scanActive, SourceStatus: source.Status,
 		SourcePath: source.SourcePath, MappingCount: mappingCount, Cue: cue,
 	}).Error(job.TrackID); err != nil {
 		return WritebackJob{}, err
@@ -1072,10 +1087,10 @@ func deleteAlbumIfEmpty(ctx context.Context, tx pgx.Tx, albumID string) error {
 	return nil
 }
 
-func assertWritableSource(rootMode string, enabled bool, rootStatus, sourceStatus string) error {
+func assertWritableSource(rootMode string, enabled, scanActive bool, sourceStatus string) error {
 	return tagwriteback.Evaluate(tagwriteback.SourceContext{
 		HasSource: true, RootMode: rootMode, RootEnabled: enabled,
-		RootStatus: rootStatus, SourceStatus: sourceStatus,
+		ScanActive: scanActive, SourceStatus: sourceStatus,
 	}).Error("")
 }
 
@@ -1188,14 +1203,15 @@ func scanMetadata(row scanRow, withSource bool) (MetadataRecord, error) {
 		&record.Version, &record.CreatedAt, &record.UpdatedAt,
 	}
 	var sourceID, rootID, sourcePath, sourceStatus, checksum *string
-	var rootPath, rootMode, rootStatus, trackStatus *string
+	var rootPath, rootMode, trackStatus *string
 	var rootEnabled *bool
+	var scanActive bool
 	var mappingCount int
 	var cue bool
 	if withSource {
 		destinations = append(destinations,
 			&sourceID, &rootID, &sourcePath, &sourceStatus, &checksum,
-			&rootPath, &rootMode, &rootEnabled, &rootStatus, &trackStatus,
+			&rootPath, &rootMode, &rootEnabled, &scanActive, &trackStatus,
 			&mappingCount, &cue,
 		)
 	}
@@ -1206,7 +1222,7 @@ func scanMetadata(row scanRow, withSource bool) (MetadataRecord, error) {
 		record.Source = &MetadataSourceRecord{
 			ID: *sourceID, RootID: rootID, SourcePath: *sourcePath, Status: *sourceStatus,
 			ChecksumSHA256: *checksum, RootPath: rootPath, RootMode: rootMode,
-			RootEnabled: rootEnabled, RootStatus: rootStatus, TrackStatus: trackStatus,
+			RootEnabled: rootEnabled, ScanActive: scanActive, TrackStatus: trackStatus,
 			MappingCount: mappingCount, Cue: cue,
 		}
 	}

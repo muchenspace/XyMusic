@@ -542,7 +542,11 @@ func (repository *Repository) enrichTracks(ctx context.Context, records []TrackR
 	sourceRows, err := repository.pool.Query(ctx, `
 		SELECT mapped.track_id, source.id, source.root_id, root.name, source.source_path,
 		       source.status, source.checksum_sha256, root.mode::text, root.enabled,
-		       root.status::text, mapping_stats.mapping_count, mapping_stats.cue
+		       EXISTS (
+		         SELECT 1 FROM library_scan_runs active_scan
+		         WHERE active_scan.root_id = root.id
+		           AND active_scan.status = 'RUNNING' AND active_scan.locked_until > now()
+		       ), mapping_stats.mapping_count, mapping_stats.cue
 		FROM local_music_source_tracks mapped
 		JOIN local_music_sources source ON source.id = mapped.source_id
 		LEFT JOIN library_roots root ON root.id = source.root_id
@@ -568,7 +572,7 @@ func (repository *Repository) enrichTracks(ctx context.Context, records []TrackR
 		if err := sourceRows.Scan(
 			&trackID, &source.ID, &source.RootID, &source.RootName, &source.RelativePath,
 			&source.Status, &source.ChecksumSHA256, &source.Mode, &source.RootEnabled,
-			&source.RootStatus, &source.MappingCount, &source.Cue,
+			&source.ScanActive, &source.MappingCount, &source.Cue,
 		); err != nil {
 			sourceRows.Close()
 			return fmt.Errorf("scan admin track source: %w", err)

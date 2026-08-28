@@ -256,7 +256,8 @@ func TestStoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Database.URL != cfg.Database.URL || loaded.Storage.Bucket != cfg.Storage.Bucket {
+	if loaded.Database.URL != cfg.Database.URL || loaded.Storage.Bucket != cfg.Storage.Bucket ||
+		loaded.Storage.AccessKeyID != cfg.Storage.AccessKeyID || loaded.Storage.SecretAccessKey != cfg.Storage.SecretAccessKey {
 		t.Fatalf("round trip mismatch: %#v", loaded)
 	}
 }

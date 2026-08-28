@@ -52,9 +52,13 @@ func (repository *Repository) ListRootViews(ctx context.Context, query RootQuery
 	if err != nil {
 		return nil, 0, err
 	}
+	activeRoots, err := repository.activeScanRoots(ctx, rootIDs)
+	if err != nil {
+		return nil, 0, err
+	}
 	views := make([]RootView, 0, len(roots))
 	for _, root := range roots {
-		view := RootView{Root: root, Counts: counts[root.ID]}
+		view := RootView{Root: root, Counts: counts[root.ID], ScanActive: activeRoots[root.ID]}
 		if run, exists := runs[root.ID]; exists {
 			copy := run
 			view.LatestRun = &copy
@@ -81,6 +85,11 @@ func (repository *Repository) FindRootView(ctx context.Context, rootID string) (
 		view.LatestRun = &run
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return RootView{}, fmt.Errorf("find latest library scan: %w", err)
+	}
+	if err := repository.database.QueryRow(ctx, `SELECT EXISTS(
+		SELECT 1 FROM library_scan_runs
+		WHERE root_id=$1 AND (status='PENDING' OR (status='RUNNING' AND locked_until > now())))`, rootID).Scan(&view.ScanActive); err != nil {
+		return RootView{}, fmt.Errorf("find active library scan: %w", err)
 	}
 	return view, nil
 }
@@ -112,7 +121,7 @@ func (repository *Repository) CreateRoot(
 	defer transaction.Rollback(ctx)
 	root, err := scanRoot(transaction.QueryRow(ctx, `
 		INSERT INTO library_roots (
-			name,path,normalized_path,mode,tag_writeback_enabled,enabled,scan_on_startup,
+			name,path,normalized_path,mode,configuration_managed,enabled,scan_on_startup,
 			scan_interval_minutes,include_patterns,exclude_patterns,status
 		) VALUES ($1,$2,$3,$4,false,$5,$6,$7,$8::jsonb,$9::jsonb,$10)
 		RETURNING `+rootColumns,
@@ -207,7 +216,7 @@ func (repository *Repository) UpdateRoot(ctx context.Context, command UpdateRoot
 	}
 	root, err := scanRoot(transaction.QueryRow(ctx, `
 		UPDATE library_roots SET
-			name=$2,path=$3,normalized_path=$4,mode=$5,tag_writeback_enabled=false,
+			name=$2,path=$3,normalized_path=$4,mode=$5,configuration_managed=false,
 			enabled=$6,scan_on_startup=$7,scan_interval_minutes=$8,
 			include_patterns=$9::jsonb,exclude_patterns=$10::jsonb,status=$11,
 			version=version+1,updated_at=$12
@@ -498,6 +507,9 @@ func (repository *Repository) EnqueueScan(ctx context.Context, command EnqueueSc
 			active, lookupErr := scanRun(transaction.QueryRow(ctx, `SELECT `+scanRunColumns+`
 				FROM library_scan_runs WHERE root_id=$1 AND status IN ('PENDING','RUNNING') LIMIT 1`, command.RootID))
 			if lookupErr == nil {
+				if err := reconcileRootScanState(ctx, transaction, command.RootID, active.RootVersion, active.Status, nil, time.Now().UTC()); err != nil {
+					return ScanRun{}, err
+				}
 				if err := transaction.Commit(ctx); err != nil {
 					return ScanRun{}, fmt.Errorf("commit deduplicated music source scan enqueue: %w", err)
 				}
@@ -511,6 +523,9 @@ func (repository *Repository) EnqueueScan(ctx context.Context, command EnqueueSc
 	}
 	if err != nil {
 		return ScanRun{}, fmt.Errorf("enqueue music source scan: %w", err)
+	}
+	if err := reconcileRootScanState(ctx, transaction, command.RootID, run.RootVersion, run.Status, nil, time.Now().UTC()); err != nil {
+		return ScanRun{}, err
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return ScanRun{}, fmt.Errorf("commit music source scan enqueue: %w", err)
@@ -539,14 +554,14 @@ func (repository *Repository) CancelScan(ctx context.Context, command CancelScan
 			locked_until=NULL,heartbeat_at=NULL,updated_at=$2 WHERE id=$1`, run.ID, now); err != nil {
 			return fmt.Errorf("cancel pending music source scan: %w", err)
 		}
-		if _, err := transaction.Exec(ctx, `UPDATE library_roots SET
-			status='READY',last_error=NULL,updated_at=$3 WHERE id=$1 AND version=$2`,
-			command.RootID, run.RootVersion, now); err != nil {
-			return fmt.Errorf("restore pending scan music source state: %w", err)
+		if err := reconcileRootScanState(ctx, transaction, command.RootID, run.RootVersion, ScanStatusCancelled, nil, now); err != nil {
+			return err
 		}
 	} else if _, err := transaction.Exec(ctx,
 		`UPDATE library_scan_runs SET cancel_requested=true,updated_at=$2 WHERE id=$1`, run.ID, now); err != nil {
 		return fmt.Errorf("request running music source scan cancellation: %w", err)
+	} else if err := reconcileRootScanState(ctx, transaction, command.RootID, run.RootVersion, ScanStatusRunning, nil, now); err != nil {
+		return err
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return fmt.Errorf("commit music source scan cancellation: %w", err)
@@ -555,47 +570,56 @@ func (repository *Repository) CancelScan(ctx context.Context, command CancelScan
 }
 
 func (repository *Repository) InitializeScans(ctx context.Context, now time.Time) error {
-	transaction, err := repository.database.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin music source scan recovery: %w", err)
-	}
-	defer transaction.Rollback(ctx)
-	rows, err := transaction.Query(ctx, `UPDATE library_scan_runs SET
+	if _, err := repository.database.Exec(ctx, `UPDATE library_scan_runs SET
 		status='FAILED',completed_at=$1,locked_by=NULL,locked_until=NULL,heartbeat_at=NULL,
 		last_error='The scan worker lease expired before completion',updated_at=$1
-		WHERE status='RUNNING' AND (locked_until IS NULL OR locked_until<$1) RETURNING root_id`, now)
-	if err != nil {
+		WHERE status='RUNNING' AND (locked_until IS NULL OR locked_until<$1)`, now); err != nil {
 		return fmt.Errorf("recover expired music source scans: %w", err)
 	}
-	rootIDs := make([]string, 0)
-	for rows.Next() {
-		var rootID string
-		if err := rows.Scan(&rootID); err != nil {
-			rows.Close()
-			return fmt.Errorf("scan expired music source root: %w", err)
-		}
-		rootIDs = append(rootIDs, rootID)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return fmt.Errorf("iterate expired music source roots: %w", err)
-	}
-	rows.Close()
-	if len(rootIDs) > 0 {
-		if _, err := transaction.Exec(ctx, `UPDATE library_roots root SET
-			status='ERROR',last_error='The previous scan stopped before completion',updated_at=$2
-			WHERE root.id=ANY($1::uuid[]) AND root.status='SCANNING' AND NOT EXISTS(
-				SELECT 1 FROM library_scan_runs run WHERE run.root_id=root.id
-				AND run.status IN ('PENDING','RUNNING'))`, rootIDs, now); err != nil {
-			return fmt.Errorf("mark expired scan music sources failed: %w", err)
-		}
-	}
-	if err := transaction.Commit(ctx); err != nil {
-		return fmt.Errorf("commit music source scan recovery: %w", err)
+	// Run reconciliation as a separate SQL command. If the database has the
+	// compatibility trigger installed, the preceding status update already
+	// touched the root row; updating that same row from the data-modifying CTE
+	// would make PostgreSQL reject the command as a self-conflicting update.
+	if _, err := repository.database.Exec(ctx, `WITH latest AS (
+		SELECT DISTINCT ON (root_id) root_id,status,root_version,completed_at,last_error,updated_at
+		FROM library_scan_runs
+		ORDER BY root_id,created_at DESC,id DESC
+	)
+	UPDATE library_roots AS root SET
+		status = CASE
+			WHEN NOT root.enabled THEN 'DISABLED'::library_root_status
+			WHEN EXISTS (SELECT 1 FROM library_scan_runs active WHERE active.root_id=root.id AND active.status IN ('PENDING','RUNNING'))
+				THEN 'SCANNING'::library_root_status
+			WHEN latest.root_version <> root.version THEN 'UNKNOWN'::library_root_status
+			WHEN latest.status='COMPLETED' THEN 'READY'::library_root_status
+			WHEN latest.status='FAILED' THEN 'ERROR'::library_root_status
+			WHEN root.last_error IS NOT NULL THEN 'ERROR'::library_root_status
+			WHEN root.last_scan_at IS NOT NULL THEN 'READY'::library_root_status
+			ELSE 'UNKNOWN'::library_root_status
+		END,
+		last_scan_at = CASE
+			WHEN latest.status IN ('COMPLETED','FAILED') AND latest.root_version=root.version
+				THEN coalesce(latest.completed_at,latest.updated_at,root.last_scan_at)
+			-- A stale worker must not make a root look ready, but its terminal
+			-- attempt still needs to seed an empty timestamp. Otherwise a root
+			-- whose version changed during a scan can be scheduled forever.
+			WHEN latest.status IN ('COMPLETED','FAILED')
+				THEN coalesce(root.last_scan_at,coalesce(latest.completed_at,latest.updated_at))
+			ELSE root.last_scan_at
+		END,
+		last_error = CASE
+			WHEN latest.root_version <> root.version THEN NULL
+			WHEN latest.status='COMPLETED' THEN NULL
+			WHEN latest.status='FAILED' THEN latest.last_error
+			ELSE root.last_error
+		END,
+		updated_at = GREATEST(root.updated_at,latest.updated_at)
+	FROM latest
+	WHERE root.id=latest.root_id`); err != nil {
+		return fmt.Errorf("reconcile music source scan states after recovery: %w", err)
 	}
 	return nil
 }
-
 func (repository *Repository) EnsureDefaultRoot(ctx context.Context, mutation RootMutation) (Root, error) {
 	includePatterns, excludePatterns, err := encodePatterns(mutation)
 	if err != nil {
@@ -618,10 +642,17 @@ func (repository *Repository) EnsureDefaultRoot(ctx context.Context, mutation Ro
 		return Root{}, fmt.Errorf("find existing default music source: %w", err)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
+		// Only the very first managed root may adopt legacy source rows that
+		// predate root_id. When a second root is added, those rows belong to
+		// the old catalog and must never be reassigned to the new root.
+		var existingRootCount int
+		if err := transaction.QueryRow(ctx, `SELECT count(*)::int FROM library_roots`).Scan(&existingRootCount); err != nil {
+			return Root{}, fmt.Errorf("count existing music source roots: %w", err)
+		}
 		root, err = scanRoot(transaction.QueryRow(ctx, `INSERT INTO library_roots(
-			name,path,normalized_path,mode,tag_writeback_enabled,enabled,scan_on_startup,
+			name,path,normalized_path,mode,configuration_managed,enabled,scan_on_startup,
 			scan_interval_minutes,include_patterns,exclude_patterns,status
-		) VALUES($1,$2,$3,$4,false,$5,$6,$7,$8::jsonb,$9::jsonb,$10)
+		) VALUES($1,$2,$3,$4,true,$5,$6,$7,$8::jsonb,$9::jsonb,$10)
 		ON CONFLICT(normalized_path) DO UPDATE SET normalized_path=EXCLUDED.normalized_path
 		RETURNING `+rootColumns,
 			mutation.Name, mutation.Path, mutation.NormalizedPath, mutation.Mode,
@@ -631,10 +662,17 @@ func (repository *Repository) EnsureDefaultRoot(ctx context.Context, mutation Ro
 		if err != nil {
 			return Root{}, fmt.Errorf("create default music source: %w", err)
 		}
-		if _, err := transaction.Exec(ctx, `UPDATE local_music_sources SET root_id=$1 WHERE root_id IS NULL`, root.ID); err != nil {
-			return Root{}, fmt.Errorf("attach legacy files to default music source: %w", err)
+		// A concurrent insert can make the ON CONFLICT branch return an
+		// administrator-owned root even though this transaction saw no roots
+		// in its snapshot. Never attach legacy rows to that unrelated root.
+		if existingRootCount == 0 && root.ConfigurationManaged {
+			if _, err := transaction.Exec(ctx, `UPDATE local_music_sources SET root_id=$1 WHERE root_id IS NULL`, root.ID); err != nil {
+				return Root{}, fmt.Errorf("attach legacy files to default music source: %w", err)
+			}
 		}
-	} else {
+	} else if root.ConfigurationManaged {
+		// Only the configuration-owned default root follows LOCAL_MUSIC_* values.
+		// Admin-created/edited roots retain their database state across runtime reloads.
 		updated, updateErr := scanRoot(transaction.QueryRow(ctx, `
 			UPDATE library_roots SET
 				name=$2,path=$3,mode=$4,enabled=$5,scan_on_startup=$6,
@@ -691,8 +729,18 @@ func (repository *Repository) StartupRootIDs(ctx context.Context) ([]string, err
 func (repository *Repository) EnqueueScheduledScans(ctx context.Context, now time.Time) error {
 	_, err := repository.database.Exec(ctx, `INSERT INTO library_scan_runs(root_id,root_version)
 		SELECT root.id,root.version FROM library_roots root
+		LEFT JOIN LATERAL (
+			SELECT completed_at
+			FROM library_scan_runs completed
+			WHERE completed.root_id=root.id AND completed.root_version=root.version AND completed.status='COMPLETED'
+			ORDER BY completed_at DESC NULLS LAST,updated_at DESC,id DESC
+			LIMIT 1
+		) latest_completed ON true
 		WHERE root.enabled=true AND root.scan_interval_minutes IS NOT NULL
-		AND (root.last_scan_at IS NULL OR root.last_scan_at + make_interval(mins=>root.scan_interval_minutes) <= $1)
+		AND (
+			COALESCE(root.last_scan_at,latest_completed.completed_at) IS NULL
+			OR COALESCE(root.last_scan_at,latest_completed.completed_at) + make_interval(mins=>root.scan_interval_minutes) <= $1
+		)
 		AND NOT EXISTS(SELECT 1 FROM library_scan_runs active
 			WHERE active.root_id=root.id AND active.status IN ('PENDING','RUNNING'))
 		ON CONFLICT DO NOTHING`, now)
@@ -714,8 +762,14 @@ func (repository *Repository) ClaimNextScan(
 	}
 	defer transaction.Rollback(ctx)
 	run, err := scanRun(transaction.QueryRow(ctx, `SELECT `+scanRunColumns+`
-		FROM library_scan_runs WHERE status='PENDING' OR (status='RUNNING' AND locked_until<$1)
-		ORDER BY created_at ASC,id ASC FOR UPDATE SKIP LOCKED LIMIT 1`, now))
+		FROM library_scan_runs run
+		WHERE (run.status='PENDING' OR (run.status='RUNNING' AND run.locked_until<$1))
+		AND NOT EXISTS (
+			SELECT 1 FROM metadata_writeback_jobs writeback
+			JOIN local_music_sources source ON source.id=writeback.source_id
+			WHERE source.root_id=run.root_id AND writeback.status IN ('PENDING','PROCESSING')
+		)
+		ORDER BY run.created_at ASC,run.id ASC FOR UPDATE OF run SKIP LOCKED LIMIT 1`, now))
 	if errors.Is(err, pgx.ErrNoRows) {
 		if err := transaction.Commit(ctx); err != nil {
 			return nil, fmt.Errorf("commit empty music source scan claim: %w", err)
@@ -731,6 +785,22 @@ func (repository *Repository) ClaimNextScan(
 		return nil, fmt.Errorf("lock claimed music source: %w", err)
 	}
 	invalid := errors.Is(err, pgx.ErrNoRows) || !root.Enabled || root.Version != run.RootVersion || run.CancelRequested
+	if !invalid {
+		var writebackActive bool
+		if err := transaction.QueryRow(ctx, `SELECT EXISTS(
+			SELECT 1 FROM metadata_writeback_jobs writeback
+			JOIN local_music_sources source ON source.id=writeback.source_id
+			WHERE source.root_id=$1 AND writeback.status IN ('PENDING','PROCESSING')
+		)`, root.ID).Scan(&writebackActive); err != nil {
+			return nil, fmt.Errorf("check claimed music source writeback: %w", err)
+		}
+		if writebackActive {
+			if err := transaction.Commit(ctx); err != nil {
+				return nil, fmt.Errorf("commit deferred music source scan claim: %w", err)
+			}
+			return nil, nil
+		}
+	}
 	if invalid {
 		var lastError *string
 		if err == nil && !root.Enabled {
@@ -743,6 +813,9 @@ func (repository *Repository) ClaimNextScan(
 			RETURNING `+scanRunColumns, run.ID, now, lastError))
 		if err != nil {
 			return nil, fmt.Errorf("cancel invalid music source scan claim: %w", err)
+		}
+		if err := reconcileRootScanState(ctx, transaction, run.RootID, run.RootVersion, ScanStatusCancelled, lastError, now); err != nil {
+			return nil, err
 		}
 		if err := transaction.Commit(ctx); err != nil {
 			return nil, fmt.Errorf("commit invalid music source scan claim: %w", err)
@@ -758,10 +831,8 @@ func (repository *Repository) ClaimNextScan(
 	if err != nil {
 		return nil, fmt.Errorf("claim music source scan: %w", err)
 	}
-	if _, err := transaction.Exec(ctx, `UPDATE library_roots SET
-		status='SCANNING',last_error=NULL,updated_at=$4
-		WHERE id=$1 AND version=$2 AND enabled=$3`, root.ID, run.RootVersion, true, now); err != nil {
-		return nil, fmt.Errorf("mark claimed music source scanning: %w", err)
+	if err := reconcileRootScanState(ctx, transaction, root.ID, run.RootVersion, ScanStatusRunning, nil, now); err != nil {
+		return nil, err
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit music source scan claim: %w", err)
@@ -777,7 +848,7 @@ func (repository *Repository) HeartbeatScan(
 ) (bool, error) {
 	command, err := repository.database.Exec(ctx, `UPDATE library_scan_runs SET
 		heartbeat_at=$4,locked_until=$5
-		WHERE id=$1 AND status='RUNNING' AND attempt_id=$2 AND locked_by=$3 AND cancel_requested=false`,
+		WHERE id=$1 AND status='RUNNING' AND attempt_id=$2 AND locked_by=$3`,
 		runID, attemptID, workerID, now, now.Add(lease))
 	if err != nil {
 		return false, fmt.Errorf("heartbeat music source scan: %w", err)
@@ -846,10 +917,8 @@ func (repository *Repository) CompleteScan(
 		}
 		return false, nil
 	}
-	if _, err := transaction.Exec(ctx, `UPDATE library_roots SET
-		status='READY',last_scan_at=$3,last_error=NULL,updated_at=$3
-		WHERE id=$1 AND version=$2 AND enabled=true`, claim.Root.ID, claim.Run.RootVersion, now); err != nil {
-		return false, fmt.Errorf("mark completed music source ready: %w", err)
+	if err := reconcileRootScanState(ctx, transaction, claim.Root.ID, claim.Run.RootVersion, ScanStatusCompleted, nil, now); err != nil {
+		return false, err
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return false, fmt.Errorf("commit music source scan completion: %w", err)
@@ -874,7 +943,7 @@ func (repository *Repository) FinalizeScanFailure(
 	}
 	defer transaction.Rollback(ctx)
 	command, err := transaction.Exec(ctx, `UPDATE library_scan_runs SET
-		status=$4,completed_at=CASE WHEN $4='PENDING' THEN NULL ELSE $5 END,
+		status=$4::library_scan_status,completed_at=CASE WHEN $4::text='PENDING' THEN NULL ELSE $5 END,
 		locked_by=NULL,locked_until=NULL,heartbeat_at=NULL,last_error=$6,updated_at=$5
 		WHERE id=$1 AND status='RUNNING' AND attempt_id=$2 AND locked_by=$3`,
 		claim.Run.ID, attemptID, workerID, status, now, lastError)
@@ -887,21 +956,8 @@ func (repository *Repository) FinalizeScanFailure(
 		}
 		return false, nil
 	}
-	rootStatus := RootStatusError
-	if status == ScanStatusPending {
-		rootStatus = RootStatusUnknown
-	} else if status == ScanStatusCancelled {
-		rootStatus = RootStatusReady
-	}
-	if status == ScanStatusPending {
-		_, err = transaction.Exec(ctx, `UPDATE library_roots SET status=$3,last_error=NULL,updated_at=$4
-			WHERE id=$1 AND version=$2`, claim.Root.ID, claim.Run.RootVersion, rootStatus, now)
-	} else {
-		_, err = transaction.Exec(ctx, `UPDATE library_roots SET status=$3,last_scan_at=$4,last_error=$5,updated_at=$4
-			WHERE id=$1 AND version=$2`, claim.Root.ID, claim.Run.RootVersion, rootStatus, now, lastError)
-	}
-	if err != nil {
-		return false, fmt.Errorf("finalize failed music source state: %w", err)
+	if err := reconcileRootScanState(ctx, transaction, claim.Root.ID, claim.Run.RootVersion, status, lastError, now); err != nil {
+		return false, err
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return false, fmt.Errorf("commit music source scan failure: %w", err)
@@ -909,6 +965,51 @@ func (repository *Repository) FinalizeScanFailure(
 	return true, nil
 }
 
+type scanStateExecutor interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
+func reconcileRootScanState(
+	ctx context.Context,
+	executor scanStateExecutor,
+	rootID string,
+	rootVersion int,
+	scanStatus ScanStatus,
+	lastError *string,
+	now time.Time,
+) error {
+	_, err := executor.Exec(ctx, `UPDATE library_roots AS root SET
+		status = CASE
+			WHEN NOT root.enabled THEN 'DISABLED'::library_root_status
+			WHEN EXISTS (
+				SELECT 1 FROM library_scan_runs active
+				WHERE active.root_id=root.id AND active.status IN ('PENDING','RUNNING')
+			) THEN 'SCANNING'::library_root_status
+			WHEN root.version <> $2 THEN 'UNKNOWN'::library_root_status
+			WHEN $3::text = 'COMPLETED' THEN 'READY'::library_root_status
+			WHEN $3::text = 'FAILED' THEN 'ERROR'::library_root_status
+			WHEN root.last_error IS NOT NULL THEN 'ERROR'::library_root_status
+			WHEN root.last_scan_at IS NOT NULL THEN 'READY'::library_root_status
+			ELSE 'UNKNOWN'::library_root_status
+		END,
+		last_scan_at = CASE
+			WHEN root.version=$2 AND $3::text IN ('COMPLETED','FAILED') THEN $4
+			WHEN $3::text IN ('COMPLETED','FAILED') THEN coalesce(root.last_scan_at,$4)
+			ELSE root.last_scan_at
+		END,
+		last_error = CASE
+			WHEN root.version <> $2 THEN NULL
+			WHEN $3::text IN ('PENDING','RUNNING','COMPLETED','CANCELLED') THEN NULL
+			WHEN $3::text = 'FAILED' THEN $5
+			ELSE root.last_error
+		END,
+		updated_at = GREATEST(root.updated_at,$4)
+		WHERE root.id=$1`, rootID, rootVersion, string(scanStatus), now, lastError)
+	if err != nil {
+		return fmt.Errorf("reconcile music source scan state: %w", err)
+	}
+	return nil
+}
 func listRoots(ctx context.Context, database repositoryDatabase, query RootQuery) ([]Root, int, error) {
 	rows, err := database.Query(ctx, `SELECT `+rootColumns+`
 		FROM library_roots ORDER BY name ASC,id ASC LIMIT $1 OFFSET $2`, query.Limit, query.Offset)
@@ -1003,6 +1104,31 @@ func rootCount(ctx context.Context, database repositoryDatabase, rootID string) 
 	return counts, nil
 }
 
+func (repository *Repository) activeScanRoots(ctx context.Context, rootIDs []string) (map[string]bool, error) {
+	result := make(map[string]bool)
+	if len(rootIDs) == 0 {
+		return result, nil
+	}
+	rows, err := repository.database.Query(ctx, `SELECT DISTINCT root_id::text
+		FROM library_scan_runs
+		WHERE root_id = ANY($1::uuid[]) AND (status='PENDING' OR (status='RUNNING' AND locked_until > now()))`, rootIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list active music source scans: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var rootID string
+		if err := rows.Scan(&rootID); err != nil {
+			return nil, fmt.Errorf("scan active music source scan: %w", err)
+		}
+		result[rootID] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate active music source scans: %w", err)
+	}
+	return result, nil
+}
+
 func (repository *Repository) latestRuns(ctx context.Context, rootIDs []string) (map[string]ScanRun, error) {
 	result := make(map[string]ScanRun)
 	if len(rootIDs) == 0 {
@@ -1035,7 +1161,7 @@ func scanRoot(scanner rowScanner) (Root, error) {
 	var includePatterns, excludePatterns []byte
 	err := scanner.Scan(
 		&root.ID, &root.Name, &root.Path, &root.NormalizedPath, &root.Mode,
-		&root.TagWritebackEnabled, &root.Enabled, &root.ScanOnStartup,
+		&root.ConfigurationManaged, &root.Enabled, &root.ScanOnStartup,
 		&root.ScanIntervalMinutes, &includePatterns, &excludePatterns, &root.Status,
 		&root.LastScanAt, &root.LastError, &root.Version, &root.CreatedAt, &root.UpdatedAt,
 	)
@@ -1081,7 +1207,7 @@ func isUniqueViolation(err error) bool {
 }
 
 const rootColumns = `
-	id,name,path,normalized_path,mode,tag_writeback_enabled,enabled,scan_on_startup,
+	id,name,path,normalized_path,mode,configuration_managed,enabled,scan_on_startup,
 	scan_interval_minutes,include_patterns,exclude_patterns,status,last_scan_at,last_error,
 	version,created_at,updated_at`
 

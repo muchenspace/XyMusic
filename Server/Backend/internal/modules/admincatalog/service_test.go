@@ -99,7 +99,7 @@ func TestAlbumPaginatesTracksAndReturnsTrackTotals(t *testing.T) {
 func TestTrackPresentsAdminOperationalProjection(t *testing.T) {
 	now := time.Date(2026, 7, 16, 3, 4, 5, 0, time.UTC)
 	albumID, albumTitle, coverID := "album-1", "Album", "cover-1"
-	rootID, rootName, mode, rootStatus := "root-1", "Library", "READ_ONLY", "READY"
+	rootID, rootName, mode := "root-1", "Library", "READ_ONLY"
 	rootEnabled := true
 	errorMessage, errorCode := "worker failed with SQLSTATE 08000", "DEPENDENCY_UNAVAILABLE"
 	metadataVersion := 2
@@ -117,7 +117,7 @@ func TestTrackPresentsAdminOperationalProjection(t *testing.T) {
 		Source: &SourceRecord{
 			ID: "source-1", RootID: &rootID, RootName: &rootName, RelativePath: `disc\song.flac`,
 			Status: "READY", ChecksumSHA256: "sum", Mode: &mode, RootEnabled: &rootEnabled,
-			RootStatus: &rootStatus, MappingCount: 1,
+			MappingCount: 1,
 		},
 		MetadataStatus: MetadataPendingWrite, MetadataVersion: &metadataVersion,
 		MediaProcessing: &MediaProcessingRecord{Status: "FAILED", Attempts: 2, MaxAttempts: 5, LastError: &errorMessage, LastErrorCode: &errorCode, UpdatedAt: now},

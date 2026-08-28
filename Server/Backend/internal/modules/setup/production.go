@@ -310,9 +310,9 @@ func (connection *productionInstallationDatabase) Provision(
 	if libraryRootID == "" {
 		if err := tx.QueryRow(ctx, `
 		insert into library_roots (
-			name, path, normalized_path, mode, tag_writeback_enabled, enabled,
+			name, path, normalized_path, mode, configuration_managed, enabled,
 			scan_on_startup, scan_interval_minutes, include_patterns, exclude_patterns, status
-		) values ($1, $2, $3, $4::library_root_mode, false, $5, $6, $7, $8::jsonb, $9::jsonb, $10::library_root_status)
+		) values ($1, $2, $3, $4::library_root_mode, true, $5, $6, $7, $8::jsonb, $9::jsonb, $10::library_root_status)
 		returning id::text`,
 			input.Source.Name,
 			input.Source.Path,

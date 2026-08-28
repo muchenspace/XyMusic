@@ -146,6 +146,8 @@ func (worker *Worker) RunNextScan(ctx context.Context) (bool, error) {
 	attemptID := *claim.Run.AttemptID
 	var ownershipLost atomic.Bool
 	var cancellationSeen atomic.Bool
+	scanContext, cancelScan := context.WithCancel(ctx)
+	defer cancelScan()
 	heartbeatContext, stopHeartbeat := context.WithCancel(context.WithoutCancel(ctx))
 	heartbeatDone := make(chan struct{})
 	go func() {
@@ -162,8 +164,9 @@ func (worker *Worker) RunNextScan(ctx context.Context) (bool, error) {
 					beatContext, claim.Run.ID, attemptID, worker.workerID, worker.now(), worker.lease,
 				)
 				cancel()
-				if beatErr == nil && !owned {
+				if beatErr != nil || !owned {
 					ownershipLost.Store(true)
+					cancelScan()
 					return
 				}
 			}
@@ -178,12 +181,12 @@ func (worker *Worker) RunNextScan(ctx context.Context) (bool, error) {
 	var controlMu sync.Mutex
 	var lastControlAt time.Time
 	var cachedCancelled, cachedOwned bool
-	result, scanErr := worker.scanner.Scan(ctx, ScanInput{
+	result, scanErr := worker.scanner.Scan(scanContext, ScanInput{
 		ScanRunID: claim.Run.ID, RootID: claim.Root.ID, Directory: claim.Root.Path,
 		IncludePatterns: cloneStrings(claim.Root.IncludePatterns),
 		ExcludePatterns: cloneStrings(claim.Root.ExcludePatterns),
 		IsCancelled: func(callbackContext context.Context) (bool, error) {
-			if ctx.Err() != nil || ownershipLost.Load() {
+			if scanContext.Err() != nil || ownershipLost.Load() {
 				return true, nil
 			}
 			now := worker.now()

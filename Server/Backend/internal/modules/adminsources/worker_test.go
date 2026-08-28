@@ -105,6 +105,40 @@ func TestWorkerFinalizesRequestedCancellation(t *testing.T) {
 	}
 }
 
+func TestWorkerStopsScannerWhenHeartbeatFails(t *testing.T) {
+	attemptID := "00000000-0000-4000-8000-000000000003"
+	store := &workerStoreStub{
+		heartbeatErr: errors.New("heartbeat unavailable"),
+		claim: &ClaimedScan{
+			Run:  ScanRun{ID: testRunID, RootID: testRootID, RootVersion: 1, Status: ScanStatusRunning, AttemptID: &attemptID},
+			Root: Root{ID: testRootID, Path: t.TempDir(), Version: 1, Enabled: true},
+		},
+	}
+	scanner := scannerFunc(func(ctx context.Context, _ ScanInput) (ScanResult, error) {
+		select {
+		case <-ctx.Done():
+			return ScanResult{}, ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+			return ScanResult{}, nil
+		}
+	})
+	worker, err := NewWorker(WorkerOptions{
+		Store: store, Scanner: scanner, RootDirectory: t.TempDir(), WorkerID: "worker-test",
+		Lease: time.Second, Heartbeat: 10 * time.Millisecond,
+		DefaultRoot: config.LocalLibrary{Directory: store.claim.Root.Path, Mode: string(RootModeReadOnly), IncludePatterns: []string{}, ExcludePatterns: []string{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worked, err := worker.RunNextScan(context.Background())
+	if err != nil || !worked {
+		t.Fatalf("worked=%v err=%v", worked, err)
+	}
+	if store.finalStatus != ScanStatusPending {
+		t.Fatalf("heartbeat failure final status=%s", store.finalStatus)
+	}
+}
+
 func TestWorkerStopsScannerWhenScanOwnershipIsLost(t *testing.T) {
 	attemptID := "00000000-0000-4000-8000-000000000003"
 	controlOwned := false
@@ -159,6 +193,7 @@ type workerStoreStub struct {
 	completed        ScanResult
 	finalStatus      ScanStatus
 	finalError       *string
+	heartbeatErr     error
 }
 
 func (stub *workerStoreStub) InitializeScans(context.Context, time.Time) error {
@@ -189,6 +224,9 @@ func (stub *workerStoreStub) ClaimNextScan(context.Context, string, time.Time, t
 	return claim, nil
 }
 func (stub *workerStoreStub) HeartbeatScan(context.Context, string, string, string, time.Time, time.Duration) (bool, error) {
+	if stub.heartbeatErr != nil {
+		return false, stub.heartbeatErr
+	}
 	return stub.owned, nil
 }
 func (stub *workerStoreStub) ScanControl(context.Context, string, string, string) (bool, bool, error) {

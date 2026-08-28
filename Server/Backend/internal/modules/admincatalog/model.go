@@ -108,7 +108,7 @@ type SourceRecord struct {
 	ChecksumSHA256 string
 	Mode           *string
 	RootEnabled    *bool
-	RootStatus     *string
+	ScanActive     bool
 	MappingCount   int
 	Cue            bool
 }

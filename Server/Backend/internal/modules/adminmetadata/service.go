@@ -249,7 +249,7 @@ func presentMetadata(record MetadataRecord) (MetadataDTO, error) {
 	}
 	var source *MetadataSourceDTO
 	if record.Source != nil {
-		rootMode, rootStatus, trackStatus := "", "", ""
+		rootMode, trackStatus := "", ""
 		rootEnabled := false
 		if record.Source.RootMode != nil {
 			rootMode = *record.Source.RootMode
@@ -257,15 +257,12 @@ func presentMetadata(record MetadataRecord) (MetadataDTO, error) {
 		if record.Source.RootEnabled != nil {
 			rootEnabled = *record.Source.RootEnabled
 		}
-		if record.Source.RootStatus != nil {
-			rootStatus = *record.Source.RootStatus
-		}
 		if record.Source.TrackStatus != nil {
 			trackStatus = *record.Source.TrackStatus
 		}
 		eligibility := tagwriteback.Evaluate(tagwriteback.SourceContext{
 			HasSource: true, TrackStatus: trackStatus, RootMode: rootMode,
-			RootEnabled: rootEnabled, RootStatus: rootStatus, SourceStatus: record.Source.Status,
+			RootEnabled: rootEnabled, ScanActive: record.Source.ScanActive, SourceStatus: record.Source.Status,
 			SourcePath: record.Source.SourcePath, MappingCount: record.Source.MappingCount,
 			Cue: record.Source.Cue,
 		})
