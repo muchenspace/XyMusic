@@ -116,21 +116,60 @@ const testLibrary = useMutation({ mutationFn: () => settingsAdmin.testLocalLibra
 const testing = computed(() => testDatabase.isPending.value || testStorage.isPending.value || testMedia.isPending.value || testLibrary.isPending.value);
 function testCurrent(): void { resetMessages(); if (tab.value === "database") testDatabase.mutate(); else if (tab.value === "storage") testStorage.mutate(); else if (tab.value === "media") testMedia.mutate(); else if (tab.value === "library") testLibrary.mutate(); }
 
+function baselineState(): Record<string, unknown> | undefined {
+  if (!baseline.value) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(baseline.value);
+    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : undefined;
+  } catch {
+    return undefined;
+  }
+}
+function sectionChanged(section: string): boolean {
+  const initial = baselineState();
+  if (!initial) return true;
+  const current = editableState() as Record<string, unknown>;
+  return JSON.stringify(current[section]) !== JSON.stringify(initial[section]);
+}
 function payload(): RuntimeSettingsUpdate {
-  return {
-    expectedVersion: form.version,
-    database: { ...form.database, password: databasePassword.value || undefined },
-    storage: { ...form.storage, endpoint: form.storage.endpoint || null, publicBaseUrl: form.storage.publicBaseUrl || null, secretAccessKey: storageSecret.value || undefined },
-    mediaTools: mediaToolsPayload(),
-    scraping: {
+  const result: RuntimeSettingsUpdate = { expectedVersion: form.version };
+  // Send only sections the administrator actually changed. The settings
+  // response intentionally redacts database/storage secrets; sending the
+  // whole form on a library-only edit makes stale UI values authoritative and
+  // can switch the runtime to a different database or object bucket.
+  if (sectionChanged("database") || databasePassword.value.trim()) {
+    result.database = { ...form.database, password: databasePassword.value || undefined };
+  }
+  if (sectionChanged("storage") || storageSecret.value.trim()) {
+    result.storage = {
+      ...form.storage,
+      endpoint: form.storage.endpoint || null,
+      publicBaseUrl: form.storage.publicBaseUrl || null,
+      secretAccessKey: storageSecret.value || undefined,
+    };
+  }
+  if (sectionChanged("mediaTools") || sectionChanged("autoDetectMedia")) {
+    result.mediaTools = mediaToolsPayload();
+  }
+  if (sectionChanged("scraping")) {
+    result.scraping = {
       fpcalcPath: form.scraping.fpcalcPath.trim(),
       acoustIdClient: form.scraping.acoustIdClient.trim(),
-    },
-    localLibrary: { ...form.localLibrary, includePatterns: lines(includePatterns.value), excludePatterns: lines(excludePatterns.value) },
-    registration: { enabled: form.registration.enabled },
-    security: { ...form.security },
-    http: { ...form.http, trustedProxyAddresses: lines(proxies.value) },
-  };
+    };
+  }
+  if (sectionChanged("localLibrary") || sectionChanged("includePatterns") || sectionChanged("excludePatterns")) {
+    result.localLibrary = {
+      ...form.localLibrary,
+      includePatterns: lines(includePatterns.value),
+      excludePatterns: lines(excludePatterns.value),
+    };
+  }
+  if (sectionChanged("registration")) result.registration = { enabled: form.registration.enabled };
+  if (sectionChanged("security")) result.security = { ...form.security };
+  if (sectionChanged("http") || sectionChanged("proxies")) {
+    result.http = { ...form.http, trustedProxyAddresses: lines(proxies.value) };
+  }
+  return result;
 }
 const saveMutation = useMutation({ mutationFn: () => settingsAdmin.update(payload()), onSuccess: async (settings) => { applySettings(settings); queryClient.setQueryData(["admin", "settings"], settings); if (settings.restartRequiredFields.length) ui.notify("warning", "设置已保存，监听地址需重启生效", `当前仍监听 IPv4 ${settings.actualListener.ipv4.host}:${settings.actualListener.ipv4.port}，IPv6 [${settings.actualListener.ipv6.host}]:${settings.actualListener.ipv6.port}`); else ui.notify("success", "系统设置已应用", "Server 已切换配置，Worker 将自动安全重载"); await Promise.all([queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === "admin" && query.queryKey[1] !== "settings" }), queryClient.invalidateQueries({ queryKey: ["service", "readiness"] })]); }, onError: (error) => { actionError.value = detailedApiError(error, "设置保存失败，服务继续使用原配置"); } });
 

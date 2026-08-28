@@ -396,13 +396,9 @@ func (service *Service) presentTracks(ctx context.Context, records []TrackRecord
 			if record.Source.RootEnabled != nil {
 				rootEnabled = *record.Source.RootEnabled
 			}
-			rootStatus := ""
-			if record.Source.RootStatus != nil {
-				rootStatus = *record.Source.RootStatus
-			}
 			eligibility := tagwriteback.Evaluate(tagwriteback.SourceContext{
 				HasSource: true, TrackStatus: string(record.Status), RootMode: rootMode,
-				RootEnabled: rootEnabled, RootStatus: rootStatus, SourceStatus: record.Source.Status,
+				RootEnabled: rootEnabled, ScanActive: record.Source.ScanActive, SourceStatus: record.Source.Status,
 				SourcePath: record.Source.RelativePath, MappingCount: record.Source.MappingCount,
 				Cue: record.Source.Cue,
 			})

@@ -99,7 +99,7 @@ type MetadataSourceRecord struct {
 	RootPath       *string
 	RootMode       *string
 	RootEnabled    *bool
-	RootStatus     *string
+	ScanActive     bool
 	TrackStatus    *string
 	MappingCount   int
 	Cue            bool
@@ -165,7 +165,7 @@ type WritebackContext struct {
 	RootPath    string
 	RootMode    string
 	Enabled     bool
-	Status      string
+	ScanRunning bool
 	TrackStatus string
 }
 

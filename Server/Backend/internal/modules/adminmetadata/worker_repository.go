@@ -349,7 +349,7 @@ func (repository *Repository) CommitWriteback(ctx context.Context, input Writeba
 	if err := assertWritableSource(
 		contextRecord.RootMode,
 		contextRecord.Enabled,
-		contextRecord.Status,
+		contextRecord.ScanRunning,
 		contextRecord.Source.Status,
 	); err != nil {
 		return err
@@ -628,7 +628,12 @@ func loadWritebackContext(
 			`+metadataColumns+`,
 			source.id::text, source.root_id::text, source.source_path,
 			source.status, source.checksum_sha256,
-			root.path, root.mode::text, root.enabled, root.status::text,
+			root.path, root.mode::text, root.enabled,
+			EXISTS (
+				SELECT 1 FROM library_scan_runs active_scan
+				WHERE active_scan.root_id = root.id
+				  AND active_scan.status = 'RUNNING' AND active_scan.locked_until > now()
+			),
 			track.status::text,
 			artwork.object_key, artwork.mime_type
 		from metadata_writeback_jobs job
@@ -674,7 +679,7 @@ func scanWritebackContext(row scanRow) (WritebackContext, error) {
 		&result.Metadata.Version, &result.Metadata.CreatedAt, &result.Metadata.UpdatedAt,
 		&result.Source.ID, &sourceRootID, &result.Source.SourcePath,
 		&result.Source.Status, &result.Source.ChecksumSHA256,
-		&result.RootPath, &result.RootMode, &result.Enabled, &result.Status,
+		&result.RootPath, &result.RootMode, &result.Enabled, &result.ScanRunning,
 		&result.TrackStatus,
 		&artworkObjectKey, &artworkMIMEType,
 	)

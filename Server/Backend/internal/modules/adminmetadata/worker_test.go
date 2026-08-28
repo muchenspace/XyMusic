@@ -469,7 +469,7 @@ func newWritebackWorkerFixture(
 				ID: job.SourceID, SourcePath: "song.flac", Status: "READY",
 				ChecksumSHA256: checksumBytes(original),
 			},
-			RootPath: root, RootMode: "READ_WRITE", Enabled: true, Status: "READY",
+			RootPath: root, RootMode: "READ_WRITE", Enabled: true,
 		},
 	}
 	worker, err := NewWritebackWorker(WorkerDependencies{

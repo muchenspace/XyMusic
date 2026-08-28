@@ -15,14 +15,14 @@ func TestPresentMetadataIncludesWritebackBlockReason(t *testing.T) {
 	}
 	overrides := json.RawMessage(`{}`)
 	now := time.Now().UTC()
-	mode, rootStatus, trackStatus := "READ_ONLY", "READY", "READY"
+	mode, trackStatus := "READ_ONLY", "READY"
 	enabled := true
 	dto, err := presentMetadata(MetadataRecord{
 		TrackID: "track", Raw: raw, Overrides: overrides, Version: 1, CreatedAt: now, UpdatedAt: now,
 		Source: &MetadataSourceRecord{
 			ID: "source", SourcePath: "album/song.flac", Status: "READY",
 			ChecksumSHA256: "checksum", RootMode: &mode, RootEnabled: &enabled,
-			RootStatus: &rootStatus, TrackStatus: &trackStatus, MappingCount: 1,
+			TrackStatus: &trackStatus, MappingCount: 1,
 		},
 	})
 	if err != nil {

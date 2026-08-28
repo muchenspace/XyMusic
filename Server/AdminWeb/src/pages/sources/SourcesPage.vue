@@ -81,7 +81,7 @@ let allowDeleteClose = false;
 const sourcesQuery = useQuery({
   queryKey: computed(() => ["admin", "sources", "list", sourcePage.value, sourcePageSize.value]),
   queryFn: ({ signal }) => sourceAdmin.list(sourcePage.value, sourcePageSize.value, signal),
-  refetchInterval: 60_000,
+  refetchInterval: (query) => query.state.data?.items.some((source) => source.status === "SCANNING") ? 5_000 : 60_000,
 });
 watch([sourcePage, sourcePageSize], () => {
   historySourceId.value = "";
@@ -209,7 +209,14 @@ function connectScan(sourceId: string, scanId: string): void {
     }
   }, () => {
     scanEvents?.close(); scanEvents = undefined; scanEventSourceId = undefined;
-    void queryClient.invalidateQueries({ queryKey: ["admin", "sources", sourceId, "scans"] });
+    // Do not keep rendering the last queued snapshot after an SSE disconnect.
+    // The source/scans queries are refreshed below and will repopulate the
+    // active scan when it is still running, or remove it once it is terminal.
+    if (scanSubmission.value?.sourceId === sourceId) scanSubmission.value = undefined;
+    void Promise.all([
+      refresh(),
+      queryClient.invalidateQueries({ queryKey: ["admin", "sources", sourceId, "scans"] }),
+    ]);
   });
 }
 function queueProcessingRefresh(): void {

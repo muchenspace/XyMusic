@@ -255,13 +255,17 @@ func (repository *Repository) EnqueueWriteback(
 		return WritebackJob{}, fmt.Errorf("lock writeback track: %w", err)
 	}
 	var rawJSON, overridesJSON []byte
-	var sourceID, sourcePath, sourceStatus, checksum, currentRootID, rootPath, rootMode, rootStatus, trackStatus string
+	var sourceID, sourcePath, sourceStatus, checksum, currentRootID, rootPath, rootMode, trackStatus string
 	var version int
-	var rootEnabled bool
+	var rootEnabled, scanActive bool
 	err = tx.QueryRow(ctx, `
 		SELECT metadata.raw_tags, metadata.overrides, metadata.version,
 		       source.id, source.source_path, source.status, source.checksum_sha256,
-		       root.id::text, root.path, root.mode, root.enabled, root.status, track.status::text
+		       root.id::text, root.path, root.mode, root.enabled, EXISTS (
+			         SELECT 1 FROM library_scan_runs active_scan
+			         WHERE active_scan.root_id = root.id
+			           AND active_scan.status = 'RUNNING' AND active_scan.locked_until > now()
+			       ), track.status::text
 		FROM track_metadata metadata
 		JOIN tracks track ON track.id = metadata.track_id
 		JOIN local_music_sources source ON source.id = metadata.source_id
@@ -269,7 +273,7 @@ func (repository *Repository) EnqueueWriteback(
 		WHERE metadata.track_id = $1
 		FOR UPDATE OF metadata, source`, trackID).Scan(
 		&rawJSON, &overridesJSON, &version, &sourceID, &sourcePath, &sourceStatus,
-		&checksum, &currentRootID, &rootPath, &rootMode, &rootEnabled, &rootStatus, &trackStatus,
+		&checksum, &currentRootID, &rootPath, &rootMode, &rootEnabled, &scanActive, &trackStatus,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return WritebackJob{}, apperror.NotFound("A writable local source for this track was not found")
@@ -298,7 +302,7 @@ func (repository *Repository) EnqueueWriteback(
 	}
 	if err := tagwriteback.Evaluate(tagwriteback.SourceContext{
 		HasSource: true, TrackStatus: trackStatus, RootMode: rootMode,
-		RootEnabled: rootEnabled, RootStatus: rootStatus, SourceStatus: sourceStatus,
+		RootEnabled: rootEnabled, ScanActive: scanActive, SourceStatus: sourceStatus,
 		SourcePath: sourcePath, MappingCount: mappingCount, Cue: cue,
 	}).Error(trackID); err != nil {
 		return WritebackJob{}, err
@@ -361,7 +365,11 @@ func (repository *Repository) ValidateBatchWriteback(ctx context.Context, items 
 	rows, err := repository.pool.Query(ctx, `
 		SELECT requested.track_id::text, track.status::text,
 		       source.id::text, source.source_path, source.status,
-		       root.mode::text, root.enabled, root.status::text,
+		       root.mode::text, root.enabled, EXISTS (
+		         SELECT 1 FROM library_scan_runs active_scan
+		         WHERE active_scan.root_id = root.id
+		           AND active_scan.status = 'RUNNING' AND active_scan.locked_until > now()
+		       ),
 		       mapping_stats.mapping_count, mapping_stats.cue
 		FROM unnest($1::uuid[]) WITH ORDINALITY requested(track_id, position)
 		LEFT JOIN tracks track ON track.id = requested.track_id
@@ -380,13 +388,14 @@ func (repository *Repository) ValidateBatchWriteback(ctx context.Context, items 
 	defer rows.Close()
 	for rows.Next() {
 		var trackID string
-		var trackStatus, sourceID, sourcePath, sourceStatus, rootMode, rootStatus *string
+		var trackStatus, sourceID, sourcePath, sourceStatus, rootMode *string
 		var rootEnabled *bool
+		var scanActive bool
 		var mappingCount *int
 		var cue *bool
 		if err := rows.Scan(
 			&trackID, &trackStatus, &sourceID, &sourcePath, &sourceStatus,
-			&rootMode, &rootEnabled, &rootStatus, &mappingCount, &cue,
+			&rootMode, &rootEnabled, &scanActive, &mappingCount, &cue,
 		); err != nil {
 			return fmt.Errorf("scan batch Tag writeback source: %w", err)
 		}
@@ -400,7 +409,7 @@ func (repository *Repository) ValidateBatchWriteback(ctx context.Context, items 
 		eligibility := tagwriteback.Evaluate(tagwriteback.SourceContext{
 			HasSource: sourceID != nil, TrackStatus: pointerValue(trackStatus),
 			RootMode: pointerValue(rootMode), RootEnabled: boolPointerValue(rootEnabled),
-			RootStatus: pointerValue(rootStatus), SourceStatus: pointerValue(sourceStatus),
+			ScanActive: scanActive, SourceStatus: pointerValue(sourceStatus),
 			SourcePath: pointerValue(sourcePath), MappingCount: intPointerValue(mappingCount),
 			Cue: boolPointerValue(cue),
 		})
@@ -1361,7 +1370,11 @@ func (repository *Repository) loadMetadataWith(ctx context.Context, database met
 		SELECT metadata.track_id, metadata.raw_tags, metadata.overrides, metadata.version,
 		       metadata.last_scanned_at, metadata.updated_by, metadata.created_at, metadata.updated_at,
 		       source.id, source.root_id, source.source_path, source.status, source.checksum_sha256,
-		       root.mode, root.enabled, root.status, track.status::text,
+		       root.mode, root.enabled, EXISTS (
+			         SELECT 1 FROM library_scan_runs active_scan
+			         WHERE active_scan.root_id = root.id
+			           AND active_scan.status = 'RUNNING' AND active_scan.locked_until > now()
+			       ), track.status::text,
 		       COALESCE(mapping_stats.mapping_count, 0), COALESCE(mapping_stats.cue, false)
 		FROM track_metadata metadata
 		LEFT JOIN local_music_sources source ON source.id = metadata.source_id
@@ -1415,7 +1428,11 @@ func (repository *Repository) MetadataBatch(
 		SELECT metadata.track_id, metadata.raw_tags, metadata.overrides, metadata.version,
 		       metadata.last_scanned_at, metadata.updated_by, metadata.created_at, metadata.updated_at,
 		       source.id, source.root_id, source.source_path, source.status, source.checksum_sha256,
-		       root.mode, root.enabled, root.status, track.status::text,
+		       root.mode, root.enabled, EXISTS (
+			         SELECT 1 FROM library_scan_runs active_scan
+			         WHERE active_scan.root_id = root.id
+			           AND active_scan.status = 'RUNNING' AND active_scan.locked_until > now()
+			       ), track.status::text,
 		       COALESCE(mapping_stats.mapping_count, 0), COALESCE(mapping_stats.cue, false)
 		FROM track_metadata metadata
 		LEFT JOIN local_music_sources source ON source.id = metadata.source_id
@@ -1723,7 +1740,7 @@ type trackMetadataRowValues struct {
 	checksum      *string
 	rootMode      *string
 	rootEnabled   *bool
-	rootStatus    *string
+	scanActive    bool
 	trackStatus   *string
 	mappingCount  int
 	cue           bool
@@ -1734,7 +1751,7 @@ func (values *trackMetadataRowValues) scanTargets() []any {
 		&values.trackID, &values.rawJSON, &values.overridesJSON, &values.version,
 		&values.lastScannedAt, &values.updatedBy, &values.createdAt, &values.updatedAt,
 		&values.sourceID, &values.rootID, &values.sourcePath, &values.sourceStatus, &values.checksum,
-		&values.rootMode, &values.rootEnabled, &values.rootStatus, &values.trackStatus,
+		&values.rootMode, &values.rootEnabled, &values.scanActive, &values.trackStatus,
 		&values.mappingCount, &values.cue,
 	}
 }
@@ -1759,7 +1776,7 @@ func (values *trackMetadataRowValues) build() (TrackMetadata, error) {
 		result.UpdatedBy = &updatedBy
 	}
 	if values.sourceID != nil {
-		mode, rootState, trackState := "", "", ""
+		mode, trackState := "", ""
 		enabled := false
 		if values.rootMode != nil {
 			mode = *values.rootMode
@@ -1767,15 +1784,12 @@ func (values *trackMetadataRowValues) build() (TrackMetadata, error) {
 		if values.rootEnabled != nil {
 			enabled = *values.rootEnabled
 		}
-		if values.rootStatus != nil {
-			rootState = *values.rootStatus
-		}
 		if values.trackStatus != nil {
 			trackState = *values.trackStatus
 		}
 		eligibility := tagwriteback.Evaluate(tagwriteback.SourceContext{
 			HasSource: true, TrackStatus: trackState, RootMode: mode, RootEnabled: enabled,
-			RootStatus: rootState, SourceStatus: pointerValue(values.sourceStatus),
+			ScanActive: values.scanActive, SourceStatus: pointerValue(values.sourceStatus),
 			SourcePath: pointerValue(values.sourcePath), MappingCount: values.mappingCount, Cue: values.cue,
 		})
 		result.Source = &MetadataSource{
@@ -2074,7 +2088,11 @@ const claimedBatchItemSelect = `
 	       COALESCE(metadata.version, 0), metadata.last_scanned_at, metadata.updated_by,
 	       COALESCE(metadata.created_at, item.created_at), COALESCE(metadata.updated_at, item.updated_at),
 	       source.id, source.root_id, source.source_path, source.status, source.checksum_sha256,
-	       root.mode, root.enabled, root.status, track.status::text,
+	       root.mode, root.enabled, EXISTS (
+			         SELECT 1 FROM library_scan_runs active_scan
+			         WHERE active_scan.root_id = root.id
+			           AND active_scan.status = 'RUNNING' AND active_scan.locked_until > now()
+			       ), track.status::text,
 	       COALESCE(mapping_stats.mapping_count, 0), COALESCE(mapping_stats.cue, false)
 	FROM tag_scraping_job_items item
 	JOIN tracks track ON track.id = item.track_id

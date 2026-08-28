@@ -327,6 +327,10 @@ func retryScanJob(ctx context.Context, transaction pgx.Tx, jobID string) error {
 	if err != nil {
 		return fmt.Errorf("retry library scan: %w", err)
 	}
+	if err := reconcileScanRootState(ctx, transaction, rootID, rootVersion, "PENDING", nil, now); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -386,10 +390,11 @@ func cancelMediaJob(
 }
 
 func cancelScanJob(ctx context.Context, transaction pgx.Tx, jobID string) error {
-	var previousStatus string
+	var previousStatus, rootID string
+	var rootVersion int
 	err := transaction.QueryRow(ctx, `
-		SELECT status::text FROM library_scan_runs WHERE id = $1 FOR UPDATE`, jobID,
-	).Scan(&previousStatus)
+		SELECT status::text,root_id,root_version FROM library_scan_runs WHERE id = $1 FOR UPDATE`, jobID,
+	).Scan(&previousStatus, &rootID, &rootVersion)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return apperror.NotFound("Background job was not found")
 	}
@@ -417,6 +422,57 @@ func cancelScanJob(ctx context.Context, transaction pgx.Tx, jobID string) error 
 			updated_at = $3
 		WHERE id = $4`, status, completedAt, now, jobID); err != nil {
 		return fmt.Errorf("cancel library scan: %w", err)
+	}
+	if err := reconcileScanRootState(ctx, transaction, rootID, rootVersion, status, nil, now); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+type scanRootStateExecutor interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
+func reconcileScanRootState(
+	ctx context.Context,
+	transaction scanRootStateExecutor,
+	rootID string,
+	rootVersion int,
+	scanStatus string,
+	lastError *string,
+	now time.Time,
+) error {
+	_, err := transaction.Exec(ctx, `UPDATE library_roots AS root SET
+		status = CASE
+			WHEN NOT root.enabled THEN 'DISABLED'::library_root_status
+			WHEN EXISTS (
+				SELECT 1 FROM library_scan_runs active
+				WHERE active.root_id=root.id AND active.status IN ('PENDING','RUNNING')
+			) THEN 'SCANNING'::library_root_status
+			WHEN root.version <> $2 THEN 'UNKNOWN'::library_root_status
+			WHEN $3::text IN ('PENDING','RUNNING') THEN 'SCANNING'::library_root_status
+			WHEN $3::text = 'COMPLETED' THEN 'READY'::library_root_status
+			WHEN $3::text = 'FAILED' THEN 'ERROR'::library_root_status
+			WHEN root.last_error IS NOT NULL THEN 'ERROR'::library_root_status
+			WHEN root.last_scan_at IS NOT NULL THEN 'READY'::library_root_status
+			ELSE 'UNKNOWN'::library_root_status
+		END,
+		last_scan_at = CASE
+			WHEN root.version=$2 AND $3::text IN ('COMPLETED','FAILED') THEN $4
+			WHEN $3::text IN ('COMPLETED','FAILED') THEN coalesce(root.last_scan_at,$4)
+			ELSE root.last_scan_at
+		END,
+		last_error = CASE
+			WHEN root.version<>$2 THEN NULL
+			WHEN $3::text IN ('PENDING','RUNNING','COMPLETED','CANCELLED') THEN NULL
+			WHEN $3::text = 'FAILED' THEN $5
+			ELSE root.last_error
+		END,
+		updated_at=GREATEST(root.updated_at,$4)
+		WHERE root.id=$1`, rootID, rootVersion, scanStatus, now, lastError)
+	if err != nil {
+		return fmt.Errorf("reconcile library scan root state: %w", err)
 	}
 	return nil
 }

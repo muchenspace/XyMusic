@@ -239,6 +239,27 @@
       "when": 1785805200000,
       "tag": "0033_tag_scraping_item_retries",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1787716800000,
+      "tag": "0034_scan_state_and_writeback_authority",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1787832209039,
+      "tag": "0035_configuration_managed_library_roots",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1787908044123,
+      "tag": "0036_track_manual_archive_flag",
+      "breakpoints": true
     }
   ]
 }
