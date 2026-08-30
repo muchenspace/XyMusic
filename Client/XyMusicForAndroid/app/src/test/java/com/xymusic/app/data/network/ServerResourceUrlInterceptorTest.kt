@@ -17,8 +17,9 @@ class ServerResourceUrlInterceptorTest {
                 .setBody(
                     """
                     {
-                      "artwork":{"url":"/api/v1/oss/b2JqZWN0cw/cover.jpg?X-Amz-Signature=a%2Bb"},
-                      "playback":{"url":"/api/v1/oss/b2JqZWN0cw/song.flac"},
+                      "artwork":{"url":"/api/v1/assets/asset-1/cover-hash"},
+                      "objectStorage":{"url":"/api/v1/oss/b2JqZWN0cw/cover.jpg?X-Amz-Signature=a%2Bb"},
+                      "playback":{"url":"/api/v1/playback/streams/session-1?ticket=abc"},
                       "external":{"url":"https://cdn.example/image.jpg"}
                     }
                     """.trimIndent(),
@@ -39,10 +40,13 @@ class ServerResourceUrlInterceptorTest {
                 val content = checkNotNull(it.body).string()
                 val origin = server.url("/").toString().removeSuffix("/")
                 assertThat(it.header("Content-Length")).isNull()
+                assertThat(content).contains("$origin/api/v1/assets/asset-1/cover-hash")
                 assertThat(content).contains("$origin/api/v1/oss/b2JqZWN0cw/cover.jpg?X-Amz-Signature=a%2Bb")
-                assertThat(content).contains("$origin/api/v1/oss/b2JqZWN0cw/song.flac")
+                assertThat(content).contains("$origin/api/v1/playback/streams/session-1?ticket=abc")
                 assertThat(content).contains("https://cdn.example/image.jpg")
+                assertThat(content).doesNotContain("\"/api/v1/assets/")
                 assertThat(content).doesNotContain("\"/api/v1/oss/")
+                assertThat(content).doesNotContain("\"/api/v1/playback/streams/")
             }
         } finally {
             server.shutdown()

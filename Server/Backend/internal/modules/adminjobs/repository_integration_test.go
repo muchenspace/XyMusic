@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -77,40 +76,29 @@ func TestRepositoryRunsJobProjectionAndMutationsInConfiguredDatabase(t *testing.
 	).Scan(&trackID); err != nil {
 		t.Fatal(err)
 	}
-	var assetID string
-	if err := transaction.QueryRow(ctx, `
-		INSERT INTO media_assets (
-			uploader_id, object_key, kind, mime_type, size_bytes, checksum_sha256, status
-		) VALUES ($1, $2, 'AUDIO_SOURCE', 'audio/flac', 100, $3, 'READY') RETURNING id`,
-		actorID, "integration/jobs/"+suffix+".flac", strings.Repeat("a", 64),
-	).Scan(&assetID); err != nil {
-		t.Fatal(err)
-	}
-	var mediaJobID string
-	if err := transaction.QueryRow(ctx, `
-		INSERT INTO media_jobs (
-			type, source_asset_id, track_id, status, attempts, idempotency_key,
-			payload, last_error, last_error_code
-		) VALUES ('INGEST_TRACK', $1, $2, 'FAILED', 2, $3, '{}'::jsonb,
-			'integration media failure', 'DEPENDENCY_UNAVAILABLE') RETURNING id`,
-		assetID, trackID, "integration-job-"+suffix,
-	).Scan(&mediaJobID); err != nil {
-		t.Fatal(err)
-	}
 	var sourceID string
 	if err := transaction.QueryRow(ctx, `
 		INSERT INTO local_music_sources (
-			root_id, source_path, normalized_source_path, checksum_sha256, size_bytes,
-			modified_at, track_id, source_asset_id, media_job_id, status, last_error
-		) VALUES ($1, $2, $2, $3, 100, now(), $4, $5, $6, 'FAILED', 'integration failure')
-		RETURNING id`,
-		rootID, "track-"+suffix+".flac", strings.Repeat("b", 64), trackID, assetID, mediaJobID,
+			root_id, track_id, source_path, normalized_source_path, checksum_sha256,
+			size_bytes, modified_at, status
+		) VALUES ($1, $2, $3, $3, repeat('a', 64), 100, now(), 'READY') RETURNING id`,
+		rootID, trackID, "D:/xymusic-integration/"+suffix+".flac",
 	).Scan(&sourceID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := transaction.Exec(ctx, `
-		INSERT INTO local_music_source_tracks (source_id, track_id, media_job_id)
-		VALUES ($1, $2, $3)`, sourceID, trackID, mediaJobID); err != nil {
+	var tagJobID string
+	if err := transaction.QueryRow(ctx, `
+		INSERT INTO metadata_writeback_jobs (
+			track_id, root_id, source_id, target_path, original_checksum_sha256,
+			requested_by, status, attempts, metadata_snapshot, metadata_version,
+			expected_source_checksum, payload, root_path_snapshot, source_path_snapshot,
+			last_error, last_error_code
+		) VALUES ($1, $2, $3, $4, repeat('a', 64), $5, 'FAILED', 2,
+			'{}'::jsonb, 1, repeat('a', 64), '{}'::jsonb, $6, $7,
+			'integration writeback failure', 'DEPENDENCY_UNAVAILABLE') RETURNING id`,
+		trackID, rootID, sourceID, "D:/xymusic-integration/"+suffix+".flac", actorID,
+		"D:/xymusic-integration/"+suffix, "D:/xymusic-integration/"+suffix+".flac",
+	).Scan(&tagJobID); err != nil {
 		t.Fatal(err)
 	}
 	var scanJobID string
@@ -130,7 +118,7 @@ func TestRepositoryRunsJobProjectionAndMutationsInConfiguredDatabase(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if total < 2 || !containsJob(items, mediaJobID, JobTypeMediaProcess, JobStatusFailed) ||
+	if total < 2 || !containsJob(items, tagJobID, JobTypeTagWrite, JobStatusFailed) ||
 		!containsJob(items, scanJobID, JobTypeSourceScan, JobStatusFailed) {
 		t.Fatalf("projection total/items=%d/%+v", total, items)
 	}
@@ -142,31 +130,17 @@ func TestRepositoryRunsJobProjectionAndMutationsInConfiguredDatabase(t *testing.
 		}
 	}
 	if _, _, err := repository.ListJobs(ctx, ListQuery{
-		Search: `%_\`, Status: JobStatusFailed, Type: JobTypeMediaProcess,
+		Search: `%_\`, Status: JobStatusFailed, Type: JobTypeTagWrite,
 		Sort: SortCreatedAt, Order: SortDescending, Limit: 1,
 	}); err != nil {
 		t.Fatalf("list jobs escaped search: %v", err)
 	}
-	if _, err := repository.FindJob(ctx, mediaJobID); err != nil {
+	if _, err := repository.FindJob(ctx, tagJobID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repository.EventState(ctx); err != nil {
 		t.Fatal(err)
 	}
-
-	if err := repository.RetryMediaOrScan(ctx, mediaJobID); err != nil {
-		t.Fatal(err)
-	}
-	assertMediaState(t, ctx, transaction, mediaJobID, "PENDING", 0, false, 2)
-	assertTrackGeneration(t, ctx, transaction, trackID, 1, 2)
-	assertSourceState(t, ctx, transaction, sourceID, "PROCESSING", nil)
-
-	if err := repository.CancelMediaOrScan(ctx, mediaJobID); err != nil {
-		t.Fatal(err)
-	}
-	assertMediaState(t, ctx, transaction, mediaJobID, "CANCELLED", 0, true, 3)
-	cancelled := "Cancelled by an administrator"
-	assertSourceState(t, ctx, transaction, sourceID, "FAILED", &cancelled)
 
 	if err := repository.RetryMediaOrScan(ctx, scanJobID); err != nil {
 		t.Fatal(err)
@@ -176,7 +150,6 @@ func TestRepositoryRunsJobProjectionAndMutationsInConfiguredDatabase(t *testing.
 		t.Fatal(err)
 	}
 	assertScanState(t, ctx, transaction, scanJobID, "CANCELLED", true, true)
-
 }
 
 func containsJob(items []JobRecord, id string, jobType JobType, status JobStatus) bool {
@@ -186,71 +159,6 @@ func containsJob(items []JobRecord, id string, jobType JobType, status JobStatus
 		}
 	}
 	return false
-}
-
-func assertMediaState(
-	t *testing.T,
-	ctx context.Context,
-	database integrationQueryer,
-	jobID, expectedStatus string,
-	expectedAttempts int,
-	expectedCancel bool,
-	expectedVersion int,
-) {
-	t.Helper()
-	var status string
-	var attempts, version int
-	var cancelRequested bool
-	var lastError, lastErrorCode *string
-	if err := database.QueryRow(ctx, `
-		SELECT status::text, attempts, cancel_requested, version, last_error, last_error_code
-		FROM media_jobs WHERE id = $1`, jobID,
-	).Scan(&status, &attempts, &cancelRequested, &version, &lastError, &lastErrorCode); err != nil {
-		t.Fatal(err)
-	}
-	if status != expectedStatus || attempts != expectedAttempts || cancelRequested != expectedCancel ||
-		version != expectedVersion || lastError != nil || lastErrorCode != nil {
-		t.Fatalf("media state=%s/%d/%t/%d/%v/%v", status, attempts, cancelRequested, version, lastError, lastErrorCode)
-	}
-}
-
-func assertTrackGeneration(
-	t *testing.T,
-	ctx context.Context,
-	database integrationQueryer,
-	trackID string,
-	expectedGeneration, expectedVersion int,
-) {
-	t.Helper()
-	var generation, version int
-	if err := database.QueryRow(ctx, `
-		SELECT media_generation, version FROM tracks WHERE id = $1`, trackID,
-	).Scan(&generation, &version); err != nil {
-		t.Fatal(err)
-	}
-	if generation != expectedGeneration || version != expectedVersion {
-		t.Fatalf("track generation/version=%d/%d", generation, version)
-	}
-}
-
-func assertSourceState(
-	t *testing.T,
-	ctx context.Context,
-	database integrationQueryer,
-	sourceID, expectedStatus string,
-	expectedError *string,
-) {
-	t.Helper()
-	var status string
-	var lastError *string
-	if err := database.QueryRow(ctx, `
-		SELECT status, last_error FROM local_music_sources WHERE id = $1`, sourceID,
-	).Scan(&status, &lastError); err != nil {
-		t.Fatal(err)
-	}
-	if status != expectedStatus || !equalOptionalString(lastError, expectedError) {
-		t.Fatalf("source status/error=%s/%v", status, lastError)
-	}
 }
 
 func assertScanState(

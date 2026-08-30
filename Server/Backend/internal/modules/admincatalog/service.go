@@ -277,21 +277,6 @@ func (service *Service) Track(ctx context.Context, id string, input PageInput) (
 			IsDefault: lyric.IsDefault, Version: lyric.Version, UpdatedAt: formatTimestamp(lyric.UpdatedAt),
 		})
 	}
-	variants := append([]VariantRecord(nil), record.Variants...)
-	sort.SliceStable(variants, func(left, right int) bool {
-		if variants[left].Bitrate != variants[right].Bitrate {
-			return variants[left].Bitrate > variants[right].Bitrate
-		}
-		return variants[left].ID < variants[right].ID
-	})
-	variantDTOs := make([]VariantDTO, 0, len(variants))
-	for _, variant := range variants {
-		variantDTOs = append(variantDTOs, VariantDTO{
-			ID: variant.ID, Quality: variant.Quality, MimeType: variant.MimeType, Codec: variant.Codec,
-			Container: variant.Container, Bitrate: variant.Bitrate, SampleRate: variant.SampleRate,
-			Status: variant.Status, UpdatedAt: formatTimestamp(variant.UpdatedAt),
-		})
-	}
 	return TrackDetailDTO{
 		TrackDTO:        items[0],
 		Lyrics:          lyrics,
@@ -299,7 +284,6 @@ func (service *Service) Track(ctx context.Context, id string, input PageInput) (
 		LyricPageSize:   page.PageSize,
 		LyricTotal:      lyricTotal,
 		LyricTotalPages: exactTotalPages(lyricTotal, page.PageSize),
-		Variants:        variantDTOs,
 	}, nil
 }
 
@@ -409,22 +393,6 @@ func (service *Service) presentTracks(ctx context.Context, records []TrackRecord
 				CanWriteBack: eligibility.CanWriteBack, WritebackBlockReason: eligibility.MessagePointer(),
 			}
 		}
-		var processing *MediaProcessingDTO
-		if record.MediaProcessing != nil {
-			processing = &MediaProcessingDTO{
-				Status: record.MediaProcessing.Status, Attempts: record.MediaProcessing.Attempts,
-				MaxAttempts: record.MediaProcessing.MaxAttempts,
-				LastError:   userFacingOperationalError(record.MediaProcessing.LastError, record.MediaProcessing.LastErrorCode),
-				UpdatedAt:   formatTimestamp(record.MediaProcessing.UpdatedAt),
-			}
-		}
-		variantSummary := make([]VariantSummaryDTO, 0, len(record.Variants))
-		for _, variant := range record.Variants {
-			variantSummary = append(variantSummary, VariantSummaryDTO{
-				Quality: variant.Quality, Codec: variant.Codec, Container: variant.Container,
-				Bitrate: variant.Bitrate, SampleRate: variant.SampleRate, Status: variant.Status,
-			})
-		}
 		var publishedAt *string
 		if record.PublishedAt != nil {
 			value := formatTimestamp(*record.PublishedAt)
@@ -435,8 +403,7 @@ func (service *Service) presentTracks(ctx context.Context, records []TrackRecord
 			Album: album, Artwork: artworkPointer(artworks, record.AlbumCoverAssetID),
 			DurationMS: record.DurationMS, TrackNumber: record.TrackNumber, DiscNumber: record.DiscNumber,
 			Status: string(record.Status), AudioStatus: record.AudioStatus, MetadataStatus: record.MetadataStatus,
-			MetadataVersion: record.MetadataVersion, Source: source, MediaProcessing: processing,
-			VariantSummary: variantSummary, ActiveWritebackJobID: record.ActiveWritebackJobID,
+			MetadataVersion: record.MetadataVersion, Source: source, ActiveWritebackJobID: record.ActiveWritebackJobID,
 			LatestWritebackErrorCode: record.LatestWritebackErrorCode,
 			LatestWritebackError:     record.LatestWritebackError,
 			PublishedAt:              publishedAt, Version: record.Version,

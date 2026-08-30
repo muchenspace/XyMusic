@@ -26,7 +26,7 @@ func TestFileConfigurationRepositoryUsesAtomicStoreContract(t *testing.T) {
 	if err != nil || !exists {
 		t.Fatalf("saved configuration did not load: exists=%v err=%v", exists, err)
 	}
-	if loaded.Database.URL != candidate.Database.URL || loaded.Storage.Bucket != candidate.Storage.Bucket {
+	if loaded.Database.URL != candidate.Database.URL || loaded.MediaStorage.AssetDirectory != candidate.MediaStorage.AssetDirectory {
 		t.Fatalf("configuration round trip mismatch: %#v", loaded)
 	}
 	if _, err := os.Stat(path + ".next"); !errors.Is(err, os.ErrNotExist) {
@@ -80,8 +80,8 @@ func TestOSSourceValidatorValidatesReadWriteDirectoryAndPatterns(t *testing.T) {
 }
 
 func TestProductionAdaptersRejectInvalidStorageAndProbeListener(t *testing.T) {
-	if _, err := (ProductionObjectStorageFactory{}).Open(config.Storage{Endpoint: "ftp://invalid"}); err == nil {
-		t.Fatal("invalid object storage endpoint was accepted")
+	if _, err := (ProductionMediaStorageFactory{}).Open(config.MediaStorage{}); err != nil {
+		t.Fatal(err)
 	}
 	if err := (NetworkListenerProbe{}).Check(context.Background(), "127.0.0.1", 0); err != nil {
 		t.Fatalf("ephemeral listener probe failed: %v", err)

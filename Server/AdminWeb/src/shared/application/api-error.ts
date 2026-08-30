@@ -99,7 +99,7 @@ function resourceConflictMessage(problem: ProblemDetails): string | undefined {
     case "library_scan":
       return "音源扫描仍在进行，请等待扫描完成后重试";
     case "media_job":
-      return "媒体处理仍在进行，请等待任务结束后重试";
+      return "音源扫描仍在进行，请等待扫描结束后重试";
     case "metadata_writeback_job":
       return "Tag 写回仍在进行，请等待任务结束后重试";
     default:

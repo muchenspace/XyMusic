@@ -60,7 +60,7 @@ func TestAdminMutationProductionLifecycle(t *testing.T) {
 		if len(createdIDs) > 0 {
 		}
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM tracks WHERE title LIKE '__admin_mutation_it_%'`)
-		_, _ = pool.Exec(cleanupCtx, `DELETE FROM media_assets WHERE object_key LIKE 'integration/admin-mutation/%'`)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM media_assets WHERE storage_path LIKE 'integration/admin-mutation/%'`)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM albums WHERE title LIKE '__admin_mutation_it_%'`)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM artists WHERE name LIKE '__admin_mutation_it_%'`)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM users WHERE username LIKE 'admin_mutation_it_%'`)
@@ -143,14 +143,16 @@ func TestAdminMutationProductionLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO media_assets(
-		id,object_key,kind,mime_type,size_bytes,status
-	) VALUES($1,$2,'AUDIO_VARIANT','audio/ogg',1,'READY')`,
-		playableAssetID, "integration/admin-mutation/"+playableAssetID+".ogg"); err != nil {
+		id,storage_path,kind,mime_type,size_bytes,status
+	) VALUES($1,$2,'AUDIO_SOURCE','audio/flac',1,'READY')`,
+		playableAssetID, "integration/admin-mutation/"+playableAssetID+".flac"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO track_variants(
-		track_id,asset_id,quality,mime_type,codec,container,bitrate,status
-	) VALUES($1,$2,'STANDARD','audio/ogg','opus','ogg',128000,'READY')`, sourceTrack.ID, playableAssetID); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO media_uploads(
+		id,purpose,target_id,track_id,uploader_id,storage_path,expected_size,
+		expected_checksum_sha256,expected_mime_type,original_file_name,status,asset_id,expires_at
+	) VALUES($1,'TRACK_SOURCE',$2,$2,$3,'path',1,repeat('a',64),'audio/flac','source.flac','COMPLETED',$4,now()+interval '1 hour')`,
+		uuid.NewString(), sourceTrack.ID, actorID, playableAssetID); err != nil {
 		t.Fatal(err)
 	}
 	sourceTrack, err = service.RestoreTrack(ctx, sourceTrack.ID, sourceTrack.Version)
@@ -166,31 +168,6 @@ func TestAdminMutationProductionLifecycle(t *testing.T) {
 	sourceTrack, err = service.ArchiveTrack(ctx, sourceTrack.ID, sourceTrack.Version)
 	if err != nil || sourceTrack.Status != "ARCHIVED" {
 		t.Fatalf("ArchiveTrack after restore=%#v,%v", sourceTrack, err)
-	}
-	probeAssetID := uuid.NewString()
-	probeJobID := uuid.NewString()
-	if _, err := pool.Exec(ctx, `INSERT INTO media_assets(
-		id,object_key,kind,mime_type,size_bytes,status
-	) VALUES($1,$2,'AUDIO_SOURCE','audio/flac',1,'READY')`,
-		probeAssetID, "integration/admin-mutation/"+probeAssetID+".flac"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO media_jobs(
-		id,type,source_asset_id,track_id,status,idempotency_key,next_attempt_at
-	) VALUES($1,'INGEST_TRACK',$2,$3,'PENDING',$4,now()+interval '1 hour')`,
-		probeJobID, probeAssetID, sourceTrack.ID, "admin-mutation-probe-"+probeJobID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := service.DeleteTrackPermanently(ctx, sourceTrack.ID, sourceTrack.Version); !apperror.IsCode(err, apperror.CodeResourceConflict) {
-		t.Fatalf("DeleteTrack active media error=%v", err)
-	} else if applicationError, ok := apperror.As(err); !ok || applicationError.Metadata["conflictResourceType"] != "media_job" {
-		t.Fatalf("DeleteTrack active media metadata=%v", err)
-	}
-	if _, err := pool.Exec(ctx, `DELETE FROM media_jobs WHERE id=$1`, probeJobID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `DELETE FROM media_assets WHERE id=$1`, probeAssetID); err != nil {
-		t.Fatal(err)
 	}
 	deleted, err := service.DeleteTrackPermanently(ctx, sourceTrack.ID, sourceTrack.Version)
 	if err != nil || !deleted.Deleted {

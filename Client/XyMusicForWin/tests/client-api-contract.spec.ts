@@ -172,8 +172,14 @@ describe("desktop library and playback API contract", () => {
     expect(history).toMatchObject({ nextCursor: "history-next", items: [{ id: "track-1" }] });
   });
 
-  it("covers playback grants and idempotent history events", async () => {
-    const grant = { url: "https://media.example/track", expiresAt: "2026-07-17T01:00:00Z", selectedQuality: "HIGH" };
+  it("covers on-demand playback grants and idempotent history events", async () => {
+    const grant = {
+      trackId: "track/1", sessionId: "session-1", selectedQuality: "HIGH",
+      streamUrl: "https://media.example/api/v1/playback/streams/session-1?ticket=abc",
+      expiresAt: "2026-07-17T01:00:00Z", mimeType: "audio/mp4", codec: "aac",
+      container: "m4a", bitrate: 256000, sampleRate: 44100, contentLength: null,
+      checksumSha256: null, cacheKey: "track:cache",
+    };
     const api = new RecordingApi([grant, undefined]);
     const repository = new HttpPlaybackRepository(api.client);
 
@@ -185,7 +191,7 @@ describe("desktop library and playback API contract", () => {
       "api/v1/library/history/track%2F1",
     ]);
     expect(api.calls[0]?.init.method).toBe("POST");
-    expect(parseBody(api.calls[0])).toEqual({ preferredQuality: "HIGH", acceptedCodecs: ["aac", "mp3", "flac", "opus"] });
+    expect(parseBody(api.calls[0])).toEqual({ preferredQuality: "HIGH", acceptedCodecs: ["aac", "mp3", "flac", "opus", "wav"] });
     expect(api.calls[1]?.init.method).toBe("PUT");
     expect(new Headers(api.calls[1]?.init.headers).get("Idempotency-Key")).toBeTruthy();
     expect(parseBody(api.calls[1])).toMatchObject({ playbackSessionId: "session-1", positionMs: 1235, event: "PROGRESS" });

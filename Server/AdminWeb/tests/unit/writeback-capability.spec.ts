@@ -77,8 +77,6 @@ function track(id: string, source: TrackSummary["source"], status: TrackSummary[
     metadataStatus: "NORMAL",
     metadataVersion: 1,
     source,
-    mediaProcessing: null,
-    variantSummary: [],
     activeWritebackJobId: null,
     publishedAt: null,
     createdAt: "2026-01-01T00:00:00Z",

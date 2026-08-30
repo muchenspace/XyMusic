@@ -52,8 +52,8 @@ func TestEveryIdempotentAPIHasReplayBoundaryTestEvidence(t *testing.T) {
 		covered++
 		t.Logf("%s | idempotency=%s#%s", key, reference.file, reference.test)
 	}
-	if covered != 58 {
-		t.Fatalf("idempotency evidence covers %d endpoints, want 58", covered)
+	if covered != 57 {
+		t.Fatalf("idempotency evidence covers %d endpoints, want 57", covered)
 	}
 }
 
@@ -98,7 +98,7 @@ func successfulHTTPTest(api apiContract) (testReference, bool) {
 	case "admin-library-source":
 		return testReference{"internal/modules/adminsources/routes_test.go", "TestRoutesExposeAllThirteenLibrarySourceAPIs"}, true
 	case "admin-media":
-		return testReference{"internal/modules/adminmedia/routes_test.go", "TestRoutesExposeFiveAdminMediaEndpointsAndContracts"}, true
+		return testReference{"internal/modules/adminmedia/routes_test.go", "TestRoutesExposeAdminMediaEndpoints"}, true
 	default:
 		return testReference{}, false
 	}
@@ -159,7 +159,7 @@ func idempotencyTest(api apiContract) (testReference, bool) {
 	case "admin-library-source":
 		return testReference{"internal/modules/adminsources/routes_test.go", "TestRoutesExposeAllThirteenLibrarySourceAPIs"}, true
 	case "admin-media":
-		return testReference{"internal/modules/adminmedia/routes_test.go", "TestRoutesExposeFiveAdminMediaEndpointsAndContracts"}, true
+		return testReference{"internal/modules/adminmedia/routes_test.go", "TestRoutesExposeAdminMediaEndpoints"}, true
 	default:
 		return testReference{}, false
 	}

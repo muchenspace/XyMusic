@@ -51,18 +51,15 @@ type StorageInspection = NonNullable<SetupValidationResult["storageInspection"]>
 const databaseInspection = ref<DatabaseInspection>();
 const storageInspection = ref<StorageInspection>();
 const databaseDecisionOpen = ref(false);
-const storageDecisionOpen = ref(false);
 const databaseDecision = ref<"reuse_partial" | "migrate" | "reset">();
-const storageDecision = ref<"reuse" | "reset">();
 const databaseResetConfirmation = ref("");
-const storageResetConfirmation = ref("");
 const submittedWithReusedAdministrator = ref(false);
 
 const form = reactive<SetupCompleteInput>({
   http: { ipv4Host: "0.0.0.0", ipv4Port: 3000, ipv6Host: "::", ipv6Port: 3000, trustedProxyAddresses: [] },
   paths: { migrationsDirectory: "migrations", adminWebDirectory: "admin" },
   database: { host: "", port: 5432, database: "", username: "", password: "", sslMode: "prefer", maxConnections: 10 },
-  storage: { endpoint: "", region: "us-east-1", bucket: "xymusic", accessKeyId: "", secretAccessKey: "", forcePathStyle: true, publicBaseUrl: "", signedUrlTtlSeconds: 300, maxUploadBytes: 1_073_741_824 },
+  storage: { assetDirectory: "assets", transcodeDirectory: "transcode", maxUploadBytes: 1_073_741_824, transcodeCacheMaxBytes: 10_737_418_240, uploadTtlSeconds: 3600, streamTtlSeconds: 900, streamMaxConcurrent: 4, streamIdleTimeoutSeconds: 30, transcodeTimeoutSeconds: 30 },
   media: { mode: "DIRECTORY", directory: "tools", ffmpegPath: "", ffprobePath: "", fpcalcPath: "", acoustIdClient: "" },
   source: { name: "", directory: "music", mode: "READ_ONLY", enabled: true, syncOnStartup: true, scanIntervalMinutes: null, includePatterns: [], excludePatterns: [] },
   registration: { enabled: true },
@@ -82,53 +79,6 @@ const reusesDatabase = computed(() => (
 const reusesActiveAdministrator = computed(() => (
   reusesDatabase.value && Boolean(databaseInspection.value?.hasActiveAdministrator)
 ));
-
-type EndpointProtocol = "http" | "https";
-const storageConnection = reactive<{ protocol: EndpointProtocol; host: string; port: number }>({
-  protocol: "http",
-  host: "",
-  port: 9000,
-});
-const storagePublicConnection = reactive<{ protocol: EndpointProtocol; host: string; port: number }>({
-  protocol: "http",
-  host: "",
-  port: 9000,
-});
-const storageConnectionSchema = z.object({
-  protocol: z.enum(["http", "https"]),
-  host: z.string().trim().min(1, "请输入对象存储地址").max(255),
-  port: z.coerce.number().int().min(1, "端口必须在 1–65535 之间").max(65_535, "端口必须在 1–65535 之间"),
-});
-
-function endpointUrl(protocol: EndpointProtocol, host: string, port: number): string {
-  const normalizedHost = host.trim();
-  if (!normalizedHost) return "";
-  const authority = normalizedHost.includes(":")
-    && !(normalizedHost.startsWith("[") && normalizedHost.endsWith("]"))
-    ? `[${normalizedHost}]`
-    : normalizedHost;
-  return `${protocol}://${authority}:${port}`;
-}
-function syncStorageEndpoints(): void {
-  form.storage.endpoint = endpointUrl(
-    storageConnection.protocol,
-    storageConnection.host,
-    storageConnection.port,
-  );
-  form.storage.publicBaseUrl = endpointUrl(
-    storagePublicConnection.protocol,
-    storagePublicConnection.host,
-    storagePublicConnection.port,
-  ) || undefined;
-}
-function validateStorageConnection(): boolean {
-  const result = storageConnectionSchema.safeParse(storageConnection);
-  if (!result.success) {
-    fieldErrors.value.endpoint = result.error.issues[0]?.message ?? "对象存储地址无效";
-    return false;
-  }
-  return true;
-}
 
 function linesModel(values: string[]) {
   return computed({
@@ -252,13 +202,6 @@ function confirmDatabaseAction(expectedState: "PARTIAL" | "COMPLETE"): void {
   databaseDecisionOpen.value = false;
   current.value = 3;
 }
-function confirmStorageAction(): void {
-  if (!storageDecision.value) return;
-  if (storageDecision.value === "reset" && storageResetConfirmation.value !== form.storage.bucket) return;
-  form.storageAction = storageDecision.value;
-  storageDecisionOpen.value = false;
-  current.value = 4;
-}
 
 async function validateCurrent(index: number): Promise<boolean> {
   actionError.value = "";
@@ -297,22 +240,10 @@ async function validateCurrent(index: number): Promise<boolean> {
         }
       }
     } else if (key === "storage") {
-      syncStorageEndpoints();
-      if (!validateStorageConnection()) return false;
       const input = parsedStep(setupStepSchemas.storage.safeParse(form.storage));
       if (!input) return false;
       result = await setup.testStorage(input);
       storageInspection.value = result.storageInspection;
-      if (!result.storageInspection?.hasObjects) {
-        form.storageAction = undefined;
-      } else if (form.storageAction !== "reuse" && form.storageAction !== "reset") {
-        form.storageAction = undefined;
-        storageDecision.value = undefined;
-        storageResetConfirmation.value = "";
-        storageDecisionOpen.value = true;
-        validation[index] = result;
-        return false;
-      }
     } else if (key === "media") {
       const input = parsedStep(setupStepSchemas.media.safeParse(form.media));
       if (!input) return false;
@@ -398,7 +329,6 @@ function complete(): void {
   if (completeMutation.isPending.value || validating.value) return;
   actionError.value = "";
   fieldErrors.value = {};
-  syncStorageEndpoints();
   if (reusesActiveAdministrator.value) {
     Object.assign(form.administrator, { username: "", displayName: "", password: "" });
   }
@@ -455,7 +385,7 @@ function invalidateValidation(index: number): void {
 }
 
 watch(() => form.http, () => { invalidateValidation(0); }, { deep: true });
-watch(() => form.paths, () => { invalidateValidation(1); invalidateValidation(2); }, { deep: true });
+watch(() => form.paths, () => { invalidateValidation(1); }, { deep: true });
 watch(() => form.database, () => {
   invalidateValidation(2);
   databaseInspection.value = undefined;
@@ -467,15 +397,6 @@ watch(() => form.storage, () => {
   storageInspection.value = undefined;
   form.storageAction = undefined;
 }, { deep: true });
-watch(
-  () => [storageConnection.protocol, storageConnection.host, storageConnection.port],
-  () => { syncStorageEndpoints(); invalidateValidation(3); },
-  { immediate: true },
-);
-watch(
-  () => [storagePublicConnection.protocol, storagePublicConnection.host, storagePublicConnection.port],
-  syncStorageEndpoints,
-);
 watch(() => form.media, () => { invalidateValidation(4); }, { deep: true });
 watch(() => form.source, () => { invalidateValidation(5); }, { deep: true });
 watch(() => [form.registration, form.administrator], () => { invalidateValidation(6); }, { deep: true });
@@ -613,26 +534,13 @@ const ReviewRow = defineComponent({
               </template>
 
               <template v-else-if="steps[current]?.key === 'storage'">
-                <StepTitle title="配置 S3 兼容存储" description="支持 Amazon S3、MinIO 及其他标准 S3 兼容服务，不依赖厂商专有 API。" />
+                <StepTitle title="配置本地资产与转码存储" description="指定媒体资产存储路径与实时转码临时目录，音频与封面将直接保存在服务端本地磁盘。" />
                 <div class="mt-8 grid gap-5 sm:grid-cols-2">
-                  <FieldWrap label="协议"><select v-model="storageConnection.protocol" class="ui-input"><option value="http">HTTP</option><option value="https">HTTPS</option></select></FieldWrap>
-                  <FieldWrap label="对象存储 IP 或域名" :error="errorFor('endpoint')"><input v-model="storageConnection.host" class="ui-input" placeholder="minio.example.com" /></FieldWrap>
-                  <FieldWrap label="端口"><input v-model.number="storageConnection.port" class="ui-input" type="number" min="1" max="65535" /></FieldWrap>
-                  <FieldWrap label="Access Key" :error="errorFor('accessKeyId')"><input v-model="form.storage.accessKeyId" class="ui-input" autocomplete="username" /></FieldWrap>
-                  <FieldWrap label="Secret Key" :error="errorFor('secretAccessKey')"><PasswordInput v-model="form.storage.secretAccessKey" v-model:reveal="reveal.storage" autocomplete="current-password" /></FieldWrap>
-                  <details class="sm:col-span-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
-                    <summary class="cursor-pointer font-semibold">高级选项</summary>
-                    <div class="mt-5 grid gap-5 sm:grid-cols-2">
-                      <FieldWrap label="区域" :error="errorFor('region')"><input v-model="form.storage.region" class="ui-input" /></FieldWrap>
-                      <FieldWrap label="Bucket" :error="errorFor('bucket')"><input v-model="form.storage.bucket" class="ui-input" /></FieldWrap>
-                      <FieldWrap label="公开地址协议"><select v-model="storagePublicConnection.protocol" class="ui-input"><option value="http">HTTP</option><option value="https">HTTPS</option></select></FieldWrap>
-                      <FieldWrap label="公开地址 IP 或域名" :error="errorFor('publicBaseUrl')"><input v-model="storagePublicConnection.host" class="ui-input" placeholder="客户端可直接访问的地址" /></FieldWrap>
-                      <FieldWrap label="公开地址端口"><input v-model.number="storagePublicConnection.port" class="ui-input" type="number" min="1" max="65535" /></FieldWrap>
-                      <FieldWrap label="播放/上传签名有效秒数" :error="errorFor('signedUrlTtlSeconds')"><input v-model.number="form.storage.signedUrlTtlSeconds" class="ui-input" type="number" min="30" max="3600" /></FieldWrap>
-                      <FieldWrap label="最大上传字节数" :error="errorFor('maxUploadBytes')"><input v-model.number="form.storage.maxUploadBytes" class="ui-input" type="number" min="1" /></FieldWrap>
-                      <label class="flex items-center justify-between gap-4 rounded-xl border border-[var(--border)] p-4"><span><span class="block font-semibold">Path-style 访问</span><span class="mt-1 block text-xs text-[var(--muted)]">MinIO 与多数自托管存储建议开启</span></span><button type="button" class="switch" role="switch" :aria-checked="form.storage.forcePathStyle" @click="form.storage.forcePathStyle = !form.storage.forcePathStyle" /></label>
-                    </div>
-                  </details>
+                  <FieldWrap class="sm:col-span-2" label="媒体资产目录" :error="errorFor('assetDirectory')" hint="用于存储上传的音频文件、封面图片及头像"><input v-model="form.storage.assetDirectory" class="ui-input font-mono" placeholder="assets" /></FieldWrap>
+                  <FieldWrap class="sm:col-span-2" label="转码临时目录" :error="errorFor('transcodeDirectory')" hint="用于存储即时转码的临时音频文件"><input v-model="form.storage.transcodeDirectory" class="ui-input font-mono" placeholder="transcode" /></FieldWrap>
+                  <FieldWrap label="单文件最大上传字节数" :error="errorFor('maxUploadBytes')"><input v-model.number="form.storage.maxUploadBytes" class="ui-input" type="number" min="1" /></FieldWrap>
+                  <FieldWrap label="转码缓存上限（字节）" :error="errorFor('transcodeCacheMaxBytes')" hint="已完成的转码版本会保存在转码目录，超过上限后按最近最少使用清理"><input v-model.number="form.storage.transcodeCacheMaxBytes" class="ui-input" type="number" min="134217728" /></FieldWrap>
+                  <FieldWrap label="最大并发转码任务数" :error="errorFor('streamMaxConcurrent')"><input v-model.number="form.storage.streamMaxConcurrent" class="ui-input" type="number" min="1" max="100" /></FieldWrap>
                 </div>
               </template>
 
@@ -700,8 +608,7 @@ const ReviewRow = defineComponent({
                   <ReviewRow icon="source" label="管理端资源" :value="form.paths.adminWebDirectory" />
                   <ReviewRow icon="database" label="PostgreSQL" :value="`${form.database.host}:${form.database.port}/${form.database.database} · 最大 ${form.database.maxConnections} 个连接`" />
                   <ReviewRow v-if="form.databaseAction" icon="database" label="数据库处理" :value="form.databaseAction === 'reset' ? '全部清除数据库后重新初始化' : form.databaseAction === 'migrate' ? '迁移并复用数据库内所有配置' : '复用数据库内可用的部分配置'" />
-                  <ReviewRow icon="storage" label="对象存储" :value="`${form.storage.endpoint} / ${form.storage.bucket}`" />
-                  <ReviewRow v-if="form.storageAction" icon="storage" label="Bucket 处理" :value="form.storageAction === 'reset' ? '全部清除 Bucket 后继续' : '继续复用 Bucket 内现有对象'" />
+                  <ReviewRow icon="storage" label="资产与转码" :value="`资产：${form.storage.assetDirectory} · 转码：${form.storage.transcodeDirectory}`" />
                   <ReviewRow icon="tools" label="FFmpeg" :value="form.media.mode === 'DIRECTORY' ? `自动检测：${form.media.directory || '系统 PATH'}` : `${form.media.ffmpegPath || '系统 PATH'} · ${form.media.ffprobePath || '系统 PATH'}`" />
                   <ReviewRow v-if="fingerprintConfigured" icon="tools" label="音频指纹" :value="`${form.media.fpcalcPath} · AcoustID ${form.media.acoustIdClient}`" />
                   <ReviewRow icon="source" label="音乐音源" :value="`${form.source.name} · ${form.source.directory} · ${form.source.mode}`" />
@@ -742,7 +649,7 @@ const ReviewRow = defineComponent({
           </button>
           <button type="button" class="flex min-w-0 w-full items-start gap-3 rounded-md border p-4 text-left transition" :class="databaseDecision === 'reset' ? 'border-rose-500 bg-rose-500/8' : 'border-[var(--border)] hover:border-rose-500/50'" @click="selectDatabaseDecision('reset')">
             <span class="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded border" :class="databaseDecision === 'reset' ? 'border-rose-500 bg-rose-500 text-white' : 'border-[var(--border-strong)]'"><XCircle v-if="databaseDecision === 'reset'" :size="13" /></span>
-            <span class="min-w-0"><span class="flex items-center gap-2 font-semibold text-[var(--danger)]"><Trash2 :size="15" />否，清空数据库</span><span class="mt-1 block break-words text-sm leading-6 text-[var(--muted)]">永久删除当前数据库内全部 XyMusic 业务数据，不会清除 MinIO Bucket。</span></span>
+            <span class="min-w-0"><span class="flex items-center gap-2 font-semibold text-[var(--danger)]"><Trash2 :size="15" />否，清空数据库</span><span class="mt-1 block break-words text-sm leading-6 text-[var(--muted)]">永久删除当前数据库内全部 XyMusic 业务数据，不会清除本地媒体资产。</span></span>
           </button>
         </fieldset>
 
@@ -774,7 +681,7 @@ const ReviewRow = defineComponent({
           </button>
           <button type="button" class="flex min-w-0 w-full items-start gap-3 rounded-md border p-4 text-left transition" :class="databaseDecision === 'reset' ? 'border-rose-500 bg-rose-500/8' : 'border-[var(--border)] hover:border-rose-500/50'" @click="selectDatabaseDecision('reset')">
             <span class="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded border" :class="databaseDecision === 'reset' ? 'border-rose-500 bg-rose-500 text-white' : 'border-[var(--border-strong)]'"><XCircle v-if="databaseDecision === 'reset'" :size="13" /></span>
-            <span class="min-w-0"><span class="flex items-center gap-2 font-semibold text-[var(--danger)]"><Trash2 :size="15" />否，清空数据库</span><span class="mt-1 block break-words text-sm leading-6 text-[var(--muted)]">永久删除当前数据库内全部 XyMusic 业务数据，不会清除 MinIO Bucket。</span></span>
+            <span class="min-w-0"><span class="flex items-center gap-2 font-semibold text-[var(--danger)]"><Trash2 :size="15" />否，清空数据库</span><span class="mt-1 block break-words text-sm leading-6 text-[var(--muted)]">永久删除当前数据库内全部 XyMusic 业务数据，不会清除本地媒体资产。</span></span>
           </button>
         </fieldset>
 
@@ -784,31 +691,6 @@ const ReviewRow = defineComponent({
         </div>
       </div>
       <template #footer><AppButton :variant="databaseDecision === 'reset' ? 'danger' : 'primary'" :disabled="(databaseDecision !== 'reuse_partial' && databaseDecision !== 'reset') || (databaseDecision === 'reset' && databaseResetConfirmation !== form.database.database)" @click="confirmDatabaseAction('PARTIAL')">确认并继续</AppButton></template>
-    </BaseDialog>
-
-    <BaseDialog v-model="storageDecisionOpen" title="选择 Bucket 处理方式" description="检测到当前 MinIO Bucket 已包含对象。" prevent-close width="md">
-      <div v-if="storageInspection" class="min-w-0 space-y-6 overflow-x-hidden">
-        <div class="flex min-w-0 items-start gap-3 border-b border-[var(--border)] pb-5">
-          <span class="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-[var(--primary-soft)] text-[var(--primary)]"><HardDrive :size="18" /></span>
-          <div class="min-w-0"><p class="break-words font-semibold">{{ form.storage.bucket }}</p><p class="mt-1 text-sm text-[var(--muted)]">检测到 {{ storageInspection.objectCount }}{{ storageInspection.countLimited ? '+' : '' }} 个对象。此选择不会影响数据库。</p></div>
-        </div>
-        <fieldset class="space-y-3">
-          <legend class="mb-3 text-sm font-semibold">请选择一种处理方式</legend>
-          <button type="button" class="flex min-w-0 w-full items-start gap-3 rounded-md border p-4 text-left transition" :class="storageDecision === 'reuse' ? 'border-[var(--primary)] bg-[var(--primary-soft)]' : 'border-[var(--border)] hover:border-[var(--border-strong)]'" @click="storageDecision = 'reuse'">
-            <span class="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border" :class="storageDecision === 'reuse' ? 'border-[var(--primary)] bg-[var(--primary)] text-white' : 'border-[var(--border-strong)]'"><Check v-if="storageDecision === 'reuse'" :size="13" /></span>
-            <span class="min-w-0"><span class="flex flex-wrap items-center gap-2 font-semibold"><span>继续复用 Bucket</span><span class="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-300">推荐</span></span><span class="mt-1 block break-words text-sm leading-6 text-[var(--muted)]">保留 Bucket 中的全部现有对象，初始化只写入后续新增内容。</span></span>
-          </button>
-          <button type="button" class="flex min-w-0 w-full items-start gap-3 rounded-md border p-4 text-left transition" :class="storageDecision === 'reset' ? 'border-rose-500 bg-rose-500/8' : 'border-[var(--border)] hover:border-rose-500/50'" @click="storageDecision = 'reset'">
-            <span class="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border" :class="storageDecision === 'reset' ? 'border-rose-500 bg-rose-500 text-white' : 'border-[var(--border-strong)]'"><Check v-if="storageDecision === 'reset'" :size="13" /></span>
-            <span class="min-w-0"><span class="flex items-center gap-2 font-semibold text-[var(--danger)]"><Trash2 :size="15" />全部清除 Bucket</span><span class="mt-1 block break-words text-sm leading-6 text-[var(--muted)]">永久删除 Bucket 中的全部对象，不会修改或清除数据库。</span></span>
-          </button>
-        </fieldset>
-        <div v-if="storageDecision === 'reset'" class="min-w-0 border-t border-rose-500/25 pt-5 text-sm">
-          <label class="block break-words font-medium text-[var(--text)]">输入 Bucket 名“{{ form.storage.bucket }}”确认清除</label>
-          <input v-model="storageResetConfirmation" class="ui-input mt-2 min-w-0 w-full" autocomplete="off" />
-        </div>
-      </div>
-      <template #footer><AppButton :variant="storageDecision === 'reset' ? 'danger' : 'primary'" :disabled="!storageDecision || (storageDecision === 'reset' && storageResetConfirmation !== form.storage.bucket)" @click="confirmStorageAction">确认并继续</AppButton></template>
     </BaseDialog>
   </main>
 </template>

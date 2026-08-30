@@ -101,7 +101,6 @@ func TestTrackPresentsAdminOperationalProjection(t *testing.T) {
 	albumID, albumTitle, coverID := "album-1", "Album", "cover-1"
 	rootID, rootName, mode := "root-1", "Library", "READ_ONLY"
 	rootEnabled := true
-	errorMessage, errorCode := "worker failed with SQLSTATE 08000", "DEPENDENCY_UNAVAILABLE"
 	metadataVersion := 2
 	writebackID := "writeback-1"
 	writebackErrorCode, writebackError := "WRITE_FAILED", "Tag writeback failed"
@@ -120,11 +119,6 @@ func TestTrackPresentsAdminOperationalProjection(t *testing.T) {
 			MappingCount: 1,
 		},
 		MetadataStatus: MetadataPendingWrite, MetadataVersion: &metadataVersion,
-		MediaProcessing: &MediaProcessingRecord{Status: "FAILED", Attempts: 2, MaxAttempts: 5, LastError: &errorMessage, LastErrorCode: &errorCode, UpdatedAt: now},
-		Variants: []VariantRecord{
-			{ID: "variant-low", Quality: "LOW", MimeType: "audio/aac", Codec: "aac", Container: "m4a", Bitrate: 128, Status: "READY", UpdatedAt: now},
-			{ID: "variant-high", Quality: "HIGH", MimeType: "audio/flac", Codec: "flac", Container: "flac", Bitrate: 900, Status: "READY", UpdatedAt: now},
-		},
 		ActiveWritebackJobID:     &writebackID,
 		LatestWritebackErrorCode: &writebackErrorCode,
 		LatestWritebackError:     &writebackError,
@@ -147,18 +141,12 @@ func TestTrackPresentsAdminOperationalProjection(t *testing.T) {
 	if result.Source.CanWriteBack || result.Source.WritebackBlockReason == nil || *result.Source.WritebackBlockReason != "The music source is read-only" {
 		t.Fatalf("source writeback eligibility = %#v", result.Source)
 	}
-	if result.MediaProcessing == nil || result.MediaProcessing.LastError == nil || *result.MediaProcessing.LastError != "\u76f8\u5173\u5904\u7406\u670d\u52a1\u6682\u65f6\u4e0d\u53ef\u7528\uff0c\u8bf7\u68c0\u67e5\u670d\u52a1\u914d\u7f6e\u540e\u91cd\u8bd5\u3002" {
-		t.Fatalf("media processing = %#v", result.MediaProcessing)
-	}
 	if result.Status != string(TrackStatusReady) || result.AudioStatus != AudioStatusError {
 		t.Fatalf("track states = raw %q audio %q", result.Status, result.AudioStatus)
 	}
 	if result.LatestWritebackErrorCode == nil || *result.LatestWritebackErrorCode != writebackErrorCode ||
 		result.LatestWritebackError == nil || *result.LatestWritebackError != writebackError {
 		t.Fatalf("latest writeback error = %v / %v", result.LatestWritebackErrorCode, result.LatestWritebackError)
-	}
-	if len(result.Variants) != 2 || result.Variants[0].ID != "variant-high" || len(result.VariantSummary) != 2 {
-		t.Fatalf("variants = %#v / %#v", result.Variants, result.VariantSummary)
 	}
 	if result.LyricPage != 2 || result.LyricPageSize != 1 || result.LyricTotal != 3 || result.LyricTotalPages != 3 || len(result.Lyrics) != 1 {
 		t.Fatalf("lyric page = %#v", result)

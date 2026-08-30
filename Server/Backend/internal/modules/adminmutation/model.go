@@ -220,7 +220,6 @@ type TrackRecord struct {
 	Credits                                []CreditRecord
 	DurationMS                             int64
 	TrackNumber, DiscNumber                *int
-	ActiveMediaJobID                       *string
 	Version                                int
 	CreatedAt, UpdatedAt                   time.Time
 }

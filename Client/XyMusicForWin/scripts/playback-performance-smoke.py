@@ -160,7 +160,7 @@ class LocalApi:
         query = parse_qs(parsed.query)
         self.requests.append({"method": method, "path": path, "query": query})
 
-        if path != "/api/v1/auth/login" and path != "/api/v1/oss/perf.wav":
+        if path != "/api/v1/auth/login" and path != "/api/v1/playback/streams/00000000-0000-4000-8000-000000000900":
             authorization = request.headers.get("authorization")
             if authorization != f"Bearer {ACCESS_TOKEN}":
                 self.contract_failures.append(f"Missing bearer token for {method} {path}")
@@ -234,9 +234,19 @@ class LocalApi:
             self._json(
                 route,
                 {
-                    "url": "/api/v1/oss/perf.wav",
-                    "expiresAt": "2099-01-01T00:00:00.000Z",
+                    "trackId": TRACK_ID,
+                    "sessionId": "00000000-0000-4000-8000-000000000900",
                     "selectedQuality": "STANDARD",
+                    "streamUrl": "/api/v1/playback/streams/00000000-0000-4000-8000-000000000900?ticket=performance",
+                    "expiresAt": "2099-01-01T00:00:00.000Z",
+                    "mimeType": "audio/wav",
+                    "codec": "pcm_s16le",
+                    "container": "wav",
+                    "bitrate": 128000,
+                    "sampleRate": 8000,
+                    "contentLength": len(AUDIO_BYTES),
+                    "checksumSha256": None,
+                    "cacheKey": "perf-track-1",
                 },
             )
             return
@@ -247,7 +257,7 @@ class LocalApi:
                 self.contract_failures.append("Playback history request did not contain a session id")
             if not isinstance(body.get("positionMs"), (int, float)) or body["positionMs"] < 0:
                 self.contract_failures.append("Playback history request did not contain a valid position")
-            if body.get("event") not in {"STARTED", "PAUSED", "ENDED"}:
+            if body.get("event") not in {"STARTED", "PROGRESS", "PAUSED", "COMPLETED"}:
                 self.contract_failures.append("Playback history request did not contain a valid event")
             if not request.headers.get("idempotency-key"):
                 self.contract_failures.append("Playback history request did not contain an idempotency key")
@@ -271,7 +281,7 @@ class LocalApi:
             self._json(route, detail)
             return
 
-        if method == "GET" and path == "/api/v1/oss/perf.wav":
+        if method == "GET" and path == "/api/v1/playback/streams/00000000-0000-4000-8000-000000000900":
             self._audio(route)
             return
 
@@ -458,7 +468,7 @@ def verify_required_requests(api: LocalApi) -> None:
     required = {
         ("POST", "/api/v1/auth/login"),
         ("POST", f"/api/v1/tracks/{TRACK_ID}/playback"),
-        ("GET", "/api/v1/oss/perf.wav"),
+        ("GET", "/api/v1/playback/streams/00000000-0000-4000-8000-000000000900"),
         ("PUT", f"/api/v1/library/history/{TRACK_ID}"),
         ("GET", f"/api/v1/tracks/{TRACK_ID}"),
         ("GET", "/api/v1/library/history"),

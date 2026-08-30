@@ -405,9 +405,9 @@ private class RecordingPlaybackApi : PlaybackApi {
         return Response.success(
             PlaybackGrantDto(
                 trackId = trackId,
-                variantId = "10000000-0000-0000-0000-000000000001",
+                sessionId = "10000000-0000-0000-0000-000000000001",
                 selectedQuality = request.preferredQuality,
-                url = "https://music.example/$trackId",
+                streamUrl = "https://music.example/$trackId",
                 expiresAt = "2026-01-01T00:10:00Z",
                 mimeType = "audio/mp4",
                 codec = "aac",
@@ -447,14 +447,14 @@ private class BlockingPlaybackApi(
         val body =
             PlaybackGrantDto(
                 trackId = trackId,
-                variantId =
+                sessionId =
                 if (trackId.endsWith("1")) {
                     "10000000-0000-0000-0000-000000000001"
                 } else {
                     "10000000-0000-0000-0000-000000000002"
                 },
                 selectedQuality = request.preferredQuality,
-                url = "$grantUrlScheme://music.example/$trackId",
+                streamUrl = "$grantUrlScheme://music.example/$trackId",
                 expiresAt = grantExpiresAt,
                 mimeType = "audio/mp4",
                 codec = "aac",

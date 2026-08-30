@@ -182,7 +182,7 @@ func validStatusFilter(value JobStatus) bool {
 }
 
 func validTypeFilter(value JobType) bool {
-	return value == "" || value == JobTypeSourceScan || value == JobTypeTagWrite || value == JobTypeMediaProcess
+	return value == "" || value == JobTypeSourceScan || value == JobTypeTagWrite
 }
 
 func validSort(value SortField) bool {

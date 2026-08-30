@@ -27,16 +27,16 @@ data class PlaybackRequestDto(val preferredQuality: String, val acceptedCodecs: 
 @Serializable
 data class PlaybackGrantDto(
     val trackId: String,
-    val variantId: String,
+    val sessionId: String,
     val selectedQuality: String,
-    val url: String,
+    val streamUrl: String,
     val expiresAt: String,
     val mimeType: String,
     val codec: String,
     val container: String,
     val bitrate: Int,
     val sampleRate: Int? = null,
-    val contentLength: Long,
+    val contentLength: Long? = null,
     val checksumSha256: String? = null,
     val cacheKey: String,
 )

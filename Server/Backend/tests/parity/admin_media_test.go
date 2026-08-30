@@ -3,7 +3,6 @@ package parity
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,8 +11,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 
 	"xymusic/server/internal/app"
 	"xymusic/server/internal/config"
@@ -51,8 +48,6 @@ func TestLegacyAndGoAdminMediaAuthenticationAndValidationParity(t *testing.T) {
 		{http.MethodPost, "/api/v1/admin/media/uploads", []byte(`{"purpose":"TRACK_SOURCE","targetId":"` + id + `","fileName":"source.flac","contentType":"audio/flac","sizeBytes":4,"checksumSha256":"` + checksum + `"}`), "application/json"},
 		{http.MethodPut, "/api/v1/admin/media/uploads/" + id + "/content", []byte("FLAC"), "audio/flac"},
 		{http.MethodPost, "/api/v1/admin/media/uploads/" + id + "/complete", []byte(`{}`), "application/json"},
-		{http.MethodGet, "/api/v1/admin/media/jobs/" + id, nil, ""},
-		{http.MethodPost, "/api/v1/admin/media/jobs/" + id + "/retry", []byte(`{"expectedVersion":1}`), "application/json"},
 	}
 	for _, request := range requests {
 		legacy := fetchMediaParity(t, client, legacyBase+request.path, request)
@@ -66,8 +61,6 @@ func TestLegacyAndGoAdminMediaAuthenticationAndValidationParity(t *testing.T) {
 		{http.MethodPost, "/api/v1/admin/media/uploads", []byte(`{"purpose":"TRACK_SOURCE","targetId":"` + id + `","fileName":"source.flac","contentType":"audio/flac","sizeBytes":4,"checksumSha256":"` + checksum + `","unknown":true}`), "application/json"},
 		{http.MethodPut, "/api/v1/admin/media/uploads/not-a-uuid/content", []byte("FLAC"), "audio/flac"},
 		{http.MethodPost, "/api/v1/admin/media/uploads/not-a-uuid/complete", []byte(`{}`), "application/json"},
-		{http.MethodGet, "/api/v1/admin/media/jobs/not-a-uuid", nil, ""},
-		{http.MethodPost, "/api/v1/admin/media/jobs/" + id + "/retry", []byte(`{"expectedVersion":0}`), "application/json"},
 	}
 	for _, request := range invalid {
 		legacy := fetchMediaParity(t, client, legacyBase+request.path, request)
@@ -75,17 +68,6 @@ func TestLegacyAndGoAdminMediaAuthenticationAndValidationParity(t *testing.T) {
 		if legacy.status != modern.status || !semanticJSONEqual(legacy.body, modern.body) {
 			t.Fatalf("invalid %s %s differs:\nlegacy=%d %s\ngo=%d %s", request.method, request.path, legacy.status, legacy.body, modern.status, modern.body)
 		}
-	}
-	accessToken := existingAdministratorAccessToken(t, ctx, goRuntime, cfg)
-	var jobID string
-	err = goRuntime.DB.QueryRow(ctx, "select id from media_jobs order by created_at desc limit 1").Scan(&jobID)
-	if err == nil {
-		path := "/api/v1/admin/media/jobs/" + jobID
-		legacy := fetchAdminSettings(t, client, http.MethodGet, legacyBase+path, accessToken, nil)
-		modern := fetchAdminSettings(t, client, http.MethodGet, goServer.URL+path, accessToken, nil)
-		assertParityJSON(t, "GET "+path, legacy, modern, nil)
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		t.Fatal(err)
 	}
 }
 

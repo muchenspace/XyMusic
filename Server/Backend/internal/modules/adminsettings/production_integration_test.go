@@ -53,7 +53,7 @@ func TestProductionSettingsReadAndDependencyProbes(t *testing.T) {
 	defer metrics.Close()
 	service, err := NewService(ServiceDependencies{
 		Database: pool, Runtime: runtime, Store: productionNoopStore{},
-		Storage: ProductionStorageFactory{}, MediaTool: setup.CommandMediaTool{}, Worker: monitor,
+		Storage: ProductionMediaStorageFactory{}, MediaTool: setup.CommandMediaTool{}, Worker: monitor,
 		Metrics:       metrics,
 		RootDirectory: filepath.Dir(absolute), ConfigurationPath: absolute,
 		Listener: ListenerDTO{
@@ -70,7 +70,7 @@ func TestProductionSettingsReadAndDependencyProbes(t *testing.T) {
 	if result, err := service.TestDatabase(ctx, DatabaseInput{}); err != nil || !result.OK {
 		t.Fatalf("TestDatabase() = %#v, %v", result, err)
 	}
-	if result, err := service.TestStorage(ctx, StorageInput{}); err != nil || !result.OK || !result.BucketExists {
+	if result, err := service.TestStorage(ctx, StorageInput{}); err != nil || !result.OK || !result.AssetDirectoryExists {
 		t.Fatalf("TestStorage() = %#v, %v", result, err)
 	}
 	if result, err := service.TestMediaTools(ctx, MediaToolsInput{}); err != nil || !result.OK || len(result.Details) != 2 {

@@ -43,10 +43,6 @@ func apply(ctx context.Context, executor Executor, now time.Time) (Counts, error
 	if err != nil {
 		return counts, policyError("terminal uploads", err)
 	}
-	counts.MediaJobs, err = drain(ctx, executor, mediaJobsStatement, cutoffs.OperationalJobs)
-	if err != nil {
-		return counts, policyError("media jobs", err)
-	}
 	counts.LibraryScans, err = drain(ctx, executor, libraryScansStatement, cutoffs.OperationalJobs)
 	if err != nil {
 		return counts, policyError("library scans", err)
@@ -54,12 +50,6 @@ func apply(ctx context.Context, executor Executor, now time.Time) (Counts, error
 	counts.Writebacks, err = drain(ctx, executor, writebacksStatement, cutoffs.OperationalJobs)
 	if err != nil {
 		return counts, policyError("metadata writebacks", err)
-	}
-	counts.ObjectCleanupJobs, err = drain(
-		ctx, executor, objectCleanupJobsStatement, cutoffs.OperationalJobs,
-	)
-	if err != nil {
-		return counts, policyError("object cleanup jobs", err)
 	}
 	counts.TrackDeleteBatches, err = drain(
 		ctx, executor, trackDeleteBatchesStatement, cutoffs.OperationalJobs,
@@ -116,15 +106,14 @@ WITH candidates AS (
 DELETE FROM rate_limit_buckets target
 USING candidates
 WHERE target.key_hash = candidates.key_hash
-RETURNING target.key_hash AS "keyHash"`
+RETURNING target.key_hash`
 
 const refreshTokensStatement = `
 WITH candidates AS (
   SELECT id FROM refresh_tokens
   WHERE expires_at <= $1::timestamptz
-     OR used_at <= $1::timestamptz
-     OR revoked_at <= $1::timestamptz
-  ORDER BY expires_at, id
+     OR (revoked_at IS NOT NULL AND revoked_at <= $1::timestamptz)
+  ORDER BY LEAST(expires_at, COALESCE(revoked_at, expires_at)), id
   LIMIT 500
 )
 DELETE FROM refresh_tokens target
@@ -133,31 +122,37 @@ WHERE target.id = candidates.id
 RETURNING target.id`
 
 const sessionsRevokedStatement = `
-WITH candidates AS (
-  SELECT auth_session.id
-  FROM auth_sessions auth_session
-  WHERE auth_session.revoked_at IS NULL
-    AND auth_session.last_seen_at < $1::timestamptz
+WITH idle_candidates AS (
+  SELECT id FROM auth_sessions
+  WHERE revoked_at IS NULL
+    AND last_seen_at <= $1::timestamptz
     AND NOT EXISTS (
       SELECT 1 FROM refresh_tokens token
-      WHERE token.session_id = auth_session.id
-        AND token.expires_at > $2::timestamptz
-        AND token.used_at IS NULL
+      WHERE token.session_id = auth_sessions.id
         AND token.revoked_at IS NULL
+        AND token.expires_at > $1::timestamptz
     )
-  ORDER BY auth_session.last_seen_at, auth_session.id
+  ORDER BY last_seen_at, id
   LIMIT 500
+), revoked_sessions AS (
+  UPDATE auth_sessions session
+  SET revoked_at = $2::timestamptz
+  FROM idle_candidates
+  WHERE session.id = idle_candidates.id
+  RETURNING session.id
+), revoked_tokens AS (
+  UPDATE refresh_tokens token
+  SET revoked_at = $2::timestamptz
+  FROM idle_candidates
+  WHERE token.session_id = idle_candidates.id
+    AND token.revoked_at IS NULL
 )
-UPDATE auth_sessions target
-SET revoked_at = $2::timestamptz
-FROM candidates
-WHERE target.id = candidates.id AND target.revoked_at IS NULL
-RETURNING target.id`
+SELECT id FROM revoked_sessions`
 
 const sessionsDeletedStatement = `
 WITH candidates AS (
   SELECT id FROM auth_sessions
-  WHERE revoked_at <= $1::timestamptz
+  WHERE revoked_at IS NOT NULL AND revoked_at <= $1::timestamptz
   ORDER BY revoked_at, id
   LIMIT 500
 )
@@ -171,44 +166,17 @@ WITH candidates AS (
   SELECT id FROM media_uploads
   WHERE (status = 'CREATED' AND expires_at <= $1::timestamptz)
      OR (status = 'COMPLETING' AND expires_at <= $1::timestamptz
-       AND (completion_started_at IS NULL OR completion_started_at <= $2::timestamptz))
+         AND (completion_started_at IS NULL OR completion_started_at <= $2::timestamptz))
   ORDER BY expires_at, id
   LIMIT 500
-  FOR UPDATE SKIP LOCKED
-), expired AS (
-  UPDATE media_uploads target
-  SET status = 'EXPIRED', completion_token = NULL, completion_started_at = NULL
-  FROM candidates
-  WHERE target.id = candidates.id
-  RETURNING target.id, target.object_key
-), queued AS (
-  INSERT INTO object_cleanup_jobs (
-    object_key, reason, status, attempts, max_attempts, next_attempt_at, created_at, updated_at
-  )
-  SELECT object_key, 'EXPIRED_UPLOAD', 'PENDING', 0, 20,
-    $1::timestamptz, $1::timestamptz, $1::timestamptz
-  FROM expired
-  ON CONFLICT (object_key) DO UPDATE SET
-    reason = 'EXPIRED_UPLOAD',
-    status = (CASE WHEN object_cleanup_jobs.status = 'PROCESSING'
-      THEN 'PROCESSING' ELSE 'PENDING' END)::object_cleanup_status,
-    attempts = CASE WHEN object_cleanup_jobs.status = 'PROCESSING'
-      THEN object_cleanup_jobs.attempts ELSE 0 END,
-    attempt_id = CASE WHEN object_cleanup_jobs.status = 'PROCESSING'
-      THEN object_cleanup_jobs.attempt_id ELSE NULL END,
-    locked_by = CASE WHEN object_cleanup_jobs.status = 'PROCESSING'
-      THEN object_cleanup_jobs.locked_by ELSE NULL END,
-    locked_until = CASE WHEN object_cleanup_jobs.status = 'PROCESSING'
-      THEN object_cleanup_jobs.locked_until ELSE NULL END,
-    next_attempt_at = CASE WHEN object_cleanup_jobs.status = 'PROCESSING'
-      THEN object_cleanup_jobs.next_attempt_at ELSE $1::timestamptz END,
-    last_error = CASE WHEN object_cleanup_jobs.status = 'PROCESSING'
-      THEN object_cleanup_jobs.last_error ELSE NULL END,
-    updated_at = $1::timestamptz
-  RETURNING object_key
 )
-SELECT expired.id FROM expired
-INNER JOIN queued ON queued.object_key = expired.object_key`
+UPDATE media_uploads upload
+SET status = 'EXPIRED',
+    completion_token = NULL,
+    completion_started_at = NULL
+FROM candidates
+WHERE upload.id = candidates.id
+RETURNING upload.id`
 
 const uploadsDeletedStatement = `
 WITH candidates AS (
@@ -219,21 +187,6 @@ WITH candidates AS (
   LIMIT 500
 )
 DELETE FROM media_uploads target
-USING candidates
-WHERE target.id = candidates.id
-RETURNING target.id`
-
-const mediaJobsStatement = `
-WITH candidates AS (
-  SELECT id FROM media_jobs
-  WHERE status IN ('READY', 'FAILED', 'CANCELLED') AND updated_at <= $1::timestamptz
-  ORDER BY updated_at, id
-  LIMIT 500
-), cleared_uploads AS (
-  UPDATE media_uploads upload SET job_id = NULL
-  FROM candidates WHERE upload.job_id = candidates.id
-)
-DELETE FROM media_jobs target
 USING candidates
 WHERE target.id = candidates.id
 RETURNING target.id`
@@ -253,10 +206,10 @@ RETURNING target.id`
 
 const writebacksStatement = `
 WITH candidates AS (
-	SELECT id FROM metadata_writeback_jobs
-	WHERE status IN ('READY', 'FAILED', 'CANCELLED')
-	  AND completed_at <= $1::timestamptz
-	ORDER BY completed_at, id
+  SELECT id FROM metadata_writeback_jobs
+  WHERE status IN ('READY', 'FAILED', 'CANCELLED')
+    AND completed_at IS NOT NULL AND completed_at <= $1::timestamptz
+  ORDER BY completed_at, id
   LIMIT 500
 )
 DELETE FROM metadata_writeback_jobs target
@@ -264,23 +217,10 @@ USING candidates
 WHERE target.id = candidates.id
 RETURNING target.id`
 
-const objectCleanupJobsStatement = `
-WITH candidates AS (
-  SELECT id FROM object_cleanup_jobs
-  WHERE status IN ('COMPLETED', 'FAILED') AND updated_at <= $1::timestamptz
-  ORDER BY updated_at, id
-  LIMIT 500
-)
-DELETE FROM object_cleanup_jobs target
-USING candidates
-WHERE target.id = candidates.id
-RETURNING target.id`
-
 const trackDeleteBatchesStatement = `
 WITH candidates AS (
   SELECT id FROM track_delete_batches
-  WHERE status IN ('COMPLETED', 'FAILED')
-    AND completed_at <= $1::timestamptz
+  WHERE status = 'COMPLETED' AND completed_at <= $1::timestamptz
   ORDER BY completed_at, id
   LIMIT 500
 )

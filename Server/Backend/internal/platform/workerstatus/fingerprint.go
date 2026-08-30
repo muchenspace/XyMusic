@@ -8,8 +8,6 @@ import (
 	"xymusic/server/internal/config"
 )
 
-// ConfigurationFingerprint matches the legacy worker fingerprint document so
-// a Go control process can evaluate a Bun worker during a rolling cutover.
 func ConfigurationFingerprint(cfg config.Config) string {
 	document := configurationDocument(cfg)
 	encoded, err := json.Marshal(document)
@@ -24,23 +22,30 @@ func configurationDocument(cfg config.Config) fingerprintDocument {
 	return fingerprintDocument{
 		Environment: cfg.Environment,
 		Paths: fingerprintPaths{
-			MigrationsDirectory: cfg.Paths.MigrationsDirectory,
-			MediaToolsDirectory: cfg.Paths.MediaToolsDirectory,
-			LocalMusicDirectory: cfg.Paths.LocalMusicDirectory,
+			MigrationsDirectory:     cfg.Paths.MigrationsDirectory,
+			AdminWebDirectory:       cfg.Paths.AdminWebDirectory,
+			MediaToolsDirectory:     cfg.Paths.MediaToolsDirectory,
+			LocalMusicDirectory:     cfg.Paths.LocalMusicDirectory,
+			MediaAssetDirectory:     cfg.Paths.MediaAssetDirectory,
+			MediaTranscodeDirectory: cfg.Paths.MediaTranscodeDirectory,
 		},
 		Database: fingerprintDatabase{
 			URL: cfg.Database.URL, MaxConnections: cfg.Database.MaxConnections,
 		},
-		Storage: fingerprintStorage{
-			Endpoint: cfg.Storage.Endpoint, Region: cfg.Storage.Region,
-			Bucket: cfg.Storage.Bucket, AccessKeyID: cfg.Storage.AccessKeyID,
-			SecretAccessKey: cfg.Storage.SecretAccessKey, ForcePathStyle: cfg.Storage.ForcePathStyle,
-			PublicBaseURL: cfg.Storage.PublicBaseURL, SignedURLTTLSeconds: cfg.Storage.SignedURLTTLSeconds,
-			MaxUploadBytes: cfg.Storage.MaxUploadBytes,
+		MediaStorage: fingerprintMediaStorage{
+			AssetDirectory:           cfg.MediaStorage.AssetDirectory,
+			TranscodeDirectory:       cfg.MediaStorage.TranscodeDirectory,
+			UploadTTLSeconds:         cfg.MediaStorage.UploadTTLSeconds,
+			StreamTTLSeconds:         cfg.MediaStorage.StreamTTLSeconds,
+			StreamMaxConcurrent:      cfg.MediaStorage.StreamMaxConcurrent,
+			StreamIdleTimeoutSeconds: cfg.MediaStorage.StreamIdleTimeoutSeconds,
+			TranscodeTimeoutSeconds:  cfg.MediaStorage.TranscodeTimeoutSeconds,
+			TranscodeCacheMaxBytes:   cfg.MediaStorage.TranscodeCacheMaxBytes,
+			MaxUploadBytes:           cfg.MediaStorage.MaxUploadBytes,
 		},
 		Media: fingerprintMedia{
 			Mode: cfg.Media.Mode, FFmpegPath: cfg.Media.FFmpegPath, FFprobePath: cfg.Media.FFprobePath,
-			ProbeWorkers: cfg.Media.ProbeWorkers, StorageWorkers: cfg.Media.StorageWorkers,
+			FFmpegThreads: cfg.Media.FFmpegThreads,
 		},
 		LocalLibrary: fingerprintLocalLibrary{
 			Name: cfg.LocalLibrary.Name, Directory: cfg.LocalLibrary.Directory,
@@ -51,6 +56,7 @@ func configurationDocument(cfg config.Config) fingerprintDocument {
 			ExcludePatterns:     normalizedStrings(cfg.LocalLibrary.ExcludePatterns),
 		},
 		IdempotencyEncryptionSecret: cfg.Security.IdempotencyEncryptionSecret,
+		PlaybackTicketSecret:        cfg.Security.PlaybackTicketSecret,
 	}
 }
 
@@ -58,16 +64,20 @@ type fingerprintDocument struct {
 	Environment                 config.Environment      `json:"environment"`
 	Paths                       fingerprintPaths        `json:"paths"`
 	Database                    fingerprintDatabase     `json:"database"`
-	Storage                     fingerprintStorage      `json:"storage"`
+	MediaStorage                fingerprintMediaStorage `json:"mediaStorage"`
 	Media                       fingerprintMedia        `json:"media"`
 	LocalLibrary                fingerprintLocalLibrary `json:"localLibrary"`
 	IdempotencyEncryptionSecret string                  `json:"idempotencyEncryptionSecret"`
+	PlaybackTicketSecret        string                  `json:"playbackTicketSecret"`
 }
 
 type fingerprintPaths struct {
-	MigrationsDirectory string `json:"migrationsDirectory"`
-	MediaToolsDirectory string `json:"mediaToolsDirectory"`
-	LocalMusicDirectory string `json:"localMusicDirectory"`
+	MigrationsDirectory     string `json:"migrationsDirectory"`
+	AdminWebDirectory       string `json:"adminWebDirectory"`
+	MediaToolsDirectory     string `json:"mediaToolsDirectory"`
+	LocalMusicDirectory     string `json:"localMusicDirectory"`
+	MediaAssetDirectory     string `json:"mediaAssetDirectory"`
+	MediaTranscodeDirectory string `json:"mediaTranscodeDirectory"`
 }
 
 type fingerprintDatabase struct {
@@ -75,24 +85,23 @@ type fingerprintDatabase struct {
 	MaxConnections int32  `json:"maxConnections"`
 }
 
-type fingerprintStorage struct {
-	Endpoint            string `json:"endpoint,omitempty"`
-	Region              string `json:"region"`
-	Bucket              string `json:"bucket"`
-	AccessKeyID         string `json:"accessKeyId"`
-	SecretAccessKey     string `json:"secretAccessKey"`
-	ForcePathStyle      bool   `json:"forcePathStyle"`
-	PublicBaseURL       string `json:"publicBaseUrl,omitempty"`
-	SignedURLTTLSeconds int    `json:"signedUrlTtlSeconds"`
-	MaxUploadBytes      int64  `json:"maxUploadBytes"`
+type fingerprintMediaStorage struct {
+	AssetDirectory           string `json:"assetDirectory"`
+	TranscodeDirectory       string `json:"transcodeDirectory"`
+	UploadTTLSeconds         int    `json:"uploadTTLSeconds"`
+	StreamTTLSeconds         int    `json:"streamTTLSeconds"`
+	StreamMaxConcurrent      int    `json:"streamMaxConcurrent"`
+	StreamIdleTimeoutSeconds int    `json:"streamIdleTimeoutSeconds"`
+	TranscodeTimeoutSeconds  int    `json:"transcodeTimeoutSeconds"`
+	TranscodeCacheMaxBytes   int64  `json:"transcodeCacheMaxBytes"`
+	MaxUploadBytes           int64  `json:"maxUploadBytes"`
 }
 
 type fingerprintMedia struct {
-	Mode           string `json:"mode"`
-	FFmpegPath     string `json:"ffmpegPath"`
-	FFprobePath    string `json:"ffprobePath"`
-	ProbeWorkers   int    `json:"probeWorkers"`
-	StorageWorkers int    `json:"storageWorkers"`
+	Mode          string `json:"mode"`
+	FFmpegPath    string `json:"ffmpegPath"`
+	FFprobePath   string `json:"ffprobePath"`
+	FFmpegThreads int    `json:"ffmpegThreads"`
 }
 
 type fingerprintLocalLibrary struct {

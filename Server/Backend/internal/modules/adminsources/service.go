@@ -407,10 +407,10 @@ func cloneJSONInt(value *JSONInteger) *int {
 }
 
 func nonNilStrings(values []string) []string {
-	if values == nil {
+	if len(values) == 0 {
 		return []string{}
 	}
-	return append([]string(nil), values...)
+	return append([]string{}, values...)
 }
 
 func cloneStrings(values []string) []string {

@@ -21,18 +21,18 @@ interface PlaybackGrantRepository {
 
 class PlaybackGrant(
     val trackId: String,
-    val variantId: String,
+    val sessionId: String,
     val selectedQuality: PreferredQuality,
-    val signedUrl: String,
+    val streamUrl: String,
     val expiresAtEpochMillis: Long,
     val mimeType: String,
     val codec: String,
     val container: String,
     val bitrate: Int,
     val sampleRate: Int?,
-    val contentLength: Long,
+    val contentLength: Long?,
     val checksumSha256: String?,
     val cacheKey: String,
 ) {
-    override fun toString(): String = "PlaybackGrant(trackId=$trackId, variantId=$variantId, signedUrl=[REDACTED])"
+    override fun toString(): String = "PlaybackGrant(trackId=$trackId, sessionId=$sessionId, streamUrl=[REDACTED])"
 }

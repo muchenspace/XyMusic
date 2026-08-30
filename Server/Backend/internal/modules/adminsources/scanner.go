@@ -42,7 +42,17 @@ type DiscoveredFile struct {
 
 type FileSynchronizer interface {
 	ProcessFile(context.Context, string, string, DiscoveredFile, time.Time) error
+	// ArchiveMissing is retained for lightweight/legacy synchronizers. The
+	// production synchronizer also implements MissingSourceDeleter, which is
+	// preferred and permanently removes only database records.
 	ArchiveMissing(context.Context, string, time.Time, time.Time) (int, error)
+}
+
+// MissingSourceDeleter is the destructive-on-database-only replacement for the
+// old archive flow. It is called only after discovery and file processing have
+// completed successfully.
+type MissingSourceDeleter interface {
+	DeleteMissing(context.Context, string, time.Time, time.Time) (int, error)
 }
 
 // ScanPipeline separates read-heavy preparation from the bounded database and
@@ -110,14 +120,14 @@ func NewFilesystemScannerWithOptions(options FilesystemScannerOptions) (*Filesys
 	}
 	workers := options.Workers
 	if workers <= 0 {
-		workers = max(4, min(32, runtime.GOMAXPROCS(0)*2))
+		workers = max(8, min(128, runtime.GOMAXPROCS(0)*4))
 	}
-	if workers > 64 {
-		return nil, errors.New("local library scanner worker count must not exceed 64")
+	if workers > 256 {
+		return nil, errors.New("local library scanner worker count must not exceed 256")
 	}
 	commitWorkers := options.CommitWorkers
 	if commitWorkers <= 0 {
-		commitWorkers = max(1, min(4, runtime.GOMAXPROCS(0)/2))
+		commitWorkers = max(4, min(16, runtime.GOMAXPROCS(0)*2))
 	}
 	if commitWorkers > 64 {
 		return nil, errors.New("local library scanner commit worker count must not exceed 64")
@@ -760,13 +770,22 @@ func (scanner *FilesystemScanner) finalizeScan(
 			return ScanResult{}, err
 		}
 	}
-	archived, err := scanner.synchronizer.ArchiveMissing(finalizeContext, input.RootID, startedAt, scanner.now())
+	deleted := 0
+	legacyArchived := 0
+	var err error
+	if deleter, ok := scanner.synchronizer.(MissingSourceDeleter); ok {
+		deleted, err = deleter.DeleteMissing(finalizeContext, input.RootID, startedAt, scanner.now())
+	} else {
+		// Keep compatibility with test/lightweight synchronizers while the
+		// production path uses DeleteMissing and never archives absent music.
+		legacyArchived, err = scanner.synchronizer.ArchiveMissing(finalizeContext, input.RootID, startedAt, scanner.now())
+	}
 	if err != nil {
 		return ScanResult{}, err
 	}
 	return ScanResult{
 		DiscoveredFiles: progress.DiscoveredFiles, ProcessedFiles: progress.ProcessedFiles,
-		FailedFiles: progress.FailedFiles, ArchivedFiles: archived,
+		FailedFiles: progress.FailedFiles, DeletedFiles: deleted, ArchivedFiles: legacyArchived,
 	}, nil
 }
 

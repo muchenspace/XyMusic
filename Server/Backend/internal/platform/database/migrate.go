@@ -95,12 +95,35 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool, directory string) er
 		return fmt.Errorf("create migration journal: %w", err)
 	}
 
-	for _, migration := range available[len(applied):] {
+	appliedCount := len(applied)
+	for _, migration := range available[appliedCount:] {
 		if err := applyMigration(ctx, connection, migration); err != nil {
+			// A failed first migration leaves only the journal relation because
+			// the migration itself is transactional. Remove that empty marker so
+			// a fresh installation remains retryable without manual journal edits.
+			if appliedCount == 0 {
+				cleanupEmptyMigrationJournal(ctx, connection)
+			}
 			return err
 		}
+		appliedCount++
 	}
 	return nil
+}
+
+func cleanupEmptyMigrationJournal(ctx context.Context, connection *pgxpool.Conn) {
+	cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), migrationCleanupTimeout)
+	defer cancel()
+	var hasRows bool
+	if err := connection.QueryRow(cleanupContext,
+		"SELECT EXISTS (SELECT 1 FROM drizzle.__drizzle_migrations)",
+	).Scan(&hasRows); err != nil || hasRows {
+		return
+	}
+	// Do not use CASCADE: if an operator has placed another object in the
+	// application-owned schema, leaving that schema is safer than dropping it.
+	_, _ = connection.Exec(cleanupContext, "DROP TABLE IF EXISTS drizzle.__drizzle_migrations")
+	_, _ = connection.Exec(cleanupContext, "DROP SCHEMA IF EXISTS drizzle")
 }
 
 // CheckMigrationCompatibility is read-only and is used before activating a
@@ -233,12 +256,12 @@ func applyMigration(ctx context.Context, connection *pgxpool.Conn, migration Mig
 		defer cancel()
 		_ = tx.Rollback(cleanupContext)
 	}()
-	for _, statement := range migration.SQL {
+	for index, statement := range migration.SQL {
 		if strings.TrimSpace(statement) == "" {
 			continue
 		}
 		if _, err := tx.Exec(ctx, statement); err != nil {
-			return fmt.Errorf("apply migration %s: %w", migration.Tag, err)
+			return fmt.Errorf("apply migration %s statement %d: %w", migration.Tag, index, err)
 		}
 	}
 	if _, err := tx.Exec(ctx,

@@ -27,16 +27,6 @@ func presentSettings(cfg config.Config, version int, source string, listener Lis
 	if cfg.HTTP.IPv6Port != listener.IPv6.Port {
 		restart = append(restart, "http.ipv6Port")
 	}
-	var endpoint *string
-	if cfg.Storage.Endpoint != "" {
-		value := cfg.Storage.Endpoint
-		endpoint = &value
-	}
-	var publicBaseURL *string
-	if cfg.Storage.PublicBaseURL != "" {
-		value := cfg.Storage.PublicBaseURL
-		publicBaseURL = &value
-	}
 	var mediaDirectory *string
 	if cfg.Media.Mode == "DIRECTORY" {
 		value := cfg.Paths.MediaToolsDirectory
@@ -48,11 +38,16 @@ func presentSettings(cfg config.Config, version int, source string, listener Lis
 		ActualListener: listener, RestartRequiredFields: restart,
 		Database: database,
 		Storage: StorageDTO{
-			Endpoint: endpoint, PublicBaseURL: publicBaseURL, Region: cfg.Storage.Region,
-			Bucket: cfg.Storage.Bucket, AccessKeyID: cfg.Storage.AccessKeyID,
-			SecretAccessKeyConfigured: cfg.Storage.SecretAccessKey != "",
-			ForcePathStyle:            cfg.Storage.ForcePathStyle, SignedURLTTLSeconds: cfg.Storage.SignedURLTTLSeconds,
-			MaxUploadBytes: cfg.Storage.MaxUploadBytes, LockedFields: empty(),
+			AssetDirectory:           cfg.MediaStorage.AssetDirectory,
+			TranscodeDirectory:       cfg.MediaStorage.TranscodeDirectory,
+			UploadTTLSeconds:         cfg.MediaStorage.UploadTTLSeconds,
+			StreamTTLSeconds:         cfg.MediaStorage.StreamTTLSeconds,
+			StreamMaxConcurrent:      cfg.MediaStorage.StreamMaxConcurrent,
+			StreamIdleTimeoutSeconds: cfg.MediaStorage.StreamIdleTimeoutSeconds,
+			TranscodeTimeoutSeconds:  cfg.MediaStorage.TranscodeTimeoutSeconds,
+			TranscodeCacheMaxBytes:   cfg.MediaStorage.TranscodeCacheMaxBytes,
+			MaxUploadBytes:           cfg.MediaStorage.MaxUploadBytes,
+			LockedFields:             empty(),
 		},
 		MediaTools: MediaToolsDTO{
 			Directory: mediaDirectory, FFmpegPath: cfg.Media.FFmpegPath,

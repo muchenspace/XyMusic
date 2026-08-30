@@ -41,10 +41,8 @@ type Counts struct {
 	SessionsDeleted    int64
 	UploadsExpired     int64
 	UploadsDeleted     int64
-	MediaJobs          int64
 	LibraryScans       int64
 	Writebacks         int64
-	ObjectCleanupJobs  int64
 	TrackDeleteBatches int64
 }
 
@@ -57,10 +55,8 @@ func (counts Counts) Fields() map[string]any {
 		"sessionsDeleted":    counts.SessionsDeleted,
 		"uploadsExpired":     counts.UploadsExpired,
 		"uploadsDeleted":     counts.UploadsDeleted,
-		"mediaJobs":          counts.MediaJobs,
 		"libraryScans":       counts.LibraryScans,
 		"writebacks":         counts.Writebacks,
-		"objectCleanupJobs":  counts.ObjectCleanupJobs,
 		"trackDeleteBatches": counts.TrackDeleteBatches,
 	}
 }

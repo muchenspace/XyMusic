@@ -19,13 +19,13 @@ type ConfigurationStore interface {
 	Save(config.Config) error
 }
 
-type StorageFactory interface {
-	Open(config.Storage) (StorageProbe, error)
+type MediaStorageFactory interface {
+	Open(config.MediaStorage) (MediaStorageProbe, error)
 }
 
-type StorageProbe interface {
-	Probe(context.Context) (bool, error)
-	EnsureBucket(context.Context) error
+type MediaStorageProbe interface {
+	Probe(context.Context) error
+	EnsureDirectories(context.Context) error
 	Close()
 }
 

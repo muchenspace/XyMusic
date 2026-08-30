@@ -422,9 +422,9 @@ class GrantResolvingDataSourceTest {
             return PlayerResult.Success(
                 PlaybackGrant(
                     trackId = trackId,
-                    variantId = "variant",
+                    sessionId = "variant",
                     selectedQuality = PreferredQuality.STANDARD,
-                    signedUrl = SIGNED_URL,
+                    streamUrl = SIGNED_URL,
                     expiresAtEpochMillis = Long.MAX_VALUE,
                     mimeType = "audio/mpeg",
                     codec = "mp3",

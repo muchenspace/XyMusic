@@ -20,9 +20,6 @@ type RuntimeSnapshot struct {
 	LastError  *string
 }
 
-// RuntimeController activates the newly persisted configuration. The setup
-// module deliberately owns only this port; the application composition layer
-// supplies the concrete hot-reload/runtime implementation.
 type RuntimeController interface {
 	Status() RuntimeSnapshot
 	Initialize(context.Context, config.Config, string) error
@@ -71,17 +68,16 @@ type ProvisionedInstallation struct {
 	CreatedLibraryRoot   bool
 }
 
-type ObjectStorageFactory interface {
-	Open(config.Storage) (SetupObjectStorage, error)
+type MediaStorageFactory interface {
+	Open(config.MediaStorage) (SetupMediaStorage, error)
 }
 
-type SetupObjectStorage interface {
+type SetupMediaStorage interface {
 	Probe(context.Context) error
 	Inspect(context.Context) (StorageInspection, error)
-	EnsureBucket(context.Context) (bool, error)
+	EnsureDirectories(context.Context) error
 	VerifyReadWrite(context.Context) error
 	Clear(context.Context) error
-	RemoveBucket(context.Context) error
 	Close()
 }
 

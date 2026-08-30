@@ -10,11 +10,8 @@ import (
 
 func TestProductionRequiresSecurityMaterial(t *testing.T) {
 	_, err := Parse(map[string]string{
-		"NODE_ENV":             "production",
-		"DATABASE_URL":         "postgres://user:pass@localhost/xymusic",
-		"S3_BUCKET":            "xymusic",
-		"S3_ACCESS_KEY_ID":     "key",
-		"S3_SECRET_ACCESS_KEY": "secret",
+		"NODE_ENV":     "production",
+		"DATABASE_URL": "postgres://user:pass@localhost/xymusic",
 	})
 	if err == nil || !strings.Contains(err.Error(), "ACCESS_TOKEN_SECRET") {
 		t.Fatalf("expected production secret error, got %v", err)
@@ -30,7 +27,7 @@ func TestDevelopmentDefaultsAreCompatible(t *testing.T) {
 		t.Fatalf("unexpected listener defaults: %+v", cfg.HTTP)
 	}
 	wantDatabaseConnections := defaultDatabaseConnections(
-		cfg.LocalLibrary.ScanCommitWorkers, cfg.Media.Workers,
+		cfg.LocalLibrary.ScanCommitWorkers,
 		cfg.Scraping.BatchWorkers, cfg.Scraping.ArtworkWorkers,
 	)
 	if cfg.HTTP.Port != 3000 || int(cfg.Database.MaxConnections) != wantDatabaseConnections {
@@ -39,24 +36,23 @@ func TestDevelopmentDefaultsAreCompatible(t *testing.T) {
 	if len(cfg.Security.AccessTokenSecret) < 32 {
 		t.Fatal("development secret is too short")
 	}
-	if cfg.Storage.MaxUploadBytes != MaxServerRequestBodyBytes {
+	if len(cfg.Security.PlaybackTicketSecret) < 32 {
+		t.Fatal("playback ticket secret is too short")
+	}
+	if cfg.MediaStorage.MaxUploadBytes != MaxServerRequestBodyBytes {
 		t.Fatal("upload limit mismatch")
 	}
 	if cfg.Media.Mode != "ADVANCED" || cfg.Media.FFmpegPath != "ffmpeg" || cfg.Media.FFprobePath != "ffprobe" {
 		t.Fatalf("expected PATH-based media defaults: %#v", cfg.Media)
 	}
-	if cfg.Media.ProfileVersion != "v1" {
-		t.Fatalf("unexpected media profile version: %#v", cfg.Media)
-	}
 	if cfg.Media.FFmpegThreads != 0 {
 		t.Fatalf("unexpected automatic FFmpeg thread setting: %#v", cfg.Media)
 	}
-	if cfg.LocalLibrary.ScanCommitWorkers < 1 || cfg.LocalLibrary.ScanCommitBatchSize < 1 || cfg.LocalLibrary.ScanProbeWorkers < 1 ||
-		cfg.Media.Workers < 1 || cfg.Media.ProbeWorkers < 1 || cfg.Media.StorageWorkers < 1 {
+	if cfg.LocalLibrary.ScanCommitWorkers < 1 || cfg.LocalLibrary.ScanCommitBatchSize < 1 || cfg.LocalLibrary.ScanProbeWorkers < 1 {
 		t.Fatalf("unexpected scan stage defaults: %#v", cfg.LocalLibrary)
 	}
-	if cfg.LocalLibrary.ReadySourceObjectStatTTLSeconds != 300 {
-		t.Fatalf("unexpected ready source object stat TTL: %d", cfg.LocalLibrary.ReadySourceObjectStatTTLSeconds)
+	if cfg.Paths.MediaAssetDirectory != DefaultMediaAssetDirectory || cfg.Paths.MediaTranscodeDirectory != DefaultMediaTranscodeDirectory {
+		t.Fatalf("unexpected media directory defaults: %#v", cfg.Paths)
 	}
 }
 
@@ -65,9 +61,6 @@ func TestPerformanceWorkerLimitsAreConfigurable(t *testing.T) {
 		"LOCAL_MUSIC_SCAN_COMMIT_WORKERS":    "3",
 		"LOCAL_MUSIC_SCAN_COMMIT_BATCH_SIZE": "11",
 		"LOCAL_MUSIC_SCAN_PROBE_WORKERS":     "5",
-		"MEDIA_WORKERS":                      "6",
-		"MEDIA_PROBE_WORKERS":                "2",
-		"MEDIA_STORAGE_WORKERS":              "5",
 		"MEDIA_FFMPEG_THREADS":               "2",
 		"TAG_SCRAPING_WORKERS":               "4",
 		"TAG_SCRAPING_CLAIM_WINDOW":          "17",
@@ -78,14 +71,13 @@ func TestPerformanceWorkerLimitsAreConfigurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.LocalLibrary.ScanCommitWorkers != 3 || cfg.LocalLibrary.ScanCommitBatchSize != 11 || cfg.LocalLibrary.ScanProbeWorkers != 5 ||
-		cfg.Media.Workers != 6 || cfg.Media.ProbeWorkers != 2 || cfg.Media.StorageWorkers != 5 || cfg.Media.FFmpegThreads != 2 ||
+		cfg.Media.FFmpegThreads != 2 ||
 		cfg.Scraping.BatchWorkers != 4 || cfg.Scraping.BatchClaimWindow != 17 || cfg.Scraping.ArtworkWorkers != 3 || cfg.Scraping.ArtworkClaimWindow != 13 {
 		t.Fatalf("performance limits = %#v/%#v", cfg.LocalLibrary, cfg.Media)
 	}
 	environment := ToEnvironment(cfg)
 	if environment["LOCAL_MUSIC_SCAN_COMMIT_WORKERS"] != "3" || environment["LOCAL_MUSIC_SCAN_COMMIT_BATCH_SIZE"] != "11" ||
-		environment["LOCAL_MUSIC_SCAN_PROBE_WORKERS"] != "5" || environment["MEDIA_WORKERS"] != "6" ||
-		environment["MEDIA_PROBE_WORKERS"] != "2" || environment["MEDIA_STORAGE_WORKERS"] != "5" || environment["MEDIA_FFMPEG_THREADS"] != "2" ||
+		environment["LOCAL_MUSIC_SCAN_PROBE_WORKERS"] != "5" || environment["MEDIA_FFMPEG_THREADS"] != "2" ||
 		environment["TAG_SCRAPING_WORKERS"] != "4" || environment["TAG_SCRAPING_CLAIM_WINDOW"] != "17" ||
 		environment["TAG_SCRAPING_ARTWORK_WORKERS"] != "3" || environment["TAG_SCRAPING_ARTWORK_CLAIM_WINDOW"] != "13" {
 		t.Fatalf("performance limits were not persisted: %#v", environment)
@@ -95,14 +87,13 @@ func TestPerformanceWorkerLimitsAreConfigurable(t *testing.T) {
 func TestDatabaseConnectionDefaultFollowsConfiguredWorkerBudget(t *testing.T) {
 	cfg, err := Parse(map[string]string{
 		"LOCAL_MUSIC_SCAN_COMMIT_WORKERS": "12",
-		"MEDIA_WORKERS":                   "16",
 		"TAG_SCRAPING_WORKERS":            "20",
 		"TAG_SCRAPING_ARTWORK_WORKERS":    "4",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := defaultDatabaseConnections(12, 16, 20, 4)
+	want := defaultDatabaseConnections(12, 20, 4)
 	if int(cfg.Database.MaxConnections) != want {
 		t.Fatalf("default database connections=%d want %d", cfg.Database.MaxConnections, want)
 	}
@@ -110,23 +101,12 @@ func TestDatabaseConnectionDefaultFollowsConfiguredWorkerBudget(t *testing.T) {
 	cfg, err = Parse(map[string]string{
 		"DATABASE_MAX_CONNECTIONS":        "9",
 		"LOCAL_MUSIC_SCAN_COMMIT_WORKERS": "12",
-		"MEDIA_WORKERS":                   "16",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Database.MaxConnections != 9 {
 		t.Fatalf("explicit database connection limit=%d want 9", cfg.Database.MaxConnections)
-	}
-}
-
-func TestReadySourceObjectStatTTLCanBeDisabled(t *testing.T) {
-	cfg, err := Parse(map[string]string{"LOCAL_MUSIC_READY_OBJECT_STAT_TTL_SECONDS": "0"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.LocalLibrary.ReadySourceObjectStatTTLSeconds != 0 {
-		t.Fatalf("TTL=%d want 0", cfg.LocalLibrary.ReadySourceObjectStatTTLSeconds)
 	}
 }
 
@@ -256,8 +236,8 @@ func TestStoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Database.URL != cfg.Database.URL || loaded.Storage.Bucket != cfg.Storage.Bucket ||
-		loaded.Storage.AccessKeyID != cfg.Storage.AccessKeyID || loaded.Storage.SecretAccessKey != cfg.Storage.SecretAccessKey {
+	if loaded.Database.URL != cfg.Database.URL || loaded.Paths.MediaAssetDirectory != cfg.Paths.MediaAssetDirectory ||
+		loaded.Paths.MediaTranscodeDirectory != cfg.Paths.MediaTranscodeDirectory {
 		t.Fatalf("round trip mismatch: %#v", loaded)
 	}
 }

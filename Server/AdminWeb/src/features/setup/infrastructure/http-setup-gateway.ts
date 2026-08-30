@@ -11,11 +11,11 @@ import type {
 } from "@/features/setup/domain/models";
 
 export function normalizeObjectStorageConfig(input: ObjectStorageConfig): ObjectStorageConfig {
-  const publicBaseUrl = input.publicBaseUrl?.trim();
-  const normalized = { ...input };
-  if (publicBaseUrl) normalized.publicBaseUrl = publicBaseUrl;
-  else delete normalized.publicBaseUrl;
-  return normalized;
+  return {
+    ...input,
+    assetDirectory: input.assetDirectory.trim(),
+    transcodeDirectory: input.transcodeDirectory.trim(),
+  };
 }
 
 export function normalizeSetupSourceInput(input: SetupSourceInput): SetupSourceInput {

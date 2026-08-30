@@ -3,11 +3,9 @@ import {
   audioStatuses,
   audioStatusPresentation,
   audioTechnicalStagePresentation,
-  mediaProcessingStatusPresentation,
   metadataStatusPresentation,
   sourceFileStatusPresentation,
   trackAudioStatusPresentation,
-  variantStatusPresentation,
 } from "@/shared/presentation/audio-status";
 
 describe("audio status presentation", () => {
@@ -26,14 +24,12 @@ describe("audio status presentation", () => {
 
   it("keeps technical stages domain-specific and Chinese", () => {
     expect(sourceFileStatusPresentation("PROCESSING").label).toBe("源文件分析中");
-    expect(mediaProcessingStatusPresentation("PROCESSING").label).toBe("媒体分析与转码中");
     expect(metadataStatusPresentation("PENDING_WRITE").label).toBe("等待写回");
-    expect(variantStatusPresentation("FAILED").label).toBe("生成失败");
   });
 
-  it("prioritizes failures when explaining a composite status", () => {
-    expect(audioTechnicalStagePresentation("ERROR", "PENDING", "FAILED")).toEqual({
-      label: "媒体处理失败",
+  it("prioritizes source failures when explaining a composite status", () => {
+    expect(audioTechnicalStagePresentation("ERROR", "MISSING")).toEqual({
+      label: "源文件处理失败",
       tone: "danger",
     });
   });
@@ -51,7 +47,7 @@ describe("audio status presentation", () => {
 
   it("uses a safe error fallback for unknown audio states instead of treating them as archived", () => {
     expect(audioStatusPresentation("BROKEN_STATE")).toEqual({ label: "未知状态", tone: "danger" });
-    expect(audioTechnicalStagePresentation("BROKEN_STATE", null, null)).toEqual({
+    expect(audioTechnicalStagePresentation("BROKEN_STATE", null)).toEqual({
       label: "音频状态异常",
       tone: "danger",
     });

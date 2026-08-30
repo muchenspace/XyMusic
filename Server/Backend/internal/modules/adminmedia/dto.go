@@ -35,10 +35,6 @@ type CompleteUploadInput struct {
 	CompletionFence CompletionFence `json:"-"`
 }
 
-type RetryJobInput struct {
-	ExpectedVersion int `json:"expectedVersion"`
-}
-
 type UploadReservationDTO struct {
 	ID              string            `json:"id"`
 	Purpose         UploadPurpose     `json:"purpose"`
@@ -46,28 +42,13 @@ type UploadReservationDTO struct {
 	Status          string            `json:"status"`
 	Method          string            `json:"method"`
 	UploadURL       string            `json:"uploadUrl"`
+	UploadPath      string            `json:"uploadPath"`
 	RequiredHeaders map[string]string `json:"requiredHeaders"`
 	ExpiresAt       string            `json:"expiresAt"`
 }
 
 type UploadCompletionDTO struct {
-	UploadID string  `json:"uploadId"`
-	Status   string  `json:"status"`
-	AssetID  string  `json:"assetId"`
-	JobID    *string `json:"jobId"`
-}
-
-type MediaJobDTO struct {
-	ID               string  `json:"id"`
-	Type             string  `json:"type"`
-	Status           string  `json:"status"`
-	Attempts         int     `json:"attempts"`
-	MaxAttempts      int     `json:"maxAttempts"`
-	CancelRequested  bool    `json:"cancelRequested"`
-	LastErrorCode    *string `json:"lastErrorCode"`
-	LastErrorMessage *string `json:"lastErrorMessage"`
-	NextAttemptAt    *string `json:"nextAttemptAt"`
-	Version          int     `json:"version"`
-	CreatedAt        string  `json:"createdAt"`
-	UpdatedAt        string  `json:"updatedAt"`
+	UploadID string `json:"uploadId"`
+	Status   string `json:"status"`
+	AssetID  string `json:"assetId"`
 }

@@ -175,7 +175,11 @@ func (routes *Routes) deleteRoot(c *gin.Context) error {
 	if err != nil || validateDeleteRoot(input, shape) != nil {
 		return routeContractError()
 	}
-	payload := map[string]any{"expectedVersion": int(input.ExpectedVersion), "archiveCatalog": *input.ArchiveCatalog}
+	archiveCatalog := false
+	if input.ArchiveCatalog != nil {
+		archiveCatalog = *input.ArchiveCatalog
+	}
+	payload := map[string]any{"expectedVersion": int(input.ExpectedVersion), "archiveCatalog": archiveCatalog}
 	return mutate(routes, c, "admin.library-source.delete:"+rootID, payload, http.StatusOK,
 		func(string) (DeletedDTO, error) {
 			return routes.service.DeleteRoot(c.Request.Context(), rootID, input)
@@ -497,6 +501,8 @@ func validateDeleteRoot(input DeleteRootInput, shape map[string]json.RawMessage)
 	if !version || !archive || int(input.ExpectedVersion) < 1 || input.ArchiveCatalog == nil {
 		return routeContractError()
 	}
+	// archiveCatalog remains part of the wire contract, but the value is
+	// intentionally ignored by the service: source removal never archives.
 	return nil
 }
 

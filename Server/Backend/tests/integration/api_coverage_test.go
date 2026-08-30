@@ -20,7 +20,7 @@ import (
 
 func TestGinRoutesCoverEveryLegacyAPI(t *testing.T) {
 	if os.Getenv("XYMUSIC_REQUIRE_FULL_API_PARITY") != "1" {
-		t.Skip("set XYMUSIC_REQUIRE_FULL_API_PARITY=1 for the final 134-endpoint gate")
+		t.Skip("set XYMUSIC_REQUIRE_FULL_API_PARITY=1 for the final API route gate")
 	}
 	environmentPath := os.Getenv("XYMUSIC_INTEGRATION_ENV")
 	if environmentPath == "" {
@@ -74,6 +74,12 @@ func TestGinRoutesCoverEveryLegacyAPI(t *testing.T) {
 	defer runtime.Close()
 	actual := make(map[string]struct{})
 	for _, route := range runtime.Handler.Routes() {
+		// The legacy manifest counts the legacy GET/POST/etc. contract only;
+		// HEAD aliases and the modern local-asset serving route are intentionally
+		// excluded from that parity count.
+		if route.Method == "HEAD" || strings.HasPrefix(route.Path, "/api/v1/assets/") {
+			continue
+		}
 		if strings.HasPrefix(route.Path, "/api/v1/oss/") {
 			continue
 		}
@@ -102,7 +108,7 @@ func TestGinRoutesCoverEveryLegacyAPI(t *testing.T) {
 	}
 	if len(differences) != 0 {
 		sort.Strings(differences)
-		t.Fatalf("Gin API coverage differs from the 134-endpoint manifest (%d registered, %d expected):\n%s", len(actual), len(expected), strings.Join(differences, "\n"))
+		t.Fatalf("Gin API coverage differs from the API manifest (%d registered, %d expected):\n%s", len(actual), len(expected), strings.Join(differences, "\n"))
 	}
 }
 

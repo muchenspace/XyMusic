@@ -36,22 +36,22 @@ func (l *DatabaseLimiter) Consume(ctx context.Context, key string, maximum int, 
 	observedAt := l.now().UTC()
 	resetAt := observedAt.Add(window)
 	keyHash := fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
-	var count int
+	var tokens int
 	var actualResetAt time.Time
 	err := l.pool.QueryRow(ctx, `
-		insert into rate_limit_buckets (key_hash, count, reset_at, updated_at)
+		insert into rate_limit_buckets (key_hash, tokens, reset_at, updated_at)
 		values ($1, 1, $2, $3)
 		on conflict (key_hash) do update set
-			count = case
+			tokens = case
 				when rate_limit_buckets.reset_at <= $3 then 1
-				else least(rate_limit_buckets.count + 1, $4)
+				else least(rate_limit_buckets.tokens + 1, $4)
 			end,
 			reset_at = case
 				when rate_limit_buckets.reset_at <= $3 then $2
 				else rate_limit_buckets.reset_at
 			end,
 			updated_at = $3
-		returning count, reset_at`, keyHash, resetAt, observedAt, maximum+1).Scan(&count, &actualResetAt)
+		returning tokens, reset_at`, keyHash, resetAt, observedAt, maximum+1).Scan(&tokens, &actualResetAt)
 	if err != nil {
 		return apperror.New(
 			apperror.CodeDependencyUnavailable,
@@ -59,7 +59,7 @@ func (l *DatabaseLimiter) Consume(ctx context.Context, key string, maximum int, 
 			apperror.WithCause(err),
 		)
 	}
-	if count > maximum {
+	if tokens > maximum {
 		retryAfter := int(math.Ceil(actualResetAt.Sub(observedAt).Seconds()))
 		if retryAfter < 1 {
 			retryAfter = 1

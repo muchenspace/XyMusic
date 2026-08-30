@@ -64,7 +64,7 @@ export interface Lyrics {
   translationSource?: string;
 }
 export interface PlaybackGrant {
-  url: string;
+  streamUrl: string;
   expiresAt: string;
   selectedQuality: ConcretePlaybackQuality;
   bitrate?: number;

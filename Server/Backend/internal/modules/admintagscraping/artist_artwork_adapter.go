@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"xymusic/server/internal/modules/adminmedia"
@@ -29,7 +30,7 @@ func (adapter *AdminMediaArtworkApplier) ApplyArtistArtwork(
 		return apperror.Validation("Artist artwork apply context is invalid")
 	}
 	digest := sha256.Sum256(artwork.Bytes)
-	upload, err := adapter.media.CreateUpload(ctx, actorID, adminmedia.CreateUploadInput{
+	upload, _, err := adapter.media.CreateUpload(ctx, actorID, uuid.NewString(), adminmedia.CreateUploadInput{
 		Purpose:        adminmedia.PurposeArtistArtwork,
 		TargetID:       artistID,
 		FileName:       "scraped-artist." + artwork.Extension,
@@ -40,21 +41,20 @@ func (adapter *AdminMediaArtworkApplier) ApplyArtistArtwork(
 	if err != nil {
 		return err
 	}
-	if err := adapter.media.UploadContent(
+	if err := adapter.media.UploadDirect(
 		ctx,
-		actorID,
 		upload.ID,
-		artwork.ContentType,
-		int64(len(artwork.Bytes)),
 		bytes.NewReader(artwork.Bytes),
+		int64(len(artwork.Bytes)),
 	); err != nil {
 		return adapter.abandonAfterFailure(ctx, actorID, upload.ID, err)
 	}
 	completionContext, cancelCompletion := artworkFollowupContext(ctx)
-	_, err = adapter.media.CompleteUpload(
+	_, _, err = adapter.media.CompleteUpload(
 		completionContext,
 		actorID,
 		upload.ID,
+		uuid.NewString(),
 		adminmedia.CompleteUploadInput{CompletionFence: &artistArtworkCompletionFence{
 			executionContext: ctx,
 			mutationFence:    completionMutationFenceFromContext(ctx),

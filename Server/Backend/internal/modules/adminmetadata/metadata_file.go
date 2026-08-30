@@ -251,6 +251,29 @@ func streamLayoutsEqual(before, after []StreamFingerprint) bool {
 	return stableEqual(filter(before), filter(after))
 }
 
+func streamHasArtwork(stream ProbeStream) bool {
+	if !strings.EqualFold(stream.CodecType, "video") {
+		return false
+	}
+	if stream.Disposition["attached_pic"] > 0 {
+		return true
+	}
+	// Containers do not agree on where they label a cover stream. MP4/M4A
+	// commonly uses handler_name, while Matroska/older FFmpeg builds may put
+	// the marker in title/comment or a MIME tag. Treat only explicit artwork
+	// markers as a cover so real video streams are not mistaken for album art.
+	tags := normalizedTags(stream.Tags, nil)
+	for _, key := range []string{"comment", "title", "handler_name", "filename", "mimetype", "cover_type"} {
+		value := strings.ToLower(firstTag(tags, key))
+		if strings.Contains(value, "cover") || strings.Contains(value, "album art") ||
+			strings.Contains(value, "albumart") || strings.Contains(value, "front picture") ||
+			strings.Contains(value, "attached picture") {
+			return true
+		}
+	}
+	return false
+}
+
 func metadataFileFromProbe(probe ProbeOutput, fallbackTitle string) (ProbedMetadataFile, error) {
 	var audio *ProbeStream
 	for index := range probe.Streams {
@@ -319,12 +342,9 @@ func metadataFileFromProbe(probe ProbeOutput, fallbackTitle string) (ProbedMetad
 	hasArtwork := false
 	streams := make([]StreamFingerprint, 0, len(probe.Streams))
 	for position, stream := range probe.Streams {
-		attached := stream.Disposition["attached_pic"] == 1
-		if stream.CodecType == "video" {
-			comment := strings.ToLower(firstTag(normalizedTags(stream.Tags, nil), "comment"))
-			if attached || strings.Contains(comment, "cover") {
-				hasArtwork = true
-			}
+		attached := streamHasArtwork(stream)
+		if attached {
+			hasArtwork = true
 		}
 		index := position
 		if stream.Index != nil {

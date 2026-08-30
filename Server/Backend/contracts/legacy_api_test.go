@@ -150,16 +150,16 @@ func TestLegacyAPIManifest(t *testing.T) {
 	}
 
 	assertCounts(t, "method", methodCounts, map[string]int{
-		"GET": 47, "POST": 65, "PUT": 4, "PATCH": 11, "DELETE": 6,
+		"GET": 47, "POST": 64, "PUT": 5, "PATCH": 11, "DELETE": 6,
 	})
 	assertCounts(t, "auth", authCounts, map[string]int{
-		"none": 14, "bearer": 29, "refresh-token": 1, "admin-session": 88, "admin-refresh-cookie": 1,
+		"none": 15, "bearer": 30, "refresh-token": 1, "admin-session": 86, "admin-refresh-cookie": 1,
 	})
 	assertCounts(t, "idempotency", idempotencyCounts, map[string]int{
-		"none": 75, "required": 58,
+		"none": 76, "required": 57,
 	})
 	assertCounts(t, "bodyKind", bodyCounts, map[string]int{
-		"none": 62, "json": 68, "json-optional": 2, "binary": 1,
+		"none": 62, "json": 67, "json-optional": 2, "binary": 2,
 	})
 
 	keyContracts := []apiContract{

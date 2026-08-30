@@ -15,17 +15,15 @@ const (
 type JobType string
 
 const (
-	JobTypeSourceScan   JobType = "SOURCE_SCAN"
-	JobTypeTagWrite     JobType = "TAG_WRITE"
-	JobTypeMediaProcess JobType = "MEDIA_PROCESS"
+	JobTypeSourceScan JobType = "SOURCE_SCAN"
+	JobTypeTagWrite   JobType = "TAG_WRITE"
 )
 
 type JobSource string
 
 const (
-	JobSourceMedia JobSource = "MEDIA"
-	JobSourceScan  JobSource = "SCAN"
-	JobSourceTag   JobSource = "TAG"
+	JobSourceScan JobSource = "SCAN"
+	JobSourceTag  JobSource = "TAG"
 )
 
 type SortField string

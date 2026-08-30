@@ -37,7 +37,7 @@ func TestRoutesExposeJobQueriesAndIdempotentMutations(t *testing.T) {
 	requests := []struct {
 		method, path, body string
 	}{
-		{http.MethodGet, "/api/v1/admin/jobs?page=2&pageSize=1000&search=track&status=FAILED&type=MEDIA_PROCESS&sort=updatedAt&order=asc", ""},
+		{http.MethodGet, "/api/v1/admin/jobs?page=2&pageSize=1000&search=track&status=FAILED&type=TAG_WRITE&sort=updatedAt&order=asc", ""},
 		{http.MethodGet, "/api/v1/admin/jobs/" + jobID, ""},
 		{http.MethodPost, "/api/v1/admin/jobs/" + jobID + "/retry", ""},
 		{http.MethodPost, "/api/v1/admin/jobs/" + jobID + "/cancel", `{"reason":"stop"}`},

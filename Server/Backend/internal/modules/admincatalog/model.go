@@ -113,27 +113,6 @@ type SourceRecord struct {
 	Cue            bool
 }
 
-type MediaProcessingRecord struct {
-	Status        string
-	Attempts      int
-	MaxAttempts   int
-	LastError     *string
-	LastErrorCode *string
-	UpdatedAt     time.Time
-}
-
-type VariantRecord struct {
-	ID         string
-	Quality    string
-	MimeType   string
-	Codec      string
-	Container  string
-	Bitrate    int
-	SampleRate *int
-	Status     string
-	UpdatedAt  time.Time
-}
-
 type LyricRecord struct {
 	ID        string
 	Language  string
@@ -164,8 +143,6 @@ type TrackRecord struct {
 	Source                   *SourceRecord
 	MetadataStatus           MetadataStatus
 	MetadataVersion          *int
-	MediaProcessing          *MediaProcessingRecord
-	Variants                 []VariantRecord
 	ActiveWritebackJobID     *string
 	LatestWritebackErrorCode *string
 	LatestWritebackError     *string

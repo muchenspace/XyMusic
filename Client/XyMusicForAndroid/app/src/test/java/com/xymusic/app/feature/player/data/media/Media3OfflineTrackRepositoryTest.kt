@@ -245,9 +245,10 @@ class Media3OfflineTrackRepositoryTest {
     private class RecordingDownloader(private val cache: FakeOfflineMediaCache) : OfflineMediaDownloader {
         var downloadCount = 0
 
-        override suspend fun download(grant: PlaybackGrant) {
+        override suspend fun download(grant: PlaybackGrant): Long? {
             downloadCount += 1
             cache.cachedKeys += grant.cacheKey
+            return grant.contentLength ?: 128L
         }
     }
 
@@ -255,10 +256,11 @@ class Media3OfflineTrackRepositoryTest {
         val downloadStarted = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
 
-        override suspend fun download(grant: PlaybackGrant) {
+        override suspend fun download(grant: PlaybackGrant): Long? {
             downloadStarted.complete(Unit)
             release.await()
             cache.cachedKeys += grant.cacheKey
+            return grant.contentLength ?: 128L
         }
     }
 
@@ -266,10 +268,11 @@ class Media3OfflineTrackRepositoryTest {
         val downloadStarted = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
 
-        override suspend fun download(grant: PlaybackGrant) = withContext(NonCancellable) {
+        override suspend fun download(grant: PlaybackGrant): Long? = withContext(NonCancellable) {
             downloadStarted.complete(Unit)
             release.await()
             cache.cachedKeys += grant.cacheKey
+            grant.contentLength ?: 128L
         }
     }
 
@@ -278,12 +281,13 @@ class Media3OfflineTrackRepositoryTest {
         private val allDownloadsStarted = CompletableDeferred<Unit>()
         private val startedDownloads = AtomicInteger()
 
-        override suspend fun download(grant: PlaybackGrant) {
+        override suspend fun download(grant: PlaybackGrant): Long? {
             if (startedDownloads.incrementAndGet() == expectedDownloads) {
                 allDownloadsStarted.complete(Unit)
             }
             allDownloadsStarted.await()
             cache.cachedKeys += grant.cacheKey
+            return grant.contentLength ?: 128L
         }
     }
 
@@ -322,9 +326,9 @@ class Media3OfflineTrackRepositoryTest {
 
         fun grant(trackId: String) = PlaybackGrant(
             trackId = trackId,
-            variantId = "variant-$trackId",
+            sessionId = "variant-$trackId",
             selectedQuality = PreferredQuality.STANDARD,
-            signedUrl = "https://media.example/$trackId",
+            streamUrl = "https://media.example/$trackId",
             expiresAtEpochMillis = Long.MAX_VALUE,
             mimeType = "audio/mpeg",
             codec = "mp3",

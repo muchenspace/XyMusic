@@ -16,7 +16,7 @@ func TestMergeSettingsPreservesLegacyConfigurationContract(t *testing.T) {
 	port := 5544
 	databaseName := "music_next"
 	maximumConnections := 20
-	storageEndpoint := "https://objects.example.test/"
+	assetDirectory := "new-assets"
 	mediaDirectory := "new-tools"
 	libraryName := "Archive"
 	libraryDirectory := "archive"
@@ -34,7 +34,7 @@ func TestMergeSettingsPreservesLegacyConfigurationContract(t *testing.T) {
 		Database: &DatabaseInput{
 			Host: &host, Port: &port, Database: &databaseName, MaximumConnections: &maximumConnections,
 		},
-		Storage:    &StorageInput{Endpoint: OptionalNullableString{Set: true, Value: &storageEndpoint}},
+		Storage:    &StorageInput{AssetDirectory: &assetDirectory},
 		MediaTools: &MediaToolsInput{Directory: &mediaDirectory},
 		LocalLibrary: &LocalLibraryInput{
 			Name: &libraryName, Directory: &libraryDirectory, Mode: &mode, Enabled: &enabled,
@@ -48,8 +48,8 @@ func TestMergeSettingsPreservesLegacyConfigurationContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if candidate.Database.MaxConnections != 20 || candidate.Storage.Endpoint != "https://objects.example.test" {
-		t.Fatalf("database/storage = %#v/%#v", candidate.Database, candidate.Storage)
+	if candidate.Database.MaxConnections != 20 || candidate.MediaStorage.AssetDirectory != "new-assets" {
+		t.Fatalf("database/storage = %#v/%#v", candidate.Database, candidate.MediaStorage)
 	}
 	if candidate.Media.Mode != "DIRECTORY" || candidate.Paths.MediaToolsDirectory != "new-tools" {
 		t.Fatalf("media = %#v paths=%#v", candidate.Media, candidate.Paths)
@@ -71,7 +71,7 @@ func TestMergeSettingsPreservesLegacyConfigurationContract(t *testing.T) {
 		t.Fatalf("trusted proxies = %#v", candidate.HTTP.TrustedProxyAddresses)
 	}
 	fields := changedFields(current, candidate)
-	for _, required := range []string{"database.url", "storage.endpoint", "media.ffmpegPath", "localLibrary.name", "registration.enabled", "http.ipv4Port"} {
+	for _, required := range []string{"database.url", "storage.assetDirectory", "media.ffmpegPath", "localLibrary.name", "registration.enabled", "http.ipv4Port"} {
 		if !contains(fields, required) {
 			t.Errorf("changed fields missing %q: %v", required, fields)
 		}
@@ -80,7 +80,7 @@ func TestMergeSettingsPreservesLegacyConfigurationContract(t *testing.T) {
 
 // Redacted settings responses must survive the actual JSON contract. A client
 // that updates only the library section must not manufacture nil/empty
-// database or object-storage credentials while the request is decoded.
+// database credentials while the request is decoded.
 func TestMergeSettingsPreservesCredentialsWhenRedactedFieldsAreOmittedFromJSON(t *testing.T) {
 	current := settingsTestConfig(t)
 	encoded := []byte(`{"expectedVersion":1,"localLibrary":{"name":"Updated library"}}`)
@@ -98,12 +98,8 @@ func TestMergeSettingsPreservesCredentialsWhenRedactedFieldsAreOmittedFromJSON(t
 	if candidate.Database.URL != current.Database.URL {
 		t.Fatalf("database credentials changed after JSON decode: before=%q after=%q", current.Database.URL, candidate.Database.URL)
 	}
-	if candidate.Storage.AccessKeyID != current.Storage.AccessKeyID || candidate.Storage.SecretAccessKey != current.Storage.SecretAccessKey {
-		t.Fatalf("storage credentials changed after JSON decode: before=%q/%q after=%q/%q",
-			current.Storage.AccessKeyID, current.Storage.SecretAccessKey,
-			candidate.Storage.AccessKeyID, candidate.Storage.SecretAccessKey)
-	}
 }
+
 func TestMergeSettingsLocalLibraryOnlyPreservesExternalDependencies(t *testing.T) {
 	current := settingsTestConfig(t)
 	name := "Second library"
@@ -126,8 +122,8 @@ func TestMergeSettingsLocalLibraryOnlyPreservesExternalDependencies(t *testing.T
 	if candidate.Database != current.Database {
 		t.Fatalf("database changed during local-library-only update: before=%#v after=%#v", current.Database, candidate.Database)
 	}
-	if candidate.Storage != current.Storage {
-		t.Fatalf("storage changed during local-library-only update: before=%#v after=%#v", current.Storage, candidate.Storage)
+	if candidate.MediaStorage != current.MediaStorage {
+		t.Fatalf("storage changed during local-library-only update: before=%#v after=%#v", current.MediaStorage, candidate.MediaStorage)
 	}
 	if candidate.LocalLibrary.Name != name || candidate.LocalLibrary.Directory != directory ||
 		candidate.LocalLibrary.Mode != mode || candidate.LocalLibrary.Enabled != enabled ||
@@ -135,6 +131,7 @@ func TestMergeSettingsLocalLibraryOnlyPreservesExternalDependencies(t *testing.T
 		t.Fatalf("local library was not updated: %#v", candidate.LocalLibrary)
 	}
 }
+
 func TestMergeSettingsEverySectionPreservesExternalCredentials(t *testing.T) {
 	current := settingsTestConfig(t)
 	cases := []struct {
@@ -151,8 +148,8 @@ func TestMergeSettingsEverySectionPreservesExternalCredentials(t *testing.T) {
 		{
 			name: "storage",
 			input: func() UpdateInput {
-				region := "eu-west-1"
-				return UpdateInput{Storage: &StorageInput{Region: &region}}
+				assetDirectory := "custom-assets"
+				return UpdateInput{Storage: &StorageInput{AssetDirectory: &assetDirectory}}
 			},
 		},
 		{
@@ -207,15 +204,10 @@ func TestMergeSettingsEverySectionPreservesExternalCredentials(t *testing.T) {
 			if candidate.Database.URL != current.Database.URL {
 				t.Fatalf("database credentials changed: before=%q after=%q", current.Database.URL, candidate.Database.URL)
 			}
-			if candidate.Storage.AccessKeyID != current.Storage.AccessKeyID ||
-				candidate.Storage.SecretAccessKey != current.Storage.SecretAccessKey {
-				t.Fatalf("storage credentials changed: before=%q/%q after=%q/%q",
-					current.Storage.AccessKeyID, current.Storage.SecretAccessKey,
-					candidate.Storage.AccessKeyID, candidate.Storage.SecretAccessKey)
-			}
 		})
 	}
 }
+
 func TestMergeSettingsValidatesBoundsAndNullableFields(t *testing.T) {
 	current := settingsTestConfig(t)
 	invalidPort := 0
@@ -227,14 +219,10 @@ func TestMergeSettingsValidatesBoundsAndNullableFields(t *testing.T) {
 	if !apperror.IsCode(err, apperror.CodeValidationError) {
 		t.Fatalf("missing registration error = %v", err)
 	}
-	candidate, err := mergeStorage(current, StorageInput{
-		Endpoint: OptionalNullableString{Set: true}, PublicBaseURL: OptionalNullableString{Set: true},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if candidate.Storage.Endpoint != "" || candidate.Storage.PublicBaseURL != "" {
-		t.Fatalf("nullable storage values = %#v", candidate.Storage)
+	invalidTTL := 10
+	_, err = mergeStorage(current, StorageInput{UploadTTLSeconds: &invalidTTL})
+	if !apperror.IsCode(err, apperror.CodeValidationError) {
+		t.Fatalf("invalid upload TTL error = %v", err)
 	}
 }
 
@@ -271,8 +259,8 @@ func TestPresentSettingsHidesSecretsAndReportsRestartFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Database.PasswordConfigured || !result.Storage.SecretAccessKeyConfigured {
-		t.Fatalf("secret flags = %#v/%#v", result.Database, result.Storage)
+	if !result.Database.PasswordConfigured {
+		t.Fatalf("secret flags = %#v", result.Database)
 	}
 	if result.Database.Username != "xymusic" || result.Database.Database != "xymusic" {
 		t.Fatalf("database presentation = %#v", result.Database)
@@ -288,8 +276,10 @@ func settingsTestConfig(t *testing.T) config.Config {
 		"NODE_ENV": "production", "DATABASE_URL": "postgres://xymusic:password@127.0.0.1:5432/xymusic?sslmode=disable",
 		"DATABASE_MAX_CONNECTIONS": "10", "ACCESS_TOKEN_SECRET": "12345678901234567890123456789012",
 		"IDEMPOTENCY_ENCRYPTION_SECRET": "22345678901234567890123456789012",
-		"CURSOR_SIGNING_SECRET":         "32345678901234567890123456789012", "S3_ENDPOINT": "http://127.0.0.1:9000",
-		"S3_BUCKET": "xymusic", "S3_ACCESS_KEY_ID": "access", "S3_SECRET_ACCESS_KEY": "secret",
+		"CURSOR_SIGNING_SECRET":         "32345678901234567890123456789012",
+		"PLAYBACK_TICKET_SECRET":        "42345678901234567890123456789012",
+		"MEDIA_ASSET_DIRECTORY":         "assets",
+		"MEDIA_TRANSCODE_DIRECTORY":     "transcode",
 		"HTTP_HOST": "0.0.0.0", "HTTP_PORT": "3000", "LOCAL_MUSIC_DIRECTORY": "music",
 	})
 	if err != nil {

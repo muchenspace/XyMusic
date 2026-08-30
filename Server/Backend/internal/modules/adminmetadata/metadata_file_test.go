@@ -53,6 +53,26 @@ func TestMetadataSnapshotFromProbeNormalizesTagsAndStreams(t *testing.T) {
 	}
 }
 
+func TestMetadataSnapshotRecognizesContainerArtworkMarkers(t *testing.T) {
+	probe := ProbeOutput{
+		Format: &struct {
+			Duration string         `json:"duration"`
+			Tags     map[string]any `json:"tags"`
+		}{Tags: map[string]any{"title": "Song", "artist": "Artist"}},
+		Streams: []ProbeStream{
+			{CodecType: "audio", CodecName: "aac"},
+			{CodecType: "video", CodecName: "mjpeg", Tags: map[string]any{"handler_name": "Cover Art"}},
+		},
+	}
+	metadata, err := MetadataSnapshotFromProbe(probe, "fallback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !metadata.HasArtwork {
+		t.Fatalf("expected artwork marker to be detected: %+v", metadata)
+	}
+}
+
 func TestProbeAndRemuxUseBoundedMediaToolCommands(t *testing.T) {
 	probeJSON, err := json.Marshal(ProbeOutput{
 		Format: &struct {

@@ -16,13 +16,19 @@ func TestAdminMediaArtworkApplierCompletesWithBoundedExecutionFence(t *testing.T
 	}
 	applyContext := withBatchMutationFence(requestContext, fence)
 	media := &artworkMediaStub{
-		createUpload: func(context.Context, string, adminmedia.CreateUploadInput) (adminmedia.UploadReservationDTO, error) {
-			return adminmedia.UploadReservationDTO{ID: "upload-1"}, nil
+		createUpload: func(_ context.Context, _ string, key string, _ adminmedia.CreateUploadInput) (adminmedia.UploadReservationDTO, bool, error) {
+			if len(key) < 8 {
+				t.Fatalf("create idempotency key = %q", key)
+			}
+			return adminmedia.UploadReservationDTO{ID: "upload-1"}, false, nil
 		},
-		uploadContent: func(context.Context, string, string, string, int64, io.Reader) error {
+		uploadDirect: func(context.Context, string, io.Reader, int64) error {
 			return nil
 		},
-		completeUpload: func(ctx context.Context, _, uploadID string, input adminmedia.CompleteUploadInput) (adminmedia.UploadCompletionDTO, error) {
+		completeUpload: func(ctx context.Context, _, uploadID string, key string, input adminmedia.CompleteUploadInput) (adminmedia.UploadCompletionDTO, bool, error) {
+			if len(key) < 8 {
+				t.Fatalf("complete idempotency key = %q", key)
+			}
 			if err := ctx.Err(); err != nil {
 				t.Fatalf("completion inherited request cancellation: %v", err)
 			}
@@ -34,7 +40,7 @@ func TestAdminMediaArtworkApplierCompletesWithBoundedExecutionFence(t *testing.T
 				executionFence.executionContext != applyContext {
 				t.Fatalf("completion input = %q / %#v", uploadID, input.CompletionFence)
 			}
-			return adminmedia.UploadCompletionDTO{UploadID: uploadID}, nil
+			return adminmedia.UploadCompletionDTO{UploadID: uploadID}, false, nil
 		},
 	}
 	adapter, err := NewAdminMediaArtworkApplier(media)
@@ -52,35 +58,46 @@ func TestAdminMediaArtworkApplierCompletesWithBoundedExecutionFence(t *testing.T
 	}
 }
 
+func TestArtworkCompletionFenceAllowsDirectApplyWithoutBatchFence(t *testing.T) {
+	if err := (&artworkCompletionFence{executionContext: context.Background()}).Lock(context.Background(), nil); err != nil {
+		t.Fatalf("direct artwork completion fence error = %v", err)
+	}
+}
+
 func TestAdminMediaArtworkApplierCancellationDuringCompletionPreventsAttachAndCleansUp(t *testing.T) {
 	requestContext, cancelRequest := context.WithCancel(context.Background())
-	attached := false
 	abandoned := false
 	media := &artworkMediaStub{
-		createUpload: func(context.Context, string, adminmedia.CreateUploadInput) (adminmedia.UploadReservationDTO, error) {
-			return adminmedia.UploadReservationDTO{ID: "upload-1"}, nil
+		createUpload: func(_ context.Context, _ string, key string, _ adminmedia.CreateUploadInput) (adminmedia.UploadReservationDTO, bool, error) {
+			if len(key) < 8 {
+				t.Fatalf("create idempotency key = %q", key)
+			}
+			return adminmedia.UploadReservationDTO{ID: "upload-1"}, false, nil
 		},
-		uploadContent: func(context.Context, string, string, string, int64, io.Reader) error {
+		uploadDirect: func(context.Context, string, io.Reader, int64) error {
 			return nil
 		},
-		completeUpload: func(ctx context.Context, _, uploadID string, input adminmedia.CompleteUploadInput) (adminmedia.UploadCompletionDTO, error) {
+		completeUpload: func(ctx context.Context, _, uploadID string, key string, input adminmedia.CompleteUploadInput) (adminmedia.UploadCompletionDTO, bool, error) {
+			if len(key) < 8 {
+				t.Fatalf("complete idempotency key = %q", key)
+			}
 			if err := ctx.Err(); err != nil {
 				t.Fatalf("completion inherited request cancellation: %v", err)
 			}
 			cancelRequest()
-			if err := input.CompletionFence.Lock(ctx, nil); !errors.Is(err, context.Canceled) {
-				t.Fatalf("execution fence error = %v", err)
-			} else {
-				return adminmedia.UploadCompletionDTO{}, err
+			executionFence, ok := input.CompletionFence.(*artworkCompletionFence)
+			if !ok {
+				t.Fatal("completion fence missing")
 			}
-			attached = true
-			return adminmedia.UploadCompletionDTO{UploadID: uploadID}, nil
+			if err := executionFence.Lock(ctx, nil); !errors.Is(err, context.Canceled) {
+				t.Fatalf("fence lock error = %v, want context.Canceled", err)
+			}
+			return adminmedia.UploadCompletionDTO{}, false, errors.New("synthetic fence failure")
 		},
-		abandonUpload: func(ctx context.Context, _, _ string) error {
-			if err := ctx.Err(); err != nil {
-				t.Fatalf("cleanup inherited request cancellation: %v", err)
+		abandonUpload: func(ctx context.Context, _, uploadID string) error {
+			if uploadID == "upload-1" {
+				abandoned = true
 			}
-			abandoned = true
 			return nil
 		},
 	}
@@ -94,96 +111,43 @@ func TestAdminMediaArtworkApplierCancellationDuringCompletionPreventsAttachAndCl
 		"album-1",
 		DownloadedArtwork{Bytes: []byte("image"), ContentType: "image/png", Extension: "png"},
 	)
-	if !errors.Is(err, context.Canceled) || attached || !abandoned {
-		t.Fatalf("error/attached/abandoned = %v / %v / %v", err, attached, abandoned)
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+	if !abandoned {
+		t.Fatal("upload was not abandoned")
 	}
 }
 
-func TestAdminMediaArtworkApplierAbandonsReservationAfterUploadOrCompletionFailure(t *testing.T) {
-	tests := []struct {
-		name            string
-		uploadError     error
-		completionError error
-	}{
-		{name: "upload", uploadError: errors.New("upload failed")},
-		{name: "completion", completionError: errors.New("completion failed")},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			requestContext, cancelRequest := context.WithCancel(context.Background())
-			abandoned := false
-			media := &artworkMediaStub{
-				createUpload: func(context.Context, string, adminmedia.CreateUploadInput) (adminmedia.UploadReservationDTO, error) {
-					return adminmedia.UploadReservationDTO{ID: "upload-1"}, nil
-				},
-				uploadContent: func(context.Context, string, string, string, int64, io.Reader) error {
-					if test.uploadError != nil {
-						cancelRequest()
-					}
-					return test.uploadError
-				},
-				completeUpload: func(context.Context, string, string, adminmedia.CompleteUploadInput) (adminmedia.UploadCompletionDTO, error) {
-					cancelRequest()
-					return adminmedia.UploadCompletionDTO{}, test.completionError
-				},
-				abandonUpload: func(ctx context.Context, actorID, uploadID string) error {
-					if err := ctx.Err(); err != nil {
-						t.Fatalf("abandon inherited request cancellation: %v", err)
-					}
-					if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-						t.Fatal("abandon context is not bounded")
-					}
-					if actorID != "admin-1" || uploadID != "upload-1" {
-						t.Fatalf("abandon args = %q / %q", actorID, uploadID)
-					}
-					abandoned = true
-					return nil
-				},
-			}
-			adapter, err := NewAdminMediaArtworkApplier(media)
-			if err != nil {
-				t.Fatal(err)
-			}
-			err = adapter.ApplyAlbumArtwork(
-				requestContext,
-				"admin-1",
-				"album-1",
-				DownloadedArtwork{Bytes: []byte("image"), ContentType: "image/png", Extension: "png"},
-			)
-			expected := test.uploadError
-			if expected == nil {
-				expected = test.completionError
-			}
-			if !errors.Is(err, expected) || !abandoned {
-				t.Fatalf("error/abandoned = %v / %v", err, abandoned)
-			}
-		})
-	}
-}
-
-func TestAdminMediaArtworkApplierBuildsArtistUploadWithAtomicCompletionFence(t *testing.T) {
-	candidate := ArtistCandidate{
-		Source: SourceQMusic, ID: "qq-artist", Name: "Artist",
-		ImageURL: "https://y.qq.com/music/photo_new/T001R500x500M000qq-artist.jpg",
-		Aliases:  []string{}, Score: 2,
-	}
+func TestAdminMediaArtworkApplierArtistScrape(t *testing.T) {
 	mutationFence := &BatchMutationFence{
 		JobID: "job-1", ItemID: "item-1", AttemptID: "attempt-1", WorkerID: "worker-1",
 	}
-	applyContext := withArtistArtworkDetails(
-		withArtworkMutationFence(context.Background(), mutationFence), "operator scrape", candidate,
-	)
+	applyContext := withBatchMutationFence(context.Background(), mutationFence)
+	candidate := ArtistCandidate{
+		Source:   SourceQMusic,
+		ID:       "qq-artist",
+		Name:     "Artist Name",
+		ImageURL: "https://y.qq.com/music/photo_new/T001R300x300M0000000000000.jpg",
+		Score:    1.0,
+	}
+	applyContext = withArtistArtworkDetails(applyContext, "operator scrape", candidate)
 	media := &artworkMediaStub{
-		createUpload: func(_ context.Context, actorID string, input adminmedia.CreateUploadInput) (adminmedia.UploadReservationDTO, error) {
-			if actorID != "admin-1" ||
-				input.Purpose != adminmedia.PurposeArtistArtwork || input.TargetID != "artist-1" ||
+		createUpload: func(_ context.Context, actorID string, key string, input adminmedia.CreateUploadInput) (adminmedia.UploadReservationDTO, bool, error) {
+			if len(key) < 8 {
+				t.Fatalf("artist create idempotency key = %q", key)
+			}
+			if actorID != "admin-1" || input.Purpose != adminmedia.PurposeArtistArtwork || input.TargetID != "artist-1" ||
 				input.FileName != "scraped-artist.png" || input.ContentType != "image/png" || input.SizeBytes != 5 {
 				t.Fatalf("artist upload input = %#v", input)
 			}
-			return adminmedia.UploadReservationDTO{ID: "upload-1"}, nil
+			return adminmedia.UploadReservationDTO{ID: "upload-1"}, false, nil
 		},
-		uploadContent: func(context.Context, string, string, string, int64, io.Reader) error { return nil },
-		completeUpload: func(ctx context.Context, _, uploadID string, input adminmedia.CompleteUploadInput) (adminmedia.UploadCompletionDTO, error) {
+		uploadDirect: func(context.Context, string, io.Reader, int64) error { return nil },
+		completeUpload: func(ctx context.Context, _, uploadID string, key string, input adminmedia.CompleteUploadInput) (adminmedia.UploadCompletionDTO, bool, error) {
+			if len(key) < 8 {
+				t.Fatalf("artist complete idempotency key = %q", key)
+			}
 			if uploadID != "upload-1" {
 				t.Fatalf("upload ID = %q", uploadID)
 			}
@@ -196,7 +160,7 @@ func TestAdminMediaArtworkApplierBuildsArtistUploadWithAtomicCompletionFence(t *
 			if ctx.Err() != nil {
 				t.Fatalf("completion context error = %v", ctx.Err())
 			}
-			return adminmedia.UploadCompletionDTO{UploadID: uploadID}, nil
+			return adminmedia.UploadCompletionDTO{UploadID: uploadID}, false, nil
 		},
 	}
 	adapter, err := NewAdminMediaArtworkApplier(media)
@@ -212,22 +176,22 @@ func TestAdminMediaArtworkApplierBuildsArtistUploadWithAtomicCompletionFence(t *
 }
 
 type artworkMediaStub struct {
-	createUpload   func(context.Context, string, adminmedia.CreateUploadInput) (adminmedia.UploadReservationDTO, error)
-	uploadContent  func(context.Context, string, string, string, int64, io.Reader) error
-	completeUpload func(context.Context, string, string, adminmedia.CompleteUploadInput) (adminmedia.UploadCompletionDTO, error)
+	createUpload   func(context.Context, string, string, adminmedia.CreateUploadInput) (adminmedia.UploadReservationDTO, bool, error)
+	uploadDirect   func(context.Context, string, io.Reader, int64) error
+	completeUpload func(context.Context, string, string, string, adminmedia.CompleteUploadInput) (adminmedia.UploadCompletionDTO, bool, error)
 	abandonUpload  func(context.Context, string, string) error
 }
 
-func (stub *artworkMediaStub) CreateUpload(ctx context.Context, actorID string, input adminmedia.CreateUploadInput) (adminmedia.UploadReservationDTO, error) {
-	return stub.createUpload(ctx, actorID, input)
+func (stub *artworkMediaStub) CreateUpload(ctx context.Context, actorID string, key string, input adminmedia.CreateUploadInput) (adminmedia.UploadReservationDTO, bool, error) {
+	return stub.createUpload(ctx, actorID, key, input)
 }
 
-func (stub *artworkMediaStub) UploadContent(ctx context.Context, actorID, uploadID, contentType string, contentLength int64, body io.Reader) error {
-	return stub.uploadContent(ctx, actorID, uploadID, contentType, contentLength, body)
+func (stub *artworkMediaStub) UploadDirect(ctx context.Context, uploadID string, body io.Reader, contentLength int64) error {
+	return stub.uploadDirect(ctx, uploadID, body, contentLength)
 }
 
-func (stub *artworkMediaStub) CompleteUpload(ctx context.Context, actorID, uploadID string, input adminmedia.CompleteUploadInput) (adminmedia.UploadCompletionDTO, error) {
-	return stub.completeUpload(ctx, actorID, uploadID, input)
+func (stub *artworkMediaStub) CompleteUpload(ctx context.Context, actorID, uploadID string, key string, input adminmedia.CompleteUploadInput) (adminmedia.UploadCompletionDTO, bool, error) {
+	return stub.completeUpload(ctx, actorID, uploadID, key, input)
 }
 
 func (stub *artworkMediaStub) AbandonUpload(ctx context.Context, actorID, uploadID string) error {

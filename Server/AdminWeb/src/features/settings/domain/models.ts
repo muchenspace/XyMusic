@@ -11,14 +11,14 @@ export interface DatabaseSettingsInput {
 }
 
 export interface StorageSettingsInput {
-  endpoint?: string | null;
-  publicBaseUrl?: string | null;
-  region?: string;
-  bucket?: string;
-  accessKeyId?: string;
-  secretAccessKey?: string;
-  forcePathStyle?: boolean;
-  signedUrlTtlSeconds?: number;
+  assetDirectory?: string;
+  transcodeDirectory?: string;
+  uploadTtlSeconds?: number;
+  streamTtlSeconds?: number;
+  streamMaxConcurrent?: number;
+  streamIdleTimeoutSeconds?: number;
+  transcodeTimeoutSeconds?: number;
+  transcodeCacheMaxBytes?: number;
   maxUploadBytes?: number;
 }
 
@@ -33,14 +33,14 @@ export interface RuntimeSettings {
   restartRequiredFields: string[];
   database: DatabaseSettingsInput & { passwordConfigured: boolean; lockedFields: string[] };
   storage: {
-    endpoint: string | null;
-    publicBaseUrl: string | null;
-    region: string;
-    bucket: string;
-    accessKeyId: string;
-    secretAccessKeyConfigured: boolean;
-    forcePathStyle: boolean;
-    signedUrlTtlSeconds: number;
+    assetDirectory: string;
+    transcodeDirectory: string;
+    uploadTtlSeconds: number;
+    streamTtlSeconds: number;
+    streamMaxConcurrent: number;
+    streamIdleTimeoutSeconds: number;
+    transcodeTimeoutSeconds: number;
+    transcodeCacheMaxBytes: number;
     maxUploadBytes: number;
     lockedFields: string[];
   };

@@ -2,7 +2,7 @@ import type { ConcretePlaybackQuality, PlaybackGrant } from "../../domain/music"
 import type { PlaybackUseCases } from "../use-cases/PlaybackUseCases";
 
 interface CachedGrant {
-  url: string;
+  streamUrl: string;
   expiresAt: string;
   selectedQuality: ConcretePlaybackQuality;
   bitrate?: number;

@@ -23,7 +23,11 @@ export function resolveApiUrl(path: string, serverUrl: string): URL {
 
 export function resolveServerResourceUrls<T>(value: T, serverUrl: string): T {
   if (typeof value === "string") {
-    return (value.startsWith("/api/v1/oss/")
+    // API responses intentionally use relative resource URLs so the server
+    // can sit behind a reverse proxy. Resolve every API resource (artwork,
+    // on-demand playback streams, and legacy object-storage URLs) against the
+    // configured server instead of the Tauri/webview origin.
+    return (value.startsWith("/api/v1/")
       ? new URL(value, `${normalizeServerUrl(serverUrl)}/`).toString()
       : value) as T;
   }

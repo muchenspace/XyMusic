@@ -16,8 +16,8 @@ import (
 	"xymusic/server/internal/app"
 	"xymusic/server/internal/config"
 	"xymusic/server/internal/platform/database"
+	"xymusic/server/internal/platform/localmedia"
 	platformsecurity "xymusic/server/internal/platform/security"
-	"xymusic/server/internal/platform/storage"
 )
 
 func TestProductionDependenciesAreCompatible(t *testing.T) {
@@ -95,12 +95,12 @@ func TestProductionDependenciesAreCompatible(t *testing.T) {
 			t.Fatalf("Go cannot decrypt an existing Bun idempotency response: %v", err)
 		}
 	}
-	objects, err := storage.Open(cfg.Storage)
+	localMedia, err := localmedia.NewStore(cfg.MediaStorage.AssetDirectory, cfg.MediaStorage.TranscodeDirectory, cfg.MediaStorage.MaxUploadBytes)
 	if err != nil {
-		t.Fatalf("MinIO/S3 client initialization failed: %v", err)
+		t.Fatalf("local media store initialization failed: %v", err)
 	}
-	if err := objects.Ping(ctx); err != nil {
-		t.Fatalf("MinIO/S3 read-only probe failed: %v", err)
+	if err := localMedia.Ping(ctx); err != nil {
+		t.Fatalf("local media store ping failed: %v", err)
 	}
 }
 

@@ -18,29 +18,16 @@ type CurrentUserReader interface {
 type Store interface {
 	UpdateProfile(context.Context, string, int, ProfileChanges, time.Time) error
 	CreateAvatarUpload(context.Context, CreateUploadParams) (AvatarUpload, error)
+	FindAvatarUpload(context.Context, string, string) (AvatarUpload, error)
 	MarkAvatarUploadFailed(context.Context, string, string) error
 	ClaimAvatarCompletion(context.Context, string, string, string, time.Time, time.Duration) (CompletionClaim, error)
 	AvatarCompletionStatus(context.Context, string, string) (string, error)
 	FinalizeAvatarCompletion(context.Context, FinalizeAvatarParams) error
-	FailAvatarCompletion(context.Context, string, string, bool, []string, string, time.Time) error
-}
-
-type AvatarObjectStorage interface {
-	CreateUploadURL(context.Context, UploadURLRequest) (string, error)
-	DownloadToFile(context.Context, string, string, int64) (StoredObject, error)
-	UploadFile(context.Context, string, string, string, string) (int64, error)
-}
-
-type UploadURLRequest struct {
-	ObjectKey      string
-	ContentType    string
-	ContentLength  int64
-	ChecksumSHA256 string
-	Expires        time.Duration
+	FailAvatarCompletion(context.Context, string, string, bool, string, time.Time) error
 }
 
 type AvatarInspector interface {
-	Inspect(context.Context, AvatarUpload, string) (InspectedAvatar, error)
+	Inspect(context.Context, AvatarUpload) (InspectedAvatar, error)
 }
 
 type IdempotencyInput struct {

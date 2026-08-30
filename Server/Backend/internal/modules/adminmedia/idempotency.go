@@ -12,17 +12,19 @@ type PersistentIdempotency struct {
 	service *sharedidempotency.Service
 }
 
+var _ Idempotency = (*PersistentIdempotency)(nil)
+
 func NewPersistentIdempotency(service *sharedidempotency.Service) *PersistentIdempotency {
 	return &PersistentIdempotency{service: service}
 }
 
-func (adapter *PersistentIdempotency) Execute(
+func (adapter *PersistentIdempotency) ExecuteReservation(
 	ctx context.Context,
 	input IdempotencyInput,
-	operation func() (IdempotencyResponse, error),
-) (IdempotencyResult, error) {
+	operation func() (UploadReservationDTO, error),
+) (UploadReservationDTO, bool, error) {
 	if adapter == nil || adapter.service == nil {
-		return IdempotencyResult{}, errors.New("admin media idempotency service is required")
+		return UploadReservationDTO{}, false, errors.New("admin media idempotency service is required")
 	}
 	result, err := sharedidempotency.Execute(ctx, adapter.service, sharedidempotency.Input{
 		ActorID: input.ActorID,
@@ -30,33 +32,42 @@ func (adapter *PersistentIdempotency) Execute(
 		Key:     input.Key,
 		Payload: input.Payload,
 		TTL:     24 * time.Hour,
-	}, func() (sharedidempotency.HTTPResult[rawJSON], error) {
-		response, operationErr := operation()
-		return sharedidempotency.HTTPResult[rawJSON]{
-			Status: response.Status,
-			Body:   rawJSON(response.Body),
+	}, func() (sharedidempotency.HTTPResult[UploadReservationDTO], error) {
+		body, operationErr := operation()
+		return sharedidempotency.HTTPResult[UploadReservationDTO]{
+			Status: 201,
+			Body:   body,
 		}, operationErr
 	})
 	if err != nil {
-		return IdempotencyResult{}, err
+		return UploadReservationDTO{}, false, err
 	}
-	return IdempotencyResult{
-		Status:   result.Status,
-		Body:     append([]byte(nil), result.Body...),
-		Replayed: result.Replayed,
-	}, nil
+	return result.Body, result.Replayed, nil
 }
 
-type rawJSON []byte
-
-func (message rawJSON) MarshalJSON() ([]byte, error) {
-	if len(message) == 0 {
-		return []byte("null"), nil
+func (adapter *PersistentIdempotency) ExecuteCompletion(
+	ctx context.Context,
+	input IdempotencyInput,
+	operation func() (UploadCompletionDTO, error),
+) (UploadCompletionDTO, bool, error) {
+	if adapter == nil || adapter.service == nil {
+		return UploadCompletionDTO{}, false, errors.New("admin media idempotency service is required")
 	}
-	return message, nil
-}
-
-func (message *rawJSON) UnmarshalJSON(raw []byte) error {
-	*message = append((*message)[:0], raw...)
-	return nil
+	result, err := sharedidempotency.Execute(ctx, adapter.service, sharedidempotency.Input{
+		ActorID: input.ActorID,
+		Scope:   input.Scope,
+		Key:     input.Key,
+		Payload: input.Payload,
+		TTL:     24 * time.Hour,
+	}, func() (sharedidempotency.HTTPResult[UploadCompletionDTO], error) {
+		body, operationErr := operation()
+		return sharedidempotency.HTTPResult[UploadCompletionDTO]{
+			Status: 200,
+			Body:   body,
+		}, operationErr
+	})
+	if err != nil {
+		return UploadCompletionDTO{}, false, err
+	}
+	return result.Body, result.Replayed, nil
 }

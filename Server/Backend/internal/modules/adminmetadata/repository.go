@@ -359,12 +359,15 @@ func (repository *Repository) EnqueueWriteback(
 	}
 	job, err := scanWriteback(tx.QueryRow(ctx, `
 		insert into metadata_writeback_jobs (
-			track_id, source_id, requested_by, reason,
-			metadata_snapshot, metadata_version, expected_source_checksum,
-			root_path_snapshot, source_path_snapshot
-		) values ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)
+			track_id, root_id, source_id, target_path, original_checksum_sha256,
+			requested_by, reason, metadata_snapshot, metadata_version,
+			expected_source_checksum, root_path_snapshot, source_path_snapshot,
+			idempotency_key, payload
+		) values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12,
+			gen_random_uuid()::text, '{}'::jsonb)
 		returning `+writebackColumns,
-		trackID, source.ID, actorID, input.Reason, string(snapshotJSON), metadata.Version, source.ChecksumSHA256,
+		trackID, rootID, source.ID, source.SourcePath, source.ChecksumSHA256,
+		actorID, input.Reason, string(snapshotJSON), metadata.Version, source.ChecksumSHA256,
 		rootPath, source.SourcePath,
 	))
 	if err != nil {
@@ -1060,29 +1063,15 @@ func deleteAlbumIfEmpty(ctx context.Context, tx pgx.Tx, albumID string) error {
 	if coverID == nil {
 		return nil
 	}
-	var objectKey string
-	err = tx.QueryRow(ctx, `
+	_, err = tx.Exec(ctx, `
 		update media_assets asset set status = 'DELETE_PENDING', updated_at = now()
 		where asset.id = $1
 		  and not exists (select 1 from artists where artwork_asset_id = asset.id)
 		  and not exists (select 1 from albums where cover_asset_id = asset.id)
 		  and not exists (select 1 from playlists where cover_asset_id = asset.id)
-		  and not exists (select 1 from user_profiles where avatar_asset_id = asset.id)
-		returning object_key`, *coverID).Scan(&objectKey)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
+		  and not exists (select 1 from user_profiles where avatar_asset_id = asset.id)`, *coverID)
 	if err != nil {
 		return fmt.Errorf("detach empty album artwork: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `
-		insert into object_cleanup_jobs (object_key, reason)
-		values ($1, 'EMPTY_ALBUM_AFTER_METADATA_UPDATE')
-		on conflict (object_key) do update set
-			reason = excluded.reason, status = 'PENDING', attempts = 0, attempt_id = null,
-			locked_by = null, locked_until = null, next_attempt_at = now(),
-			last_error = null, updated_at = now()`, objectKey); err != nil {
-		return fmt.Errorf("queue empty album artwork cleanup: %w", err)
 	}
 	return nil
 }

@@ -135,7 +135,7 @@ func (stub *catalogAPIStub) ListTracks(context.Context, TrackListInput) (TrackPa
 func (stub *catalogAPIStub) Track(_ context.Context, _ string, input PageInput) (TrackDetailDTO, error) {
 	stub.calls["track"]++
 	stub.trackInput = input
-	return TrackDetailDTO{Lyrics: []LyricDTO{}, Variants: []VariantDTO{}}, nil
+	return TrackDetailDTO{Lyrics: []LyricDTO{}}, nil
 }
 
 type catalogIdentityStub struct {

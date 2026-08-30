@@ -31,9 +31,9 @@ class InMemoryPlaybackGrantStoreTest {
 
     private fun grant(trackId: String) = PlaybackGrant(
         trackId = trackId,
-        variantId = "variant-$trackId",
+        sessionId = "variant-$trackId",
         selectedQuality = PreferredQuality.STANDARD,
-        signedUrl = "https://music.example/$trackId",
+        streamUrl = "https://music.example/$trackId",
         expiresAtEpochMillis = Long.MAX_VALUE,
         mimeType = "audio/mp4",
         codec = "aac",

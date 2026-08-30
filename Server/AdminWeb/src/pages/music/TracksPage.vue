@@ -379,7 +379,7 @@ function permanentDeleteTargetTitle(trackId: string): string {
 function permanentDeleteItemMessage(item: PermanentDeleteTrackJobItem): string {
   if (item.errorCode === "VERSION_CONFLICT") return "曲目版本已变化，请刷新后重新确认";
   if (item.errorCode === "INVALID_STATE_TRANSITION") return "曲目已不在回收站，请刷新后重试";
-  if (item.errorCode === "RESOURCE_CONFLICT") return "曲目仍有音源扫描或媒体处理任务，请等待任务结束后重试";
+  if (item.errorCode === "RESOURCE_CONFLICT") return "曲目仍有音源扫描任务，请等待扫描结束后重试";
   if (item.message?.trim()) return item.message.trim();
   return item.errorCode ? `删除失败（${item.errorCode}）` : "删除失败";
 }
@@ -575,7 +575,7 @@ watch(bulkOpen, (value) => { if (!value && bulkMutation.isPending.value && !allo
     <BaseDialog v-model="archiveOpen" title="删除曲目" description="曲目会移入回收站；空专辑和艺术家会同步隐藏，恢复曲目后会重新出现。"><div class="rounded-xl bg-[var(--surface-muted)] p-4"><p class="font-semibold">{{ deletionTrack?.title }}</p><p class="mt-1 text-xs text-[var(--muted)]">本地文件和关联会保留；可以在回收站中恢复曲目，或永久删除原始文件和全部数据。</p></div><p v-if="actionError" class="mt-4 rounded-xl bg-rose-500/10 p-3 text-sm text-[var(--danger)]">{{ actionError }}</p><template #footer><AppButton @click="archiveOpen = false">取消</AppButton><AppButton variant="danger" :loading="stateMutation.isPending.value" @click="stateMutation.mutate({ track: deletionTrack!, action: 'archive' })">移入回收站</AppButton></template></BaseDialog>
     <BaseDialog v-model="permanentDeleteOpen" :title="permanentDeleteJob ? '永久删除任务' : `永久删除 ${permanentDeleteTargets.length} 首曲目`" :description="permanentDeleteJob ? '任务由服务端持久化执行，页面持续查询逐项结果。' : '此操作不可恢复，并会清理曲目关联的本地文件与媒体对象。'" width="lg" :prevent-close="permanentDeletePending">
       <template v-if="!permanentDeleteJob">
-        <div class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4"><p class="font-semibold text-[var(--danger)]">将永久删除 {{ permanentDeleteTargets.length }} 首曲目</p><p class="mt-2 text-xs leading-5 text-[var(--muted)]">歌单引用、收藏、播放历史、Tag、歌词、转码文件及 MinIO 对象都会进入删除或安全清理流程；不再有任何曲目的专辑和艺术家也会一并删除。</p></div>
+        <div class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4"><p class="font-semibold text-[var(--danger)]">将永久删除 {{ permanentDeleteTargets.length }} 首曲目</p><p class="mt-2 text-xs leading-5 text-[var(--muted)]">歌单引用、收藏、播放历史、Tag、歌词、转码缓存及媒体资产都会进入删除或安全清理流程；不再有任何曲目的专辑和艺术家也会一并删除。</p></div>
         <div class="mt-4 max-h-48 divide-y divide-[var(--border)] overflow-y-auto rounded-xl border border-[var(--border)]"><div v-for="track in permanentDeleteTargets.slice(0, 8)" :key="track.id" class="px-4 py-3"><p class="truncate font-semibold">{{ track.title }}</p><p class="mt-0.5 truncate text-xs text-[var(--muted)]">{{ track.source?.relativePath ?? track.id }}</p></div><p v-if="permanentDeleteTargets.length > 8" class="px-4 py-3 text-xs text-[var(--muted)]">另有 {{ permanentDeleteTargets.length - 8 }} 首曲目</p></div>
         <div class="mt-5"><label class="ui-label">输入“永久删除”以确认</label><input v-model="permanentDeleteConfirmation" class="ui-input" autocomplete="off" aria-label="永久删除确认文字" placeholder="永久删除" /></div>
         <p v-if="permanentDeleteError" class="mt-4 whitespace-pre-line rounded-xl bg-rose-500/10 p-3 text-sm text-[var(--danger)]">{{ permanentDeleteError }}</p>

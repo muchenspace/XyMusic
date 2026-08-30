@@ -202,5 +202,8 @@ type ScanResult struct {
 	DiscoveredFiles int
 	ProcessedFiles  int
 	FailedFiles     int
-	ArchivedFiles   int
+	DeletedFiles    int
+	// ArchivedFiles is retained only for legacy test synchronizers and older
+	// integrations. Production scans populate DeletedFiles instead.
+	ArchivedFiles int
 }

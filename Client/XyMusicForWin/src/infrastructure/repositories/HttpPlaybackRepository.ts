@@ -8,7 +8,7 @@ export class HttpPlaybackRepository implements PlaybackRepository {
   getPlaybackGrant(trackId: string, quality: ConcretePlaybackQuality, signal?: AbortSignal): Promise<PlaybackGrant> {
     return this.api.request(`api/v1/tracks/${encodeURIComponent(trackId)}/playback`, {
       method: "POST",
-      body: JSON.stringify({ preferredQuality: quality, acceptedCodecs: ["aac", "mp3", "flac", "opus"] }),
+      body: JSON.stringify({ preferredQuality: quality, acceptedCodecs: ["aac", "mp3", "flac", "opus", "wav"] }),
       signal,
     });
   }
