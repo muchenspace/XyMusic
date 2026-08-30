@@ -29,15 +29,6 @@ const sourceFileStatusPresentations: Record<string, StatusPresentation> = {
   DELETED: { label: "源文件已删除", tone: "neutral" },
 };
 
-const mediaProcessingStatusPresentations: Record<string, StatusPresentation> = {
-  PENDING: { label: "等待媒体处理", tone: "info" },
-  PROCESSING: { label: "媒体分析与转码中", tone: "info" },
-  READY: { label: "媒体处理完成", tone: "success" },
-  FAILED: { label: "媒体处理失败", tone: "danger" },
-  CANCELLED: { label: "媒体处理已取消", tone: "warning" },
-  CANCELED: { label: "媒体处理已取消", tone: "warning" },
-};
-
 const sourceScanStatusPresentations: Record<string, StatusPresentation> = {
   PENDING: { label: "等待扫描", tone: "info" },
   RUNNING: { label: "扫描中", tone: "info" },
@@ -60,15 +51,6 @@ const metadataStatusPresentations: Record<string, StatusPresentation> = {
   NORMAL: { label: "正常", tone: "success" },
   PENDING_WRITE: { label: "等待写回", tone: "info" },
   WRITE_FAILED: { label: "写回失败", tone: "warning" },
-};
-
-const variantStatusPresentations: Record<string, StatusPresentation> = {
-  PENDING: { label: "等待生成", tone: "info" },
-  PROCESSING: { label: "生成中", tone: "info" },
-  READY: { label: "可用", tone: "success" },
-  FAILED: { label: "生成失败", tone: "danger" },
-  DELETE_PENDING: { label: "等待删除", tone: "warning" },
-  DELETED: { label: "已删除", tone: "neutral" },
 };
 
 const backgroundJobStatusPresentations: Record<string, StatusPresentation> = {
@@ -114,27 +96,21 @@ export function trackAudioStatusPresentation(
 export function audioTechnicalStagePresentation(
   audioStatus: AudioStatus | string,
   sourceStatus: string | null | undefined,
-  mediaStatus: string | null | undefined,
 ): StatusPresentation {
   const normalizedAudio = normalizeStatus(audioStatus);
   const normalizedSource = normalizeStatus(sourceStatus);
-  const normalizedMedia = normalizeStatus(mediaStatus);
   if (normalizedAudio === "ERROR" && normalizedSource && ["FAILED", "MISSING"].includes(normalizedSource)) {
     return sourceProcessingFailurePresentation;
   }
   if (normalizedSource && ["FAILED", "MISSING"].includes(normalizedSource)) {
     return sourceFileStatusPresentation(normalizedSource);
   }
-  if (normalizedMedia === "FAILED") return mediaProcessingStatusPresentation(normalizedMedia);
   if (normalizedSource && ["PENDING", "PROCESSING"].includes(normalizedSource)) {
     return sourceFileStatusPresentation(normalizedSource);
   }
-  if (normalizedMedia && ["PENDING", "PROCESSING", "CANCELLED", "CANCELED"].includes(normalizedMedia)) {
-    return mediaProcessingStatusPresentation(normalizedMedia);
-  }
   if (normalizedAudio === "PROCESSING") return { label: "音源扫描或状态校验中", tone: "info" };
   if (normalizedAudio === "READY") return { label: "可播放文件已准备完成", tone: "success" };
-  if (normalizedAudio === "ERROR") return { label: "曲目或媒体文件存在异常", tone: "danger" };
+  if (normalizedAudio === "ERROR") return { label: "曲目或音源文件存在异常", tone: "danger" };
   if (normalizedAudio === "ARCHIVED") return { label: "曲目已归档，不再参与播放", tone: "neutral" };
   return { label: "音频状态异常", tone: "danger" };
 }
@@ -142,11 +118,6 @@ export function audioTechnicalStagePresentation(
 export function sourceFileStatusPresentation(status: string | null | undefined): StatusPresentation {
   if (!status) return { label: "未关联源文件", tone: "neutral" };
   return presentationFor(sourceFileStatusPresentations, status);
-}
-
-export function mediaProcessingStatusPresentation(status: string | null | undefined): StatusPresentation {
-  if (!status) return { label: "未创建媒体处理任务", tone: "neutral" };
-  return presentationFor(mediaProcessingStatusPresentations, status);
 }
 
 export function sourceScanStatusPresentation(status: string): StatusPresentation {
@@ -159,10 +130,6 @@ export function librarySourceStatusPresentation(status: string): StatusPresentat
 
 export function metadataStatusPresentation(status: string): StatusPresentation {
   return presentationFor(metadataStatusPresentations, status);
-}
-
-export function variantStatusPresentation(status: string): StatusPresentation {
-  return presentationFor(variantStatusPresentations, status);
 }
 
 export function backgroundJobStatusPresentation(status: string): StatusPresentation {

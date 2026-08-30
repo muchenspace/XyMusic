@@ -169,13 +169,6 @@ constructor() : Interceptor {
         if (mediaType?.subtype?.contains("json", ignoreCase = true) != true) return response
 
         val content = body.string()
-        if (!content.contains(OSS_PROXY_JSON_PREFIX)) {
-            return response
-                .newBuilder()
-                .removeHeader(HEADER_CONTENT_LENGTH)
-                .body(content.toResponseBody(mediaType))
-                .build()
-        }
         val serverOrigin =
             response.request.url
                 .newBuilder()
@@ -185,7 +178,9 @@ constructor() : Interceptor {
                 .build()
                 .toString()
                 .removeSuffix("/")
-        val rewritten = content.replace(OSS_PROXY_JSON_PREFIX, "\"$serverOrigin/api/v1/oss/")
+        val rewritten = RESOURCE_URL_PREFIXES.fold(content) { value, prefix ->
+            value.replace(prefix, "\"$serverOrigin${prefix.removePrefix("\"")}")
+        }
         return response
             .newBuilder()
             .removeHeader(HEADER_CONTENT_LENGTH)
@@ -194,7 +189,14 @@ constructor() : Interceptor {
     }
 
     private companion object {
-        const val OSS_PROXY_JSON_PREFIX = "\"/api/v1/oss/"
+        // Resource URLs in JSON are relative by contract. They must be made
+        // absolute before Coil/Media3 consumes them because those consumers do
+        // not inherit Retrofit's configured base URL.
+        val RESOURCE_URL_PREFIXES = listOf(
+            "\"/api/v1/assets/",
+            "\"/api/v1/oss/",
+            "\"/api/v1/playback/streams/",
+        )
         const val HEADER_CONTENT_LENGTH = "Content-Length"
     }
 }

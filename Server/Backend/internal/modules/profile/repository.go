@@ -141,14 +141,14 @@ func (repository *Repository) CreateAvatarUpload(
 
 	upload, err := scanAvatarUpload(tx.QueryRow(ctx, `
 		insert into media_uploads (
-			id, purpose, target_id, track_id, uploader_id, object_key,
+			id, purpose, target_id, track_id, uploader_id, storage_path,
 			expected_size, expected_checksum_sha256, expected_mime_type,
 			original_file_name, status, expires_at, created_at
 		) values ($1, 'USER_AVATAR', $2, null, $2, $3, $4, $5, $6, $7, 'CREATED', $8, $9)
 		returning `+avatarUploadColumns,
 		input.ID,
 		input.ActorID,
-		input.ObjectKey,
+		input.StoragePath,
 		input.SizeBytes,
 		input.ChecksumSHA256,
 		input.ContentType,
@@ -161,6 +161,20 @@ func (repository *Repository) CreateAvatarUpload(
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return AvatarUpload{}, fmt.Errorf("commit avatar upload reservation: %w", err)
+	}
+	return upload, nil
+}
+
+func (repository *Repository) FindAvatarUpload(ctx context.Context, actorID, uploadID string) (AvatarUpload, error) {
+	upload, err := scanAvatarUpload(repository.pool.QueryRow(ctx, `
+		select `+avatarUploadColumns+`
+		from media_uploads
+		where id = $1 and uploader_id = $2 and purpose = 'USER_AVATAR'`, uploadID, actorID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return AvatarUpload{}, apperror.NotFound("Media upload was not found")
+	}
+	if err != nil {
+		return AvatarUpload{}, fmt.Errorf("find avatar upload: %w", err)
 	}
 	return upload, nil
 }
@@ -227,9 +241,6 @@ func (repository *Repository) ClaimAvatarCompletion(
 			set status = 'EXPIRED', completion_token = null, completion_started_at = null
 			where id = $1`, upload.ID); err != nil {
 			return CompletionClaim{}, fmt.Errorf("expire avatar upload: %w", err)
-		}
-		if err := queueObjectCleanup(ctx, tx, upload.ObjectKey, "EXPIRED_UPLOAD", now); err != nil {
-			return CompletionClaim{}, err
 		}
 		if err := tx.Commit(ctx); err != nil {
 			return CompletionClaim{}, fmt.Errorf("commit avatar upload expiry: %w", err)
@@ -314,12 +325,12 @@ func (repository *Repository) FinalizeAvatarCompletion(
 	}
 	if _, err := tx.Exec(ctx, `
 		insert into media_assets (
-			id, uploader_id, object_key, kind, mime_type, size_bytes,
+			id, uploader_id, storage_path, kind, mime_type, size_bytes,
 			checksum_sha256, width, height, status, created_at, updated_at
 		) values ($1, $2, $3, 'ARTWORK', $4, $5, $6, $7, $8, 'READY', $9, $9)`,
 		input.AssetID,
 		input.ActorID,
-		input.Inspected.ObjectKey,
+		input.Inspected.StoragePath,
 		input.Inspected.MIMEType,
 		input.Inspected.SizeBytes,
 		input.Inspected.ChecksumSHA256,
@@ -358,23 +369,14 @@ func (repository *Repository) FinalizeAvatarCompletion(
 		return apperror.NotFound("User no longer exists")
 	}
 	if previousAssetID != nil && *previousAssetID != input.AssetID {
-		var detachedKey string
-		detachErr := tx.QueryRow(ctx, `
+		_, _ = tx.Exec(ctx, `
 			update media_assets
 			set status = 'DELETE_PENDING', updated_at = $2
 			where id = $1
 			  and not exists (select 1 from artists where artwork_asset_id = media_assets.id)
 			  and not exists (select 1 from albums where cover_asset_id = media_assets.id)
-			  and not exists (select 1 from user_profiles where avatar_asset_id = media_assets.id)
-			returning object_key`, *previousAssetID, input.Now).Scan(&detachedKey)
-		if detachErr != nil && !errors.Is(detachErr, pgx.ErrNoRows) {
-			return fmt.Errorf("detach previous avatar: %w", detachErr)
-		}
-		if detachErr == nil {
-			if err := queueObjectCleanup(ctx, tx, detachedKey, "REPLACED_ARTWORK", input.Now); err != nil {
-				return err
-			}
-		}
+			  and not exists (select 1 from user_profiles where avatar_asset_id = media_assets.id)`,
+			*previousAssetID, input.Now)
 	}
 	command, err = tx.Exec(ctx, `
 		update media_uploads
@@ -393,19 +395,6 @@ func (repository *Repository) FinalizeAvatarCompletion(
 			nil,
 		)
 	}
-	queued := make(map[string]struct{})
-	for _, objectKey := range input.Inspected.CleanupKeys {
-		if objectKey == "" || objectKey == input.Inspected.ObjectKey {
-			continue
-		}
-		if _, exists := queued[objectKey]; exists {
-			continue
-		}
-		queued[objectKey] = struct{}{}
-		if err := queueObjectCleanup(ctx, tx, objectKey, "NORMALIZED_UPLOAD_SOURCE", input.Now); err != nil {
-			return err
-		}
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit avatar completion: %w", err)
 	}
@@ -417,7 +406,6 @@ func (repository *Repository) FailAvatarCompletion(
 	uploadID string,
 	completionToken string,
 	retryable bool,
-	cleanupKeys []string,
 	reason string,
 	now time.Time,
 ) error {
@@ -430,7 +418,7 @@ func (repository *Repository) FailAvatarCompletion(
 	if retryable {
 		status = UploadStatusCreated
 	}
-	command, err := tx.Exec(ctx, `
+	_, err = tx.Exec(ctx, `
 		update media_uploads
 		set status = $3, completion_token = null, completion_started_at = null
 		where id = $1 and status = 'COMPLETING' and completion_token = $2`,
@@ -439,21 +427,6 @@ func (repository *Repository) FailAvatarCompletion(
 	if err != nil {
 		return fmt.Errorf("release failed avatar completion: %w", err)
 	}
-	if command.RowsAffected() == 1 && !retryable {
-		queued := make(map[string]struct{})
-		for _, objectKey := range cleanupKeys {
-			if objectKey == "" {
-				continue
-			}
-			if _, exists := queued[objectKey]; exists {
-				continue
-			}
-			queued[objectKey] = struct{}{}
-			if err := queueObjectCleanup(ctx, tx, objectKey, reason, now); err != nil {
-				return err
-			}
-		}
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit failed avatar completion cleanup: %w", err)
 	}
@@ -461,7 +434,7 @@ func (repository *Repository) FailAvatarCompletion(
 }
 
 const avatarUploadColumns = `
-	id, purpose::text, target_id, uploader_id, object_key,
+	id, purpose::text, target_id, uploader_id, storage_path,
 	expected_size, expected_checksum_sha256, expected_mime_type,
 	original_file_name, status::text, asset_id, expires_at, created_at,
 	completed_at, completion_token, completion_started_at`
@@ -477,7 +450,7 @@ func scanAvatarUpload(row rowScanner) (AvatarUpload, error) {
 		&upload.Purpose,
 		&upload.TargetID,
 		&upload.UploaderID,
-		&upload.ObjectKey,
+		&upload.StoragePath,
 		&upload.ExpectedSize,
 		&upload.ExpectedChecksumSHA256,
 		&upload.ExpectedMIMEType,
@@ -494,7 +467,7 @@ func scanAvatarUpload(row rowScanner) (AvatarUpload, error) {
 }
 
 func expireActorUploads(ctx context.Context, tx pgx.Tx, actorID string, now time.Time) error {
-	rows, err := tx.Query(ctx, `
+	_, err := tx.Exec(ctx, `
 		update media_uploads
 		set status = 'EXPIRED', completion_token = null, completion_started_at = null
 		where uploader_id = $1
@@ -502,47 +475,9 @@ func expireActorUploads(ctx context.Context, tx pgx.Tx, actorID string, now time
 			(status = 'CREATED' and expires_at <= $2)
 			or (status = 'COMPLETING' and expires_at <= $2
 				and (completion_started_at is null or completion_started_at <= $3))
-		  )
-		returning object_key`, actorID, now, now.Add(-completionLease))
+		  )`, actorID, now, now.Add(-completionLease))
 	if err != nil {
 		return fmt.Errorf("expire stale avatar uploads: %w", err)
-	}
-	defer rows.Close()
-	var objectKeys []string
-	for rows.Next() {
-		var objectKey string
-		if err := rows.Scan(&objectKey); err != nil {
-			return fmt.Errorf("read expired avatar upload: %w", err)
-		}
-		objectKeys = append(objectKeys, objectKey)
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate expired avatar uploads: %w", err)
-	}
-	for _, objectKey := range objectKeys {
-		if err := queueObjectCleanup(ctx, tx, objectKey, "EXPIRED_UPLOAD", now); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func queueObjectCleanup(ctx context.Context, tx pgx.Tx, objectKey, reason string, now time.Time) error {
-	_, err := tx.Exec(ctx, `
-		insert into object_cleanup_jobs (object_key, reason, next_attempt_at, updated_at)
-		values ($1, $2, $3, $3)
-		on conflict (object_key) do update set
-			reason = excluded.reason,
-			status = 'PENDING',
-			attempts = 0,
-			attempt_id = null,
-			locked_by = null,
-			locked_until = null,
-			next_attempt_at = excluded.next_attempt_at,
-			last_error = null,
-			updated_at = excluded.updated_at`, objectKey, reason, now)
-	if err != nil {
-		return fmt.Errorf("queue object cleanup: %w", err)
 	}
 	return nil
 }

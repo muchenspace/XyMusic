@@ -98,7 +98,7 @@ func TestStorageProbeIsReadOnlyAndMediaFingerprintIsOptional(t *testing.T) {
 		Runtime:         runtime,
 		Store:           &fakeStore{},
 		Databases:       &fakeDatabaseFactory{database: &fakeDatabase{}},
-		ObjectStorage:   &fakeStorageFactory{storage: objects},
+		MediaStorage:    &fakeStorageFactory{storage: objects},
 		MediaTool:       media,
 		ListenerProbe:   &fakeListener{},
 		Passwords:       fakePasswords{},
@@ -111,7 +111,7 @@ func TestStorageProbeIsReadOnlyAndMediaFingerprintIsOptional(t *testing.T) {
 	if !reflect.DeepEqual(storageResult.StorageInspection, (StorageInspection{})) {
 		t.Fatalf("unexpected empty storage inspection: %#v", storageResult.StorageInspection)
 	}
-	if !reflect.DeepEqual(objects.calls, []string{"inspect", "close"}) {
+	if !reflect.DeepEqual(objects.calls, []string{"ensure", "verify", "inspect", "close"}) {
 		t.Fatalf("storage test mutated storage: %#v", objects.calls)
 	}
 
@@ -144,7 +144,7 @@ func TestAdministratorValidationMatchesLegacyPasswordBoundary(t *testing.T) {
 		Runtime:         newFakeRuntime(),
 		Store:           &fakeStore{},
 		Databases:       &fakeDatabaseFactory{database: &fakeDatabase{}},
-		ObjectStorage:   &fakeStorageFactory{storage: &fakeStorage{}},
+		MediaStorage:    &fakeStorageFactory{storage: &fakeStorage{}},
 		MediaTool:       &fakeMediaTool{},
 		ListenerProbe:   &fakeListener{},
 		Passwords:       fakePasswords{},
@@ -167,7 +167,7 @@ func TestCompleteRunsProbesMigrationsProvisioningRuntimeAndAtomicConfiguration(t
 	runtime.events = events
 	store := &fakeStore{events: events}
 	db := &fakeDatabase{events: events}
-	objects := &fakeStorage{events: events, createBucket: true}
+	objects := &fakeStorage{events: events}
 	listener := &fakeListener{events: events}
 	media := &fakeMediaTool{events: events}
 	service := mustService(t, Options{
@@ -179,7 +179,7 @@ func TestCompleteRunsProbesMigrationsProvisioningRuntimeAndAtomicConfiguration(t
 		Runtime:         runtime,
 		Store:           store,
 		Databases:       &fakeDatabaseFactory{database: db, events: events},
-		ObjectStorage:   &fakeStorageFactory{storage: objects, events: events},
+		MediaStorage:    &fakeStorageFactory{storage: objects, events: events},
 		MediaTool:       media,
 		ListenerProbe:   listener,
 		Passwords:       fakePasswords{events: events},
@@ -211,7 +211,7 @@ func TestCompleteRunsProbesMigrationsProvisioningRuntimeAndAtomicConfiguration(t
 	assertEventOrder(t, events.snapshot(), []string{
 		"listener.check",
 		"database.open", "database.ping", "database.permission", "database.compatibility", "database.inspect", "database.close",
-		"storage.open", "storage.inspect", "storage.close",
+		"storage.open", "storage.ensure", "storage.verify", "storage.inspect", "storage.close",
 		"media.ffmpeg", "media.ffprobe",
 		"store.load",
 		"database.open", "storage.open", "storage.inspect", "storage.ensure", "storage.verify",
@@ -280,7 +280,7 @@ func TestCompleteReportsMalformedEnvironmentAsConflict(t *testing.T) {
 		Runtime:         newFakeRuntime(),
 		Store:           store,
 		Databases:       &fakeDatabaseFactory{database: &fakeDatabase{}},
-		ObjectStorage:   &fakeStorageFactory{storage: &fakeStorage{}},
+		MediaStorage:    &fakeStorageFactory{storage: &fakeStorage{}},
 		MediaTool:       &fakeMediaTool{},
 		ListenerProbe:   &fakeListener{},
 		Passwords:       fakePasswords{},
@@ -298,7 +298,7 @@ func TestCompleteMapsUnknownProbeFailureToSafeStageError(t *testing.T) {
 		Runtime:         newFakeRuntime(),
 		Store:           &fakeStore{},
 		Databases:       &fakeDatabaseFactory{database: &fakeDatabase{}},
-		ObjectStorage:   &fakeStorageFactory{storage: &fakeStorage{}},
+		MediaStorage:    &fakeStorageFactory{storage: &fakeStorage{}},
 		MediaTool:       &fakeMediaTool{err: errors.New("postgresql://administrator:private-password@database/xymusic")},
 		ListenerProbe:   &fakeListener{},
 		Passwords:       fakePasswords{},
@@ -323,7 +323,7 @@ func TestCompleteRequiresFingerprintExecutableAndAcoustIDTogether(t *testing.T) 
 		Runtime:         newFakeRuntime(),
 		Store:           &fakeStore{},
 		Databases:       &fakeDatabaseFactory{database: &fakeDatabase{}},
-		ObjectStorage:   &fakeStorageFactory{storage: &fakeStorage{}},
+		MediaStorage:    &fakeStorageFactory{storage: &fakeStorage{}},
 		MediaTool:       &fakeMediaTool{},
 		ListenerProbe:   &fakeListener{},
 		Passwords:       fakePasswords{},
@@ -347,7 +347,7 @@ func TestCompleteRejectsRuntimeThatDidNotActivateCandidate(t *testing.T) {
 		Runtime:         runtime,
 		Store:           store,
 		Databases:       &fakeDatabaseFactory{database: db},
-		ObjectStorage:   &fakeStorageFactory{storage: &fakeStorage{createBucket: true}},
+		MediaStorage:    &fakeStorageFactory{storage: &fakeStorage{}},
 		MediaTool:       &fakeMediaTool{},
 		ListenerProbe:   &fakeListener{},
 		Passwords:       fakePasswords{},
@@ -371,7 +371,7 @@ func TestConfiguredRuntimeDisablesEverySetupOperation(t *testing.T) {
 		Runtime:         runtime,
 		Store:           &fakeStore{exists: true},
 		Databases:       &fakeDatabaseFactory{database: &fakeDatabase{}},
-		ObjectStorage:   &fakeStorageFactory{storage: &fakeStorage{}},
+		MediaStorage:    &fakeStorageFactory{storage: &fakeStorage{}},
 		MediaTool:       &fakeMediaTool{},
 		ListenerProbe:   &fakeListener{},
 		Passwords:       fakePasswords{},
@@ -394,7 +394,7 @@ func TestDatabaseProbeReportsExistingInstallation(t *testing.T) {
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
 		Databases:     &fakeDatabaseFactory{database: &fakeDatabase{inspection: inspection}},
-		ObjectStorage: &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
+		MediaStorage:  &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	input := validSetupInput()
@@ -413,7 +413,7 @@ func TestDatabaseProbeClassifiesMissingDatabase(t *testing.T) {
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
 		Databases:     &fakeDatabaseFactory{openErr: &pgconn.PgError{Code: "3D000"}},
-		ObjectStorage: &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
+		MediaStorage:  &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	input := validSetupInput()
@@ -437,7 +437,7 @@ func TestCompletePreservesSpecificDatabaseFailureAndSetupStage(t *testing.T) {
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
 		Databases:     &fakeDatabaseFactory{openErr: &pgconn.PgError{Code: "28P01"}},
-		ObjectStorage: &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
+		MediaStorage:  &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	_, err := service.Complete(context.Background(), validSetupInput())
@@ -488,11 +488,11 @@ func TestDatabaseDecisionMatchesInspectionState(t *testing.T) {
 }
 
 func TestStorageProbeReportsExistingObjects(t *testing.T) {
-	inspection := StorageInspection{BucketExists: true, HasObjects: true, ObjectCount: 42, CountLimited: true}
+	inspection := StorageInspection{AssetDirectoryExists: true, HasAssets: true, AssetCount: 42, CountLimited: true}
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
 		Databases:     &fakeDatabaseFactory{database: &fakeDatabase{}},
-		ObjectStorage: &fakeStorageFactory{storage: &fakeStorage{inspection: inspection}}, MediaTool: &fakeMediaTool{},
+		MediaStorage:  &fakeStorageFactory{storage: &fakeStorage{inspection: inspection}}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	result, err := service.TestStorage(context.Background(), validSetupInput().Storage)
@@ -513,7 +513,7 @@ func TestCompleteRequiresExistingDataDecisionWhenAdministratorExists(t *testing.
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
 		Databases:     &fakeDatabaseFactory{database: db},
-		ObjectStorage: &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
+		MediaStorage:  &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	_, err := service.Complete(context.Background(), validSetupInput())
@@ -535,7 +535,7 @@ func TestCompleteReusesExistingInstallationAndFillsMissingParts(t *testing.T) {
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
 		Databases:     &fakeDatabaseFactory{database: db},
-		ObjectStorage: &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
+		MediaStorage:  &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	input := validSetupInput()
@@ -561,7 +561,7 @@ func TestDatabaseResetDoesNotClearObjectStorage(t *testing.T) {
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
 		Databases:     &fakeDatabaseFactory{database: db},
-		ObjectStorage: &fakeStorageFactory{storage: objects}, MediaTool: &fakeMediaTool{},
+		MediaStorage:  &fakeStorageFactory{storage: objects}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	input := validSetupInput()
@@ -577,12 +577,12 @@ func TestDatabaseResetDoesNotClearObjectStorage(t *testing.T) {
 func TestCompleteRequiresIndependentStorageDecision(t *testing.T) {
 	db := &fakeDatabase{}
 	objects := &fakeStorage{inspection: StorageInspection{
-		BucketExists: true, HasObjects: true, ObjectCount: 3,
+		AssetDirectoryExists: true, HasAssets: true, AssetCount: 3,
 	}}
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
 		Databases:     &fakeDatabaseFactory{database: db},
-		ObjectStorage: &fakeStorageFactory{storage: objects}, MediaTool: &fakeMediaTool{},
+		MediaStorage:  &fakeStorageFactory{storage: objects}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	_, err := service.Complete(context.Background(), validSetupInput())
@@ -598,12 +598,12 @@ func TestCompleteRequiresIndependentStorageDecision(t *testing.T) {
 func TestStorageResetDoesNotClearDatabase(t *testing.T) {
 	db := &fakeDatabase{}
 	objects := &fakeStorage{inspection: StorageInspection{
-		BucketExists: true, HasObjects: true, ObjectCount: 3,
+		AssetDirectoryExists: true, HasAssets: true, AssetCount: 3,
 	}}
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
 		Databases:     &fakeDatabaseFactory{database: db},
-		ObjectStorage: &fakeStorageFactory{storage: objects}, MediaTool: &fakeMediaTool{},
+		MediaStorage:  &fakeStorageFactory{storage: objects}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	input := validSetupInput()
@@ -616,21 +616,22 @@ func TestStorageResetDoesNotClearDatabase(t *testing.T) {
 	}
 }
 
-func TestStorageConfigurationAllowsAddressesReachableFromBackend(t *testing.T) {
-	for _, endpoint := range []string{
-		"http://127.0.0.1:9000", "http://127.20.30.40:9000", "http://localhost:9000",
-		"http://0.0.0.0:9000", "http://[::1]:9000", "http://[::]:9000",
-	} {
-		input := validSetupInput().Storage
-		input.Endpoint = endpoint
-		if _, err := storageConfig(input); err != nil {
-			t.Fatalf("storage endpoint %q was rejected: %v", endpoint, err)
-		}
-		input = validSetupInput().Storage
-		input.PublicBaseURL = &endpoint
-		if _, err := storageConfig(input); err != nil {
-			t.Fatalf("storage public base URL %q was rejected: %v", endpoint, err)
-		}
+func TestStorageConfigurationResolvesDirectories(t *testing.T) {
+	service := mustService(t, Options{
+		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
+		Databases:     &fakeDatabaseFactory{database: &fakeDatabase{}},
+		MediaStorage:  &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
+		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
+	})
+	input := validSetupInput().Storage
+	input.AssetDirectory = "my-assets"
+	input.TranscodeDirectory = "my-transcode"
+	cfg, err := service.storageConfig(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(cfg.AssetDirectory, "my-assets") || !strings.HasSuffix(cfg.TranscodeDirectory, "my-transcode") {
+		t.Fatalf("unexpected resolved storage config: %#v", cfg)
 	}
 }
 
@@ -638,7 +639,7 @@ func TestMediaPathsUseSystemPathWheneverSelectedValuesAreBlank(t *testing.T) {
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
 		Databases:     &fakeDatabaseFactory{database: &fakeDatabase{}},
-		ObjectStorage: &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
+		MediaStorage:  &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	empty := ""
@@ -685,7 +686,6 @@ func prepareSetupRoot(t *testing.T) string {
 }
 
 func validSetupInput() SetupInput {
-	forcePathStyle := true
 	enabled := true
 	syncOnStartup := false
 	registration := false
@@ -702,9 +702,8 @@ func validSetupInput() SetupInput {
 			Password: "database-password", SSLMode: "disable", MaxConnections: 10,
 		},
 		Storage: StorageInput{
-			Endpoint: "http://minio.internal:9000", Region: "us-east-1", Bucket: "xymusic",
-			AccessKeyID: "access-key", SecretAccessKey: "secret-key", ForcePathStyle: &forcePathStyle,
-			SignedURLTTLSeconds: 300, MaxUploadBytes: 1024,
+			AssetDirectory:     "assets",
+			TranscodeDirectory: "transcode",
 		},
 		Media: MediaInput{FFmpegPath: &ffmpeg, FFprobePath: &ffprobe},
 		Source: SourceInput{
@@ -926,17 +925,15 @@ type fakeStorageFactory struct {
 	events  *eventLog
 }
 
-func (factory *fakeStorageFactory) Open(config.Storage) (SetupObjectStorage, error) {
+func (factory *fakeStorageFactory) Open(config.MediaStorage) (SetupMediaStorage, error) {
 	factory.events.add("storage.open")
 	return factory.storage, nil
 }
 
 type fakeStorage struct {
-	events        *eventLog
-	calls         []string
-	createBucket  bool
-	bucketRemoved bool
-	inspection    StorageInspection
+	events     *eventLog
+	calls      []string
+	inspection StorageInspection
 }
 
 func (storage *fakeStorage) call(value string) {
@@ -949,21 +946,16 @@ func (storage *fakeStorage) Inspect(context.Context) (StorageInspection, error) 
 	storage.call("inspect")
 	return storage.inspection, nil
 }
-func (storage *fakeStorage) EnsureBucket(context.Context) (bool, error) {
+func (storage *fakeStorage) EnsureDirectories(context.Context) error {
 	storage.call("ensure")
-	return storage.createBucket, nil
+	return nil
 }
 func (storage *fakeStorage) VerifyReadWrite(context.Context) error {
 	storage.call("verify")
 	return nil
 }
 func (storage *fakeStorage) Clear(context.Context) error { storage.call("clear"); return nil }
-func (storage *fakeStorage) RemoveBucket(context.Context) error {
-	storage.call("removeBucket")
-	storage.bucketRemoved = true
-	return nil
-}
-func (storage *fakeStorage) Close() { storage.call("close") }
+func (storage *fakeStorage) Close()                      { storage.call("close") }
 
 type fakeMediaTool struct {
 	events *eventLog

@@ -68,13 +68,8 @@ function setupInput(): SetupCompleteInput {
       maxConnections: 10,
     },
     storage: {
-      endpoint: "http://127.0.0.1:9000",
-      region: "us-east-1",
-      bucket: "xymusic",
-      accessKeyId: "xymusic",
-      secretAccessKey: "secret",
-      forcePathStyle: true,
-      signedUrlTtlSeconds: 300,
+      assetDirectory: "assets",
+      transcodeDirectory: "transcode",
       maxUploadBytes: 1024,
     },
     media: {

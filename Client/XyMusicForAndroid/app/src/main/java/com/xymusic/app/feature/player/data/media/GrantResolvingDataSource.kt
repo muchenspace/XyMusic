@@ -96,7 +96,7 @@ private class GrantResolvingDataSource(
             val resolvedSpec =
                 dataSpec
                     .buildUpon()
-                    .setUri(grant.signedUrl)
+                    .setUri(grant.streamUrl)
                     .setKey(grant.cacheKey)
                     .build()
             try {
@@ -161,7 +161,11 @@ private class GrantResolvingDataSource(
     private fun playbackGrant(trackId: String, forceRefresh: Boolean) = when (
         val result =
             runBlocking {
-                grantRepository.get(trackId = trackId, forceRefresh = forceRefresh)
+                grantRepository.get(
+                    trackId = trackId,
+                    acceptedCodecs = SUPPORTED_STREAM_CODECS,
+                    forceRefresh = forceRefresh,
+                )
             }
     ) {
         is PlayerResult.Success -> result.value
@@ -226,9 +230,10 @@ private class GrantResolvingDataSource(
     private fun IOException.isExpiredGrantResponse(): Boolean = generateSequence<Throwable>(this) {
         it.cause
     }.filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
-        .any { it.responseCode == 401 || it.responseCode == 403 }
+        .any { it.responseCode == 401 || it.responseCode == 403 || it.responseCode == 404 || it.responseCode == 410 }
 
     private companion object {
         const val MAX_GRANT_ATTEMPTS = 3
+        val SUPPORTED_STREAM_CODECS = listOf("aac", "mp3", "opus", "flac", "wav")
     }
 }

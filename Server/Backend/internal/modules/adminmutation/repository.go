@@ -378,14 +378,20 @@ func (repository *Repository) transitionTrackToReady(
 	if state.DurationMS <= 0 {
 		return apperror.Unprocessable(apperror.CodeTrackNotPlayable, "Track duration must be positive", nil)
 	}
-	var readyVariant bool
+	var readySource bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(
-		SELECT 1 FROM track_variants WHERE track_id=$1 AND status='READY'
-	)`, id).Scan(&readyVariant); err != nil {
-		return fmt.Errorf("inspect playable variant: %w", err)
+		SELECT 1 FROM local_music_source_tracks mapped
+		JOIN local_music_sources source ON source.id=mapped.source_id
+		WHERE mapped.track_id=$1 AND source.status='READY'
+		UNION
+		SELECT 1 FROM media_uploads upload
+		JOIN media_assets asset ON asset.id=upload.asset_id
+		WHERE upload.track_id=$1 AND asset.status='READY'
+	)`, id).Scan(&readySource); err != nil {
+		return fmt.Errorf("inspect playable source: %w", err)
 	}
-	if !readyVariant {
-		return apperror.Unprocessable(apperror.CodeTrackNotPlayable, "Track has no ready playback variant", nil)
+	if !readySource {
+		return apperror.Unprocessable(apperror.CodeTrackNotPlayable, "Track has no ready audio source", nil)
 	}
 	command, err := tx.Exec(ctx, `UPDATE tracks SET status='READY',published_at=now(),
 		version=version+1,updated_at=now() WHERE id=$1 AND version=$2`, id, expectedVersion)
@@ -554,7 +560,7 @@ func (repository *Repository) FindAlbum(ctx context.Context, id string) (AlbumRe
 }
 func (repository *Repository) FindTrack(ctx context.Context, id string) (TrackRecord, error) {
 	var r TrackRecord
-	err := repository.pool.QueryRow(ctx, `SELECT t.id,t.title,t.status::text,t.album_id,al.title,al.cover_asset_id,t.duration_ms,t.track_number,t.disc_number,t.version,t.created_at,t.updated_at,(SELECT job.id FROM media_jobs job WHERE job.track_id=t.id AND job.status IN('PENDING','PROCESSING') LIMIT 1) FROM tracks t LEFT JOIN albums al ON al.id=t.album_id WHERE t.id=$1`, id).Scan(&r.ID, &r.Title, &r.Status, &r.AlbumID, &r.AlbumTitle, &r.AlbumCoverAssetID, &r.DurationMS, &r.TrackNumber, &r.DiscNumber, &r.Version, &r.CreatedAt, &r.UpdatedAt, &r.ActiveMediaJobID)
+	err := repository.pool.QueryRow(ctx, `SELECT t.id,t.title,t.status::text,t.album_id,al.title,al.cover_asset_id,t.duration_ms,t.track_number,t.disc_number,t.version,t.created_at,t.updated_at FROM tracks t LEFT JOIN albums al ON al.id=t.album_id WHERE t.id=$1`, id).Scan(&r.ID, &r.Title, &r.Status, &r.AlbumID, &r.AlbumTitle, &r.AlbumCoverAssetID, &r.DurationMS, &r.TrackNumber, &r.DiscNumber, &r.Version, &r.CreatedAt, &r.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TrackRecord{}, apperror.NotFound("Track was not found")
 	}
@@ -724,16 +730,11 @@ func scheduleArtworkCleanup(ctx context.Context, tx pgx.Tx, assetID *string, rea
 	if assetID == nil {
 		return nil
 	}
-	var objectKey string
-	err := tx.QueryRow(ctx, `UPDATE media_assets asset SET status='DELETE_PENDING',updated_at=now() WHERE id=$1 AND NOT EXISTS(SELECT 1 FROM artists WHERE artwork_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM albums WHERE cover_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM playlists WHERE cover_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM user_profiles WHERE avatar_asset_id=asset.id) RETURNING object_key`, *assetID).Scan(&objectKey)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
+	_, err := tx.Exec(ctx, `UPDATE media_assets asset SET status='DELETE_PENDING',updated_at=now() WHERE id=$1 AND NOT EXISTS(SELECT 1 FROM artists WHERE artwork_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM albums WHERE cover_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM playlists WHERE cover_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM user_profiles WHERE avatar_asset_id=asset.id)`, *assetID)
 	if err != nil {
 		return fmt.Errorf("detach album artwork: %w", err)
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO object_cleanup_jobs(object_key,reason) VALUES($1,$2) ON CONFLICT(object_key) DO UPDATE SET reason=excluded.reason,status='PENDING',attempts=0,attempt_id=NULL,locked_by=NULL,locked_until=NULL,next_attempt_at=now(),last_error=NULL,updated_at=now()`, objectKey, reason)
-	return err
+	return nil
 }
 func sameString(left, right *string) bool {
 	if left == nil || right == nil {

@@ -18,8 +18,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 
 	"xymusic/server/internal/config"
 	"xymusic/server/internal/platform/database"
@@ -111,7 +109,6 @@ func runCreate(arguments []string) (resultErr error) {
 		return err
 	}
 	databaseName := isolatedPrefix + suffix
-	bucketName := "xymusic-it-" + strings.ReplaceAll(suffix, "_", "-")
 	databaseURL, adminURL, err := isolatedDatabaseURLs(raw.Database.URL, databaseName)
 	if err != nil {
 		return err
@@ -128,16 +125,12 @@ func runCreate(arguments []string) (resultErr error) {
 		return fmt.Errorf("create isolated PostgreSQL database: %w", err)
 	}
 	databaseCreated := true
-	storageCreated := false
 	defer func() {
 		if resultErr == nil {
 			return
 		}
 		cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cleanupCancel()
-		if storageCreated {
-			_ = removeBucket(cleanupContext, raw.Storage, bucketName)
-		}
 		if databaseCreated {
 			_, _ = adminConnection.Exec(cleanupContext, "DROP DATABASE IF EXISTS "+pgx.Identifier{databaseName}.Sanitize()+" WITH (FORCE)")
 		}
@@ -157,8 +150,8 @@ func runCreate(arguments []string) (resultErr error) {
 	isolated.HTTP.Port = isolated.HTTP.IPv4Port
 	isolated.Database.URL = databaseURL
 	isolated.Database.MaxConnections = min(isolated.Database.MaxConnections, 10)
-	isolated.Storage.Bucket = bucketName
-	isolated.Storage.PublicBaseURL = ""
+	isolated.MediaStorage.AssetDirectory = filepath.Join(output, "assets")
+	isolated.MediaStorage.TranscodeDirectory = filepath.Join(output, "transcode")
 	isolated.Media = resolved.Media
 	isolated.Scraping = resolved.Scraping
 	isolated.LocalLibrary.Name = "Isolated integration library"
@@ -178,21 +171,18 @@ func runCreate(arguments []string) (resultErr error) {
 	if isolated.Security.CursorSigningSecret, err = randomSecret(); err != nil {
 		return err
 	}
+	if isolated.Security.PlaybackTicketSecret, err = randomSecret(); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(isolated.Paths.LocalMusicDirectory, 0o755); err != nil {
 		return err
 	}
-
-	storageClient, err := newStorageClient(isolated.Storage)
-	if err != nil {
+	if err := os.MkdirAll(isolated.MediaStorage.AssetDirectory, 0o755); err != nil {
 		return err
 	}
-	if err := storageClient.MakeBucket(ctx, bucketName, minio.MakeBucketOptions{Region: isolated.Storage.Region}); err != nil {
-		exists, checkErr := storageClient.BucketExists(ctx, bucketName)
-		if checkErr != nil || !exists {
-			return fmt.Errorf("create isolated object-storage bucket: %w", err)
-		}
+	if err := os.MkdirAll(isolated.MediaStorage.TranscodeDirectory, 0o755); err != nil {
+		return err
 	}
-	storageCreated = true
 
 	resolvedIsolated, err := config.ResolveRuntime(isolated, output)
 	if err != nil {
@@ -229,11 +219,10 @@ func runCreate(arguments []string) (resultErr error) {
 		}
 	}
 	databaseCreated = false
-	storageCreated = false
 	createdDirectory = false
 	fmt.Println(environmentPath)
 	fmt.Println("database=" + databaseName)
-	fmt.Println("bucket=" + bucketName)
+	fmt.Println("assets=" + isolated.MediaStorage.AssetDirectory)
 	fmt.Println("legacy=http://127.0.0.1:" + strconv.Itoa(*port))
 	fmt.Println("credentials=" + credentialsPath)
 	return nil
@@ -264,14 +253,11 @@ func runDestroy(arguments []string) error {
 	if err != nil {
 		return err
 	}
-	if !strings.HasPrefix(databaseName, isolatedPrefix) || !strings.HasPrefix(raw.Storage.Bucket, "xymusic-it-") {
+	if !strings.HasPrefix(databaseName, isolatedPrefix) {
 		return errors.New("refusing to destroy resources without isolated prefixes")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if err := removeBucket(ctx, raw.Storage, raw.Storage.Bucket); err != nil {
-		return err
-	}
 	connection, err := pgx.Connect(ctx, adminURL)
 	if err != nil {
 		return err
@@ -328,7 +314,7 @@ func loadIsolatedEnvironment(environmentPath string) (string, config.Config, err
 	if err != nil {
 		return "", config.Config{}, err
 	}
-	if !strings.HasPrefix(databaseName, isolatedPrefix) || !strings.HasPrefix(raw.Storage.Bucket, "xymusic-it-") {
+	if !strings.HasPrefix(databaseName, isolatedPrefix) {
 		return "", config.Config{}, errors.New("refusing to use resources without isolated prefixes")
 	}
 	return absolute, raw, nil
@@ -367,44 +353,6 @@ func databaseIdentity(raw string) (string, string, error) {
 	admin := *parsed
 	admin.Path = "/postgres"
 	return databaseName, admin.String(), nil
-}
-
-func newStorageClient(cfg config.Storage) (*minio.Client, error) {
-	parsed, err := url.Parse(cfg.Endpoint)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return nil, errors.New("S3_ENDPOINT is invalid")
-	}
-	lookup := minio.BucketLookupAuto
-	if cfg.ForcePathStyle {
-		lookup = minio.BucketLookupPath
-	}
-	return minio.New(parsed.Host, &minio.Options{
-		Creds:  credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
-		Secure: parsed.Scheme == "https", Region: cfg.Region, BucketLookup: lookup,
-	})
-}
-
-func removeBucket(ctx context.Context, cfg config.Storage, bucket string) error {
-	client, err := newStorageClient(cfg)
-	if err != nil {
-		return err
-	}
-	for object := range client.ListObjects(ctx, bucket, minio.ListObjectsOptions{Recursive: true}) {
-		if object.Err != nil {
-			return object.Err
-		}
-		if err := client.RemoveObject(ctx, bucket, object.Key, minio.RemoveObjectOptions{}); err != nil {
-			return err
-		}
-	}
-	if err := client.RemoveBucket(ctx, bucket); err != nil {
-		exists, checkErr := client.BucketExists(ctx, bucket)
-		if checkErr == nil && !exists {
-			return nil
-		}
-		return fmt.Errorf("remove isolated object-storage bucket: %w", err)
-	}
-	return nil
 }
 
 func seedAccounts(ctx context.Context, pool *database.Pool) (testCredentials, error) {

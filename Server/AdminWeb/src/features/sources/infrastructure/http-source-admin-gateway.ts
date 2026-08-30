@@ -26,8 +26,8 @@ export class HttpSourceAdminGateway implements SourceAdminGateway {
     return adminApi.updateSource(sourceId, input);
   }
 
-  async delete(sourceId: string, expectedVersion: number, archiveCatalog: boolean): Promise<void> {
-    await adminApi.deleteSource(sourceId, expectedVersion, archiveCatalog);
+  async delete(sourceId: string, expectedVersion: number, _archiveCatalog = false): Promise<void> {
+    await adminApi.deleteSource(sourceId, expectedVersion, false);
   }
 
   browse(path: string, page: number, pageSize: number, signal?: AbortSignal): Promise<DirectoryListing> {

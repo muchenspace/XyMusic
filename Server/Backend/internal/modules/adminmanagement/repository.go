@@ -57,7 +57,13 @@ func (repository *Repository) Dashboard(ctx context.Context) (DashboardCounts, e
 	}{
 		{trackStatusCountsSQL, result.Tracks, "tracks"},
 		{`SELECT status::text, count(*)::int FROM local_music_sources GROUP BY status`, result.Sources, "sources"},
-		{`SELECT status::text, count(*)::int FROM media_jobs GROUP BY status`, result.Jobs, "jobs"},
+		{`SELECT status::text, count(*)::int FROM (
+			SELECT status::text FROM metadata_writeback_jobs
+			UNION ALL
+			SELECT status::text FROM library_scan_runs
+			UNION ALL
+			SELECT status::text FROM tag_scraping_jobs
+		) all_jobs GROUP BY status`, result.Jobs, "jobs"},
 	} {
 		rows, err := repository.pool.Query(ctx, grouped.statement)
 		if err != nil {

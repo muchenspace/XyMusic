@@ -9,7 +9,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 if (-not $AllowWrite) {
-    throw 'This command creates and writes an isolated PostgreSQL database and MinIO bucket. Re-run with -AllowWrite.'
+    throw 'This command creates and writes an isolated PostgreSQL database and local asset directory. Re-run with -AllowWrite.'
 }
 
 $ProjectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))

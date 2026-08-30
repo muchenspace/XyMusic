@@ -22,7 +22,7 @@ type ProfileChanges struct {
 type CreateUploadParams struct {
 	ID             string
 	ActorID        string
-	ObjectKey      string
+	StoragePath    string
 	FileName       string
 	ContentType    string
 	SizeBytes      int64
@@ -36,7 +36,7 @@ type AvatarUpload struct {
 	Purpose                string
 	TargetID               string
 	UploaderID             string
-	ObjectKey              string
+	StoragePath            string
 	ExpectedSize           int64
 	ExpectedChecksumSHA256 string
 	ExpectedMIMEType       string
@@ -65,22 +65,13 @@ type CompletionClaim struct {
 	Token   string
 }
 
-type StoredObject struct {
-	SizeBytes      int64
-	ContentType    string
-	ETag           string
-	ChecksumSHA256 string
-	MetadataSHA256 string
-}
-
 type InspectedAvatar struct {
-	ObjectKey      string
+	StoragePath    string
 	MIMEType       string
 	SizeBytes      int64
 	ChecksumSHA256 string
 	Width          int
 	Height         int
-	CleanupKeys    []string
 }
 
 type FinalizeAvatarParams struct {

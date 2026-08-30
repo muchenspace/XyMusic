@@ -38,8 +38,6 @@ function track(): TrackSummary {
       canWriteBack: false,
       writebackBlockReason: null,
     },
-    mediaProcessing: null,
-    variantSummary: [],
     activeWritebackJobId: null,
     publishedAt: null,
     createdAt: "2026-07-18T00:00:00.000Z",

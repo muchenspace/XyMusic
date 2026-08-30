@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"xymusic/server/internal/platform/localmedia"
 	"xymusic/server/internal/shared/apperror"
 )
 
@@ -37,7 +38,7 @@ type CommandRunner interface {
 }
 
 type FFmpegAvatarInspector struct {
-	storage     AvatarObjectStorage
+	localMedia  *localmedia.Store
 	ffprobePath string
 	ffmpegPath  string
 	runner      CommandRunner
@@ -46,21 +47,21 @@ type FFmpegAvatarInspector struct {
 var _ AvatarInspector = (*FFmpegAvatarInspector)(nil)
 
 func NewFFmpegAvatarInspector(
-	storage AvatarObjectStorage,
+	localMedia *localmedia.Store,
 	ffprobePath string,
 	ffmpegPath string,
 ) (*FFmpegAvatarInspector, error) {
-	return newFFmpegAvatarInspector(storage, ffprobePath, ffmpegPath, osCommandRunner{})
+	return newFFmpegAvatarInspector(localMedia, ffprobePath, ffmpegPath, osCommandRunner{})
 }
 
 func newFFmpegAvatarInspector(
-	storage AvatarObjectStorage,
+	localMedia *localmedia.Store,
 	ffprobePath string,
 	ffmpegPath string,
 	runner CommandRunner,
 ) (*FFmpegAvatarInspector, error) {
-	if storage == nil {
-		return nil, errors.New("avatar inspector object storage is required")
+	if localMedia == nil {
+		return nil, errors.New("avatar inspector local media store is required")
 	}
 	if strings.TrimSpace(ffprobePath) == "" {
 		return nil, errors.New("avatar inspector ffprobe path is required")
@@ -69,10 +70,10 @@ func newFFmpegAvatarInspector(
 		return nil, errors.New("avatar inspector ffmpeg path is required")
 	}
 	if runner == nil {
-		return nil, errors.New("avatar inspector command runner is required")
+		runner = osCommandRunner{}
 	}
 	return &FFmpegAvatarInspector{
-		storage:     storage,
+		localMedia:  localMedia,
 		ffprobePath: ffprobePath,
 		ffmpegPath:  ffmpegPath,
 		runner:      runner,
@@ -82,26 +83,21 @@ func newFFmpegAvatarInspector(
 func (inspector *FFmpegAvatarInspector) Inspect(
 	ctx context.Context,
 	upload AvatarUpload,
-	observedETag string,
 ) (InspectedAvatar, error) {
-	directory, err := os.MkdirTemp("", "xymusic-avatar-inspection-")
+	inputPath, err := inspector.localMedia.ResolveAssetPath(upload.StoragePath)
 	if err != nil {
-		return InspectedAvatar{}, fmt.Errorf("create avatar inspection directory: %w", err)
+		return InspectedAvatar{}, apperror.Unprocessable(apperror.CodeMediaUploadMismatch, "Uploaded avatar file path is invalid", nil)
 	}
-	defer os.RemoveAll(directory)
-	inputPath := filepath.Join(directory, "input")
-	observed, err := inspector.storage.DownloadToFile(ctx, upload.ObjectKey, inputPath, upload.ExpectedSize+1)
-	if err != nil {
-		return InspectedAvatar{}, apperror.DependencyUnavailable("Uploaded avatar could not be read from object storage")
+
+	info, err := os.Stat(inputPath)
+	if err != nil || info.IsDir() {
+		return InspectedAvatar{}, apperror.Unprocessable(apperror.CodeMediaUploadMismatch, "Uploaded avatar file is missing", nil)
 	}
-	mismatches := observedObjectMismatches(upload, observed, observedETag)
-	if len(mismatches) > 0 {
-		return InspectedAvatar{}, apperror.Unprocessable(
-			apperror.CodeMediaUploadMismatch,
-			"Uploaded object mismatched: "+strings.Join(mismatches, ", "),
-			map[string]any{"mismatches": mismatches},
-		)
+
+	if info.Size() != upload.ExpectedSize {
+		return InspectedAvatar{}, apperror.Unprocessable(apperror.CodeMediaUploadMismatch, "Uploaded file size mismatch", nil)
 	}
+
 	probe, err := inspector.runner.Run(ctx, inspector.ffprobePath, []string{
 		"-v", "error",
 		"-select_streams", "v:0",
@@ -122,7 +118,7 @@ func (inspector *FFmpegAvatarInspector) Inspect(
 	if probe.ExitCode != 0 {
 		return InspectedAvatar{}, apperror.Unprocessable(
 			apperror.CodeMediaUploadMismatch,
-			"Uploaded image is invalid: "+truncateDiagnostic(probe.Stderr, 300),
+			"Uploaded image is invalid",
 			nil,
 		)
 	}
@@ -134,7 +130,11 @@ func (inspector *FFmpegAvatarInspector) Inspect(
 			nil,
 		)
 	}
-	outputPath := filepath.Join(directory, "normalized.jpg")
+
+	tempDir := filepath.Join(inspector.localMedia.AssetDirectory(), "temp")
+	_ = os.MkdirAll(tempDir, 0o755)
+	normalizedTempPath := filepath.Join(tempDir, fmt.Sprintf("norm_%s.jpg", upload.ID))
+
 	normalized, err := inspector.runner.Run(ctx, inspector.ffmpegPath, []string{
 		"-nostdin", "-v", "error", "-y",
 		"-i", inputPath,
@@ -148,109 +148,50 @@ func (inspector *FFmpegAvatarInspector) Inspect(
 		),
 		"-c:v", "mjpeg",
 		"-q:v", "2",
-		outputPath,
+		normalizedTempPath,
 	}, imageNormalizeTimeout)
 	if err != nil {
 		return InspectedAvatar{}, apperror.DependencyUnavailable("Avatar image normalization is unavailable")
 	}
-	if normalized.TimedOut {
+	if normalized.TimedOut || normalized.ExitCode != 0 {
+		_ = os.Remove(normalizedTempPath)
 		return InspectedAvatar{}, apperror.Unprocessable(
 			apperror.CodeMediaUploadMismatch,
-			"Image processing timed out",
+			"Image normalization failed",
 			nil,
 		)
 	}
-	if normalized.ExitCode != 0 {
-		return InspectedAvatar{}, apperror.Unprocessable(
-			apperror.CodeMediaUploadMismatch,
-			"Uploaded image is invalid: "+truncateDiagnostic(normalized.Stderr, 300),
-			nil,
-		)
-	}
-	normalizedSize, normalizedChecksum, err := fileSizeAndSHA256(outputPath)
+
+	normalizedSize, normalizedChecksum, err := fileSizeAndSHA256(normalizedTempPath)
 	if err != nil {
+		_ = os.Remove(normalizedTempPath)
 		return InspectedAvatar{}, fmt.Errorf("inspect normalized avatar: %w", err)
 	}
-	finalWidth, finalHeight, err := probeNormalizedImage(ctx, inspector, outputPath)
+
+	finalWidth, finalHeight, err := probeNormalizedImage(ctx, inspector, normalizedTempPath)
 	if err != nil {
+		_ = os.Remove(normalizedTempPath)
 		return InspectedAvatar{}, err
 	}
-	objectKey := "media/artwork/user_avatar/" + upload.TargetID + "/" + upload.ID + ".jpg"
-	storedSize, err := inspector.storage.UploadFile(
-		ctx,
-		objectKey,
-		outputPath,
-		"image/jpeg",
-		normalizedChecksum,
-	)
-	cleanupKeys := []string{upload.ObjectKey, objectKey}
+
+	destRelPath := fmt.Sprintf("avatars/%s.jpg", upload.ID)
+	committedRelPath, err := inspector.localMedia.CommitUpload(ctx, normalizedTempPath, destRelPath)
 	if err != nil {
-		return InspectedAvatar{}, &AvatarInspectionFailure{
-			Cause:       apperror.DependencyUnavailable("Normalized avatar could not be stored"),
-			CleanupKeys: cleanupKeys,
-		}
+		_ = os.Remove(normalizedTempPath)
+		return InspectedAvatar{}, fmt.Errorf("commit normalized avatar: %w", err)
 	}
-	if storedSize != normalizedSize {
-		return InspectedAvatar{}, &AvatarInspectionFailure{
-			Cause: apperror.Unprocessable(
-				apperror.CodeMediaUploadMismatch,
-				"Normalized avatar size changed during storage",
-				nil,
-			),
-			CleanupKeys: cleanupKeys,
-		}
-	}
+
+	// Remove input partial file
+	_ = os.Remove(inputPath)
+
 	return InspectedAvatar{
-		ObjectKey:      objectKey,
+		StoragePath:    committedRelPath,
 		MIMEType:       "image/jpeg",
 		SizeBytes:      normalizedSize,
 		ChecksumSHA256: normalizedChecksum,
 		Width:          finalWidth,
 		Height:         finalHeight,
-		CleanupKeys:    cleanupKeys,
 	}, nil
-}
-
-// AvatarInspectionFailure retains object keys created before an inspection
-// failed, allowing the transactional upload lifecycle to enqueue cleanup.
-type AvatarInspectionFailure struct {
-	Cause       error
-	CleanupKeys []string
-}
-
-func (failure *AvatarInspectionFailure) Error() string {
-	if failure == nil || failure.Cause == nil {
-		return "avatar inspection failed"
-	}
-	return failure.Cause.Error()
-}
-
-func (failure *AvatarInspectionFailure) Unwrap() error {
-	if failure == nil {
-		return nil
-	}
-	return failure.Cause
-}
-
-func observedObjectMismatches(upload AvatarUpload, observed StoredObject, observedETag string) []string {
-	var mismatches []string
-	if observed.SizeBytes != upload.ExpectedSize {
-		mismatches = append(mismatches, "sizeBytes")
-	}
-	contentType := strings.ToLower(strings.TrimSpace(strings.Split(observed.ContentType, ";")[0]))
-	if contentType != strings.ToLower(upload.ExpectedMIMEType) {
-		mismatches = append(mismatches, "contentType")
-	}
-	if observed.ChecksumSHA256 != upload.ExpectedChecksumSHA256 {
-		mismatches = append(mismatches, "checksumSha256")
-	}
-	if observed.MetadataSHA256 != "" && observed.MetadataSHA256 != upload.ExpectedChecksumSHA256 {
-		mismatches = append(mismatches, "metadataSha256")
-	}
-	if observedETag != "" && normalizeETag(observed.ETag) != normalizeETag(observedETag) {
-		mismatches = append(mismatches, "etag")
-	}
-	return mismatches
 }
 
 func parseImageProbe(raw string) (int, int, string, error) {
@@ -348,14 +289,6 @@ func fileSizeAndSHA256(path string) (int64, string, error) {
 		return 0, "", err
 	}
 	return info.Size(), hex.EncodeToString(hasher.Sum(nil)), nil
-}
-
-func truncateDiagnostic(value string, maximum int) string {
-	value = strings.TrimSpace(value)
-	if len(value) <= maximum {
-		return value
-	}
-	return value[:maximum]
 }
 
 type osCommandRunner struct{}

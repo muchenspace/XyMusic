@@ -76,7 +76,7 @@ describe("playback session", () => {
     harness.audio.setPlaybackPosition(42);
     await harness.session.toggle();
     harness.grants.getForResume.mockResolvedValueOnce({
-      grant: { url: "https://example.test/one-refreshed.mp3", expiresAt: "", selectedQuality: "STANDARD" },
+      grant: { streamUrl: "https://example.test/one-refreshed.mp3", expiresAt: "", selectedQuality: "STANDARD" },
       refreshed: true,
     });
 
@@ -99,11 +99,11 @@ describe("playback session", () => {
     harness.audio.setPlaybackPosition(42);
     await harness.session.toggle();
     harness.grants.getForResume.mockResolvedValueOnce({
-      grant: { url: "https://example.test/one.mp3", expiresAt: "", selectedQuality: "STANDARD" },
+      grant: { streamUrl: "https://example.test/one.mp3", expiresAt: "", selectedQuality: "STANDARD" },
       refreshed: false,
     });
     harness.grants.get.mockResolvedValueOnce({
-      url: "https://example.test/one-recovered.mp3",
+      streamUrl: "https://example.test/one-recovered.mp3",
       expiresAt: "",
       selectedQuality: "STANDARD",
     });
@@ -152,7 +152,7 @@ describe("playback session", () => {
 
       await harness.session.next();
       resolveDowngrade({
-        url: "https://example.test/one-low.mp3",
+        streamUrl: "https://example.test/one-low.mp3",
         expiresAt: "",
         selectedQuality: "DATA_SAVER",
       });
@@ -246,7 +246,7 @@ describe("playback session", () => {
     await started?.playback;
     harness.audio.setPlaybackPosition(42);
     harness.grants.get.mockResolvedValueOnce({
-      url: "https://example.test/one-recovered.mp3",
+      streamUrl: "https://example.test/one-recovered.mp3",
       expiresAt: "",
       selectedQuality: "STANDARD",
     });
@@ -630,12 +630,12 @@ function createHarness(options: {
   };
   const grants = {
     get: vi.fn(async (trackId: string, quality: ConcretePlaybackQuality) => ({
-      url: `https://example.test/${trackId}.mp3`,
+      streamUrl: `https://example.test/${trackId}.mp3`,
       expiresAt: "",
       selectedQuality: quality,
     })),
     getForResume: vi.fn(async (trackId: string) => ({
-      grant: { url: `https://example.test/${trackId}.mp3`, expiresAt: "", selectedQuality: "STANDARD" },
+      grant: { streamUrl: `https://example.test/${trackId}.mp3`, expiresAt: "", selectedQuality: "STANDARD" },
       refreshed: false,
     })),
     invalidate: vi.fn(),

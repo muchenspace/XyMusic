@@ -261,6 +261,31 @@ function csrfCookieToken(): string | undefined {
   }
 }
 
+function resolveApiResourceUrls<T>(value: T): T {
+  if (typeof value === "string") {
+    return (value.startsWith("/api/v1/")
+      ? new URL(value, apiResourceOrigin()).toString()
+      : value) as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => resolveApiResourceUrls(item)) as T;
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, resolveApiResourceUrls(item)]),
+    ) as T;
+  }
+  return value;
+}
+
+function apiResourceOrigin(): string {
+  try {
+    return new URL(API_BASE || window.location.origin, window.location.origin).origin;
+  } catch {
+    return window.location.origin;
+  }
+}
+
 export function buildApiUrl(path: string, query?: Record<string, QueryValue>): string {
   const url = new URL(`${API_BASE}${path}`, window.location.origin);
   for (const [key, value] of Object.entries(query ?? {})) {
@@ -535,7 +560,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
       const problem = responseProblem(response, payload);
       throw new ApiError({ ...problem, status: response.status });
     }
-    return payload as T;
+    return resolveApiResourceUrls(payload) as T;
   } finally {
     timeout.cleanup();
   }

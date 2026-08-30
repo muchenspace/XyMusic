@@ -5,7 +5,6 @@ import com.xymusic.app.core.session.ActiveSessionIdentity
 import com.xymusic.app.core.session.SessionIdentityProvider
 import com.xymusic.app.data.network.ProblemResponseParser
 import com.xymusic.app.domain.server.ServerConfigRepository
-import com.xymusic.app.domain.server.ServerProtocol
 import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.feature.player.data.media.PlaybackGrantKey
 import com.xymusic.app.feature.player.data.media.PlaybackGrantStore
@@ -168,9 +167,8 @@ constructor(
                 dto.toDomain(
                     expectedTrackId = trackId,
                     now = now,
-                    allowCleartext =
-                    serverConfigRepository.currentEndpoint()?.protocol ==
-                        ServerProtocol.HTTP,
+                    endpoint = serverConfigRepository.currentEndpoint()
+                        ?: return PlayerResult.Failure(PlayerFailure.PlaybackUnavailable),
                 )
             automaticQualityController.recordSelectedQuality(trackId, grant.selectedQuality)
             if (storeGrant(identity, key, grant, requestGeneration)) {
@@ -306,25 +304,35 @@ constructor(
     private fun grantMutex(key: PlaybackGrantKey): Mutex =
         grantMutexes[(key.hashCode() and Int.MAX_VALUE) % grantMutexes.size]
 
-    private fun PlaybackGrantDto.toDomain(expectedTrackId: String, now: Long, allowCleartext: Boolean): PlaybackGrant {
+    private fun PlaybackGrantDto.toDomain(
+        expectedTrackId: String,
+        now: Long,
+        endpoint: com.xymusic.app.domain.server.ServerEndpoint,
+    ): PlaybackGrant {
         require(trackId == expectedTrackId)
         UUID.fromString(trackId)
-        UUID.fromString(variantId)
-        val signedUri = URI(url)
-        require(signedUri.scheme == "https" || allowCleartext && signedUri.scheme == "http")
-        require(!signedUri.host.isNullOrBlank() && signedUri.rawUserInfo == null)
-        require(signedUri.rawFragment == null)
+        UUID.fromString(sessionId)
+        val configuredUri = URI(endpoint.displayValue + "/")
+        val rawUri = URI(streamUrl)
+        require(rawUri.rawFragment == null && rawUri.rawUserInfo == null)
+        val resolvedUri = if (rawUri.isAbsolute) rawUri else configuredUri.resolve(rawUri)
+        require(resolvedUri.scheme == endpoint.protocol.scheme)
+        require(resolvedUri.host.equals(endpoint.host, ignoreCase = true))
+        val resolvedPort = if (resolvedUri.port == -1) endpoint.protocol.defaultPort else resolvedUri.port
+        require(resolvedPort == endpoint.port)
+        require(resolvedUri.rawPath.startsWith("/"))
         val expiry = Instant.parse(expiresAt).toEpochMilli()
         require(Math.subtractExact(expiry, now) > MINIMUM_GRANT_LIFETIME_MS)
-        require(bitrate > 0 && contentLength > 0)
+        require(bitrate > 0)
         require(sampleRate == null || sampleRate > 0)
+        require(contentLength == null || contentLength > 0)
         require(cacheKey.isNotBlank() && !cacheKey.contains("?"))
         require(checksumSha256 == null || CHECKSUM_REGEX.matches(checksumSha256))
         return PlaybackGrant(
             trackId = trackId,
-            variantId = variantId,
+            sessionId = sessionId,
             selectedQuality = PreferredQuality.valueOf(selectedQuality),
-            signedUrl = url,
+            streamUrl = resolvedUri.toString(),
             expiresAtEpochMillis = expiry,
             mimeType = mimeType,
             codec = codec,

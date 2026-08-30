@@ -41,21 +41,6 @@ export interface TrackSummary {
     canWriteBack: boolean;
     writebackBlockReason: string | null;
   } | null;
-  mediaProcessing: {
-    status: "PENDING" | "PROCESSING" | "READY" | "FAILED" | "CANCELLED";
-    attempts: number;
-    maxAttempts: number;
-    lastError: string | null;
-    updatedAt: string;
-  } | null;
-  variantSummary: Array<{
-    quality: string;
-    codec: string;
-    container: string;
-    bitrate: number | null;
-    sampleRate: number | null;
-    status: string;
-  }>;
   activeWritebackJobId: string | null;
   latestWritebackErrorCode?: string | null;
   latestWritebackError?: string | null;
@@ -160,7 +145,6 @@ export interface TrackTagValues {
 
 export interface TrackDetail extends TrackSummary {
   lyrics: Array<{ id: string; language: string; format: "PLAIN" | "LRC"; timing: LyricTiming; content: string; isDefault: boolean; version: number; updatedAt: string }>;
-  variants: Array<{ id: string; quality: string; mimeType: string; codec: string; container: string; bitrate: number | null; sampleRate: number | null; status: string; updatedAt: string }>;
 }
 
 export interface TrackMetadataRecord {

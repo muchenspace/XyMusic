@@ -14,12 +14,12 @@ describe("playback grant cache resume freshness", () => {
     const playback = {
       grant: vi.fn()
         .mockResolvedValueOnce({
-          url: "https://example.test/valid.mp3",
+          streamUrl: "https://example.test/valid.mp3",
           expiresAt: new Date(now.getTime() + 60_000).toISOString(),
           selectedQuality: "STANDARD",
         })
         .mockResolvedValueOnce({
-          url: "https://example.test/refreshed.mp3",
+          streamUrl: "https://example.test/refreshed.mp3",
           expiresAt: new Date(now.getTime() + 300_000).toISOString(),
           selectedQuality: "STANDARD",
         }),
@@ -29,13 +29,13 @@ describe("playback grant cache resume freshness", () => {
     await cache.get("track-1", "STANDARD");
     const valid = await cache.getForResume("track-1", "STANDARD");
 
-    expect(valid).toMatchObject({ refreshed: false, grant: { url: "https://example.test/valid.mp3" } });
+    expect(valid).toMatchObject({ refreshed: false, grant: { streamUrl: "https://example.test/valid.mp3" } });
     expect(playback.grant).toHaveBeenCalledOnce();
 
     vi.setSystemTime(new Date(now.getTime() + 35_000));
     const refreshed = await cache.getForResume("track-1", "STANDARD");
 
-    expect(refreshed).toMatchObject({ refreshed: true, grant: { url: "https://example.test/refreshed.mp3" } });
+    expect(refreshed).toMatchObject({ refreshed: true, grant: { streamUrl: "https://example.test/refreshed.mp3" } });
     expect(playback.grant).toHaveBeenCalledTimes(2);
   });
 });

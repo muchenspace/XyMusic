@@ -3,274 +3,137 @@ package adminmedia
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
-	"regexp"
-	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
-	"xymusic/server/internal/modules/adminauth"
+	"xymusic/server/internal/modules/identity"
 	"xymusic/server/internal/platform/httpserver"
 	"xymusic/server/internal/shared/apperror"
 )
 
-type API interface {
-	CreateUpload(context.Context, string, CreateUploadInput) (UploadReservationDTO, error)
-	UploadContent(context.Context, string, string, string, int64, io.Reader) error
-	CompleteUpload(context.Context, string, string, CompleteUploadInput) (UploadCompletionDTO, error)
-	GetJob(context.Context, string) (MediaJobDTO, error)
-	RetryJob(context.Context, string, RetryJobInput) (MediaJobDTO, error)
+type Application interface {
+	CreateUpload(c context.Context, actorID string, idempotencyKey string, input CreateUploadInput) (UploadReservationDTO, bool, error)
+	UploadDirect(c context.Context, uploadID string, body io.Reader, contentLength int64) error
+	CompleteUpload(c context.Context, actorID string, uploadID string, idempotencyKey string, input CompleteUploadInput) (UploadCompletionDTO, bool, error)
 }
 
 type Routes struct {
-	service     API
-	identity    adminauth.Identity
-	idempotency Idempotency
+	authenticator Authenticator
+	application   Application
 }
 
-func NewRoutes(service API, identity adminauth.Identity, idempotency Idempotency) (*Routes, error) {
-	if service == nil {
-		return nil, errors.New("admin media API service is required")
-	}
-	if identity == nil {
-		return nil, errors.New("admin media identity service is required")
-	}
-	if idempotency == nil {
-		return nil, errors.New("admin media idempotency service is required")
-	}
-	return &Routes{service: service, identity: identity, idempotency: idempotency}, nil
+func NewRoutes(authenticator Authenticator, application Application) *Routes {
+	return &Routes{authenticator: authenticator, application: application}
 }
 
 func (routes *Routes) Register(router gin.IRouter) {
-	media := router.Group("/api/v1/admin/media")
-	media.POST("/uploads", httpserver.Handle(routes.createUpload))
-	media.PUT("/uploads/:id/content", httpserver.Handle(routes.uploadContent))
-	media.POST("/uploads/:id/complete", httpserver.Handle(routes.completeUpload))
-	media.GET("/jobs/:id", httpserver.Handle(routes.getJob))
-	media.POST("/jobs/:id/retry", httpserver.Handle(routes.retryJob))
+	admin := router.Group("/api/v1/admin")
+	admin.POST("/media/uploads", httpserver.Handle(routes.createUpload))
+	admin.PUT("/media/uploads/:id/content", httpserver.Handle(routes.uploadDirect))
+	admin.POST("/media/uploads/:id/complete", httpserver.Handle(routes.completeUpload))
 }
 
 func (routes *Routes) createUpload(c *gin.Context) error {
 	var input CreateUploadInput
-	if err := decodeStrictJSON(c, &input); err != nil {
+	if err := decodeMediaJSON(c, &input); err != nil {
 		return err
 	}
-	if !validPurpose(input.Purpose) || !routeUUIDPattern.MatchString(input.TargetID) ||
-		!routeStringLength(input.FileName, 1, 255) ||
-		!routeStringLength(input.ContentType, 3, 100) ||
-		input.SizeBytes < 1 || !checksumPattern.MatchString(input.ChecksumSHA256) {
-		return routeContractError()
-	}
-	return routes.mutate(
-		c,
-		"admin.media.upload.create",
-		input,
-		http.StatusCreated,
-		func(actorID string) (any, error) {
-			return routes.service.CreateUpload(c.Request.Context(), actorID, input)
-		},
-	)
-}
-
-func (routes *Routes) uploadContent(c *gin.Context) error {
-	uploadID, err := routeUUID(c.Param("id"))
+	actor, err := routes.authenticateAdmin(c)
 	if err != nil {
 		return err
 	}
-	actor, err := adminauth.RequireAdmin(c, routes.identity, true)
-	if err != nil {
-		return err
-	}
-	contentLength, err := requestContentLength(c.Request)
-	if err != nil {
-		return err
-	}
-	if err := routes.service.UploadContent(
+	result, replayed, err := routes.application.CreateUpload(
 		c.Request.Context(),
 		actor.UserID,
-		uploadID,
-		c.GetHeader("Content-Type"),
-		contentLength,
-		c.Request.Body,
-	); err != nil {
+		c.GetHeader("Idempotency-Key"),
+		input,
+	)
+	if err != nil {
 		return err
 	}
-	c.Status(http.StatusNoContent)
+	c.Header("X-Idempotent-Replay", formatReplay(replayed))
+	c.JSON(http.StatusCreated, result)
+	return nil
+}
+
+func (routes *Routes) uploadDirect(c *gin.Context) error {
+	uploadID := c.Param("id")
+	if _, err := uuid.Parse(uploadID); err != nil {
+		return apperror.Validation("id must be a UUID")
+	}
+	if _, err := routes.authenticateAdmin(c); err != nil {
+		return err
+	}
+	err := routes.application.UploadDirect(c.Request.Context(), uploadID, c.Request.Body, c.Request.ContentLength)
+	if err != nil {
+		return err
+	}
+	c.Status(http.StatusOK)
 	return nil
 }
 
 func (routes *Routes) completeUpload(c *gin.Context) error {
-	uploadID, err := routeUUID(c.Param("id"))
-	if err != nil {
-		return err
+	uploadID := c.Param("id")
+	if _, err := uuid.Parse(uploadID); err != nil {
+		return apperror.Validation("id must be a UUID")
 	}
 	var input CompleteUploadInput
-	if err := decodeStrictJSON(c, &input); err != nil {
+	if err := decodeMediaJSON(c, &input); err != nil {
 		return err
 	}
-	if input.ObservedETag.Set && !routeStringLength(input.ObservedETag.Value, 1, 200) {
-		return routeContractError()
+	actor, err := routes.authenticateAdmin(c)
+	if err != nil {
+		return err
 	}
-	payload := make(map[string]any)
-	if input.ObservedETag.Set {
-		payload["observedEtag"] = input.ObservedETag.Value
-	}
-	return routes.mutate(
-		c,
-		"admin.media.upload.complete:"+uploadID,
-		payload,
-		http.StatusAccepted,
-		func(actorID string) (any, error) {
-			return routes.service.CompleteUpload(c.Request.Context(), actorID, uploadID, input)
-		},
+	result, replayed, err := routes.application.CompleteUpload(
+		c.Request.Context(),
+		actor.UserID,
+		uploadID,
+		c.GetHeader("Idempotency-Key"),
+		input,
 	)
-}
-
-func (routes *Routes) getJob(c *gin.Context) error {
-	jobID, err := routeUUID(c.Param("id"))
 	if err != nil {
 		return err
 	}
-	if _, err := adminauth.RequireAdmin(c, routes.identity, false); err != nil {
-		return err
-	}
-	job, err := routes.service.GetJob(c.Request.Context(), jobID)
-	if err != nil {
-		return err
-	}
-	c.JSON(http.StatusOK, job)
+	c.Header("X-Idempotent-Replay", formatReplay(replayed))
+	c.JSON(http.StatusOK, result)
 	return nil
 }
 
-func (routes *Routes) retryJob(c *gin.Context) error {
-	jobID, err := routeUUID(c.Param("id"))
+func (routes *Routes) authenticateAdmin(c *gin.Context) (identity.AuthenticatedActor, error) {
+	if routes.authenticator == nil {
+		return identity.AuthenticatedActor{}, apperror.Unauthorized(
+			apperror.CodeAuthenticationRequired,
+			"Authentication is required",
+		)
+	}
+	actor, err := routes.authenticator.Authenticate(c.Request.Context(), c.GetHeader("Authorization"))
 	if err != nil {
-		return err
+		return identity.AuthenticatedActor{}, err
 	}
-	var input RetryJobInput
-	if err := decodeStrictJSON(c, &input); err != nil {
-		return err
+	if actor.Role != "ADMIN" {
+		return identity.AuthenticatedActor{}, apperror.Forbidden("Admin access required")
 	}
-	if input.ExpectedVersion < 1 {
-		return routeContractError()
-	}
-	payload := map[string]any{"expectedVersion": input.ExpectedVersion}
-	return routes.mutate(
-		c,
-		"admin.media.job.retry:"+jobID,
-		payload,
-		http.StatusAccepted,
-		func(string) (any, error) {
-			return routes.service.RetryJob(c.Request.Context(), jobID, input)
-		},
-	)
+	return actor, nil
 }
 
-func (routes *Routes) mutate(
-	c *gin.Context,
-	scope string,
-	payload any,
-	status int,
-	operation func(string) (any, error),
-) error {
-	actor, err := adminauth.RequireAdmin(c, routes.identity, true)
-	if err != nil {
-		return err
-	}
-	key := c.GetHeader("Idempotency-Key")
-	if !routeIdempotencyKey.MatchString(key) {
-		return apperror.Validation("Idempotency-Key is invalid")
-	}
-	result, err := routes.idempotency.Execute(c.Request.Context(), IdempotencyInput{
-		ActorID: actor.UserID,
-		Scope:   scope,
-		Key:     key,
-		Payload: payload,
-	}, func() (IdempotencyResponse, error) {
-		body, operationErr := operation(actor.UserID)
-		if operationErr != nil {
-			return IdempotencyResponse{}, operationErr
-		}
-		encoded, encodeErr := json.Marshal(body)
-		if encodeErr != nil {
-			return IdempotencyResponse{}, encodeErr
-		}
-		return IdempotencyResponse{Status: status, Body: encoded}, nil
-	})
-	if err != nil {
-		return err
-	}
-	c.Header("X-Idempotent-Replay", strconv.FormatBool(result.Replayed))
-	c.Data(result.Status, "application/json; charset=utf-8", result.Body)
-	return nil
-}
-
-func decodeStrictJSON(c *gin.Context, destination any) error {
+func decodeMediaJSON(c *gin.Context, destination any) error {
 	if c == nil || c.Request == nil || c.Request.Body == nil || c.Request.Body == http.NoBody {
-		return routeContractError()
+		return apperror.Validation("Request body is required")
 	}
 	decoder := json.NewDecoder(c.Request.Body)
 	if err := decoder.Decode(destination); err != nil {
-		var maximumBytesError *http.MaxBytesError
-		if errors.As(err, &maximumBytesError) {
-			return apperror.PayloadTooLarge("Request body exceeds the permitted size")
-		}
-		return routeContractError()
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return routeContractError()
+		return apperror.Validation("Request body is invalid")
 	}
 	return nil
 }
 
-func requestContentLength(request *http.Request) (int64, error) {
-	if request == nil {
-		return -1, routeContractError()
+func formatReplay(value bool) string {
+	if value {
+		return "true"
 	}
-	values := request.Header.Values("Content-Length")
-	if len(values) > 1 {
-		return -1, apperror.Validation("Content-Length is invalid")
-	}
-	if len(values) == 0 {
-		return request.ContentLength, nil
-	}
-	raw := values[0]
-	if raw == "" || strings.IndexFunc(raw, func(character rune) bool {
-		return character < '0' || character > '9'
-	}) >= 0 {
-		return -1, apperror.Validation("Content-Length is invalid")
-	}
-	value, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || value < 0 {
-		return -1, apperror.Validation("Content-Length is invalid")
-	}
-	if request.ContentLength >= 0 && request.ContentLength != value {
-		return -1, apperror.Validation("Content-Length does not match the request body")
-	}
-	return value, nil
+	return "false"
 }
-
-func routeUUID(value string) (string, error) {
-	if !routeUUIDPattern.MatchString(value) {
-		return "", routeContractError()
-	}
-	return value, nil
-}
-
-func routeStringLength(value string, minimum, maximum int) bool {
-	length := javascriptStringLength(value)
-	return length >= minimum && length <= maximum
-}
-
-func routeContractError() error {
-	return apperror.Validation("\u8bf7\u6c42\u53c2\u6570\u4e0d\u7b26\u5408\u63a5\u53e3\u8981\u6c42")
-}
-
-var (
-	routeUUIDPattern    = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-	routeIdempotencyKey = regexp.MustCompile(`^[A-Za-z0-9._~-]{8,128}$`)
-)

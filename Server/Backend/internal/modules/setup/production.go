@@ -1,16 +1,12 @@
 package setup
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
-	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,8 +16,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	"golang.org/x/text/unicode/norm"
 
 	"xymusic/server/internal/config"
@@ -182,11 +176,11 @@ func (connection *productionInstallationDatabase) tableHasRows(ctx context.Conte
 
 func (connection *productionInstallationDatabase) Reset(ctx context.Context) error {
 	const statement = `truncate table
-		tag_scraping_job_items, tag_scraping_jobs, object_cleanup_jobs,
+		tag_scraping_job_items, tag_scraping_jobs,
 		metadata_writeback_jobs, track_metadata,
 		library_scan_runs, local_music_source_tracks, library_roots, local_music_sources,
-		media_jobs, media_uploads, play_history, favorite_tracks,
-		playlist_tracks, playlists, track_variants, lyrics, track_artists, tracks,
+		media_uploads, play_history, favorite_tracks,
+		playlist_tracks, playlists, lyrics, track_artists, tracks,
 		album_artists, albums, artists, user_profiles, media_assets,
 		idempotency_records, rate_limit_buckets, refresh_tokens, auth_sessions, users
 		restart identity cascade`
@@ -365,204 +359,92 @@ func (connection *productionInstallationDatabase) Compensate(
 	return nil
 }
 
-type ProductionObjectStorageFactory struct{}
+type ProductionMediaStorageFactory struct{}
 
-func (ProductionObjectStorageFactory) Open(cfg config.Storage) (SetupObjectStorage, error) {
-	endpoint, secure, err := setupStorageEndpoint(cfg.Endpoint)
-	if err != nil {
-		return nil, err
-	}
-	bucketLookup := minio.BucketLookupAuto
-	if cfg.ForcePathStyle {
-		bucketLookup = minio.BucketLookupPath
-	}
-	client, err := minio.New(endpoint, &minio.Options{
-		Creds:        credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
-		Secure:       secure,
-		Region:       cfg.Region,
-		BucketLookup: bucketLookup,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create setup object storage client: %w", err)
-	}
-	return &productionSetupStorage{client: client, bucket: cfg.Bucket, region: cfg.Region}, nil
+func (ProductionMediaStorageFactory) Open(cfg config.MediaStorage) (SetupMediaStorage, error) {
+	return &productionSetupMediaStorage{
+		assetDir:     cfg.AssetDirectory,
+		transcodeDir: cfg.TranscodeDirectory,
+	}, nil
 }
 
-type productionSetupStorage struct {
-	client *minio.Client
-	bucket string
-	region string
+type productionSetupMediaStorage struct {
+	assetDir     string
+	transcodeDir string
 }
 
-func (objects *productionSetupStorage) Probe(ctx context.Context) error {
-	_, err := objects.client.BucketExists(ctx, objects.bucket)
-	return classifyStorageAccessError(err, "Object storage endpoint or bucket is unavailable", false)
+func (storage *productionSetupMediaStorage) Probe(ctx context.Context) error {
+	if storage.assetDir == "" || storage.transcodeDir == "" {
+		return errors.New("media asset and transcode directories are required")
+	}
+	return nil
 }
 
-func (objects *productionSetupStorage) Inspect(ctx context.Context) (StorageInspection, error) {
-	exists, err := objects.client.BucketExists(ctx, objects.bucket)
-	if err != nil {
-		return StorageInspection{}, classifyStorageAccessError(err, "Object storage endpoint or bucket is unavailable", false)
+func (storage *productionSetupMediaStorage) Inspect(ctx context.Context) (StorageInspection, error) {
+	assetExists := false
+	if fi, err := os.Stat(storage.assetDir); err == nil && fi.IsDir() {
+		assetExists = true
 	}
-	inspection := StorageInspection{BucketExists: exists}
-	if !exists {
-		return inspection, nil
+	transcodeExists := false
+	if fi, err := os.Stat(storage.transcodeDir); err == nil && fi.IsDir() {
+		transcodeExists = true
 	}
-	listContext, cancel := context.WithCancel(ctx)
-	defer cancel()
-	const maximumCount = int64(10_000)
-	for object := range objects.client.ListObjects(listContext, objects.bucket, minio.ListObjectsOptions{
-		Recursive: true, WithVersions: true,
-	}) {
-		if object.Err != nil {
-			return StorageInspection{}, fmt.Errorf("inspect object storage contents: %w", object.Err)
-		}
-		inspection.HasObjects = true
-		inspection.ObjectCount++
-		if inspection.ObjectCount >= maximumCount {
-			inspection.CountLimited = true
-			cancel()
-			break
+	var count int64
+	hasAssets := false
+	if assetExists {
+		entries, err := os.ReadDir(storage.assetDir)
+		if err == nil {
+			count = int64(len(entries))
+			hasAssets = count > 0
 		}
 	}
-	return inspection, nil
+	return StorageInspection{
+		AssetDirectoryExists:     assetExists,
+		TranscodeDirectoryExists: transcodeExists,
+		HasAssets:                hasAssets,
+		AssetCount:               count,
+	}, nil
 }
 
-func (objects *productionSetupStorage) EnsureBucket(ctx context.Context) (bool, error) {
-	exists, err := objects.client.BucketExists(ctx, objects.bucket)
-	if err != nil {
-		return false, classifyStorageAccessError(err, "Object storage endpoint or bucket is unavailable", false)
+func (storage *productionSetupMediaStorage) EnsureDirectories(ctx context.Context) error {
+	if err := os.MkdirAll(storage.assetDir, 0755); err != nil {
+		return fmt.Errorf("create media asset directory: %w", err)
 	}
-	if exists {
-		return false, nil
+	if err := os.MkdirAll(storage.transcodeDir, 0755); err != nil {
+		return fmt.Errorf("create media transcode directory: %w", err)
 	}
-	if err := objects.client.MakeBucket(ctx, objects.bucket, minio.MakeBucketOptions{Region: objects.region}); err != nil {
-		// A concurrent setup or operator may have created the bucket between the
-		// read-only probe and MakeBucket. Recheck before classifying it as failure.
-		exists, checkErr := objects.client.BucketExists(ctx, objects.bucket)
-		if checkErr == nil && exists {
-			return false, nil
-		}
-		return false, classifyStorageAccessError(err, "Object storage bucket could not be created", true)
-	}
-	return true, nil
+	return nil
 }
 
-func (objects *productionSetupStorage) VerifyReadWrite(ctx context.Context) error {
-	nonce, err := randomSecret()
-	if err != nil {
+func (storage *productionSetupMediaStorage) VerifyReadWrite(ctx context.Context) error {
+	if err := storage.EnsureDirectories(ctx); err != nil {
 		return err
 	}
-	payload := []byte("xymusic-storage-apply:" + nonce)
-	expected := sha256.Sum256(payload)
-	objectKey := ".xymusic-setup-probe/" + nonce
-	uploaded := false
-	defer func() {
-		if uploaded {
-			_ = objects.client.RemoveObject(context.WithoutCancel(ctx), objects.bucket, objectKey, minio.RemoveObjectOptions{})
-		}
-	}()
-	info, err := objects.client.PutObject(
-		ctx,
-		objects.bucket,
-		objectKey,
-		bytes.NewReader(payload),
-		int64(len(payload)),
-		minio.PutObjectOptions{ContentType: "application/octet-stream"},
-	)
-	if err != nil {
-		return fmt.Errorf("upload setup probe: %w", err)
+	probeFile := filepath.Join(storage.assetDir, ".xymusic-setup-probe")
+	if err := os.WriteFile(probeFile, []byte("probe"), 0644); err != nil {
+		return fmt.Errorf("verify write permission on asset directory: %w", err)
 	}
-	uploaded = true
-	if info.Size != int64(len(payload)) {
-		return errors.New("object storage upload size is invalid")
+	_ = os.Remove(probeFile)
+
+	probeTranscode := filepath.Join(storage.transcodeDir, ".xymusic-setup-probe")
+	if err := os.WriteFile(probeTranscode, []byte("probe"), 0644); err != nil {
+		return fmt.Errorf("verify write permission on transcode directory: %w", err)
 	}
-	metadata, err := objects.client.StatObject(ctx, objects.bucket, objectKey, minio.StatObjectOptions{})
-	if err != nil {
-		return fmt.Errorf("inspect setup probe: %w", err)
-	}
-	if metadata.Size != int64(len(payload)) {
-		return errors.New("object storage metadata verification failed")
-	}
-	object, err := objects.client.GetObject(ctx, objects.bucket, objectKey, minio.GetObjectOptions{})
-	if err != nil {
-		return fmt.Errorf("download setup probe: %w", err)
-	}
-	downloaded, readErr := io.ReadAll(io.LimitReader(object, int64(len(payload)+1)))
-	closeErr := object.Close()
-	if readErr != nil {
-		return fmt.Errorf("read setup probe: %w", readErr)
-	}
-	if closeErr != nil {
-		return fmt.Errorf("close setup probe: %w", closeErr)
-	}
-	actual := sha256.Sum256(downloaded)
-	if len(downloaded) != len(payload) || actual != expected {
-		return errors.New("object storage download verification failed")
-	}
-	if _, err := objects.client.PresignedGetObject(ctx, objects.bucket, objectKey, 30*time.Second, nil); err != nil {
-		return fmt.Errorf("create setup probe download URL: %w", err)
-	}
-	if err := objects.client.RemoveObject(ctx, objects.bucket, objectKey, minio.RemoveObjectOptions{}); err != nil {
-		return fmt.Errorf("delete setup probe: %w", err)
-	}
-	uploaded = false
+	_ = os.Remove(probeTranscode)
 	return nil
 }
 
-func (objects *productionSetupStorage) Clear(ctx context.Context) error {
-	for object := range objects.client.ListObjects(ctx, objects.bucket, minio.ListObjectsOptions{
-		Recursive:    true,
-		WithVersions: true,
-	}) {
-		if object.Err != nil {
-			return fmt.Errorf("list object storage contents: %w", object.Err)
-		}
-		if err := objects.client.RemoveObject(ctx, objects.bucket, object.Key, minio.RemoveObjectOptions{
-			VersionID: object.VersionID,
-		}); err != nil {
-			return fmt.Errorf("remove object storage item %q: %w", object.Key, err)
-		}
+func (storage *productionSetupMediaStorage) Clear(ctx context.Context) error {
+	if err := os.RemoveAll(storage.assetDir); err != nil {
+		return err
 	}
-	return nil
+	if err := os.RemoveAll(storage.transcodeDir); err != nil {
+		return err
+	}
+	return storage.EnsureDirectories(ctx)
 }
 
-func (objects *productionSetupStorage) RemoveBucket(ctx context.Context) error {
-	return objects.client.RemoveBucket(ctx, objects.bucket)
-}
-
-func (*productionSetupStorage) Close() {}
-
-func classifyStorageAccessError(err error, unavailableDetail string, creating bool) error {
-	if err == nil {
-		return nil
-	}
-	response := minio.ToErrorResponse(err)
-	accessDenied := response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden
-	switch response.Code {
-	case "AccessDenied", "InvalidAccessKeyId", "SignatureDoesNotMatch":
-		accessDenied = true
-	}
-	if accessDenied {
-		detail := "Object storage credentials cannot access the configured bucket"
-		if creating {
-			detail = "Object storage credentials cannot create the configured bucket"
-		}
-		return apperror.New(apperror.CodeValidationError, detail, apperror.WithCause(err))
-	}
-	return dependencyFailure(unavailableDetail, err)
-}
-
-func setupStorageEndpoint(raw string) (string, bool, error) {
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return "", false, errors.New("storage endpoint must be an absolute HTTP or HTTPS URL")
-	}
-	if parsed.Path != "" && parsed.Path != "/" {
-		return "", false, errors.New("storage endpoint must not contain a path")
-	}
-	return parsed.Host, parsed.Scheme == "https", nil
-}
+func (storage *productionSetupMediaStorage) Close() {}
 
 type CommandMediaTool struct{}
 

@@ -2,89 +2,44 @@ package adminsettings
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/url"
-	"strings"
-
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
+	"os"
 
 	"xymusic/server/internal/config"
-	"xymusic/server/internal/shared/apperror"
 )
 
-type ProductionStorageFactory struct{}
+type ProductionMediaStorageFactory struct{}
 
-func (ProductionStorageFactory) Open(cfg config.Storage) (StorageProbe, error) {
-	endpoint, secure, err := storageEndpoint(cfg.Endpoint)
-	if err != nil {
-		return nil, err
-	}
-	lookup := minio.BucketLookupAuto
-	if cfg.ForcePathStyle {
-		lookup = minio.BucketLookupPath
-	}
-	client, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
-		Secure: secure, Region: cfg.Region, BucketLookup: lookup,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create object storage client: %w", err)
-	}
-	return &productionStorage{client: client, bucket: cfg.Bucket, region: cfg.Region}, nil
+func (ProductionMediaStorageFactory) Open(cfg config.MediaStorage) (MediaStorageProbe, error) {
+	return &productionMediaStorage{
+		assetDir:     cfg.AssetDirectory,
+		transcodeDir: cfg.TranscodeDirectory,
+	}, nil
 }
 
-type productionStorage struct {
-	client *minio.Client
-	bucket string
-	region string
+type productionMediaStorage struct {
+	assetDir     string
+	transcodeDir string
 }
 
-func (storage *productionStorage) Probe(ctx context.Context) (bool, error) {
-	exists, err := storage.client.BucketExists(ctx, storage.bucket)
-	if err != nil {
-		return false, storageDependencyError("Object storage endpoint or bucket is unavailable", err)
+func (storage *productionMediaStorage) Probe(ctx context.Context) error {
+	if fi, err := os.Stat(storage.assetDir); err != nil || !fi.IsDir() {
+		return fmt.Errorf("media asset directory does not exist or is not a directory: %s", storage.assetDir)
 	}
-	return exists, nil
-}
-
-func (storage *productionStorage) EnsureBucket(ctx context.Context) error {
-	exists, err := storage.client.BucketExists(ctx, storage.bucket)
-	if err != nil {
-		return storageDependencyError("Object storage endpoint or bucket is unavailable", err)
-	}
-	if exists {
-		return nil
-	}
-	if err := storage.client.MakeBucket(ctx, storage.bucket, minio.MakeBucketOptions{Region: storage.region}); err != nil {
-		if exists, checkErr := storage.client.BucketExists(ctx, storage.bucket); checkErr == nil && exists {
-			return nil
-		}
-		return storageDependencyError("Object storage bucket could not be created", err)
+	if fi, err := os.Stat(storage.transcodeDir); err != nil || !fi.IsDir() {
+		return fmt.Errorf("media transcode directory does not exist or is not a directory: %s", storage.transcodeDir)
 	}
 	return nil
 }
 
-func (*productionStorage) Close() {}
-
-func storageEndpoint(raw string) (string, bool, error) {
-	if strings.TrimSpace(raw) == "" {
-		return "s3.amazonaws.com", true, nil
+func (storage *productionMediaStorage) EnsureDirectories(ctx context.Context) error {
+	if err := os.MkdirAll(storage.assetDir, 0755); err != nil {
+		return fmt.Errorf("create media asset directory: %w", err)
 	}
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return "", false, validation("storage.endpoint is invalid")
+	if err := os.MkdirAll(storage.transcodeDir, 0755); err != nil {
+		return fmt.Errorf("create media transcode directory: %w", err)
 	}
-	if parsed.Path != "" && parsed.Path != "/" {
-		return "", false, validation("storage.endpoint must not contain a path")
-	}
-	return parsed.Host, parsed.Scheme == "https", nil
+	return nil
 }
 
-func storageDependencyError(detail string, cause error) error {
-	if cause == nil {
-		cause = errors.New(detail)
-	}
-	return apperror.New(apperror.CodeDependencyUnavailable, detail, apperror.WithCause(cause))
-}
+func (storage *productionMediaStorage) Close() {}

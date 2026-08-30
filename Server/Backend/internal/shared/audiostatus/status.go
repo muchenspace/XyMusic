@@ -30,26 +30,7 @@ func Expression(trackAlias string) string {
 		  AND active_scan.status IN ('PENDING', 'RUNNING')
 		  AND scan_source.last_seen_at < COALESCE(active_scan.started_at, active_scan.created_at)
 	) THEN 'PROCESSING'
-	WHEN EXISTS (
-		SELECT 1 FROM media_jobs active_job
-		WHERE active_job.track_id = %[1]s.id
-		  AND active_job.generation = %[1]s.media_generation
-		  AND active_job.status IN ('PENDING', 'PROCESSING')
-	) THEN 'PROCESSING'
-	WHEN EXISTS (
-		SELECT 1
-		FROM local_music_source_tracks processing_mapping
-		JOIN local_music_sources processing_source ON processing_source.id = processing_mapping.source_id
-		WHERE processing_mapping.track_id = %[1]s.id
-		  AND processing_source.status IN ('PENDING', 'PROCESSING')
-	) THEN 'PROCESSING'
-	WHEN %[1]s.status = 'ERROR' THEN 'ERROR'
-	WHEN EXISTS (
-		SELECT 1 FROM media_jobs failed_job
-		WHERE failed_job.track_id = %[1]s.id
-		  AND failed_job.generation = %[1]s.media_generation
-		  AND failed_job.status IN ('FAILED', 'CANCELLED')
-	) THEN 'ERROR'
+	WHEN %[1]s.status = 'FAILED' THEN 'ERROR'
 	WHEN EXISTS (
 		SELECT 1
 		FROM local_music_source_tracks source_mapping
@@ -66,13 +47,19 @@ func Expression(trackAlias string) string {
 	WHEN %[1]s.status = 'READY'
 	  AND %[1]s.published_at IS NOT NULL
 	  AND %[1]s.duration_ms > 0
-	  AND EXISTS (
-		SELECT 1
-		FROM track_variants ready_variant
-		JOIN media_assets ready_asset ON ready_asset.id = ready_variant.asset_id
-		WHERE ready_variant.track_id = %[1]s.id
-		  AND ready_variant.status = 'READY'
-		  AND ready_asset.status = 'READY'
+	  AND (
+		EXISTS (
+			SELECT 1
+			FROM local_music_source_tracks ready_mapping
+			JOIN local_music_sources ready_source ON ready_source.id = ready_mapping.source_id
+			WHERE ready_mapping.track_id = %[1]s.id
+			  AND ready_source.status = 'READY'
+		) OR EXISTS (
+			SELECT 1
+			FROM media_assets ready_asset
+			WHERE ready_asset.id = %[1]s.source_asset_id
+			  AND ready_asset.status = 'READY'
+		)
 	) THEN 'READY'
 	WHEN %[1]s.published_at IS NOT NULL THEN 'ERROR'
 	ELSE 'PROCESSING'

@@ -129,30 +129,15 @@ describe("setup administrator form", () => {
     }).success).toBe(true);
   });
 
-  it("allows object storage on local, loopback, wildcard, and remote addresses", () => {
+  it("validates local media asset and transcode directories", () => {
     const base = {
-      endpoint: "http://minio.example.com:9000",
-      region: "us-east-1",
-      bucket: "xymusic",
-      accessKeyId: "access-key",
-      secretAccessKey: "secret-key",
-      forcePathStyle: true,
-      signedUrlTtlSeconds: 300,
+      assetDirectory: "assets",
+      transcodeDirectory: "transcode",
       maxUploadBytes: 1024,
     };
     expect(setupStepSchemas.storage.safeParse(base).success).toBe(true);
-    for (const endpoint of [
-      "http://127.0.0.1:9000",
-      "http://127.1.2.3:9000",
-      "http://localhost:9000",
-      "http://0.0.0.0:9000",
-      "http://[::1]:9000",
-      "http://[::]:9000",
-      "https://objects.example.com",
-    ]) {
-      expect(setupStepSchemas.storage.safeParse({ ...base, endpoint }).success).toBe(true);
-      expect(setupStepSchemas.storage.safeParse({ ...base, publicBaseUrl: endpoint }).success).toBe(true);
-    }
+    expect(setupStepSchemas.storage.safeParse({ ...base, assetDirectory: "" }).success).toBe(false);
+    expect(setupStepSchemas.storage.safeParse({ ...base, transcodeDirectory: "" }).success).toBe(false);
   });
 });
 
@@ -179,13 +164,8 @@ function completeSetupInput(): SetupCompleteInput {
       maxConnections: 10,
     },
     storage: {
-      endpoint: "http://minio.example.com:9000",
-      region: "us-east-1",
-      bucket: "xymusic",
-      accessKeyId: "access-key",
-      secretAccessKey: "secret-key",
-      forcePathStyle: true,
-      signedUrlTtlSeconds: 300,
+      assetDirectory: "assets",
+      transcodeDirectory: "transcode",
       maxUploadBytes: 1024,
     },
     media: {

@@ -19,6 +19,7 @@ import (
 	"xymusic/server/internal/platform/database"
 	platformsecurity "xymusic/server/internal/platform/security"
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/audiostatus"
 	"xymusic/server/internal/testsupport"
 )
 
@@ -93,43 +94,23 @@ func TestRepositoryRunsLibrarySourceLifecycleInConfiguredDatabase(t *testing.T) 
 	) VALUES($1,$2,1000,'READY') RETURNING id`, "Source Track "+short, "source track "+short).Scan(&trackID); err != nil {
 		t.Fatal(err)
 	}
-	var assetID string
-	if err := transaction.QueryRow(ctx, `INSERT INTO media_assets(
-		uploader_id,object_key,kind,mime_type,size_bytes,checksum_sha256,status
-	) VALUES($1,$2,'AUDIO_SOURCE','audio/flac',100,$3,'READY') RETURNING id`,
-		actorID, "integration/sources/"+suffix+".flac", strings.Repeat("a", 64)).Scan(&assetID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := transaction.Exec(ctx, `INSERT INTO media_jobs(
-		type,source_asset_id,track_id,status,idempotency_key,payload
-	) VALUES('INGEST_TRACK',$1,$2,'READY',$3,'{}'::jsonb)`,
-		assetID, trackID, "integration-source-historical-"+suffix); err != nil {
-		t.Fatal(err)
-	}
 	var summaryRunID string
 	if err := transaction.QueryRow(ctx, `INSERT INTO library_scan_runs(
 		root_id,root_version,status,started_at,completed_at
 	) VALUES($1,1,'COMPLETED',now(),now()) RETURNING id`, rootID).Scan(&summaryRunID); err != nil {
 		t.Fatal(err)
 	}
-	var mediaJobID string
-	if err := transaction.QueryRow(ctx, `INSERT INTO media_jobs(
-		type,source_asset_id,track_id,status,idempotency_key,payload,scan_run_id
-	) VALUES('INGEST_TRACK',$1,$2,'PENDING',$3,'{}'::jsonb,$4) RETURNING id`,
-		assetID, trackID, "integration-source-"+suffix, summaryRunID).Scan(&mediaJobID); err != nil {
-		t.Fatal(err)
-	}
 	var sourceID string
 	if err := transaction.QueryRow(ctx, `INSERT INTO local_music_sources(
 		root_id,source_path,normalized_source_path,checksum_sha256,size_bytes,modified_at,
-		track_id,source_asset_id,media_job_id,status
-	) VALUES($1,$2,$2,$3,100,now(),$4,$5,$6,'PROCESSING') RETURNING id`,
-		rootID, "album/track-"+short+".flac", strings.Repeat("b", 64), trackID, assetID, mediaJobID).Scan(&sourceID); err != nil {
+		status
+	) VALUES($1,$2,$2,$3,100,now(),'READY') RETURNING id`,
+		rootID, "album/track-"+short+".flac", strings.Repeat("b", 64)).Scan(&sourceID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := transaction.Exec(ctx, `INSERT INTO local_music_source_tracks(
-		source_id,track_id,media_job_id,segment_index,start_ms
-	) VALUES($1,$2,$3,0,0)`, sourceID, trackID, mediaJobID); err != nil {
+		source_id,track_id,segment_index,start_ms
+	) VALUES($1,$2,0,0)`, sourceID, trackID); err != nil {
 		t.Fatal(err)
 	}
 	views, total, err := repository.ListRootViews(ctx, RootQuery{Limit: 25})
@@ -144,12 +125,12 @@ func TestRepositoryRunsLibrarySourceLifecycleInConfiguredDatabase(t *testing.T) 
 		view.LatestRun == nil || view.LatestRun.ID != summaryRunID {
 		t.Fatalf("root view=%+v found=%v", view, found)
 	}
-	files, total, err := repository.ListFiles(ctx, rootID, FileQuery{Page: 1, PageSize: 25, Query: "track", Status: SourceFileProcessing})
+	files, total, err := repository.ListFiles(ctx, rootID, FileQuery{Page: 1, PageSize: 25, Query: "track", Status: SourceFileReady})
 	if err != nil || total != 1 || len(files) != 1 || files[0].TrackID != trackID {
 		t.Fatalf("files=%+v total=%d err=%v", files, total, err)
 	}
 	processing, err := repository.ProcessingSummary(ctx, rootID)
-	if err != nil || processing.Queued != 1 || len(processing.Jobs) != 1 || processing.Jobs[0].ID != mediaJobID {
+	if err != nil || len(processing.Jobs) != 0 {
 		t.Fatalf("processing=%+v err=%v", processing, err)
 	}
 
@@ -613,14 +594,14 @@ func TestProductionSynchronizerPersistsFilesMetadataAndCUEInConfiguredDatabase(t
 		t.Fatal(err)
 	}
 	rootID := view.Root.ID
-	storage := &syncStorageStub{}
-	probe := metadataProbeStub{metadata: adminmetadata.MetadataSnapshot{
+	durationMS := int64(180000)
+	probe := metadataProbeStub{durationMS: &durationMS, metadata: adminmetadata.MetadataSnapshot{
 		Title: "Scanned Song", Credits: []adminmetadata.MetadataCredit{{Name: "Scan Artist", Role: adminmetadata.CreditPrimary}},
 		AlbumArtists: []string{"Scan Artist"}, Album: stringPointer("Scan Album"),
 		TrackNumber: intPointer(1), DiscNumber: intPointer(1), Genres: []string{},
 	}, calls: &atomic.Int32{}}
 	synchronizer := &ProductionSynchronizer{
-		database: transaction, storage: storage, probe: probe, now: func() time.Time { return time.Now().UTC() },
+		database: transaction, probe: probe, now: func() time.Time { return time.Now().UTC() },
 	}
 	audioPath := filepath.Join(directory, "song.flac")
 	if err := os.WriteFile(audioPath, []byte("first-audio"), 0o600); err != nil {
@@ -635,15 +616,26 @@ func TestProductionSynchronizerPersistsFilesMetadataAndCUEInConfiguredDatabase(t
 	}, seenAt); err != nil {
 		t.Fatal(err)
 	}
-	var sourceID, trackID, jobID, sourceStatus string
-	if err := transaction.QueryRow(ctx, `SELECT id,track_id,media_job_id,status
-		FROM local_music_sources WHERE root_id=$1 AND normalized_source_path='song.flac'`, rootID).Scan(
-		&sourceID, &trackID, &jobID, &sourceStatus,
+	var sourceID, trackID, sourceStatus string
+	if err := transaction.QueryRow(ctx, `SELECT source.id, track_link.track_id, source.status
+		FROM local_music_sources source
+		JOIN local_music_source_tracks track_link ON track_link.source_id = source.id
+		WHERE source.root_id=$1 AND source.normalized_source_path='song.flac'`, rootID).Scan(
+		&sourceID, &trackID, &sourceStatus,
 	); err != nil {
 		t.Fatal(err)
 	}
-	if sourceStatus != "PROCESSING" || len(storage.uploads) != 1 {
-		t.Fatalf("source status=%s uploads=%+v", sourceStatus, storage.uploads)
+	if sourceStatus != "READY" {
+		t.Fatalf("source status=%s", sourceStatus)
+	}
+	var publishedAt *time.Time
+	var audioStatus string
+	if err := transaction.QueryRow(ctx, `SELECT track.published_at, (`+audiostatus.Expression("track")+`)
+		FROM tracks track WHERE track.id=$1`, trackID).Scan(&publishedAt, &audioStatus); err != nil {
+		t.Fatal(err)
+	}
+	if publishedAt == nil || audioStatus != "READY" {
+		t.Fatalf("scanned track readiness: publishedAt=%v audioStatus=%s", publishedAt, audioStatus)
 	}
 	var title, artistName, lyricOrigin, lyricFormat string
 	if err := transaction.QueryRow(ctx, `SELECT track.title,artist.name,lyric.origin::text,lyric.format::text
@@ -669,50 +661,6 @@ func TestProductionSynchronizerPersistsFilesMetadataAndCUEInConfiguredDatabase(t
 	}, seenAt.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	var jobCount int
-	if err := transaction.QueryRow(ctx, `SELECT count(*)::int FROM media_jobs WHERE track_id=$1`, trackID).Scan(&jobCount); err != nil {
-		t.Fatal(err)
-	}
-	if jobCount != 1 {
-		t.Fatalf("unchanged job count=%d", jobCount)
-	}
-	if _, err := transaction.Exec(ctx, `UPDATE media_jobs SET status='READY',updated_at=now() WHERE id=$1`, jobID); err != nil {
-		t.Fatal(err)
-	}
-	if err := synchronizer.ProcessFile(ctx, rootID, "", DiscoveredFile{
-		AudioPath: audioPath, RelativePath: "song.flac",
-	}, seenAt.Add(2*time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	var sourceObjectKey string
-	if err := transaction.QueryRow(ctx, `SELECT asset.object_key FROM local_music_sources source
-		JOIN media_assets asset ON asset.id=source.source_asset_id WHERE source.id=$1`, sourceID).Scan(&sourceObjectKey); err != nil {
-		t.Fatal(err)
-	}
-	delete(storage.objects, sourceObjectKey)
-	if err := synchronizer.ProcessFile(ctx, rootID, "", DiscoveredFile{
-		AudioPath: audioPath, RelativePath: "song.flac",
-	}, seenAt.Add(3*time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	if len(storage.uploads) != 2 {
-		t.Fatalf("missing reusable source asset was not uploaded again: uploads=%+v", storage.uploads)
-	}
-	if err := transaction.QueryRow(ctx, `SELECT count(*)::int FROM media_jobs WHERE track_id=$1`, trackID).Scan(&jobCount); err != nil {
-		t.Fatal(err)
-	}
-	if jobCount != 2 {
-		t.Fatalf("missing reusable source asset job count=%d", jobCount)
-	}
-	if err := transaction.QueryRow(ctx, `SELECT media_job_id FROM local_music_sources WHERE id=$1`, sourceID).Scan(&jobID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := transaction.Exec(ctx, `UPDATE media_jobs SET status='READY',updated_at=now() WHERE id=$1`, jobID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := transaction.Exec(ctx, `UPDATE local_music_sources SET status='READY' WHERE id=$1`, sourceID); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(audioPath, []byte("second-audio-content"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -723,22 +671,6 @@ func TestProductionSynchronizerPersistsFilesMetadataAndCUEInConfiguredDatabase(t
 	if err := synchronizer.ProcessFile(ctx, rootID, "", DiscoveredFile{
 		AudioPath: audioPath, RelativePath: "song.flac",
 	}, modified); err != nil {
-		t.Fatal(err)
-	}
-	if err := transaction.QueryRow(ctx, `SELECT count(*)::int FROM media_jobs WHERE track_id=$1`, trackID).Scan(&jobCount); err != nil {
-		t.Fatal(err)
-	}
-	if jobCount != 3 {
-		t.Fatalf("changed job count=%d", jobCount)
-	}
-	var latestJobID string
-	if err := transaction.QueryRow(ctx, `SELECT media_job_id FROM local_music_sources WHERE id=$1`, sourceID).Scan(&latestJobID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := transaction.Exec(ctx, `UPDATE media_jobs SET status='READY',updated_at=now() WHERE id=$1`, latestJobID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := transaction.Exec(ctx, `UPDATE local_music_sources SET status='READY' WHERE id=$1`, sourceID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := transaction.Exec(ctx, `UPDATE tracks SET status='ARCHIVED' WHERE id=$1`, trackID); err != nil {
@@ -762,15 +694,6 @@ func TestProductionSynchronizerPersistsFilesMetadataAndCUEInConfiguredDatabase(t
 	}
 	if archivedTrackStatus != "ARCHIVED" {
 		t.Fatalf("changed archived track status=%s", archivedTrackStatus)
-	}
-	if err := transaction.QueryRow(ctx, `SELECT media_job_id FROM local_music_sources WHERE id=$1`, sourceID).Scan(&latestJobID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := transaction.Exec(ctx, `UPDATE media_jobs SET status='READY',updated_at=now() WHERE id=$1`, latestJobID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := transaction.Exec(ctx, `UPDATE local_music_sources SET status='READY' WHERE id=$1`, sourceID); err != nil {
-		t.Fatal(err)
 	}
 	renamedPath := filepath.Join(directory, "renamed.flac")
 	if err := os.Rename(audioPath, renamedPath); err != nil {
@@ -821,15 +744,16 @@ FILE "disc.wav" WAVE
 		WHERE root_id=$1 AND normalized_source_path='disc.wav'`, rootID).Scan(&cueSourceID); err != nil {
 		t.Fatal(err)
 	}
-	var mappingCount, segmentEnd int
+	var mappingCount int
+	var segmentEnd *int64
 	if err := transaction.QueryRow(ctx, `SELECT count(*)::int,
-		max(end_ms) FILTER(WHERE segment_index=0)::int FROM local_music_source_tracks WHERE source_id=$1`, cueSourceID).Scan(
+		max(cue_end_time_ms) FILTER(WHERE cue_track_number=1) FROM local_music_source_tracks WHERE source_id=$1`, cueSourceID).Scan(
 		&mappingCount, &segmentEnd,
 	); err != nil {
 		t.Fatal(err)
 	}
-	if mappingCount != 2 || segmentEnd != 60000 {
-		t.Fatalf("CUE mappings=%d first end=%d", mappingCount, segmentEnd)
+	if mappingCount != 2 || segmentEnd == nil || *segmentEnd != 60000 {
+		t.Fatalf("CUE mappings=%d first end=%v", mappingCount, segmentEnd)
 	}
 	if _, err := transaction.Exec(ctx, `UPDATE local_music_sources SET last_seen_at=$2,status='READY'
 		WHERE id=$1`, sourceID, seenAt.Add(-time.Hour)); err != nil {
@@ -999,15 +923,16 @@ func (stub *syncStorageStub) StatObject(
 }
 
 type metadataProbeStub struct {
-	metadata adminmetadata.MetadataSnapshot
-	calls    *atomic.Int32
+	metadata   adminmetadata.MetadataSnapshot
+	durationMS *int64
+	calls      *atomic.Int32
 }
 
 func (stub metadataProbeStub) Probe(context.Context, string) (adminmetadata.ProbedMetadataFile, error) {
 	if stub.calls != nil {
 		stub.calls.Add(1)
 	}
-	return adminmetadata.ProbedMetadataFile{Metadata: stub.metadata}, nil
+	return adminmetadata.ProbedMetadataFile{Metadata: stub.metadata, DurationMS: stub.durationMS}, nil
 }
 
 type metadataProbeFailureStub struct{ err error }

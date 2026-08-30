@@ -532,7 +532,7 @@ func (service *Service) track(ctx context.Context, id string) (TrackDTO, error) 
 	if record.DiscNumber != nil {
 		disc = *record.DiscNumber
 	}
-	return TrackDTO{ID: record.ID, Title: record.Title, Album: album, ArtistCredits: creditsDTO(record.Credits), Artwork: artwork(artworks, record.AlbumCoverAssetID), DurationMS: duration, TrackNumber: record.TrackNumber, DiscNumber: disc, Status: record.Status, ActiveMediaJobID: record.ActiveMediaJobID, Version: record.Version, CreatedAt: formatTimestamp(record.CreatedAt), UpdatedAt: formatTimestamp(record.UpdatedAt)}, nil
+	return TrackDTO{ID: record.ID, Title: record.Title, Album: album, ArtistCredits: creditsDTO(record.Credits), Artwork: artwork(artworks, record.AlbumCoverAssetID), DurationMS: duration, TrackNumber: record.TrackNumber, DiscNumber: disc, Status: record.Status, Version: record.Version, CreatedAt: formatTimestamp(record.CreatedAt), UpdatedAt: formatTimestamp(record.UpdatedAt)}, nil
 }
 
 func creditsDTO(records []CreditRecord) []CreditDTO {

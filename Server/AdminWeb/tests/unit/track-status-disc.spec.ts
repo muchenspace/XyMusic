@@ -21,8 +21,6 @@ function track(overrides: Partial<TrackSummary> = {}): TrackSummary {
     metadataStatus: "NORMAL",
     metadataVersion: 2,
     source: { id: "source-1", rootId: "root-1", rootName: "Music", relativePath: "Artist/Test.flac", format: "FLAC", status: "READY", checksumSha256: null, mode: "READ_WRITE", canWriteBack: true, writebackBlockReason: null },
-    mediaProcessing: { status: "READY", attempts: 1, maxAttempts: 5, lastError: null, updatedAt: "2026-07-15T00:00:00.000Z" },
-    variantSummary: [{ quality: "HIGH", codec: "opus", container: "ogg", bitrate: 192_000, sampleRate: 48_000, status: "READY" }],
     activeWritebackJobId: null,
     publishedAt: "2026-07-15T00:00:00.000Z",
     createdAt: "2026-07-15T00:00:00.000Z",
@@ -33,17 +31,14 @@ function track(overrides: Partial<TrackSummary> = {}): TrackSummary {
 }
 
 describe("TrackStatusDisc", () => {
-  it("shows analysis, media and transcoding details on hover", async () => {
+  it("shows source analysis and on-demand transcoding details on hover", async () => {
     const wrapper = mount(TrackStatusDisc, { props: { track: track() }, attachTo: document.body });
     await wrapper.find(".inline-flex").trigger("mouseenter");
     expect(document.body.textContent).toContain("源文件分析");
     expect(document.body.textContent).toContain("源文件分析完成");
-    expect(document.body.textContent).toContain("媒体处理");
-    expect(document.body.textContent).toContain("媒体处理完成");
+    expect(document.body.textContent).toContain("播放时动态转码");
+    expect(document.body.textContent).toContain("不会预先生成转码变体");
     expect(document.body.textContent).toContain("正常");
-    expect(document.body.textContent).toContain("HIGH");
-    expect(document.body.textContent).toContain("可用");
-    expect(document.body.textContent).toContain("192 kbps");
     expect(document.body.textContent).not.toContain("READY");
     wrapper.unmount();
   });
@@ -62,7 +57,7 @@ describe("TrackStatusDisc", () => {
 
   it("explains a composite processing state without exposing raw enums", async () => {
     const wrapper = mount(TrackStatusDisc, {
-      props: { track: track({ audioStatus: "PROCESSING", mediaProcessing: { ...track().mediaProcessing!, status: "READY" } }) },
+      props: { track: track({ audioStatus: "PROCESSING" }) },
       attachTo: document.body,
     });
     await wrapper.find(".inline-flex").trigger("mouseenter");

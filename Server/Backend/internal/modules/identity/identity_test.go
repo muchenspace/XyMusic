@@ -161,7 +161,6 @@ func TestRegisterExplainsWhenSelfServiceRegistrationIsDisabled(t *testing.T) {
 	service, err := NewService(config.Config{
 		Registration: config.Registration{Enabled: false},
 		Security:     config.Security{RefreshTokenTTLSeconds: 3600},
-		Storage:      config.Storage{SignedURLTTLSeconds: 300},
 	}, ServiceDependencies{
 		Repository:   &storeStub{},
 		AccessTokens: tokenStub{},
@@ -794,7 +793,6 @@ func newTestServiceWith(t *testing.T, store Store, overrides testDependencies) *
 	service, err := NewService(config.Config{
 		Registration: config.Registration{Enabled: true},
 		Security:     config.Security{RefreshTokenTTLSeconds: 3600},
-		Storage:      config.Storage{SignedURLTTLSeconds: 300},
 	}, ServiceDependencies{
 		Repository:   store,
 		AccessTokens: overrides.tokens,

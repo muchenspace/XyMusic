@@ -51,8 +51,6 @@ function track(id: string, trackSource: TrackSummary["source"] = null, status: T
     metadataStatus: "NORMAL",
     metadataVersion: 1,
     source: trackSource,
-    mediaProcessing: null,
-    variantSummary: [],
     activeWritebackJobId: null,
     publishedAt: null,
     createdAt: "2026-01-01T00:00:00Z",

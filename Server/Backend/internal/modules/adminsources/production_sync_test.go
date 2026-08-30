@@ -3,17 +3,22 @@ package adminsources
 import (
 	"context"
 	"errors"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"xymusic/server/internal/modules/adminmetadata"
+	"xymusic/server/internal/platform/localmedia"
 	sharedlyrics "xymusic/server/internal/shared/lyrics"
 )
 
@@ -67,37 +72,6 @@ func (transaction *scannedLyricTransactionStub) Exec(context.Context, string, ..
 	return pgconn.CommandTag{}, errors.New("unexpected database call")
 }
 
-func TestProcessFileTouchesExistingSourceBeforeRecordingProcessingFailure(t *testing.T) {
-	seenAt := time.Date(2026, 7, 18, 1, 2, 3, 0, time.UTC)
-	now := seenAt.Add(time.Second)
-	database := &processFailureDatabase{
-		sourceID:  "00000000-0000-4000-8000-000000000020",
-		status:    SourceFileReady,
-		updatedAt: seenAt.Add(-time.Hour),
-	}
-	synchronizer := &ProductionSynchronizer{database: database, now: func() time.Time { return now }}
-	failure := errors.New("metadata probe failed")
-	err := synchronizer.ProcessFile(context.Background(),
-		"00000000-0000-4000-8000-000000000021", "", DiscoveredFile{
-			RelativePath: "music/song.flac", ScanError: failure,
-		}, seenAt)
-	if !errors.Is(err, failure) {
-		t.Fatalf("processing error=%v", err)
-	}
-	if database.beginCount != 2 || database.commitCount != 2 {
-		t.Fatalf("transactions begun=%d committed=%d", database.beginCount, database.commitCount)
-	}
-	if database.status != SourceFileFailed || database.lastError != failure.Error() {
-		t.Fatalf("source status=%s error=%q", database.status, database.lastError)
-	}
-	if !database.lastSeenAt.Equal(seenAt) {
-		t.Fatalf("last seen=%s want=%s", database.lastSeenAt, seenAt)
-	}
-	if !database.trackFailed {
-		t.Fatal("mapped track was not marked failed")
-	}
-}
-
 func TestProcessPreparedFileSkipsCommitForReusableUnchangedSource(t *testing.T) {
 	path := t.TempDir() + string(os.PathSeparator) + "song.flac"
 	if err := os.WriteFile(path, []byte("stable audio"), 0o600); err != nil {
@@ -118,271 +92,191 @@ func TestProcessPreparedFileSkipsCommitForReusableUnchangedSource(t *testing.T) 
 	}
 }
 
-func TestProductionSynchronizerResourceGatesBoundStorageAndFFmpeg(t *testing.T) {
-	storage := &boundedSynchronizerStorage{}
-	runner := &boundedSynchronizerRunner{}
+func TestFFprobeMetadataProbeReadsRealAudioWithoutFFmpeg(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not available")
+	}
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe is not available")
+	}
+	audioPath := filepath.Join(t.TempDir(), "probe.wav")
+	command := exec.Command(ffmpeg, "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.25", "-c:a", "pcm_s16le", audioPath)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("create real audio fixture: %v: %s", err, output)
+	}
+	probe, err := NewFFprobeMetadataProbe(ffprobe, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := probe.Probe(context.Background(), audioPath)
+	if err != nil {
+		t.Fatalf("probe real audio: %v", err)
+	}
+	if result.DurationMS == nil || *result.DurationMS < 200 || len(result.Streams) == 0 || result.Streams[0].CodecType != "audio" {
+		t.Fatalf("real audio probe result=%+v", result)
+	}
+}
+
+func TestStageArtworkExtractsRealEmbeddedCoverWithFFmpeg(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not available")
+	}
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe is not available")
+	}
+	tempDir := t.TempDir()
+	wavPath := filepath.Join(tempDir, "source.wav")
+	audioFixture := exec.Command(ffmpeg, "-nostdin", "-v", "error", "-y",
+		"-f", "lavfi", "-i", "sine=frequency=440:duration=0.2",
+		"-c:a", "pcm_s16le", wavPath)
+	if output, err := audioFixture.CombinedOutput(); err != nil {
+		t.Fatalf("create audio fixture: %v: %s", err, output)
+	}
+	coverPath := filepath.Join(tempDir, "cover.jpg")
+	cover := image.NewRGBA(image.Rect(0, 0, 32, 32))
+	for y := 0; y < 32; y++ {
+		for x := 0; x < 32; x++ {
+			cover.Set(x, y, color.RGBA{R: 220, G: uint8(x * 4), B: uint8(y * 4), A: 255})
+		}
+	}
+	file, err := os.Create(coverPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := jpeg.Encode(file, cover, &jpeg.Options{Quality: 90}); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := filepath.Join(tempDir, "embedded.mp3")
+	command := exec.Command(ffmpeg, "-nostdin", "-v", "error", "-y",
+		"-i", wavPath, "-i", coverPath,
+		"-map", "0:a:0", "-map", "1:v:0",
+		"-c:a", "libmp3lame", "-b:a", "128k",
+		"-c:v", "mjpeg", "-id3v2_version", "3",
+		"-metadata:s:v", "title=Album cover",
+		"-metadata:s:v", "comment=Cover (front)",
+		"-disposition:v:0", "attached_pic", sourcePath)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("create embedded audio fixture: %v: %s", err, output)
+	}
+	probe, err := NewFFprobeMetadataProbe(ffprobe, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probed, err := probe.Probe(context.Background(), sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !probed.Metadata.HasArtwork {
+		t.Fatalf("embedded cover was not detected: %+v", probed)
+	}
+	mediaStore, err := localmedia.NewStore(filepath.Join(tempDir, "assets"), filepath.Join(tempDir, "transcode"), 10*1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
 	synchronizer := &ProductionSynchronizer{
-		storage:       storage,
-		runner:        runner,
-		ffmpegPath:    "ffmpeg",
-		storageGate:   make(chan struct{}, 2),
-		ffmpegGate:    make(chan struct{}, 1),
-		ffmpegThreads: 1,
+		localMedia: mediaStore, ffmpegPath: ffmpeg, artworkRunner: adminmetadata.OSProcessRunner{},
+		artworkGate: make(chan struct{}, 1),
 	}
-
-	var group sync.WaitGroup
-	for index := 0; index < 24; index++ {
-		group.Add(2)
-		go func() {
-			defer group.Done()
-			if _, err := synchronizer.uploadFile(context.Background(), "object", "path", "audio/flac", "checksum"); err != nil {
-				t.Errorf("uploadFile() error = %v", err)
-			}
-		}()
-		go func() {
-			defer group.Done()
-			if _, err := synchronizer.runFFmpeg(context.Background(), []string{"-i", "source"}, time.Second); err != nil {
-				t.Errorf("runFFmpeg() error = %v", err)
-			}
-		}()
+	checksum, err := fileSHA256(sourcePath)
+	if err != nil {
+		t.Fatal(err)
 	}
-	group.Wait()
-	if got := storage.max.Load(); got > 2 {
-		t.Fatalf("storage concurrency = %d, want <= 2", got)
+	artwork, err := synchronizer.stageArtwork(context.Background(), sourcePath, true, checksum)
+	if err != nil {
+		t.Fatalf("extract real embedded cover: %v", err)
 	}
-	if got := runner.max.Load(); got > 1 {
-		t.Fatalf("ffmpeg concurrency = %d, want <= 1", got)
+	if artwork == nil {
+		t.Fatal("expected extracted artwork")
 	}
-	if storage.max.Load() == 0 || runner.max.Load() == 0 {
-		t.Fatal("resource operations did not run")
+	coverFile, err := mediaStore.OpenAsset(artwork.StoragePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := jpeg.Decode(coverFile)
+	_ = coverFile.Close()
+	if err != nil {
+		t.Fatalf("decode stored artwork: %v", err)
+	}
+	if decoded.Bounds().Dx() != 32 || decoded.Bounds().Dy() != 32 {
+		t.Fatalf("stored artwork dimensions = %v, want 32x32", decoded.Bounds())
 	}
 }
 
-type boundedSynchronizerStorage struct {
-	active atomic.Int32
-	max    atomic.Int32
+func TestStageArtworkStoresEmbeddedCoverAsLocalAsset(t *testing.T) {
+	tempDir := t.TempDir()
+	mediaStore, err := localmedia.NewStore(filepath.Join(tempDir, "assets"), filepath.Join(tempDir, "transcode"), 10*1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &artworkRunnerStub{content: []byte("normalized jpeg payload")}
+	synchronizer := &ProductionSynchronizer{
+		localMedia: mediaStore, ffmpegPath: "ffmpeg", artworkRunner: runner,
+		artworkGate: make(chan struct{}, 1),
+	}
+	snapshot := &sourceScanSnapshot{artworkByChecksum: make(map[string]*stagedArtwork)}
+	scanContext := context.WithValue(context.Background(), sourceScanSnapshotContextKey{}, snapshot)
+	artwork, err := synchronizer.stageArtwork(scanContext, filepath.Join(tempDir, "song.flac"), true, "source-checksum")
+	if err != nil {
+		t.Fatalf("stageArtwork() error = %v", err)
+	}
+	if artwork == nil || artwork.StoragePath == "" || artwork.Checksum == "" || artwork.SizeBytes <= 0 {
+		t.Fatalf("unexpected staged artwork: %+v", artwork)
+	}
+	if !strings.HasPrefix(artwork.StoragePath, "artworks/") || !strings.HasSuffix(artwork.StoragePath, ".jpg") {
+		t.Fatalf("unexpected artwork storage path: %q", artwork.StoragePath)
+	}
+	info, err := mediaStore.StatAsset(artwork.StoragePath)
+	if err != nil || info.Size() != artwork.SizeBytes {
+		t.Fatalf("stored artwork stat = %v/%v, want size %d", info, err, artwork.SizeBytes)
+	}
+	if len(runner.calls) != 1 || runner.calls[0] != "ffmpeg" {
+		t.Fatalf("artwork runner calls = %+v", runner.calls)
+	}
+
+	// A scan-scoped source checksum cache prevents repeated extraction when the
+	// same audio source is encountered through multiple catalog mappings.
+	second, err := synchronizer.stageArtwork(scanContext, filepath.Join(tempDir, "other.flac"), true, "source-checksum")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second == nil || second.StoragePath != artwork.StoragePath || len(runner.calls) != 1 {
+		t.Fatalf("second staged artwork = %+v, runner calls = %d", second, len(runner.calls))
+	}
 }
 
-func (storage *boundedSynchronizerStorage) UploadFile(context.Context, string, string, string, string) (int64, error) {
-	current := storage.active.Add(1)
-	updateAtomicMaximum(&storage.max, current)
-	time.Sleep(time.Millisecond)
-	storage.active.Add(-1)
-	return 1, nil
+type artworkRunnerStub struct {
+	content []byte
+	calls   []string
 }
 
-func (*boundedSynchronizerStorage) StatObject(context.Context, string) (int64, string, bool, error) {
-	return 1, "checksum", true, nil
-}
-
-type boundedSynchronizerRunner struct {
-	active atomic.Int32
-	max    atomic.Int32
-}
-
-func (runner *boundedSynchronizerRunner) Run(context.Context, string, []string, time.Duration) (adminmetadata.ProcessResult, error) {
-	current := runner.active.Add(1)
-	updateAtomicMaximum(&runner.max, current)
-	time.Sleep(time.Millisecond)
-	runner.active.Add(-1)
+func (runner *artworkRunnerStub) Run(_ context.Context, executable string, arguments []string, _ time.Duration) (adminmetadata.ProcessResult, error) {
+	runner.calls = append(runner.calls, executable)
+	if len(arguments) == 0 {
+		return adminmetadata.ProcessResult{}, errors.New("missing artwork output path")
+	}
+	if err := os.WriteFile(arguments[len(arguments)-1], runner.content, 0o600); err != nil {
+		return adminmetadata.ProcessResult{}, err
+	}
 	return adminmetadata.ProcessResult{}, nil
 }
 
-func updateAtomicMaximum(maximum *atomic.Int32, value int32) {
-	for {
-		current := maximum.Load()
-		if value <= current || maximum.CompareAndSwap(current, value) {
-			return
-		}
-	}
-}
-
-func TestReadySourceAssetReusableValidatesStoredReference(t *testing.T) {
-	checksum := strings.Repeat("a", 64)
-	assetID := "00000000-0000-4000-8000-000000000010"
-	storageFailure := errors.New("storage unavailable")
-	tests := []struct {
-		name      string
-		row       reusableAssetRow
-		storage   reusableAssetStorage
-		want      bool
-		wantError bool
-	}{
-		{
-			name:    "matching object",
-			row:     reusableAssetRow{objectKey: "library/source.flac", sizeBytes: 100, checksum: &checksum},
-			storage: reusableAssetStorage{exists: true, sizeBytes: 100, checksum: checksum},
-			want:    true,
-		},
-		{
-			name:    "missing object",
-			row:     reusableAssetRow{objectKey: "library/source.flac", sizeBytes: 100, checksum: &checksum},
-			storage: reusableAssetStorage{},
-		},
-		{
-			name:    "stored size mismatch",
-			row:     reusableAssetRow{objectKey: "library/source.flac", sizeBytes: 100, checksum: &checksum},
-			storage: reusableAssetStorage{exists: true, sizeBytes: 99, checksum: checksum},
-		},
-		{
-			name:    "stored checksum mismatch",
-			row:     reusableAssetRow{objectKey: "library/source.flac", sizeBytes: 100, checksum: &checksum},
-			storage: reusableAssetStorage{exists: true, sizeBytes: 100, checksum: strings.Repeat("b", 64)},
-		},
-		{
-			name:    "database asset missing",
-			row:     reusableAssetRow{err: pgx.ErrNoRows},
-			storage: reusableAssetStorage{exists: true, sizeBytes: 100, checksum: checksum},
-		},
-		{
-			name:      "storage inspection failure",
-			row:       reusableAssetRow{objectKey: "library/source.flac", sizeBytes: 100, checksum: &checksum},
-			storage:   reusableAssetStorage{err: storageFailure},
-			wantError: true,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			synchronizer := &ProductionSynchronizer{
-				database: reusableAssetDatabase{row: test.row},
-				storage:  &test.storage,
-			}
-			got, err := synchronizer.readySourceAssetReusable(context.Background(), localSourceRecord{
-				SourceAssetID: &assetID, SizeBytes: 100, Checksum: checksum,
-			})
-			if test.wantError {
-				if err == nil {
-					t.Fatal("expected source asset inspection error")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got != test.want {
-				t.Fatalf("reusable=%v want=%v", got, test.want)
-			}
-		})
-	}
-}
-
-type reusableAssetDatabase struct{ row reusableAssetRow }
-
-func (database reusableAssetDatabase) QueryRow(context.Context, string, ...any) pgx.Row {
-	return database.row
-}
-func (reusableAssetDatabase) Query(context.Context, string, ...any) (pgx.Rows, error) {
-	panic("unexpected Query call")
-}
-func (reusableAssetDatabase) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
-	panic("unexpected Exec call")
-}
-func (reusableAssetDatabase) Begin(context.Context) (pgx.Tx, error) {
-	panic("unexpected Begin call")
-}
-
-type reusableAssetRow struct {
-	objectKey string
-	sizeBytes int64
-	checksum  *string
-	err       error
-}
-
-func (row reusableAssetRow) Scan(destinations ...any) error {
-	if row.err != nil {
-		return row.err
-	}
-	*destinations[0].(*string) = row.objectKey
-	*destinations[1].(*int64) = row.sizeBytes
-	*destinations[2].(**string) = row.checksum
-	return nil
-}
-
-type reusableAssetStorage struct {
-	sizeBytes int64
-	checksum  string
-	exists    bool
-	err       error
-}
-
-func (*reusableAssetStorage) UploadFile(context.Context, string, string, string, string) (int64, error) {
-	panic("unexpected UploadFile call")
-}
-func (storage *reusableAssetStorage) StatObject(context.Context, string) (int64, string, bool, error) {
-	return storage.sizeBytes, storage.checksum, storage.exists, storage.err
-}
-
-type processFailureDatabase struct {
-	sourceID    string
-	status      SourceFileStatus
-	updatedAt   time.Time
-	lastSeenAt  time.Time
-	lastError   string
-	trackFailed bool
-	beginCount  int
-	commitCount int
-}
-
-func (*processFailureDatabase) QueryRow(context.Context, string, ...any) pgx.Row {
-	panic("unexpected QueryRow call")
-}
-func (*processFailureDatabase) Query(context.Context, string, ...any) (pgx.Rows, error) {
-	panic("unexpected Query call")
-}
-func (*processFailureDatabase) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
-	panic("unexpected Exec call")
-}
-func (database *processFailureDatabase) Begin(context.Context) (pgx.Tx, error) {
-	database.beginCount++
-	return &processFailureTransaction{database: database, phase: database.beginCount}, nil
-}
-
-type processFailureTransaction struct {
-	pgx.Tx
-	database *processFailureDatabase
-	phase    int
-}
-
-func (transaction *processFailureTransaction) QueryRow(_ context.Context, _ string, arguments ...any) pgx.Row {
-	if transaction.phase == 1 {
-		return scanRowFunc(func(destinations ...any) error {
-			*destinations[0].(*string) = transaction.database.sourceID
-			*destinations[1].(*SourceFileStatus) = transaction.database.status
-			*destinations[2].(*time.Time) = transaction.database.updatedAt
-			return nil
-		})
-	}
-	return scanRowFunc(func(destinations ...any) error {
-		transaction.database.status = SourceFileFailed
-		transaction.database.lastError = arguments[2].(string)
-		transaction.database.lastSeenAt = arguments[3].(time.Time)
-		value := transaction.database.sourceID
-		*destinations[0].(**string) = &value
-		return nil
+func TestProductionSynchronizerDoesNotRequireFFmpegForSourceScan(t *testing.T) {
+	probe := metadataProbeFailureStub{err: errors.New("probe fixture")}
+	synchronizer, err := NewProductionSynchronizer(ProductionSynchronizerOptions{
+		Database: &pgxpool.Pool{}, Probe: probe,
 	})
-}
-
-func (transaction *processFailureTransaction) Exec(
-	_ context.Context,
-	_ string,
-	arguments ...any,
-) (pgconn.CommandTag, error) {
-	if transaction.phase == 1 {
-		transaction.database.lastSeenAt = arguments[1].(time.Time)
-		transaction.database.updatedAt = arguments[2].(time.Time)
-	} else {
-		transaction.database.trackFailed = true
+	if err != nil {
+		t.Fatalf("source synchronizer should not require FFmpeg: %v", err)
 	}
-	return pgconn.NewCommandTag("UPDATE 1"), nil
+	if synchronizer == nil || synchronizer.probe == nil {
+		t.Fatal("source synchronizer was not initialized")
+	}
 }
-
-func (transaction *processFailureTransaction) Commit(context.Context) error {
-	transaction.database.commitCount++
-	return nil
-}
-
-func (*processFailureTransaction) Rollback(context.Context) error { return nil }
-
-type scanRowFunc func(...any) error
-
-func (row scanRowFunc) Scan(destinations ...any) error { return row(destinations...) }

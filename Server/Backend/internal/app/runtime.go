@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	goruntime "runtime"
+	"runtime"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -26,31 +26,30 @@ import (
 	"xymusic/server/internal/modules/catalog"
 	"xymusic/server/internal/modules/identity"
 	"xymusic/server/internal/modules/library"
+	"xymusic/server/internal/modules/localassets"
 	"xymusic/server/internal/modules/playback"
 	"xymusic/server/internal/modules/playlist"
 	"xymusic/server/internal/modules/profile"
 	"xymusic/server/internal/modules/setup"
-	"xymusic/server/internal/platform/artworkstore"
 	"xymusic/server/internal/platform/database"
 	"xymusic/server/internal/platform/httpserver"
-	"xymusic/server/internal/platform/ossproxy"
+	"xymusic/server/internal/platform/localmedia"
 	"xymusic/server/internal/platform/runtimemetrics"
 	platformsecurity "xymusic/server/internal/platform/security"
-	"xymusic/server/internal/platform/storage"
 	"xymusic/server/internal/platform/workerstatus"
+	"xymusic/server/internal/shared/apperror"
 	sharedidempotency "xymusic/server/internal/shared/idempotency"
 	"xymusic/server/internal/shared/pagination"
 	"xymusic/server/internal/shared/ratelimit"
 	"xymusic/server/internal/shared/resourcebudget"
 	"xymusic/server/internal/shared/sse"
-	mediaworker "xymusic/server/internal/workers/media"
 	"xymusic/server/internal/workers/retention"
 )
 
 type Runtime struct {
 	Config                    config.Config
 	DB                        *database.Pool
-	Storage                   *storage.Client
+	LocalMedia                *localmedia.Store
 	Identity                  *identity.Service
 	AdminCatalog              *admincatalog.Service
 	AdminJobs                 *adminjobs.Service
@@ -73,7 +72,7 @@ type Runtime struct {
 	ready                     *dependencyReadiness
 	events                    *sse.Broadcaster
 	background                *backgroundGroup
-	mediaWorker               *mediaworker.Worker
+	playbackTranscoder        *playback.TranscodeSessionManager
 }
 
 type Options struct {
@@ -88,7 +87,7 @@ type AdministrationOptions struct {
 	Runtime            adminsettings.RuntimeController
 	Store              adminsettings.ConfigurationStore
 	Worker             adminsettings.WorkerMonitor
-	Storage            adminsettings.StorageFactory
+	Storage            adminsettings.MediaStorageFactory
 	MediaTool          adminsettings.MediaTool
 	ConfigurationPath  string
 	IPv4ListenerHost   string
@@ -109,23 +108,12 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	if err != nil {
 		return nil, fmt.Errorf("resolve runtime configuration: %w", err)
 	}
-	// These budgets are shared by scan and media workers. Their local worker
-	// counts can remain independently tunable, while the process-wide total for
-	// FFmpeg, ffprobe, and object storage stays bounded.
-	ffmpegBudget, err := resourcebudget.New(max(1, max(goruntime.GOMAXPROCS(0), resolved.Media.FFmpegThreads)))
-	if err != nil {
-		return nil, fmt.Errorf("create FFmpeg resource budget: %w", err)
-	}
-	probeBudget, err := resourcebudget.New(max(1, max(
-		resolved.LocalLibrary.ScanProbeWorkers, resolved.Media.ProbeWorkers,
-	)))
+
+	probeBudget, err := resourcebudget.New(max(1, resolved.LocalLibrary.ScanProbeWorkers))
 	if err != nil {
 		return nil, fmt.Errorf("create ffprobe resource budget: %w", err)
 	}
-	storageBudget, err := resourcebudget.New(max(1, resolved.Media.StorageWorkers))
-	if err != nil {
-		return nil, fmt.Errorf("create object storage resource budget: %w", err)
-	}
+
 	db, err := database.Open(ctx, resolved.Database)
 	if err != nil {
 		return nil, err
@@ -133,10 +121,13 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	failed := true
 	var events *sse.Broadcaster
 	var background *backgroundGroup
-	var mediaWorker *mediaworker.Worker
 	var metrics *runtimemetrics.Collector
+	var playbackTranscoder *playback.TranscodeSessionManager
 	defer func() {
 		if failed {
+			if playbackTranscoder != nil {
+				playbackTranscoder.Close()
+			}
 			if background != nil {
 				closeContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				_ = background.Close(closeContext)
@@ -144,9 +135,6 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 			}
 			if events != nil {
 				events.Close()
-			}
-			if mediaWorker != nil {
-				_ = mediaWorker.Close()
 			}
 			if metrics != nil {
 				metrics.Close()
@@ -161,25 +149,15 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	if err := database.RunMigrations(ctx, db.Pool, resolved.Paths.MigrationsDirectory); err != nil {
 		return nil, fmt.Errorf("run database migrations: %w", err)
 	}
-	objects, err := storage.Open(resolved.Storage)
+
+	localMedia, err := localmedia.NewStore(resolved.MediaStorage.AssetDirectory, resolved.MediaStorage.TranscodeDirectory, resolved.MediaStorage.MaxUploadBytes)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create local media store: %w", err)
 	}
-	artworkResolver, err := artworkstore.NewPostgresResolver(db.Pool)
-	if err != nil {
-		return nil, fmt.Errorf("configure artwork resolver: %w", err)
+	if err := localMedia.Ping(ctx); err != nil {
+		return nil, fmt.Errorf("ping local media store: %w", err)
 	}
-	objectProxy, err := ossproxy.New(
-		resolved.Storage.Endpoint,
-		resolved.Storage.PublicBaseURL,
-		ossproxy.WithArtworkGateway(artworkResolver, objects),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("configure object storage proxy: %w", err)
-	}
-	if err := objects.Ping(ctx); err != nil {
-		return nil, err
-	}
+
 	payloadCipher, err := platformsecurity.NewPayloadCipher(resolved.Security.IdempotencyEncryptionSecret)
 	if err != nil {
 		return nil, err
@@ -189,6 +167,9 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	if err != nil {
 		return nil, fmt.Errorf("create SSE broadcaster: %w", err)
 	}
+
+	localAssetsPresenter := localassets.NewPresenter()
+
 	identityService, err := identity.NewService(resolved, identity.ServiceDependencies{
 		Repository: identity.NewRepository(db.Pool),
 		AccessTokens: platformsecurity.NewAccessTokenService(
@@ -196,31 +177,29 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 			time.Duration(resolved.Security.AccessTokenTTLSeconds)*time.Second,
 		),
 		Idempotency: identity.NewPersistentRefreshIdempotency(idempotencyService),
-		ArtworkURLs: objectProxy,
+		ArtworkURLs: localAssetsPresenter,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create identity service: %w", err)
 	}
 	identityRoutes := identity.NewRoutes(identityService, ratelimit.NewDatabaseLimiter(db.Pool))
-	mediaObjects, err := adminmedia.NewMinIOObjectStorage(resolved.Storage)
-	if err != nil {
-		return nil, fmt.Errorf("create admin media object storage: %w", err)
-	}
+
 	adminMediaService, err := adminmedia.NewService(resolved, adminmedia.ServiceDependencies{
-		Repository: adminmedia.NewRepository(db.Pool),
-		Storage:    mediaObjects,
+		Repository:  adminmedia.NewRepository(db.Pool),
+		Idempotency: adminmedia.NewPersistentIdempotency(idempotencyService),
+		LocalMedia:  localMedia,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create admin media service: %w", err)
 	}
-	adminMediaRoutes, err := adminmedia.NewRoutes(
-		adminMediaService,
+	adminMediaRoutes := adminmedia.NewRoutes(
 		identityService,
-		adminmedia.NewPersistentIdempotency(idempotencyService),
+		adminMediaService,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create admin media routes: %w", err)
 	}
+
 	metadataRepository := adminmetadata.NewRepository(db.Pool)
 	adminMetadataService, err := adminmetadata.NewService(metadataRepository)
 	if err != nil {
@@ -253,26 +232,25 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	}
 	metadataWorker, err := adminmetadata.NewWritebackWorker(adminmetadata.WorkerDependencies{
 		Store: metadataRepository, FFmpegPath: resolved.Media.FFmpegPath, FFprobePath: resolved.Media.FFprobePath,
-		Artwork: objects, SourceStorage: mediaObjects, Logger: workerLogger,
+		Artwork: localMedia, SourceStorage: localMedia, Logger: workerLogger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create metadata writeback worker: %w", err)
 	}
+
 	sourceRepository := adminsources.NewRepository(db.Pool)
 	sourceProbe, err := adminsources.NewFFprobeMetadataProbe(resolved.Media.FFprobePath, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create local library metadata probe: %w", err)
 	}
 	sourceSynchronizer, err := adminsources.NewProductionSynchronizer(adminsources.ProductionSynchronizerOptions{
-		Database: db.Pool, Storage: mediaObjects, Probe: sourceProbe, FFmpegPath: resolved.Media.FFmpegPath,
-		ProbeWorkers:             resolved.LocalLibrary.ScanProbeWorkers,
-		StorageWorkers:           resolved.Media.StorageWorkers,
-		FFmpegWorkers:            resolved.Media.Workers,
-		FFmpegThreads:            resolved.Media.FFmpegThreads,
-		ReadySourceObjectStatTTL: time.Duration(resolved.LocalLibrary.ReadySourceObjectStatTTLSeconds) * time.Second,
-		ProbeBudget:              probeBudget,
-		StorageBudget:            storageBudget,
-		FFmpegBudget:             ffmpegBudget,
+		Database:       db.Pool,
+		Probe:          sourceProbe,
+		ProbeWorkers:   resolved.LocalLibrary.ScanProbeWorkers,
+		ProbeBudget:    probeBudget,
+		LocalMedia:     localMedia,
+		FFmpegPath:     resolved.Media.FFmpegPath,
+		ArtworkWorkers: max(2, min(16, runtime.GOMAXPROCS(0)*2)),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create local library synchronizer: %w", err)
@@ -317,6 +295,7 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	if err != nil {
 		return nil, fmt.Errorf("create administrator sources routes: %w", err)
 	}
+
 	tagRepository := admintagscraping.NewRepository(db.Pool)
 	tagArtwork, err := admintagscraping.NewAdminMediaArtworkApplier(adminMediaService)
 	if err != nil {
@@ -361,10 +340,11 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	if err != nil {
 		return nil, fmt.Errorf("create tag scraping routes: %w", err)
 	}
+
 	catalogService, err := catalog.NewService(catalog.ServiceDependencies{
 		Repository:  catalog.NewRepository(db.Pool),
 		Cursors:     pagination.NewCursorCodec(resolved.Security.CursorSigningSecret),
-		ArtworkURLs: objectProxy,
+		ArtworkURLs: localAssetsPresenter,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create catalog service: %w", err)
@@ -381,36 +361,66 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	if err != nil {
 		return nil, fmt.Errorf("create catalog routes: %w", err)
 	}
+
+	playbackResolver := playback.NewPlaybackSourceResolver(db.Pool, localMedia)
+	playbackSelector := playback.NewProfileSelector()
+	playbackSigner, err := playback.NewTicketSigner(resolved.Security.PlaybackTicketSecret)
+	if err != nil {
+		return nil, fmt.Errorf("create playback ticket signer: %w", err)
+	}
+	playbackTranscoder, err = playback.NewTranscodeSessionManager(
+		localMedia,
+		resolved.Media.FFmpegPath,
+		resolved.Media.FFmpegThreads,
+		resolved.MediaStorage.StreamMaxConcurrent,
+		time.Duration(resolved.MediaStorage.StreamIdleTimeoutSeconds)*time.Second,
+		time.Duration(resolved.MediaStorage.TranscodeTimeoutSeconds)*time.Second,
+		resolved.MediaStorage.TranscodeCacheMaxBytes,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create playback transcode manager: %w", err)
+	}
 	playbackService, err := playback.NewService(
-		playback.NewRepository(db.Pool), objects,
-		time.Duration(resolved.Storage.SignedURLTTLSeconds)*time.Second,
+		playbackResolver,
+		playbackSelector,
+		playbackSigner,
+		playbackTranscoder,
+		time.Duration(resolved.MediaStorage.StreamTTLSeconds)*time.Second,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create playback service: %w", err)
 	}
-	playbackRoutes, err := playback.NewRoutes(playbackService, playback.AuthenticateFunc(
-		func(ctx context.Context, authorization string) error {
-			_, err := identityService.Authenticate(ctx, authorization)
-			return err
-		},
-	))
+	playbackRoutes, err := playback.NewRoutes(
+		playbackService,
+		playbackSigner,
+		playbackTranscoder,
+		&playbackIdentityAdapter{identity: identityService},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("create playback routes: %w", err)
 	}
-	avatarObjects, err := profile.NewMinIOObjectStorage(resolved.Storage)
+
+	localAssetsRepository := localassets.NewRepository(db.Pool)
+	localAssetsRoutes, err := localassets.NewRoutes(localAssetsRepository, localMedia)
 	if err != nil {
-		return nil, fmt.Errorf("create profile object storage: %w", err)
+		return nil, fmt.Errorf("create local assets routes: %w", err)
 	}
+	localAssetsCleaner, err := localassets.NewCleaner(db.Pool, localMedia)
+	if err != nil {
+		return nil, fmt.Errorf("create local asset cleaner: %w", err)
+	}
+
 	profileService, err := profile.NewService(resolved, profile.ServiceDependencies{
 		Repository:   profile.NewRepository(db.Pool),
 		CurrentUsers: identityService,
 		Idempotency:  profile.NewPersistentIdempotency(idempotencyService),
-		Storage:      avatarObjects,
+		LocalMedia:   localMedia,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create profile service: %w", err)
 	}
 	profileRoutes := profile.NewRoutes(identityService, profileService)
+
 	authenticateUserID := func(ctx context.Context, authorization string) (string, error) {
 		actor, err := identityService.Authenticate(ctx, authorization)
 		if err != nil {
@@ -431,9 +441,10 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	if err != nil {
 		return nil, fmt.Errorf("create library routes: %w", err)
 	}
+
 	playlistUsers, err := playlist.NewProductionUserPresenter(
 		db.Pool,
-		objectProxy,
+		localAssetsPresenter,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create playlist user presenter: %w", err)
@@ -455,6 +466,7 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	if err != nil {
 		return nil, fmt.Errorf("create playlist routes: %w", err)
 	}
+
 	adminManagementIdempotency := adminmanagement.NewPersistentIdempotency(idempotencyService)
 	adminManagementService, err := adminmanagement.NewService(adminmanagement.ServiceDependencies{
 		Store:     adminmanagement.NewRepository(db.Pool),
@@ -470,6 +482,7 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	if err != nil {
 		return nil, fmt.Errorf("create admin management routes: %w", err)
 	}
+
 	adminCatalogService, err := admincatalog.NewService(
 		admincatalog.NewRepository(db.Pool), adminArtworkPresenter{delegate: playlistUsers},
 	)
@@ -480,6 +493,7 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	if err != nil {
 		return nil, fmt.Errorf("create admin catalog routes: %w", err)
 	}
+
 	adminMutationIdempotency := adminmutation.NewPersistentIdempotency(idempotencyService)
 	adminMutationRepository := adminmutation.NewRepository(db.Pool)
 	adminMutationService, err := adminmutation.NewService(
@@ -504,12 +518,13 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	if err != nil {
 		return nil, fmt.Errorf("create admin mutation routes: %w", err)
 	}
+
 	var adminSettingsService *adminsettings.Service
 	var adminSettingsRoutes *adminsettings.Routes
 	if administration := options.Administration; administration != nil {
 		storageFactory := administration.Storage
 		if storageFactory == nil {
-			storageFactory = adminsettings.ProductionStorageFactory{}
+			storageFactory = adminsettings.ProductionMediaStorageFactory{}
 		}
 		mediaTool := administration.MediaTool
 		if mediaTool == nil {
@@ -549,7 +564,7 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 		return nil, fmt.Errorf("configure admin web assets: %w", err)
 	}
 	cors := httpserver.UnrestrictedCORSConfig()
-	readiness := &dependencyReadiness{database: db, storage: objects}
+	readiness := &dependencyReadiness{database: db, localMedia: localMedia}
 	engine, err := httpserver.New(httpserver.Options{
 		CORS:           cors,
 		RequestLimits:  httpserver.DefaultRequestLimits(),
@@ -558,7 +573,7 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 		TrustedProxies: append([]string(nil), resolved.HTTP.TrustedProxyAddresses...),
 		RegisterRoutes: func(engine *gin.Engine) {
 			adminAssets.Register(engine)
-			objectProxy.Register(engine)
+			localAssetsRoutes.Register(engine)
 			identityRoutes.Register(engine)
 			adminMediaRoutes.Register(engine)
 			adminMetadataRoutes.Register(engine)
@@ -586,14 +601,6 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 		return nil, fmt.Errorf("create HTTP application: %w", err)
 	}
 	if options.StartBackground {
-		mediaWorker, err = mediaworker.NewProduction(mediaworker.ProductionOptions{
-			Database: db.Pool, Storage: resolved.Storage, Media: resolved.Media,
-			Logger: workerLogger, ProfileVersion: resolved.Media.ProfileVersion,
-			CodecBudget: ffmpegBudget, ProbeBudget: probeBudget, StorageBudget: storageBudget,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("create media worker: %w", err)
-		}
 		retentionDatabase, err := retention.NewPostgresDatabase(db.Pool)
 		if err != nil {
 			return nil, fmt.Errorf("create retention database: %w", err)
@@ -621,18 +628,12 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 			return nil, fmt.Errorf("start artist artwork scraping batch service: %w", err)
 		}
 		metadataWorkerID := "metadata-" + uuid.NewString()
-		backgroundTasks := make([]backgroundTask, 0, mediaWorker.Workers()+4)
-		for index := 0; index < mediaWorker.Workers(); index++ {
-			name := "media"
-			if index > 0 {
-				name = fmt.Sprintf("media-%d", index+1)
-			}
-			backgroundTasks = append(backgroundTasks, backgroundTask{
-				name: name,
-				run:  func(ctx context.Context) (bool, error) { return mediaWorker.RunNext(ctx) },
-			})
-		}
+		backgroundTasks := make([]backgroundTask, 0, 5)
 		backgroundTasks = append(backgroundTasks,
+			backgroundTask{
+				name: "local-asset-cleanup",
+				run:  func(ctx context.Context) (bool, error) { return localAssetsCleaner.RunOnce(ctx) },
+			},
 			backgroundTask{
 				name: "library-source-scan",
 				run:  func(ctx context.Context) (bool, error) { return sourceWorker.RunNextScan(ctx) },
@@ -658,7 +659,7 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 
 	failed = false
 	return &Runtime{
-		Config: resolved, DB: db, Storage: objects, Identity: identityService,
+		Config: resolved, DB: db, LocalMedia: localMedia, Identity: identityService,
 		AdminCatalog: adminCatalogService, AdminJobs: adminJobsService,
 		AdminManagement: adminManagementService, AdminMedia: adminMediaService,
 		AdminMetadata: adminMetadataService, AdminMutation: adminMutationService,
@@ -666,8 +667,9 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 		AdminTagScraping: tagScrapingService, AdminTagBatches: tagBatchService,
 		AdminArtistArtworkBatches: artistArtworkBatchService,
 		Catalog:                   catalogService, Library: libraryService, Playback: playbackService,
-		Playlist: playlistService, Profile: profileService, Metrics: metrics, Handler: engine, ready: readiness,
-		events: events, background: background, mediaWorker: mediaWorker,
+		playbackTranscoder: playbackTranscoder,
+		Playlist:           playlistService, Profile: profileService, Metrics: metrics, Handler: engine, ready: readiness,
+		events: events, background: background,
 	}, nil
 }
 
@@ -713,8 +715,8 @@ func (runtime *Runtime) CloseContext(ctx context.Context) error {
 	if runtime.background != nil {
 		closeErr = runtime.background.Close(ctx)
 	}
-	if runtime.mediaWorker != nil {
-		closeErr = errors.Join(closeErr, runtime.mediaWorker.Close())
+	if runtime.playbackTranscoder != nil {
+		runtime.playbackTranscoder.Close()
 	}
 	if runtime.AdminTagBatches != nil {
 		closeErr = errors.Join(closeErr, runtime.AdminTagBatches.Close(ctx))
@@ -735,8 +737,8 @@ func (runtime *Runtime) CloseContext(ctx context.Context) error {
 }
 
 type dependencyReadiness struct {
-	database *database.Pool
-	storage  *storage.Client
+	database   *database.Pool
+	localMedia *localmedia.Store
 }
 
 func (check *dependencyReadiness) Check(ctx context.Context) error {
@@ -744,11 +746,27 @@ func (check *dependencyReadiness) Check(ctx context.Context) error {
 	defer cancel()
 	errorsChannel := make(chan error, 2)
 	go func() { errorsChannel <- check.database.Ping(ctx) }()
-	go func() { errorsChannel <- check.storage.Ping(ctx) }()
+	go func() { errorsChannel <- check.localMedia.Ping(ctx) }()
 	for range 2 {
 		if err := <-errorsChannel; err != nil {
 			return errors.Join(errors.New("runtime dependency is unavailable"), err)
 		}
 	}
 	return nil
+}
+
+type playbackIdentityAdapter struct {
+	identity *identity.Service
+}
+
+func (a *playbackIdentityAdapter) CurrentUserID(c *gin.Context) (string, error) {
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		return "", apperror.Unauthorized(apperror.CodeAuthenticationRequired, "Authentication is required")
+	}
+	actor, err := a.identity.Authenticate(c.Request.Context(), authHeader)
+	if err != nil {
+		return "", err
+	}
+	return actor.UserID, nil
 }

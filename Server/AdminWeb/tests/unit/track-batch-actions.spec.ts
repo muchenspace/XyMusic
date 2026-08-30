@@ -19,8 +19,6 @@ function track(id: string, status: TrackSummary["status"] = "ARCHIVED", version 
     metadataStatus: "NORMAL",
     metadataVersion: 1,
     source: null,
-    mediaProcessing: null,
-    variantSummary: [],
     activeWritebackJobId: null,
     publishedAt: null,
     createdAt: "2026-01-01T00:00:00Z",

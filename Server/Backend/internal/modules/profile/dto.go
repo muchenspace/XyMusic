@@ -68,6 +68,7 @@ type AvatarUploadDTO struct {
 	Status          string            `json:"status"`
 	Method          string            `json:"method"`
 	UploadURL       string            `json:"uploadUrl"`
+	UploadPath      string            `json:"uploadPath"`
 	RequiredHeaders map[string]string `json:"requiredHeaders"`
 	ExpiresAt       string            `json:"expiresAt"`
 }

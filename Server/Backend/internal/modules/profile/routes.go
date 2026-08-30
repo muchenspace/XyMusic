@@ -19,6 +19,7 @@ type Application interface {
 	GetCurrentUser(context.Context, string) (identity.CurrentUserDTO, error)
 	UpdateCurrentUser(context.Context, string, string, UpdateProfileInput) (MutationResult[identity.CurrentUserDTO], error)
 	CreateAvatarUpload(context.Context, string, string, CreateAvatarUploadInput) (MutationResult[AvatarUploadDTO], error)
+	UploadDirect(context.Context, string, string, io.Reader, int64) error
 	CompleteAvatarUpload(context.Context, string, string, string, CompleteAvatarUploadInput) (MutationResult[identity.CurrentUserDTO], error)
 }
 
@@ -36,7 +37,25 @@ func (routes *Routes) Register(engine *gin.Engine) {
 	users.GET("/me", httpserver.Handle(routes.getCurrentUser))
 	users.PATCH("/me", httpserver.Handle(routes.updateCurrentUser))
 	users.POST("/me/avatar/uploads", httpserver.Handle(routes.createAvatarUpload))
+	users.PUT("/me/avatar/uploads/:id", httpserver.Handle(routes.uploadAvatarDirect))
 	users.POST("/me/avatar/uploads/:id/complete", httpserver.Handle(routes.completeAvatarUpload))
+}
+
+func (routes *Routes) uploadAvatarDirect(c *gin.Context) error {
+	uploadID := c.Param("id")
+	if _, err := uuid.Parse(uploadID); err != nil {
+		return apperror.Validation("id must be a UUID")
+	}
+	actor, err := routes.authenticate(c)
+	if err != nil {
+		return err
+	}
+	err = routes.application.UploadDirect(c.Request.Context(), actor.UserID, uploadID, c.Request.Body, c.Request.ContentLength)
+	if err != nil {
+		return err
+	}
+	c.Status(http.StatusOK)
+	return nil
 }
 
 func (routes *Routes) getCurrentUser(c *gin.Context) error {

@@ -2,11 +2,9 @@ package profile
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"net/http"
+	"io"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -17,6 +15,7 @@ import (
 
 	"xymusic/server/internal/config"
 	"xymusic/server/internal/modules/identity"
+	"xymusic/server/internal/platform/localmedia"
 	"xymusic/server/internal/shared/apperror"
 )
 
@@ -34,7 +33,7 @@ type ServiceDependencies struct {
 	Repository   Store
 	CurrentUsers CurrentUserReader
 	Idempotency  Idempotency
-	Storage      AvatarObjectStorage
+	LocalMedia   *localmedia.Store
 	Inspector    AvatarInspector
 	Clock        Clock
 	Sleeper      Sleeper
@@ -45,7 +44,7 @@ type Service struct {
 	repository     Store
 	currentUsers   CurrentUserReader
 	idempotency    Idempotency
-	storage        AvatarObjectStorage
+	localMedia     *localmedia.Store
 	inspector      AvatarInspector
 	clock          Clock
 	sleeper        Sleeper
@@ -64,8 +63,8 @@ func NewService(cfg config.Config, dependencies ServiceDependencies) (*Service, 
 	if dependencies.Idempotency == nil {
 		return nil, errors.New("profile idempotency service is required")
 	}
-	if dependencies.Storage == nil {
-		return nil, errors.New("profile object storage is required")
+	if dependencies.LocalMedia == nil {
+		return nil, errors.New("profile local media store is required")
 	}
 	if dependencies.Clock == nil {
 		dependencies.Clock = systemClock{}
@@ -76,16 +75,17 @@ func NewService(cfg config.Config, dependencies ServiceDependencies) (*Service, 
 	if dependencies.IDGenerator == nil {
 		dependencies.IDGenerator = uuid.NewString
 	}
-	uploadURLTTL := time.Duration(cfg.Storage.SignedURLTTLSeconds) * time.Second
+	uploadURLTTL := time.Duration(cfg.MediaStorage.UploadTTLSeconds) * time.Second
 	if uploadURLTTL <= 0 {
-		return nil, errors.New("profile upload URL TTL must be positive")
+		uploadURLTTL = 300 * time.Second
 	}
-	if cfg.Storage.MaxUploadBytes < 1 {
-		return nil, errors.New("profile maximum upload size must be positive")
+	maxUploadBytes := cfg.MediaStorage.MaxUploadBytes
+	if maxUploadBytes < 1 {
+		maxUploadBytes = 1024 * 1024 * 1024
 	}
 	if dependencies.Inspector == nil {
 		inspector, err := NewFFmpegAvatarInspector(
-			dependencies.Storage,
+			dependencies.LocalMedia,
 			cfg.Media.FFprobePath,
 			cfg.Media.FFmpegPath,
 		)
@@ -98,261 +98,259 @@ func NewService(cfg config.Config, dependencies ServiceDependencies) (*Service, 
 		repository:     dependencies.Repository,
 		currentUsers:   dependencies.CurrentUsers,
 		idempotency:    dependencies.Idempotency,
-		storage:        dependencies.Storage,
+		localMedia:     dependencies.LocalMedia,
 		inspector:      dependencies.Inspector,
 		clock:          dependencies.Clock,
 		sleeper:        dependencies.Sleeper,
 		newID:          dependencies.IDGenerator,
 		uploadURLTTL:   uploadURLTTL,
-		maxUploadBytes: cfg.Storage.MaxUploadBytes,
+		maxUploadBytes: maxUploadBytes,
 	}, nil
 }
 
-func (service *Service) GetCurrentUser(ctx context.Context, userID string) (identity.CurrentUserDTO, error) {
-	return service.currentUsers.CurrentUser(ctx, userID)
+func (s *Service) GetCurrentUser(ctx context.Context, actorID string) (identity.CurrentUserDTO, error) {
+	return s.currentUsers.CurrentUser(ctx, actorID)
 }
 
-func (service *Service) UpdateCurrentUser(
+func (s *Service) UpdateCurrentUser(
 	ctx context.Context,
-	userID string,
+	actorID string,
 	idempotencyKey string,
 	input UpdateProfileInput,
 ) (MutationResult[identity.CurrentUserDTO], error) {
-	return service.idempotency.ExecuteCurrentUser(ctx, IdempotencyInput{
-		ActorID: userID,
-		Scope:   "profile.update",
-		Key:     idempotencyKey,
-		Payload: updateProfilePayload(input),
-	}, http.StatusOK, func() (identity.CurrentUserDTO, error) {
-		changes, err := validateProfileUpdate(input)
-		if err != nil {
-			return identity.CurrentUserDTO{}, err
-		}
-		if err := service.repository.UpdateProfile(
-			ctx,
-			userID,
-			input.ExpectedVersion,
-			changes,
-			service.clock.Now().UTC(),
-		); err != nil {
-			return identity.CurrentUserDTO{}, err
-		}
-		return service.currentUsers.CurrentUser(ctx, userID)
-	})
+	changes, err := validateProfileChanges(input)
+	if err != nil {
+		return MutationResult[identity.CurrentUserDTO]{}, err
+	}
+	return s.idempotency.ExecuteCurrentUser(
+		ctx,
+		IdempotencyInput{
+			ActorID: actorID,
+			Scope:   "profile.update",
+			Key:     idempotencyKey,
+			Payload: input,
+		},
+		input.ExpectedVersion,
+		func() (identity.CurrentUserDTO, error) {
+			now := s.clock.Now().UTC()
+			if err := s.repository.UpdateProfile(ctx, actorID, input.ExpectedVersion, changes, now); err != nil {
+				return identity.CurrentUserDTO{}, err
+			}
+			return s.currentUsers.CurrentUser(ctx, actorID)
+		},
+	)
 }
 
-func (service *Service) CreateAvatarUpload(
+func (s *Service) CreateAvatarUpload(
 	ctx context.Context,
-	userID string,
+	actorID string,
 	idempotencyKey string,
 	input CreateAvatarUploadInput,
 ) (MutationResult[AvatarUploadDTO], error) {
-	return service.idempotency.ExecuteAvatarUpload(ctx, IdempotencyInput{
-		ActorID: userID,
-		Scope:   "profile.avatar.upload.create",
-		Key:     idempotencyKey,
-		Payload: input,
-	}, http.StatusCreated, func() (AvatarUploadDTO, error) {
-		normalized, err := service.validateAvatarUpload(input)
-		if err != nil {
-			return AvatarUploadDTO{}, err
-		}
-		now := service.clock.Now().UTC()
-		uploadID := service.newID()
-		objectKey := "uploads/" + userID + "/" + uploadID
-		upload, err := service.repository.CreateAvatarUpload(ctx, CreateUploadParams{
-			ID:             uploadID,
-			ActorID:        userID,
-			ObjectKey:      objectKey,
-			FileName:       normalized.FileName,
-			ContentType:    normalized.ContentType,
-			SizeBytes:      normalized.SizeBytes,
-			ChecksumSHA256: normalized.ChecksumSHA256,
-			ExpiresAt:      now.Add(service.uploadURLTTL),
-			Now:            now,
-		})
-		if err != nil {
-			return AvatarUploadDTO{}, err
-		}
-		uploadURL, err := service.storage.CreateUploadURL(ctx, UploadURLRequest{
-			ObjectKey:      upload.ObjectKey,
-			ContentType:    upload.ExpectedMIMEType,
-			ContentLength:  upload.ExpectedSize,
-			ChecksumSHA256: upload.ExpectedChecksumSHA256,
-			Expires:        service.uploadURLTTL,
-		})
-		if err != nil {
-			_ = service.repository.MarkAvatarUploadFailed(ctx, userID, upload.ID)
-			return AvatarUploadDTO{}, apperror.DependencyUnavailable("Object storage upload signing is unavailable")
-		}
-		return AvatarUploadDTO{
-			ID:        upload.ID,
-			Purpose:   AvatarUploadPurpose,
-			TargetID:  userID,
-			Status:    UploadStatusCreated,
-			Method:    http.MethodPut,
-			UploadURL: uploadURL,
-			RequiredHeaders: map[string]string{
-				"content-type":          upload.ExpectedMIMEType,
-				"x-amz-checksum-sha256": checksumBase64(upload.ExpectedChecksumSHA256),
-				"x-amz-meta-sha256":     upload.ExpectedChecksumSHA256,
-			},
-			ExpiresAt: formatTimestamp(upload.ExpiresAt),
-		}, nil
-	})
+	if err := validateCreateAvatarInput(input, s.maxUploadBytes); err != nil {
+		return MutationResult[AvatarUploadDTO]{}, err
+	}
+	return s.idempotency.ExecuteAvatarUpload(
+		ctx,
+		IdempotencyInput{
+			ActorID: actorID,
+			Scope:   "profile.avatar.upload",
+			Key:     idempotencyKey,
+			Payload: input,
+		},
+		0,
+		func() (AvatarUploadDTO, error) {
+			uploadID := s.newID()
+			now := s.clock.Now().UTC()
+			expiresAt := now.Add(s.uploadURLTTL)
+			relStoragePath := filepath.ToSlash(filepath.Join("temp", fmt.Sprintf("avatar_%s.partial", uploadID)))
+
+			upload, err := s.repository.CreateAvatarUpload(ctx, CreateUploadParams{
+				ID:             uploadID,
+				ActorID:        actorID,
+				StoragePath:    relStoragePath,
+				FileName:       input.FileName,
+				ContentType:    input.ContentType,
+				SizeBytes:      input.SizeBytes,
+				ChecksumSHA256: input.ChecksumSHA256,
+				ExpiresAt:      expiresAt,
+				Now:            now,
+			})
+			if err != nil {
+				return AvatarUploadDTO{}, err
+			}
+
+			uploadPath := fmt.Sprintf("/api/v1/users/me/avatar/uploads/%s", upload.ID)
+			return AvatarUploadDTO{
+				ID:              upload.ID,
+				Purpose:         upload.Purpose,
+				TargetID:        upload.TargetID,
+				Status:          upload.Status,
+				Method:          "PUT",
+				UploadURL:       uploadPath,
+				UploadPath:      uploadPath,
+				RequiredHeaders: map[string]string{"Content-Type": input.ContentType},
+				ExpiresAt:       formatTime(upload.ExpiresAt),
+			}, nil
+		},
+	)
 }
 
-func (service *Service) CompleteAvatarUpload(
+func (s *Service) UploadDirect(
 	ctx context.Context,
-	userID string,
+	actorID string,
+	uploadID string,
+	body io.Reader,
+	contentLength int64,
+) error {
+	upload, err := s.repository.FindAvatarUpload(ctx, actorID, uploadID)
+	if err != nil {
+		return err
+	}
+	if upload.Status != UploadStatusCreated {
+		return apperror.Conflict(
+			apperror.CodeInvalidStateTransition,
+			fmt.Sprintf("Upload cannot receive data in status %s", upload.Status),
+			nil,
+		)
+	}
+
+	tempPath, err := s.localMedia.ResolveAssetPath(upload.StoragePath)
+	if err != nil {
+		return err
+	}
+
+	_, _, err = s.localMedia.WriteUploadStream(
+		ctx,
+		body,
+		upload.ExpectedSize,
+		upload.ExpectedChecksumSHA256,
+		tempPath,
+	)
+	return err
+}
+
+func (s *Service) CompleteAvatarUpload(
+	ctx context.Context,
+	actorID string,
 	uploadID string,
 	idempotencyKey string,
 	input CompleteAvatarUploadInput,
 ) (MutationResult[identity.CurrentUserDTO], error) {
-	return service.idempotency.ExecuteCurrentUser(ctx, IdempotencyInput{
-		ActorID: userID,
-		Scope:   "profile.avatar.upload.complete:" + uploadID,
-		Key:     idempotencyKey,
-		Payload: completeUploadPayload(input),
-	}, http.StatusOK, func() (identity.CurrentUserDTO, error) {
-		observedETag, err := validateCompleteUpload(input)
-		if err != nil {
-			return identity.CurrentUserDTO{}, err
-		}
-		claim, err := service.repository.ClaimAvatarCompletion(
-			ctx,
-			userID,
-			uploadID,
-			service.newID(),
-			service.clock.Now().UTC(),
-			completionLease,
-		)
-		if err != nil {
-			return identity.CurrentUserDTO{}, err
-		}
-		switch claim.Outcome {
-		case CompletionFinished:
-			return service.currentUsers.CurrentUser(ctx, userID)
-		case CompletionExpired:
-			return identity.CurrentUserDTO{}, apperror.Conflict(
-				apperror.CodeInvalidStateTransition,
-				"Media upload has expired",
-				nil,
-			)
-		case CompletionInProgress:
-			completed, waitErr := service.awaitAvatarCompletion(ctx, userID, uploadID)
-			if waitErr != nil {
-				return identity.CurrentUserDTO{}, waitErr
-			}
-			if completed {
-				return service.currentUsers.CurrentUser(ctx, userID)
-			}
-			return identity.CurrentUserDTO{}, apperror.Conflict(
-				apperror.CodeResourceConflict,
-				"Media upload completion is already in progress",
-				nil,
-			)
-		case CompletionClaimed:
-		default:
-			return identity.CurrentUserDTO{}, errors.New("profile repository returned an invalid completion outcome")
-		}
-
-		inspected, inspectErr := service.inspector.Inspect(ctx, claim.Upload, observedETag)
-		if inspectErr != nil {
-			cleanupKeys := inspected.CleanupKeys
-			var inspectionFailure *AvatarInspectionFailure
-			if errors.As(inspectErr, &inspectionFailure) {
-				cleanupKeys = inspectionFailure.CleanupKeys
-			}
-			service.failCompletion(ctx, claim, cleanupKeys, inspectErr)
-			return identity.CurrentUserDTO{}, inspectErr
-		}
-		finalizeErr := service.repository.FinalizeAvatarCompletion(ctx, FinalizeAvatarParams{
-			ActorID:         userID,
-			UploadID:        uploadID,
-			CompletionToken: claim.Token,
-			AssetID:         service.newID(),
-			Inspected:       inspected,
-			Now:             service.clock.Now().UTC(),
-		})
-		if finalizeErr != nil {
-			service.failCompletion(ctx, claim, inspected.CleanupKeys, finalizeErr)
-			return identity.CurrentUserDTO{}, finalizeErr
-		}
-		return service.currentUsers.CurrentUser(ctx, userID)
-	})
-}
-
-func (service *Service) awaitAvatarCompletion(ctx context.Context, actorID, uploadID string) (bool, error) {
-	for range completionWaitAttempts {
-		if err := service.sleeper.Sleep(ctx, completionWaitInterval); err != nil {
-			return false, err
-		}
-		status, err := service.repository.AvatarCompletionStatus(ctx, actorID, uploadID)
-		if err != nil {
-			return false, err
-		}
-		if status == UploadStatusCompleted {
-			return true, nil
-		}
-		if status != UploadStatusCompleting {
-			return false, nil
-		}
-	}
-	return false, nil
-}
-
-func (service *Service) failCompletion(
-	ctx context.Context,
-	claim CompletionClaim,
-	cleanupKeys []string,
-	cause error,
-) {
-	if len(cleanupKeys) == 0 {
-		cleanupKeys = []string{claim.Upload.ObjectKey}
-	}
-	retryable := apperror.IsCode(cause, apperror.CodeDependencyUnavailable)
-	_ = service.repository.FailAvatarCompletion(
+	return s.idempotency.ExecuteCurrentUser(
 		ctx,
-		claim.Upload.ID,
-		claim.Token,
-		retryable,
-		cleanupKeys,
-		failureReason(cause),
-		service.clock.Now().UTC(),
+		IdempotencyInput{
+			ActorID: actorID,
+			Scope:   "profile.avatar.complete:" + uploadID,
+			Key:     idempotencyKey,
+			Payload: input,
+		},
+		0,
+		func() (identity.CurrentUserDTO, error) {
+			now := s.clock.Now().UTC()
+			completionToken := s.newID()
+			claim, err := s.repository.ClaimAvatarCompletion(
+				ctx,
+				actorID,
+				uploadID,
+				completionToken,
+				now,
+				completionLease,
+			)
+			if err != nil {
+				return identity.CurrentUserDTO{}, err
+			}
+
+			switch claim.Outcome {
+			case CompletionFinished:
+				return s.currentUsers.CurrentUser(ctx, actorID)
+			case CompletionExpired:
+				return identity.CurrentUserDTO{}, apperror.Conflict(
+					apperror.CodeInvalidStateTransition,
+					"Upload has expired",
+					nil,
+				)
+			case CompletionInProgress:
+				return s.waitForAvatarCompletion(ctx, actorID, uploadID)
+			case CompletionClaimed:
+				// Proceed to inspect
+			default:
+				return identity.CurrentUserDTO{}, errors.New("unknown completion outcome")
+			}
+
+			inspected, err := s.inspector.Inspect(ctx, claim.Upload)
+			if err != nil {
+				_ = s.repository.FailAvatarCompletion(ctx, uploadID, completionToken, false, err.Error(), s.clock.Now().UTC())
+				return identity.CurrentUserDTO{}, err
+			}
+
+			finalizeErr := s.repository.FinalizeAvatarCompletion(ctx, FinalizeAvatarParams{
+				ActorID:         actorID,
+				UploadID:        uploadID,
+				CompletionToken: completionToken,
+				AssetID:         s.newID(),
+				Inspected:       inspected,
+				Now:             s.clock.Now().UTC(),
+			})
+			if finalizeErr != nil {
+				return identity.CurrentUserDTO{}, finalizeErr
+			}
+
+			return s.currentUsers.CurrentUser(ctx, actorID)
+		},
 	)
 }
 
-func validateProfileUpdate(input UpdateProfileInput) (ProfileChanges, error) {
-	if input.ExpectedVersion < 1 {
-		return ProfileChanges{}, apperror.Validation("expectedVersion must be a positive integer")
+func (s *Service) waitForAvatarCompletion(
+	ctx context.Context,
+	actorID string,
+	uploadID string,
+) (identity.CurrentUserDTO, error) {
+	for attempt := 0; attempt < completionWaitAttempts; attempt++ {
+		if err := s.sleeper.Sleep(ctx, completionWaitInterval); err != nil {
+			return identity.CurrentUserDTO{}, err
+		}
+		status, err := s.repository.AvatarCompletionStatus(ctx, actorID, uploadID)
+		if err != nil {
+			return identity.CurrentUserDTO{}, err
+		}
+		if status == UploadStatusCompleted {
+			return s.currentUsers.CurrentUser(ctx, actorID)
+		}
+		if status != UploadStatusCompleting {
+			return identity.CurrentUserDTO{}, apperror.Conflict(
+				apperror.CodeInvalidStateTransition,
+				"Avatar upload completion failed",
+				nil,
+			)
+		}
 	}
+	return identity.CurrentUserDTO{}, apperror.Conflict(
+		apperror.CodeResourceConflict,
+		"Avatar upload completion is taking too long",
+		nil,
+	)
+}
+
+func validateProfileChanges(input UpdateProfileInput) (ProfileChanges, error) {
 	if !input.DisplayName.Set && !input.Bio.Set {
-		return ProfileChanges{}, apperror.Validation("At least one profile field must be supplied")
+		return ProfileChanges{}, apperror.Validation("at least one of displayName or bio must be provided")
 	}
 	changes := ProfileChanges{}
 	if input.DisplayName.Set {
-		rawLength := javascriptStringLength(input.DisplayName.Value)
-		if rawLength < 1 || rawLength > 64 {
-			return ProfileChanges{}, apperror.Validation("displayName must contain 1 to 64 characters")
-		}
-		displayName := strings.TrimSpace(input.DisplayName.Value)
-		length := javascriptStringLength(displayName)
-		if length < 1 || length > 64 {
+		name := strings.TrimSpace(input.DisplayName.Value)
+		if length := javascriptStringLength(name); length < 1 || length > 64 {
 			return ProfileChanges{}, apperror.Validation("displayName must contain 1 to 64 characters")
 		}
 		changes.DisplayNameSet = true
-		changes.DisplayName = displayName
+		changes.DisplayName = name
 	}
 	if input.Bio.Set {
 		changes.BioSet = true
 		if input.Bio.Value != nil {
-			if javascriptStringLength(*input.Bio.Value) > 500 {
-				return ProfileChanges{}, apperror.Validation("bio cannot exceed 500 characters")
-			}
 			bio := strings.TrimSpace(*input.Bio.Value)
-			if javascriptStringLength(bio) > 500 {
-				return ProfileChanges{}, apperror.Validation("bio cannot exceed 500 characters")
+			if length := javascriptStringLength(bio); length > 500 {
+				return ProfileChanges{}, apperror.Validation("bio must contain at most 500 characters")
 			}
 			changes.Bio = &bio
 		}
@@ -360,88 +358,28 @@ func validateProfileUpdate(input UpdateProfileInput) (ProfileChanges, error) {
 	return changes, nil
 }
 
-func (service *Service) validateAvatarUpload(input CreateAvatarUploadInput) (CreateAvatarUploadInput, error) {
-	if strings.TrimSpace(input.FileName) == "" || javascriptStringLength(input.FileName) > 255 {
-		return CreateAvatarUploadInput{}, apperror.Validation("fileName is invalid")
+func validateCreateAvatarInput(input CreateAvatarUploadInput, maxBytes int64) error {
+	if length := javascriptStringLength(input.FileName); length < 1 || length > 255 {
+		return apperror.Validation("fileName must contain 1 to 255 characters")
 	}
-	if input.SizeBytes < 1 {
-		return CreateAvatarUploadInput{}, apperror.Validation("sizeBytes is invalid")
+	if input.ContentType != "image/jpeg" && input.ContentType != "image/png" && input.ContentType != "image/webp" {
+		return apperror.Validation("contentType must be image/jpeg, image/png, or image/webp")
 	}
-	if input.SizeBytes > service.maxUploadBytes {
-		return CreateAvatarUploadInput{}, apperror.PayloadTooLarge(
-			fmt.Sprintf("Upload exceeds %d bytes", service.maxUploadBytes),
-		)
-	}
-	if input.SizeBytes > AvatarMaximumBytes {
-		return CreateAvatarUploadInput{}, apperror.PayloadTooLarge("Avatar upload exceeds 5 MiB")
+	if input.SizeBytes < 1 || input.SizeBytes > AvatarMaximumBytes || input.SizeBytes > maxBytes {
+		return apperror.Validation(fmt.Sprintf("sizeBytes must be between 1 and %d", AvatarMaximumBytes))
 	}
 	if !checksumPattern.MatchString(input.ChecksumSHA256) {
-		return CreateAvatarUploadInput{}, apperror.Validation("checksumSha256 is invalid")
+		return apperror.Validation("checksumSha256 must be a 64-character hex string")
 	}
-	contentType := input.ContentType
-	if contentType != "image/jpeg" && contentType != "image/png" && contentType != "image/webp" {
-		return CreateAvatarUploadInput{}, apperror.Validation("contentType is not allowed")
-	}
-	extension := strings.TrimPrefix(strings.ToLower(filepath.Ext(input.FileName)), ".")
-	if extension != "jpg" && extension != "jpeg" && extension != "png" && extension != "webp" {
-		return CreateAvatarUploadInput{}, apperror.Validation("fileName has an unsupported extension")
-	}
-	input.ContentType = contentType
-	return input, nil
-}
-
-func validateCompleteUpload(input CompleteAvatarUploadInput) (string, error) {
-	if !input.ObservedETag.Set {
-		return "", nil
-	}
-	length := javascriptStringLength(input.ObservedETag.Value)
-	if length < 1 || length > 200 {
-		return "", apperror.Validation("observedEtag is invalid")
-	}
-	return normalizeETag(input.ObservedETag.Value), nil
-}
-
-func updateProfilePayload(input UpdateProfileInput) map[string]any {
-	payload := map[string]any{"expectedVersion": input.ExpectedVersion}
-	if input.DisplayName.Set {
-		payload["displayName"] = input.DisplayName.Value
-	}
-	if input.Bio.Set {
-		payload["bio"] = input.Bio.Value
-	}
-	return payload
-}
-
-func completeUploadPayload(input CompleteAvatarUploadInput) map[string]any {
-	payload := make(map[string]any)
-	if input.ObservedETag.Set {
-		payload["observedEtag"] = input.ObservedETag.Value
-	}
-	return payload
-}
-
-func checksumBase64(value string) string {
-	decoded, _ := hex.DecodeString(value)
-	return base64.StdEncoding.EncodeToString(decoded)
-}
-
-func normalizeETag(value string) string {
-	return strings.ReplaceAll(strings.TrimSpace(value), `"`, "")
-}
-
-func failureReason(err error) string {
-	if applicationError, ok := apperror.As(err); ok {
-		return "UPLOAD_FAILED_" + string(applicationError.Code)
-	}
-	return "UPLOAD_FAILED_INTERNAL_ERROR"
-}
-
-func formatTimestamp(value time.Time) string {
-	return value.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+	return nil
 }
 
 func javascriptStringLength(value string) int {
 	return len(utf16.Encode([]rune(value)))
+}
+
+func formatTime(value time.Time) string {
+	return value.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
 }
 
 type systemClock struct{}

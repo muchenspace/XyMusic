@@ -144,7 +144,7 @@ describe("administrator HTTP API contract", () => {
     await expectRequest(() => adminApi.updateSettings(settingsUpdate), "/api/v1/admin/settings", { method: "PATCH", body: settingsUpdate });
     const database = { host: "db", port: 5432, database: "xymusic", username: "admin", sslMode: "prefer" as const, maximumConnections: 10 };
     await expectRequest(() => adminApi.testDatabase(database), "/api/v1/admin/settings/test/database", { method: "POST", body: database });
-    const storage = { endpoint: "http://minio:9000", publicBaseUrl: null, region: "us-east-1", bucket: "xymusic", accessKeyId: "key", forcePathStyle: true, signedUrlTtlSeconds: 300, maxUploadBytes: 1024 };
+    const storage = { assetDirectory: "assets", transcodeDirectory: "transcode", maxUploadBytes: 1024 };
     await expectRequest(() => adminApi.testStorage(storage), "/api/v1/admin/settings/test/storage", { method: "POST", body: storage });
     await expectRequest(() => adminApi.testMediaTools({ directory: "tools" }), "/api/v1/admin/settings/test/media-tools", { method: "POST", body: { directory: "tools" } });
     await expectRequest(() => adminApi.testLocalLibrary("music"), "/api/v1/admin/settings/test/local-library", { method: "POST", body: { directory: "music" } });
@@ -173,7 +173,7 @@ describe("administrator HTTP API contract", () => {
     await expectRequest(() => setup.testHttp(completeInput.http), "/api/setup/http/test", { method: "POST", body: completeInput.http });
     await expectRequest(() => setup.testPaths({ migrationsDirectory: " migrations ", adminWebDirectory: " admin " }), "/api/setup/paths/test", { method: "POST", body: { migrationsDirectory: "migrations", adminWebDirectory: "admin" } });
     await expectRequest(() => setup.testDatabase({ database: completeInput.database, migrationsDirectory: "migrations" }), "/api/setup/database/test", { method: "POST", body: { database: completeInput.database, migrationsDirectory: "migrations" } });
-    await expectRequest(() => setup.testStorage({ ...completeInput.storage, publicBaseUrl: " " }), "/api/setup/storage/test", { method: "POST", body: completeInput.storage });
+    await expectRequest(() => setup.testStorage({ ...completeInput.storage }), "/api/setup/storage/test", { method: "POST", body: completeInput.storage });
     await expectRequest(() => setup.testMedia(completeInput.media), "/api/setup/media/test", { method: "POST", body: { ffmpegPath: "ffmpeg", ffprobePath: "ffprobe" } });
     await expectRequest(() => setup.testSource({ ...completeInput.source, scanIntervalMinutes: null }), "/api/setup/source/test", { method: "POST", body: { ...completeInput.source, scanIntervalMinutes: null } });
     await expectRequest(() => setup.testAdministrator(completeInput.administrator), "/api/setup/administrator/test", { method: "POST", body: completeInput.administrator });
@@ -226,7 +226,7 @@ function setupInput(): SetupCompleteInput {
     http: { ipv4Host: "127.0.0.1", ipv4Port: 3000, ipv6Host: "::1", ipv6Port: 3000, trustedProxyAddresses: [] },
     paths: { migrationsDirectory: "migrations", adminWebDirectory: "admin" },
     database: { host: "db", port: 5432, database: "xymusic", username: "admin", password: "secret", sslMode: "prefer", maxConnections: 10 },
-    storage: { endpoint: "http://minio:9000", region: "us-east-1", bucket: "xymusic", accessKeyId: "key", secretAccessKey: "secret", forcePathStyle: true, signedUrlTtlSeconds: 300, maxUploadBytes: 1024 },
+    storage: { assetDirectory: "assets", transcodeDirectory: "transcode", maxUploadBytes: 1024 },
     media: { mode: "ADVANCED", directory: "", ffmpegPath: "ffmpeg", ffprobePath: "ffprobe", fpcalcPath: "", acoustIdClient: "" },
     source: { name: "Music", directory: "music", mode: "READ_ONLY", enabled: true, syncOnStartup: true, scanIntervalMinutes: null, includePatterns: [], excludePatterns: [] },
     registration: { enabled: false },

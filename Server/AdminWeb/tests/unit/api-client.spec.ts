@@ -111,6 +111,20 @@ describe("admin API client", () => {
     await expect(outcome).resolves.toMatchObject({ kind: "timeout" });
   });
 
+  it("resolves relative artwork and playback resource URLs to the API origin", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
+      artwork: { url: "/api/v1/assets/asset-1/cover-hash" },
+      playback: { streamUrl: "/api/v1/playback/streams/session-1?ticket=abc" },
+    })));
+
+    await expect(apiRequest<{ artwork: { url: string }; playback: { streamUrl: string } }>(
+      "/api/v1/admin/catalog",
+    )).resolves.toEqual({
+      artwork: { url: `${window.location.origin}/api/v1/assets/asset-1/cover-hash` },
+      playback: { streamUrl: `${window.location.origin}/api/v1/playback/streams/session-1?ticket=abc` },
+    });
+  });
+
   it("adds idempotency only to mutations and preserves an explicit key", async () => {
     const sent: Array<{ method: string; key: string | null }> = [];
     vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -181,7 +195,7 @@ describe("admin API client", () => {
     }).catch((cause: unknown) => cause);
 
     expect(error).toBeInstanceOf(ApiError);
-    expect((error as ApiError).message).toContain("媒体处理仍在进行，请等待任务结束后重试");
+    expect((error as ApiError).message).toContain("音源扫描仍在进行，请等待扫描结束后重试");
     expect((error as ApiError).message).toContain("trace-media-conflict");
   });
 });

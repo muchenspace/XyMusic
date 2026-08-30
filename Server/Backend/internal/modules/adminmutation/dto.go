@@ -36,19 +36,18 @@ type AlbumReferenceDTO struct {
 }
 
 type TrackDTO struct {
-	ID               string              `json:"id"`
-	Title            string              `json:"title"`
-	Album            *AlbumReferenceDTO  `json:"album"`
-	ArtistCredits    []CreditDTO         `json:"artistCredits"`
-	Artwork          *catalog.ArtworkDTO `json:"artwork"`
-	DurationMS       *int64              `json:"durationMs"`
-	TrackNumber      *int                `json:"trackNumber"`
-	DiscNumber       int                 `json:"discNumber"`
-	Status           string              `json:"status"`
-	ActiveMediaJobID *string             `json:"activeMediaJobId"`
-	Version          int                 `json:"version"`
-	CreatedAt        string              `json:"createdAt"`
-	UpdatedAt        string              `json:"updatedAt"`
+	ID            string              `json:"id"`
+	Title         string              `json:"title"`
+	Album         *AlbumReferenceDTO  `json:"album"`
+	ArtistCredits []CreditDTO         `json:"artistCredits"`
+	Artwork       *catalog.ArtworkDTO `json:"artwork"`
+	DurationMS    *int64              `json:"durationMs"`
+	TrackNumber   *int                `json:"trackNumber"`
+	DiscNumber    int                 `json:"discNumber"`
+	Status        string              `json:"status"`
+	Version       int                 `json:"version"`
+	CreatedAt     string              `json:"createdAt"`
+	UpdatedAt     string              `json:"updatedAt"`
 }
 
 type MergeResultDTO struct {

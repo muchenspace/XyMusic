@@ -80,11 +80,11 @@ func TestServiceDelegatesMetadataMutationsWithCurrentVersionAndDefaults(t *testi
 	}
 }
 
-func TestServiceDelegatesMediaOrScanMutations(t *testing.T) {
+func TestServiceDelegatesScanMutations(t *testing.T) {
 	now := time.Now().UTC()
 	store := &jobStoreStub{findRecord: JobRecord{
-		ID: "job-2", Type: JobTypeMediaProcess, Status: JobStatusQueued, Source: JobSourceMedia,
-		Title: "Track", MaxAttempts: 5, CreatedAt: now, UpdatedAt: now,
+		ID: "job-2", Type: JobTypeSourceScan, Status: JobStatusQueued, Source: JobSourceScan,
+		Title: "Library", MaxAttempts: 1, CreatedAt: now, UpdatedAt: now,
 	}}
 	service, _ := NewService(store, &metadataMutatorStub{})
 	if _, err := service.Retry(context.Background(), "actor", "job-2", nil); err != nil {

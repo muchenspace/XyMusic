@@ -29,7 +29,7 @@ type ServiceDependencies struct {
 	Database           *database.Pool
 	Runtime            RuntimeController
 	Store              ConfigurationStore
-	Storage            StorageFactory
+	Storage            MediaStorageFactory
 	MediaTool          MediaTool
 	Worker             WorkerMonitor
 	Metrics            RuntimeMetrics
@@ -45,7 +45,7 @@ type Service struct {
 	database           *database.Pool
 	runtime            RuntimeController
 	store              ConfigurationStore
-	storage            StorageFactory
+	storage            MediaStorageFactory
 	mediaTool          MediaTool
 	worker             WorkerMonitor
 	metrics            RuntimeMetrics
@@ -130,22 +130,23 @@ func (service *Service) TestStorage(ctx context.Context, input StorageInput) (St
 		return StorageTestResponse{}, err
 	}
 	started := service.now()
-	objects, err := service.storage.Open(candidate.Storage)
+	mediaStorage, err := service.storage.Open(candidate.MediaStorage)
 	if err != nil {
 		return StorageTestResponse{}, err
 	}
-	defer objects.Close()
-	exists, err := objects.Probe(ctx)
-	if err != nil {
+	defer mediaStorage.Close()
+	if err := mediaStorage.EnsureDirectories(ctx); err != nil {
 		return StorageTestResponse{}, err
 	}
-	message := "Object storage endpoint is available; the bucket will be created when settings are applied"
-	if exists {
-		message = "Object storage bucket is available"
+	if err := mediaStorage.Probe(ctx); err != nil {
+		return StorageTestResponse{}, err
 	}
 	return StorageTestResponse{
-		OK: true, Message: message, BucketExists: exists,
-		LatencyMS: elapsedMilliseconds(service.now().Sub(started)),
+		OK:                       true,
+		Message:                  "Media storage directories are accessible",
+		AssetDirectoryExists:     true,
+		TranscodeDirectoryExists: true,
+		LatencyMS:                elapsedMilliseconds(service.now().Sub(started)),
 	}, nil
 }
 
@@ -294,13 +295,13 @@ func (service *Service) Apply(ctx context.Context, actorID string, input UpdateI
 	if err := service.validateAffectedDependencies(ctx, previous, candidate, resolvedCandidate); err != nil {
 		return failure(err)
 	}
-	if !reflect.DeepEqual(previous.Storage, candidate.Storage) {
-		objects, openErr := service.storage.Open(candidate.Storage)
+	if !reflect.DeepEqual(previous.MediaStorage, candidate.MediaStorage) {
+		mediaStorage, openErr := service.storage.Open(candidate.MediaStorage)
 		if openErr != nil {
 			return failure(openErr)
 		}
-		ensureErr := objects.EnsureBucket(ctx)
-		objects.Close()
+		ensureErr := mediaStorage.EnsureDirectories(ctx)
+		mediaStorage.Close()
 		if ensureErr != nil {
 			return failure(ensureErr)
 		}
@@ -379,13 +380,13 @@ func (service *Service) validateAffectedDependencies(
 	ctx context.Context,
 	previous, candidate, resolved config.Config,
 ) error {
-	if !reflect.DeepEqual(previous.Storage, candidate.Storage) {
-		objects, err := service.storage.Open(candidate.Storage)
+	if !reflect.DeepEqual(previous.MediaStorage, candidate.MediaStorage) {
+		mediaStorage, err := service.storage.Open(candidate.MediaStorage)
 		if err != nil {
 			return err
 		}
-		_, probeErr := objects.Probe(ctx)
-		objects.Close()
+		probeErr := mediaStorage.Probe(ctx)
+		mediaStorage.Close()
 		if probeErr != nil {
 			return probeErr
 		}
@@ -449,17 +450,18 @@ func queueInformation(ctx context.Context, pool *database.Pool) (QueueDTO, error
 	result := QueueDTO{}
 	err := pool.QueryRow(ctx, `
 		select
-			(select count(*)::int from media_jobs where status in ('PENDING','PROCESSING')),
 			(select count(*)::int from library_scan_runs where status in ('PENDING','RUNNING')),
-			(select count(*)::int from object_cleanup_jobs where status in ('PENDING','PROCESSING')),
 			(select count(*)::int from metadata_writeback_jobs where status in ('PENDING','PROCESSING')),
 			(
 				(select count(*)::int from tag_scraping_jobs where status in ('PENDING','RUNNING')) +
 				(select count(*)::int from artist_artwork_scraping_jobs where status in ('PENDING','RUNNING'))
 			)
-	`).Scan(&result.Media, &result.Scans, &result.Cleanup, &result.Writeback, &result.Scraping)
+	`).Scan(&result.Scans, &result.Writeback, &result.Scraping)
+	if err != nil {
+		return QueueDTO{}, err
+	}
 	result.Total = result.Media + result.Scans + result.Cleanup + result.Writeback + result.Scraping
-	return result, err
+	return result, nil
 }
 
 func requireDirectory(path string) error {

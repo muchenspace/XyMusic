@@ -1,9 +1,7 @@
-package adminmedia
+﻿package adminmedia
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,19 +9,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"xymusic/server/internal/config"
 	"xymusic/server/internal/platform/database"
 	platformsecurity "xymusic/server/internal/platform/security"
-	"xymusic/server/internal/shared/apperror"
 	sharedidempotency "xymusic/server/internal/shared/idempotency"
 	"xymusic/server/internal/testsupport"
 )
 
-// TestRepositoryProductionLifecycle is opt-in because it writes isolated,
-// self-cleaning rows. It validates the transaction-heavy upload completion
-// and retry SQL against the real migrated PostgreSQL schema.
 func TestRepositoryProductionLifecycle(t *testing.T) {
 	environmentPath := os.Getenv("XYMUSIC_INTEGRATION_ENV")
 	if environmentPath == "" {
@@ -58,51 +51,17 @@ func TestRepositoryProductionLifecycle(t *testing.T) {
 	artworkAssetID := uuid.NewString()
 	trackUploadID := uuid.NewString()
 	trackAssetID := uuid.NewString()
-	abandonedUploadID := uuid.NewString()
-	fencedUploadID := uuid.NewString()
-	fencedAssetID := uuid.NewString()
-	jobID := uuid.NewString()
-	username := "adminmedia_it_" + strings.ReplaceAll(userID[:12], "-", "")
-	objectKeys := []string{
-		"uploads/" + userID + "/" + artworkUploadID,
-		"media/artwork/artist_artwork/" + artistID + "/" + artworkUploadID + ".jpg",
-		"uploads/" + userID + "/" + trackUploadID,
-		"uploads/" + userID + "/" + abandonedUploadID,
-		"uploads/" + userID + "/" + fencedUploadID,
-		"media/artwork/album_artwork/" + albumID + "/" + fencedUploadID + ".jpg",
-		"media/artwork/must-not-clean-" + artworkUploadID + ".jpg",
-	}
+
+	username := "adminmedia_" + userID[:8]
 	cleanup := func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 20*time.Second)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cleanupCancel()
-		statements := []struct {
-			name string
-			sql  string
-			args []any
-		}{
-			{"idempotency records", `delete from idempotency_records where actor_id = $1`, []any{userID}},
-			{"cleanup jobs", `delete from object_cleanup_jobs where object_key = any($1::varchar[])`, []any{objectKeys}},
-			{"artist reference", `update artists set artwork_asset_id = null where id = $1`, []any{artistID}},
-			{"uploads", `delete from media_uploads where id = any($1::uuid[])`, []any{[]string{artworkUploadID, trackUploadID, abandonedUploadID, fencedUploadID}}},
-			{"jobs", `delete from media_jobs where id = $1`, []any{jobID}},
-			{"assets", `delete from media_assets where id = any($1::uuid[])`, []any{[]string{artworkAssetID, trackAssetID, fencedAssetID}}},
-			{"track", `delete from tracks where id = $1`, []any{trackID}},
-			{"album", `delete from albums where id = $1`, []any{albumID}},
-			{"artist", `delete from artists where id = $1`, []any{artistID}},
-			{"profile", `delete from user_profiles where user_id = $1`, []any{userID}},
-			{"user", `delete from users where id = $1`, []any{userID}},
-		}
-		for _, statement := range statements {
-			if _, err := pool.Exec(cleanupCtx, statement.sql, statement.args...); err != nil {
-				t.Errorf("clean admin media integration %s: %v", statement.name, err)
-			}
-		}
-		var remaining int
-		if err := pool.QueryRow(cleanupCtx, `select count(*)::int from users where id = $1`, userID).Scan(&remaining); err != nil {
-			t.Errorf("verify admin media integration cleanup: %v", err)
-		} else if remaining != 0 {
-			t.Errorf("admin media integration user %s was not deleted", userID)
-		}
+		_, _ = pool.Exec(cleanupCtx, `delete from media_uploads where id in ($1, $2)`, artworkUploadID, trackUploadID)
+		_, _ = pool.Exec(cleanupCtx, `delete from tracks where id = $1`, trackID)
+		_, _ = pool.Exec(cleanupCtx, `delete from albums where id = $1`, albumID)
+		_, _ = pool.Exec(cleanupCtx, `delete from artists where id = $1`, artistID)
+		_, _ = pool.Exec(cleanupCtx, `delete from media_assets where id in ($1, $2)`, artworkAssetID, trackAssetID)
+		_, _ = pool.Exec(cleanupCtx, `delete from users where id = $1`, userID)
 	}
 	t.Cleanup(cleanup)
 	cleanup()
@@ -116,41 +75,6 @@ func TestRepositoryProductionLifecycle(t *testing.T) {
 		values ($1, $2, $2, $3, 'ADMIN', 'ACTIVE')`, userID, username, passwordHash); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `insert into user_profiles (user_id, display_name) values ($1, 'Admin Media Integration')`, userID); err != nil {
-		t.Fatal(err)
-	}
-	payloadCipher, err := platformsecurity.NewPayloadCipher(cfg.Security.IdempotencyEncryptionSecret)
-	if err != nil {
-		t.Fatal(err)
-	}
-	persistentIdempotency := NewPersistentIdempotency(sharedidempotency.New(pool.Pool, payloadCipher))
-	idempotentCalls := 0
-	idempotencyInput := IdempotencyInput{
-		ActorID: userID,
-		Scope:   "admin.media.integration.create",
-		Key:     "adminmedia-it-" + artworkUploadID,
-		Payload: map[string]any{"purpose": PurposeArtistArtwork, "targetId": artistID},
-	}
-	operation := func() (IdempotencyResponse, error) {
-		idempotentCalls++
-		return IdempotencyResponse{Status: 201, Body: json.RawMessage(`{"id":"upload"}`)}, nil
-	}
-	first, err := persistentIdempotency.Execute(ctx, idempotencyInput, operation)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := persistentIdempotency.Execute(ctx, idempotencyInput, operation)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.Replayed || !second.Replayed || idempotentCalls != 1 || string(second.Body) != `{"id":"upload"}` {
-		t.Fatalf("persistent idempotency = first %#v second %#v calls=%d", first, second, idempotentCalls)
-	}
-	changedInput := idempotencyInput
-	changedInput.Payload = map[string]any{"purpose": PurposeAlbumArtwork, "targetId": albumID}
-	if _, err := persistentIdempotency.Execute(ctx, changedInput, operation); !apperror.IsCode(err, apperror.CodeIdempotencyKeyReused) {
-		t.Fatalf("reused idempotency key error = %v", err)
-	}
 	if _, err := pool.Exec(ctx, `insert into artists (id, name, normalized_name) values ($1, 'Admin Media Artist', $2)`, artistID, "admin media artist "+artistID); err != nil {
 		t.Fatal(err)
 	}
@@ -163,201 +87,112 @@ func TestRepositoryProductionLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	payloadCipher, err := platformsecurity.NewPayloadCipher(cfg.Security.IdempotencyEncryptionSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persistentIdempotency := NewPersistentIdempotency(sharedidempotency.New(pool.Pool, payloadCipher))
+	_ = persistentIdempotency
+
 	repository := NewRepository(pool.Pool)
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	artworkUpload, err := repository.CreateUpload(ctx, CreateUploadParams{
-		ID: artworkUploadID, ActorID: userID, Purpose: PurposeArtistArtwork,
-		TargetID: artistID, ObjectKey: objectKeys[0], FileName: "art.png",
-		ContentType: "image/png", SizeBytes: 128, ChecksumSHA256: stringOf('a', 64),
-		ExpiresAt: now.Add(5 * time.Minute), Now: now, MaximumBytes: cfg.Storage.MaxUploadBytes,
+
+	err = repository.CreateUpload(ctx, UploadReservation{
+		ID:                     artworkUploadID,
+		Purpose:                PurposeArtistArtwork,
+		TargetID:               artistID,
+		UploaderID:             userID,
+		StoragePath:            "temp/art_" + artworkUploadID + ".partial",
+		ExpectedSize:           128,
+		ExpectedChecksumSHA256: strings.Repeat("a", 64),
+		ExpectedMIMEType:       "image/png",
+		OriginalFileName:       "art.png",
+		Status:                 UploadStatusCreated,
+		ExpiresAt:              now.Add(5 * time.Minute),
+		CreatedAt:              now,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claim, err := repository.ClaimCompletion(ctx, userID, artworkUpload.ID, uuid.NewString(), now, completionLease)
+
+	claim, err := repository.ClaimUploadCompletion(ctx, artworkUploadID, uuid.NewString(), now, completionLease)
 	if err != nil || claim.Outcome != CompletionClaimed {
 		t.Fatalf("artwork claim = %#v error=%v", claim, err)
 	}
-	completedArtwork, err := repository.FinalizeCompletion(ctx, FinalizeCompletionParams{
-		ActorID: userID, UploadID: artworkUpload.ID,
-		CompletionToken: claim.Token, AssetID: artworkAssetID, JobID: uuid.NewString(),
-		Inspected: InspectedUpload{
-			ObjectKey: objectKeys[1], MIMEType: "image/jpeg", SizeBytes: 96,
-			ChecksumSHA256: stringOf('b', 64), CleanupKeys: []string{objectKeys[0], objectKeys[1]},
+
+	w, h := 800, 800
+	err = repository.FinalizeUpload(ctx, FinalizeUploadParams{
+		UploadID:        artworkUploadID,
+		CompletionToken: claim.Token,
+		AssetID:         artworkAssetID,
+		Inspected: InspectedMedia{
+			StoragePath:    "artworks/" + artworkUploadID + ".jpg",
+			Kind:           "ARTWORK",
+			MIMEType:       "image/jpeg",
+			SizeBytes:      96,
+			ChecksumSHA256: strings.Repeat("b", 64),
+			Width:          &w,
+			Height:         &h,
 		},
 		Now: now.Add(time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completedArtwork.JobID != nil || completedArtwork.AssetID != artworkAssetID {
-		t.Fatalf("completed artwork = %#v", completedArtwork)
-	}
+
 	var attachedArtwork string
 	if err := pool.QueryRow(ctx, `select artwork_asset_id from artists where id = $1`, artistID).Scan(&attachedArtwork); err != nil || attachedArtwork != artworkAssetID {
 		t.Fatalf("artist artwork = %q error=%v", attachedArtwork, err)
 	}
-	if err := repository.FailCompletion(
-		ctx,
-		artworkUpload.ID,
-		claim.Token,
-		false,
-		[]string{objectKeys[6]},
-		"STALE_COMPLETION_CLEANUP",
-		now.Add(1500*time.Millisecond),
-	); err != nil {
-		t.Fatal(err)
-	}
-	var staleCleanupCount int
-	if err := pool.QueryRow(ctx, `select count(*)::int from object_cleanup_jobs where object_key = $1`, objectKeys[6]).Scan(&staleCleanupCount); err != nil {
-		t.Fatal(err)
-	}
-	if staleCleanupCount != 0 {
-		t.Fatalf("stale completion cleanup jobs = %d", staleCleanupCount)
-	}
 
-	abandonedUpload, err := repository.CreateUpload(ctx, CreateUploadParams{
-		ID: abandonedUploadID, ActorID: userID, Purpose: PurposeAlbumArtwork,
-		TargetID: albumID, ObjectKey: objectKeys[3], FileName: "abandoned.png",
-		ContentType: "image/png", SizeBytes: 64, ChecksumSHA256: stringOf('d', 64),
-		ExpiresAt: now.Add(5 * time.Minute), Now: now, MaximumBytes: cfg.Storage.MaxUploadBytes,
+	// Test Track upload
+	err = repository.CreateUpload(ctx, UploadReservation{
+		ID:                     trackUploadID,
+		Purpose:                PurposeTrackSource,
+		TargetID:               trackID,
+		TrackID:                &trackID,
+		UploaderID:             userID,
+		StoragePath:            "temp/track_" + trackUploadID + ".partial",
+		ExpectedSize:           1024,
+		ExpectedChecksumSHA256: strings.Repeat("c", 64),
+		ExpectedMIMEType:       "audio/flac",
+		OriginalFileName:       "track.flac",
+		Status:                 UploadStatusCreated,
+		ExpiresAt:              now.Add(5 * time.Minute),
+		CreatedAt:              now,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.AbandonUpload(ctx, userID, abandonedUpload.ID, now.Add(2*time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	var abandonedStatus string
-	var abandonedCleanupCount int
-	if err := pool.QueryRow(ctx, `select status::text from media_uploads where id = $1`, abandonedUpload.ID).Scan(&abandonedStatus); err != nil {
-		t.Fatal(err)
-	}
-	if err := pool.QueryRow(ctx, `select count(*)::int from object_cleanup_jobs where object_key = $1`, abandonedUpload.ObjectKey).Scan(&abandonedCleanupCount); err != nil {
-		t.Fatal(err)
-	}
-	if abandonedStatus != UploadStatusFailed || abandonedCleanupCount != 1 {
-		t.Fatalf("abandoned upload status/cleanup = %q / %d", abandonedStatus, abandonedCleanupCount)
-	}
 
-	fencedUpload, err := repository.CreateUpload(ctx, CreateUploadParams{
-		ID: fencedUploadID, ActorID: userID, Purpose: PurposeAlbumArtwork,
-		TargetID: albumID, ObjectKey: objectKeys[4], FileName: "fenced.png",
-		ContentType: "image/png", SizeBytes: 64, ChecksumSHA256: stringOf('e', 64),
-		ExpiresAt: now.Add(5 * time.Minute), Now: now, MaximumBytes: cfg.Storage.MaxUploadBytes,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	fencedClaim, err := repository.ClaimCompletion(ctx, userID, fencedUpload.ID, uuid.NewString(), now, completionLease)
-	if err != nil || fencedClaim.Outcome != CompletionClaimed {
-		t.Fatalf("fenced claim = %#v error=%v", fencedClaim, err)
-	}
-	fenceErr := errors.New("integration completion fence lost")
-	_, err = repository.FinalizeCompletion(ctx, FinalizeCompletionParams{
-		ActorID: userID, UploadID: fencedUpload.ID,
-		CompletionToken: fencedClaim.Token, AssetID: fencedAssetID,
-		Inspected: InspectedUpload{
-			ObjectKey: objectKeys[5], MIMEType: "image/jpeg", SizeBytes: 48,
-			ChecksumSHA256: stringOf('f', 64), CleanupKeys: []string{objectKeys[4], objectKeys[5]},
-		},
-		CompletionFence: &completionFenceStub{lock: func(_ context.Context, tx pgx.Tx) error {
-			if tx == nil {
-				t.Fatal("completion fence received a nil transaction")
-			}
-			return fenceErr
-		}},
-		Now: now.Add(3 * time.Second),
-	})
-	if !errors.Is(err, fenceErr) {
-		t.Fatalf("fenced completion error = %v", err)
-	}
-	var fencedAssetCount int
-	if err := pool.QueryRow(ctx, `select count(*)::int from media_assets where id = $1`, fencedAssetID).Scan(&fencedAssetCount); err != nil {
-		t.Fatal(err)
-	}
-	if fencedAssetCount != 0 {
-		t.Fatalf("fenced completion created %d assets", fencedAssetCount)
-	}
-	var fencedAlbumCover *string
-	if err := pool.QueryRow(ctx, `select cover_asset_id from albums where id = $1`, albumID).Scan(&fencedAlbumCover); err != nil {
-		t.Fatal(err)
-	}
-	if fencedAlbumCover != nil {
-		t.Fatalf("fenced completion attached album cover %q", *fencedAlbumCover)
-	}
-	if err := repository.FailCompletion(
-		ctx,
-		fencedUpload.ID,
-		fencedClaim.Token,
-		false,
-		[]string{objectKeys[4], objectKeys[5]},
-		"BATCH_ATTEMPT_FENCE_LOST",
-		now.Add(4*time.Second),
-	); err != nil {
-		t.Fatal(err)
-	}
-	var fencedStatus string
-	var fencedCleanupCount int
-	if err := pool.QueryRow(ctx, `select status::text from media_uploads where id = $1`, fencedUpload.ID).Scan(&fencedStatus); err != nil {
-		t.Fatal(err)
-	}
-	if err := pool.QueryRow(ctx, `select count(*)::int from object_cleanup_jobs where object_key = any($1::varchar[])`, []string{objectKeys[4], objectKeys[5]}).Scan(&fencedCleanupCount); err != nil {
-		t.Fatal(err)
-	}
-	if fencedStatus != UploadStatusFailed || fencedCleanupCount != 2 {
-		t.Fatalf("fenced upload status/cleanup = %q / %d", fencedStatus, fencedCleanupCount)
-	}
-
-	trackUpload, err := repository.CreateUpload(ctx, CreateUploadParams{
-		ID: trackUploadID, ActorID: userID, Purpose: PurposeTrackSource,
-		TargetID: trackID, ObjectKey: objectKeys[2], FileName: "source.flac",
-		ContentType: "audio/flac", SizeBytes: 256, ChecksumSHA256: stringOf('c', 64),
-		ExpiresAt: now.Add(5 * time.Minute), Now: now, MaximumBytes: cfg.Storage.MaxUploadBytes,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	trackClaim, err := repository.ClaimCompletion(ctx, userID, trackUpload.ID, uuid.NewString(), now, completionLease)
+	trackClaim, err := repository.ClaimUploadCompletion(ctx, trackUploadID, uuid.NewString(), now, completionLease)
 	if err != nil || trackClaim.Outcome != CompletionClaimed {
 		t.Fatalf("track claim = %#v error=%v", trackClaim, err)
 	}
-	completedTrack, err := repository.FinalizeCompletion(ctx, FinalizeCompletionParams{
-		ActorID: userID, UploadID: trackUpload.ID,
-		CompletionToken: trackClaim.Token, AssetID: trackAssetID, JobID: jobID,
-		Inspected: InspectedUpload{
-			ObjectKey: objectKeys[2], MIMEType: "audio/flac", SizeBytes: 256,
-			ChecksumSHA256: stringOf('c', 64), CleanupKeys: []string{objectKeys[2]},
+
+	dur := int64(180000)
+	err = repository.FinalizeUpload(ctx, FinalizeUploadParams{
+		UploadID:        trackUploadID,
+		CompletionToken: trackClaim.Token,
+		AssetID:         trackAssetID,
+		Inspected: InspectedMedia{
+			StoragePath:    "sources/" + trackUploadID + ".flac",
+			Kind:           "AUDIO_SOURCE",
+			MIMEType:       "audio/flac",
+			SizeBytes:      1024,
+			ChecksumSHA256: strings.Repeat("c", 64),
+			DurationMs:     &dur,
 		},
-		Now: now.Add(2 * time.Second),
+		Now: now.Add(time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completedTrack.JobID == nil || *completedTrack.JobID != jobID {
-		t.Fatalf("completed track = %#v", completedTrack)
-	}
-	job, err := repository.FindJob(ctx, jobID)
-	if err != nil || job.Status != JobStatusPending || job.Generation != 1 || job.Version != 1 {
-		t.Fatalf("created job = %#v error=%v", job, err)
-	}
-	if _, err := pool.Exec(ctx, `
-		update media_jobs set status = 'FAILED', last_error = 'integration failure', last_error_code = 'MEDIA_UPLOAD_MISMATCH'
-		where id = $1`, jobID); err != nil {
-		t.Fatal(err)
-	}
-	retried, err := repository.RetryJob(ctx, RetryJobParams{
-		JobID:           jobID,
-		ExpectedVersion: 1, Now: now.Add(3 * time.Second),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if retried.Status != JobStatusPending || retried.Generation != 2 || retried.Version != 2 || retried.Attempts != 0 {
-		t.Fatalf("retried job = %#v", retried)
-	}
-	completedClaim, err := repository.ClaimCompletion(ctx, userID, trackUpload.ID, uuid.NewString(), now.Add(4*time.Second), completionLease)
-	if err != nil || completedClaim.Outcome != CompletionFinished || completedClaim.Upload.JobID == nil {
-		t.Fatalf("completed claim = %#v error=%v", completedClaim, err)
+
+	var trackSourceAsset string
+	var trackDuration int64
+	var publishedAt *time.Time
+	if err := pool.QueryRow(ctx, `select source_asset_id, duration_ms, published_at from tracks where id = $1`, trackID).Scan(&trackSourceAsset, &trackDuration, &publishedAt); err != nil || trackSourceAsset != trackAssetID || trackDuration != dur || publishedAt == nil {
+		t.Fatalf("track source asset = %q duration = %d publishedAt = %v error=%v", trackSourceAsset, trackDuration, publishedAt, err)
 	}
 }

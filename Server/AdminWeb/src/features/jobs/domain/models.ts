@@ -2,7 +2,7 @@ export type JobStatus = "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELE
 
 export interface JobSummary {
   id: string;
-  type: "SOURCE_SCAN" | "MEDIA_PROCESS" | "TAG_WRITE";
+  type: "SOURCE_SCAN" | "TAG_WRITE";
   status: JobStatus;
   title: string;
   progress: number;

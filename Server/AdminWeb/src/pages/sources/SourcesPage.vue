@@ -11,8 +11,6 @@ import BaseDialog from "@/components/BaseDialog.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import StatePanel from "@/components/StatePanel.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
-import type { JobEventSubscription } from "@/features/jobs/application/job-admin-gateway";
-import { useJobAdmin } from "@/app/services/jobs";
 import { scanQueuePresentation, sourceScanProgress, sourceScanRefetchInterval, submittedScanUpdate } from "@/features/sources/application/scan-queue-health";
 import type { SourceScanSubscription } from "@/features/sources/application/source-admin-gateway";
 import type { LibrarySource, LibrarySourceInput, SourceScan, SourceScanPage } from "@/features/sources/domain/models";
@@ -24,7 +22,6 @@ import { formatDate, formatRelative } from "@/utils/format";
 const queryClient = useQueryClient();
 const ui = useUiStore();
 const sourceAdmin = useSourceAdmin();
-const jobAdmin = useJobAdmin();
 const readinessQuery = useQuery({
   queryKey: ["service", "readiness"],
   queryFn: ({ signal }) => serviceReadiness(signal),
@@ -52,18 +49,14 @@ const browsePath = ref("");
 const browseRequestPath = ref("");
 const browsePage = ref(1);
 const directoryPageSize = ref(DEFAULT_CATALOG_PAGE_SIZE);
-const archiveCatalog = ref(true);
 const fieldErrors = ref<Record<string, string>>({});
 const actionError = ref("");
 const patternText = reactive({ include: "", exclude: "" });
 const form = reactive<Omit<LibrarySourceInput, "scanIntervalMinutes"> & { scanIntervalMinutes: number | null | ""; id: string; expectedVersion: number }>({ id: "", expectedVersion: 0, name: "", path: "", mode: "READ_ONLY", enabled: true, scanOnStartup: true, scanIntervalMinutes: null, includePatterns: [], excludePatterns: [] });
 let scanEvents: SourceScanSubscription | undefined;
 let scanEventSourceId: string | undefined;
-let jobEvents: JobEventSubscription | undefined;
 let scanClock: number | undefined;
-let processingRefreshTimer: number | undefined;
 const scanNow = ref(Date.now());
-const jobStreamConnected = ref(false);
 type ScanSubmission = {
   sourceId: string;
   sourceName: string;
@@ -109,13 +102,6 @@ const scansQuery = useQuery({
     query.state.data?.items,
   ),
 });
-const processingQuery = useQuery({
-  queryKey: computed(() => ["admin", "sources", historySourceId.value, "processing"]),
-  queryFn: ({ signal }) => sourceAdmin.processing(historySourceId.value, signal),
-  enabled: computed(() => Boolean(historySourceId.value)),
-  refetchInterval: (query) => jobStreamConnected.value ? false : (query.state.data?.active ?? 0) > 0 ? 5_000 : 60_000,
-});
-const historySourceName = computed(() => sourcesQuery.data.value?.items.find((source) => source.id === historySourceId.value)?.name ?? "当前音源");
 const activeScan = computed(() => scansQuery.data.value?.items.find((scan) =>
   scan.status === "PENDING" || scan.status === "RUNNING",
 ) ?? null);
@@ -141,7 +127,7 @@ function openEdit(source: LibrarySource): void {
   Object.assign(patternText, { include: source.includePatterns.join("\n"), exclude: source.excludePatterns.join("\n") }); fieldErrors.value = {}; actionError.value = ""; editorOpen.value = true;
 }
 function openBrowser(): void { browsePath.value = form.path; browseRequestPath.value = form.path; browsePage.value = 1; browseOpen.value = true; }
-function askDelete(source: LibrarySource): void { selected.value = source; archiveCatalog.value = true; actionError.value = ""; deleteOpen.value = true; }
+function askDelete(source: LibrarySource): void { selected.value = source; actionError.value = ""; deleteOpen.value = true; }
 
 const schema = z.object({ name: z.string().trim().min(1, "请输入音源名称").max(120), path: z.string().trim().min(1, "请输入服务器目录"), mode: z.enum(["READ_ONLY", "READ_WRITE"]), scanIntervalMinutes: z.number().int().min(5).max(10_080).nullable() });
 function input(): LibrarySourceInput { return { name: form.name.trim(), path: form.path.trim(), mode: form.mode, enabled: form.enabled, scanOnStartup: form.scanOnStartup, scanIntervalMinutes: form.scanIntervalMinutes === "" ? null : form.scanIntervalMinutes, includePatterns: patterns(patternText.include), excludePatterns: patterns(patternText.exclude) }; }
@@ -189,7 +175,7 @@ function changeSourcePageSize(value: number): void { sourcePageSize.value = valu
 function changeScanPageSize(value: number): void { pageSize.value = value; page.value = 1; }
 function changeDirectoryPageSize(value: number): void { directoryPageSize.value = value; browsePage.value = 1; }
 function chooseDirectory(path: string): void { form.path = path; browseOpen.value = false; }
-const deleteMutation = useMutation({ mutationFn: () => sourceAdmin.delete(selected.value!.id, selected.value!.version, archiveCatalog.value), onSuccess: async () => { allowDeleteClose = true; deleteOpen.value = false; ui.notify("success", "音源已移除"); await refreshCatalog(); }, onError: (error) => { actionError.value = error instanceof ApiError ? error.message : "移除音源失败"; } });
+const deleteMutation = useMutation({ mutationFn: () => sourceAdmin.delete(selected.value!.id, selected.value!.version, false), onSuccess: async () => { allowDeleteClose = true; deleteOpen.value = false; ui.notify("success", "音源已移除"); await refreshCatalog(); }, onError: (error) => { actionError.value = error instanceof ApiError ? error.message : "移除音源失败"; } });
 watch(editorOpen, (value) => { if (!value && saveMutation.isPending.value && !allowEditorClose) editorOpen.value = true; allowEditorClose = false; });
 watch(deleteOpen, (value) => { if (!value && deleteMutation.isPending.value && !allowDeleteClose) deleteOpen.value = true; allowDeleteClose = false; });
 function connectScan(sourceId: string, scanId: string): void {
@@ -205,7 +191,7 @@ function connectScan(sourceId: string, scanId: string): void {
       if (scanSubmission.value?.sourceId === sourceId) scanSubmission.value = undefined;
       scanEvents?.close(); scanEvents = undefined; scanEventSourceId = undefined;
       void refreshCatalog();
-      if (scan.status === "COMPLETED") ui.notify("success", "扫描完成", "新曲目会立即显示；媒体处理中的曲目会在后台任务完成后变为可播放。");
+      if (scan.status === "COMPLETED") ui.notify("success", "扫描完成", "新曲目会立即显示；播放时才会按客户端能力即时转码。");
     }
   }, () => {
     scanEvents?.close(); scanEvents = undefined; scanEventSourceId = undefined;
@@ -218,15 +204,6 @@ function connectScan(sourceId: string, scanId: string): void {
       queryClient.invalidateQueries({ queryKey: ["admin", "sources", sourceId, "scans"] }),
     ]);
   });
-}
-function queueProcessingRefresh(): void {
-  if (processingRefreshTimer !== undefined) return;
-  processingRefreshTimer = window.setTimeout(() => {
-    processingRefreshTimer = undefined;
-    void queryClient.invalidateQueries({ queryKey: ["admin", "sources", historySourceId.value, "processing"] });
-    void queryClient.invalidateQueries({ queryKey: ["admin", "jobs"] });
-    void queryClient.invalidateQueries({ queryKey: ["admin", "dashboard"] });
-  }, 350);
 }
 watch(() => scansQuery.data.value?.items, (items) => {
   const sourceId = historySourceId.value;
@@ -255,18 +232,6 @@ watch(() => scansQuery.data.value?.items, (items) => {
 });
 onMounted(() => {
   scanClock = window.setInterval(() => { scanNow.value = Date.now(); }, 5_000);
-  jobEvents = jobAdmin.watch(
-    () => { jobStreamConnected.value = true; void processingQuery.refetch(); },
-    queueProcessingRefresh,
-    () => { jobStreamConnected.value = false; },
-  );
-});
-onBeforeUnmount(() => {
-  scanEvents?.close();
-  scanEventSourceId = undefined;
-  jobEvents?.close();
-  if (scanClock !== undefined) window.clearInterval(scanClock);
-  if (processingRefreshTimer !== undefined) window.clearTimeout(processingRefreshTimer);
 });
 const scanMutation = useMutation({
   mutationFn: (source: LibrarySource) => sourceAdmin.startScan(source.id),
@@ -290,8 +255,7 @@ const scanMutation = useMutation({
     };
     upsertScan(source.id, scan);
     connectScan(source.id, scan.id);
-    void processingQuery.refetch();
-    ui.notify("success", "扫描任务已提交", "状态面板将持续显示扫描和后续媒体处理进度。");
+    ui.notify("success", "扫描任务已提交", "状态面板将持续显示音源扫描进度；扫描完成后即可按需播放。");
     await refresh();
   },
   onError: (error, source) => {
@@ -325,18 +289,6 @@ function elapsed(from: string, to?: string | null): string {
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
   return `${minutes} 分 ${remainder} 秒`;
-}
-function jobStage(status: string): string {
-  if (status === "PENDING") return "等待媒体 Worker";
-  if (status === "PROCESSING") return "媒体分析与转码中";
-  if (status === "READY") return "处理完成";
-  if (status === "FAILED") return "处理失败";
-  return "已取消";
-}
-function jobProgress(status: string): number {
-  if (status === "PENDING") return 12;
-  if (status === "PROCESSING") return 62;
-  return 100;
 }
 function sourceSubmitting(sourceId: string): boolean {
   return scanMutation.isPending.value && scanMutation.variables.value?.id === sourceId;
@@ -373,10 +325,10 @@ const ToggleSource = defineComponent({ inheritAttrs: false, props: { modelValue:
     <section class="ui-card overflow-hidden">
       <div class="flex flex-col gap-3 border-b border-[var(--border)] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div class="flex flex-wrap items-center gap-2"><h2 class="font-bold">实时处理流水线</h2><StatusBadge :status="jobStreamConnected ? 'ONLINE' : 'OFFLINE'" :label="jobStreamConnected ? '实时更新' : '轮询更新'" dot /></div>
-          <p class="mt-1 text-xs text-[var(--muted)]">从扫描提交、文件发现到媒体分析与转码，按实际阶段连续展示。</p>
+          <div class="flex flex-wrap items-center gap-2"><h2 class="font-bold">扫描状态</h2><StatusBadge status="LOCAL" label="仅处理音源基础信息" dot /></div>
+          <p class="mt-1 text-xs text-[var(--muted)]">扫描只读取音源元数据、侧车歌词和封面信息，不会预先生成转码文件；播放时才按客户端能力即时转码。</p>
         </div>
-        <div class="flex gap-2"><select v-model="historySourceId" class="ui-select min-w-48" @change="page = 1"><option v-for="source in sourcesQuery.data.value?.items" :key="source.id" :value="source.id">{{ source.name }}</option></select><AppButton icon-only :loading="processingQuery.isFetching.value" @click="processingQuery.refetch()"><template #icon><RefreshCw :size="16" /></template>刷新</AppButton></div>
+        <div class="flex gap-2"><select v-model="historySourceId" class="ui-select min-w-48" @change="page = 1"><option v-for="source in sourcesQuery.data.value?.items" :key="source.id" :value="source.id">{{ source.name }}</option></select><AppButton icon-only :loading="scansQuery.isFetching.value" @click="scansQuery.refetch()"><template #icon><RefreshCw :size="16" /></template>刷新</AppButton></div>
       </div>
       <StatePanel v-if="!historySourceId" state="empty" compact title="请先添加音源" />
       <template v-else>
@@ -389,17 +341,13 @@ const ToggleSource = defineComponent({ inheritAttrs: false, props: { modelValue:
           <div v-else-if="currentSubmission?.phase === 'FAILED'" class="flex gap-3 rounded-xl bg-rose-500/10 p-4 text-sm text-[var(--danger)]"><AlertTriangle :size="18" class="shrink-0" /><div><p class="font-bold">扫描提交失败</p><p class="mt-1 text-xs">{{ currentSubmission.error }}</p></div></div>
           <div v-else-if="visibleScan" class="space-y-4">
             <div class="flex flex-col gap-3 sm:flex-row sm:items-center"><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><p class="font-bold">{{ scanStatusLabel(visibleScan) }}</p><StatusBadge :status="scanHealth(visibleScan).status" :label="scanHealth(visibleScan).label ?? undefined" dot /></div><p class="mt-1 text-xs text-[var(--muted)]">已处理 {{ visibleScan.processedFiles }} / {{ visibleScan.discoveredFiles }} 个文件 · 失败 {{ visibleScan.failedFiles }} · 已用时 {{ elapsed(visibleScan.startedAt ?? visibleScan.createdAt, visibleScan.completedAt) }}</p></div><span class="text-2xl font-extrabold text-[var(--primary)]">{{ progress(visibleScan) }}%</span></div>
-            <div class="h-2 overflow-hidden rounded-full bg-[var(--surface-solid)]"><div class="progress-fill h-full rounded-full bg-[var(--primary)]" :class="visibleScan.status === 'RUNNING' ? 'animate-pulse' : ''" :style="{ width: `${Math.max(visibleScan.status === 'PENDING' ? 4 : 0, progress(visibleScan))}%` }" /></div>
+            <div class="h-2 overflow-hidden rounded-full bg-[var(--surface-solid)]"><div class="progress-fill h-full rounded-full bg-[var(--primary)]" :class="visibleScan.status === 'RUNNING' ? 'animate-pulse' : ''" :style="{ width: Math.max(visibleScan.status === 'PENDING' ? 4 : 0, progress(visibleScan)) + '%' }" /></div>
             <p v-if="scanHealth(visibleScan).warning" class="text-xs text-[var(--danger)]">{{ scanHealth(visibleScan).warning }}</p>
           </div>
         </div>
-        <StatePanel v-if="processingQuery.isPending.value" state="loading" compact />
-        <StatePanel v-else-if="processingQuery.isError.value" state="error" compact @retry="processingQuery.refetch()" />
-        <template v-else-if="processingQuery.data.value">
-          <div class="grid grid-cols-2 gap-px bg-[var(--border)] lg:grid-cols-4"><div class="bg-[var(--surface-solid)] p-5"><p class="text-xs font-semibold text-[var(--muted)]">媒体处理中</p><p class="mt-2 text-2xl font-bold">{{ processingQuery.data.value.active }}</p><p class="mt-1 text-[10px] text-[var(--muted)]">排队 {{ processingQuery.data.value.queued }} · 执行 {{ processingQuery.data.value.processing }}</p></div><div class="bg-[var(--surface-solid)] p-5"><p class="text-xs font-semibold text-[var(--muted)]">已完成</p><p class="mt-2 text-2xl font-bold text-emerald-500">{{ processingQuery.data.value.completed }}</p><p class="mt-1 text-[10px] text-[var(--muted)]">可播放变体已就绪</p></div><div class="bg-[var(--surface-solid)] p-5"><p class="text-xs font-semibold text-[var(--muted)]">失败</p><p class="mt-2 text-2xl font-bold" :class="processingQuery.data.value.failed ? 'text-[var(--danger)]' : undefined">{{ processingQuery.data.value.failed }}</p><p class="mt-1 text-[10px] text-[var(--muted)]">取消 {{ processingQuery.data.value.cancelled }}</p></div><div class="bg-[var(--surface-solid)] p-5"><p class="text-xs font-semibold text-[var(--muted)]">总任务</p><p class="mt-2 text-2xl font-bold">{{ processingQuery.data.value.total }}</p><p class="mt-1 truncate text-[10px] text-[var(--muted)]">{{ historySourceName }} · {{ processingQuery.data.value.updatedAt ? formatRelative(processingQuery.data.value.updatedAt) : '等待任务' }}</p></div></div>
-          <StatePanel v-if="!processingQuery.data.value.jobs.length" state="empty" compact title="尚未产生媒体任务" detail="扫描阶段已经单独显示；发现新音频后，媒体分析与转码任务会立即出现在这里。" />
-          <div v-else class="divide-y divide-[var(--border)]"><article v-for="job in processingQuery.data.value.jobs" :key="job.id" class="px-5 py-4"><div class="flex flex-col gap-3 sm:flex-row sm:items-start"><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><p class="max-w-2xl truncate font-semibold">{{ job.title }}</p><StatusBadge :status="job.status" :label="jobStage(job.status)" dot /></div><p class="mt-1 text-xs text-[var(--muted)]">已用时 {{ elapsed(job.createdAt, ['READY','FAILED','CANCELLED'].includes(job.status) ? job.updatedAt : null) }} · 尝试 {{ job.attempts }} / {{ job.maxAttempts }} · 更新于 {{ formatRelative(job.updatedAt) }}</p><div class="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--surface-muted)]"><div class="progress-fill h-full rounded-full" :class="job.status === 'FAILED' ? 'bg-[var(--danger)]' : job.status === 'READY' ? 'bg-emerald-500' : 'animate-pulse bg-[var(--primary)]'" :style="{ width: `${jobProgress(job.status)}%` }" /></div><p v-if="job.lastError" class="mt-2 line-clamp-2 rounded-lg bg-rose-500/8 p-2 text-xs text-[var(--danger)]">{{ job.lastError }}</p></div></div></article></div>
-        </template>
+        <div class="p-5">
+          <div class="flex items-start gap-3 rounded-xl bg-[var(--primary-soft)] p-4 text-sm text-[var(--primary)]"><RefreshCw :size="18" class="mt-0.5 shrink-0" /><div><p class="font-bold">播放时动态转码</p><p class="mt-1 text-xs leading-5">扫描结束后不会继续排队媒体处理任务。服务端仅保存音源路径和基础信息，客户端开始播放时才生成临时输出并在过期后自动清理。</p></div></div>
+        </div>
       </template>
     </section>
 
@@ -409,6 +357,6 @@ const ToggleSource = defineComponent({ inheritAttrs: false, props: { modelValue:
 
     <BaseDialog v-model="browseOpen" title="浏览服务器目录" description="目录列表来自 XyMusic 服务端；相对路径以服务端二进制文件所在目录为基准，也支持绝对路径。" width="lg"><div class="flex gap-2"><input v-model="browsePath" class="ui-input font-mono" placeholder="music 或 D:\Music" @keydown.enter="browse" /><AppButton :loading="browseQuery.isFetching.value" @click="browse">打开</AppButton></div><StatePanel v-if="browseQuery.isPending.value" state="loading" compact /><StatePanel v-else-if="browseQuery.isError.value" state="error" compact @retry="browseQuery.refetch()" /><div v-else-if="browseQuery.data.value" class="mt-4"><button class="mb-3 flex w-full items-center justify-between rounded-xl bg-[var(--primary-soft)] p-3 text-left font-mono text-xs text-[var(--primary)]" type="button" @click="chooseDirectory(browseQuery.data.value.path)"><span class="truncate">选择 {{ browseQuery.data.value.path }}</span><ChevronRight :size="15" /></button><div class="max-h-80 divide-y divide-[var(--border)] overflow-y-auto rounded-xl border border-[var(--border)]"><button v-for="directory in browseQuery.data.value.directories" :key="directory.path" class="flex w-full items-center gap-3 p-3 text-left hover:bg-[var(--surface-muted)]" type="button" @click="openDirectory(directory.path)"><Folder :size="16" class="text-[var(--primary)]" /><span class="truncate">{{ directory.name }}</span></button></div><AppPagination v-if="browseQuery.data.value.total" :page="browsePage" :page-size="directoryPageSize" :total="browseQuery.data.value.total" :total-pages="browseQuery.data.value.totalPages" @change="browsePage = $event" @page-size-change="changeDirectoryPageSize" /></div></BaseDialog>
 
-    <BaseDialog v-model="deleteOpen" title="移除音源" description="磁盘上的媒体文件不会被删除。"><div class="rounded-xl bg-[var(--surface-muted)] p-4"><p class="font-semibold">{{ selected?.name }}</p><p class="mt-1 break-all font-mono text-xs text-[var(--muted)]">{{ selected?.path }}</p></div><ToggleSource v-model="archiveCatalog" class="mt-4" label="归档关联曲目" detail="将该音源已导入的曲目标记为已归档" /><p v-if="actionError" class="mt-4 rounded-xl bg-rose-500/10 p-3 text-sm text-[var(--danger)]">{{ actionError }}</p><template #footer><AppButton @click="deleteOpen = false">取消</AppButton><AppButton variant="danger" :loading="deleteMutation.isPending.value" @click="deleteMutation.mutate()">移除音源</AppButton></template></BaseDialog>
+    <BaseDialog v-model="deleteOpen" title="移除音源" description="磁盘上的媒体文件不会被删除。"><div class="rounded-xl bg-[var(--surface-muted)] p-4"><p class="font-semibold">{{ selected?.name }}</p><p class="mt-1 break-all font-mono text-xs text-[var(--muted)]">{{ selected?.path }}</p></div><p v-if="actionError" class="mt-4 rounded-xl bg-rose-500/10 p-3 text-sm text-[var(--danger)]">{{ actionError }}</p><template #footer><AppButton @click="deleteOpen = false">取消</AppButton><AppButton variant="danger" :loading="deleteMutation.isPending.value" @click="deleteMutation.mutate()">移除音源</AppButton></template></BaseDialog>
   </div>
 </template>

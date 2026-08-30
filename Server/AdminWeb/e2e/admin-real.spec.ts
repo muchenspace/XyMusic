@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+﻿import { copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test, expect, type Browser, type Page } from "@playwright/test";
 
@@ -166,7 +166,7 @@ async function createSourceAndScan(page: Page, sourceName: string, directory: st
   await card.getByRole("button", { name: "扫描" }).click();
   await expect(page.getByText("扫描任务已提交")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("扫描完成", { exact: true }).first()).toBeVisible({ timeout: 120_000 });
-  await waitForSourceProcessing(page, createdSource.id);
+  await expect.poll(async () => (await sourceProcessing(page, createdSource.id)).total, { timeout: 30_000 }).toBe(0);
   return createdSource.id;
 }
 
@@ -256,23 +256,6 @@ async function manageScannedCatalog(page: Page, sourceName: string, sourceId: st
   await expect(page.getByText("曲目已永久删除")).toBeVisible();
 }
 
-async function waitForSourceProcessing(page: Page, sourceId: string): Promise<void> {
-  await expect.poll(async () => {
-    const processing = await sourceProcessing(page, sourceId);
-    return {
-      active: processing.active,
-      total: processing.total,
-      completed: processing.completed,
-      failed: processing.failed,
-      cancelled: processing.cancelled,
-    };
-  }, {
-    message: "source media processing should reach a successful terminal state",
-    timeout: 120_000,
-    intervals: [250, 500, 1_000, 2_000],
-  }).toEqual({ active: 0, total: 1, completed: 1, failed: 0, cancelled: 0 });
-}
-
 async function sourceProcessing(page: Page, sourceId: string): Promise<{
   active: number;
   total: number;
@@ -291,7 +274,7 @@ async function verifySettings(page: Page): Promise<void> {
   await verifyPage(page, "settings", "系统设置");
   await page.getByRole("button", { name: "测试当前配置" }).click();
   await expect(page.getByText(/ms|连接|成功/).last()).toBeVisible({ timeout: 60_000 });
-  await page.getByRole("button", { name: "对象存储" }).click();
+  await page.getByRole("button", { name: "资产与转码" }).click();
   await page.getByRole("button", { name: "测试当前配置" }).click();
   await expect(page.getByText(/ms|连接|成功/).last()).toBeVisible({ timeout: 60_000 });
   await page.getByRole("button", { name: "媒体工具" }).click();

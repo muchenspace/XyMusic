@@ -1,5 +1,6 @@
 package com.xymusic.app.feature.player.data.media
 
+import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.cache.CacheDataSource
@@ -48,7 +49,7 @@ import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 
 fun interface OfflineMediaDownloader {
-    suspend fun download(grant: PlaybackGrant)
+    suspend fun download(grant: PlaybackGrant): Long?
 }
 
 @Singleton
@@ -61,18 +62,18 @@ constructor(
     private val playbackNetworkPolicy: PlaybackNetworkPolicy,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : OfflineMediaDownloader {
-    override suspend fun download(grant: PlaybackGrant) = runInterruptible(ioDispatcher) {
+    override suspend fun download(grant: PlaybackGrant): Long? = runInterruptible(ioDispatcher) {
+        val builder = DataSpec.Builder()
+            .setUri(grant.streamUrl)
+            .setKey(grant.cacheKey)
+        grant.contentLength?.takeIf { it > 0 }?.let(builder::setLength)
         CacheWriter(
             downloadDataSource(),
-            DataSpec
-                .Builder()
-                .setUri(grant.signedUrl)
-                .setKey(grant.cacheKey)
-                .setLength(grant.contentLength)
-                .build(),
+            builder.build(),
             null,
             null,
         ).cache()
+        playbackCache.cachedContentLength(grant.cacheKey)
     }
 
     private fun downloadDataSource(): CacheDataSource {
@@ -186,7 +187,7 @@ constructor(
                 is PlayerResult.Success -> result.value
                 is PlayerResult.Failure -> return null
             }
-        if (grant.contentLength <= 0L || grant.cacheKey.isBlank()) return null
+        if (grant.cacheKey.isBlank()) return null
         if (!isCurrent(downloadIdentity)) return null
         return PreparedDownload(metadata, grant)
     }
@@ -200,13 +201,16 @@ constructor(
         val operationJob = currentCoroutineContext()[Job]
         return try {
             if (!beginDownload(claim, downloadIdentity)) return OfflineTrackResult.Unavailable
-            offlineMediaDownloader.download(prepared.grant)
+            val downloadedLength = offlineMediaDownloader.download(prepared.grant)
             currentCoroutineContext().ensureActive()
+            val contentLength = prepared.grant.contentLength ?: downloadedLength
+                ?: return OfflineTrackResult.Unavailable
+            if (contentLength <= 0L) return OfflineTrackResult.Unavailable
             val track =
                 prepared.metadata.toEntity(
                     ownerUserId = ownerUserId,
                     cacheKey = prepared.grant.cacheKey,
-                    contentLength = prepared.grant.contentLength,
+                    contentLength = contentLength,
                     downloadedAtEpochMillis = clock.millis(),
                     json = json,
                 )

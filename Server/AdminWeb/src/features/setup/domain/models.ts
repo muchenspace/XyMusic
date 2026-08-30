@@ -34,17 +34,19 @@ export interface SetupPathConfig {
   adminWebDirectory: string;
 }
 
-export interface ObjectStorageConfig {
-  endpoint: string;
-  region: string;
-  bucket: string;
-  accessKeyId: string;
-  secretAccessKey: string;
-  forcePathStyle: boolean;
-  publicBaseUrl?: string;
-  signedUrlTtlSeconds: number;
+export interface MediaStorageConfig {
+  assetDirectory: string;
+  transcodeDirectory: string;
   maxUploadBytes: number;
+  transcodeCacheMaxBytes?: number;
+  uploadTtlSeconds?: number;
+  streamTtlSeconds?: number;
+  streamMaxConcurrent?: number;
+  streamIdleTimeoutSeconds?: number;
+  transcodeTimeoutSeconds?: number;
 }
+
+export type ObjectStorageConfig = MediaStorageConfig;
 
 export interface SetupMediaConfig {
   mode: "DIRECTORY" | "ADVANCED";
@@ -93,10 +95,8 @@ export interface SetupValidationResult {
     missing: string[];
   };
   storageInspection?: {
-    bucketExists: boolean;
-    hasObjects: boolean;
-    objectCount: number;
-    countLimited: boolean;
+    assetDirectoryExists: boolean;
+    transcodeDirectoryExists: boolean;
   };
 }
 
@@ -104,7 +104,7 @@ export interface SetupCompleteInput {
   http: SetupHttpConfig;
   paths: SetupPathConfig;
   database: SetupDatabaseConfig;
-  storage: ObjectStorageConfig;
+  storage: MediaStorageConfig;
   media: SetupMediaConfig;
   source: SetupSourceInput;
   registration: { enabled: boolean };

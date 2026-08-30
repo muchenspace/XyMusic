@@ -1,7 +1,6 @@
 package adminmetadata
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -14,10 +13,9 @@ import (
 	"github.com/google/uuid"
 
 	"xymusic/server/internal/config"
-	adminmedia "xymusic/server/internal/modules/adminmedia"
 	"xymusic/server/internal/platform/database"
+	"xymusic/server/internal/platform/localmedia"
 	platformsecurity "xymusic/server/internal/platform/security"
-	platformstorage "xymusic/server/internal/platform/storage"
 	"xymusic/server/internal/testsupport"
 )
 
@@ -48,14 +46,12 @@ func TestProductionWritebackWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	objects, err := platformstorage.Open(cfg.Storage)
+	localMedia, err := localmedia.NewStore(cfg.MediaStorage.AssetDirectory, cfg.MediaStorage.TranscodeDirectory, cfg.MediaStorage.MaxUploadBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sourceObjects, err := adminmedia.NewMinIOObjectStorage(cfg.Storage)
-	if err != nil {
-		t.Fatal(err)
-	}
+	objects := localMedia
+	sourceObjects := localMedia
 
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
 	username := "metadata_worker_it_" + suffix
@@ -131,9 +127,9 @@ func TestProductionWritebackWorker(t *testing.T) {
 			_, _ = pool.Exec(cleanupContext, `delete from media_assets where id = $1`, sourceAssetID)
 		}
 		if sourceObjectKey != "" {
-			_ = objects.Delete(cleanupContext, sourceObjectKey)
+			_ = objects.DeleteAsset(sourceObjectKey)
 		}
-		_ = objects.Delete(cleanupContext, artworkObjectKey)
+		_ = objects.DeleteAsset(artworkObjectKey)
 		if artistID != "" {
 			_, _ = pool.Exec(cleanupContext, `delete from artists where id = $1
 				and not exists (select 1 from track_artists where artist_id = artists.id)
@@ -145,11 +141,11 @@ func TestProductionWritebackWorker(t *testing.T) {
 		_, _ = pool.Exec(cleanupContext, `delete from users where id = $1`, actorID)
 	}
 	t.Cleanup(cleanup)
-	if err := objects.Put(ctx, artworkObjectKey, bytes.NewReader(artworkBytes), int64(len(artworkBytes)), "image/jpeg"); err != nil {
+	if _, err := objects.UploadFile(ctx, artworkObjectKey, artworkPath, "image/jpeg", hex.EncodeToString(artworkDigest[:])); err != nil {
 		t.Fatal(err)
 	}
 	if err := pool.QueryRow(ctx, `
-		insert into media_assets (uploader_id,object_key,kind,mime_type,size_bytes,checksum_sha256,status)
+		insert into media_assets (uploader_id,storage_path,kind,mime_type,size_bytes,checksum_sha256,status)
 		values ($1,$2,'ARTWORK','image/jpeg',$3,$4,'READY') returning id::text`,
 		actorID, artworkObjectKey, len(artworkBytes), hex.EncodeToString(artworkDigest[:])).Scan(&artworkAssetID); err != nil {
 		t.Fatal(err)
@@ -279,7 +275,7 @@ func TestProductionWritebackWorker(t *testing.T) {
 	sourceObjectKey = "library/sources/" + trackID + "/" + outputChecksum + ".flac"
 	var storedSourceKey, storedSourceChecksum string
 	if err := pool.QueryRow(ctx, `
-		select source.source_asset_id::text, asset.object_key, asset.checksum_sha256
+		select source.source_asset_id::text, asset.storage_path, asset.checksum_sha256
 		from local_music_sources source
 		join media_assets asset on asset.id = source.source_asset_id
 		where source.id = $1`, sourceID).Scan(&sourceAssetID, &storedSourceKey, &storedSourceChecksum); err != nil {

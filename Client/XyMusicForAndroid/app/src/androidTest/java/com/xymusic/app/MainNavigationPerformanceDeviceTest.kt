@@ -735,11 +735,11 @@ private class PerformanceFixtureDispatcher(private val server: MockWebServer) : 
 
     private fun playbackGrantResponse(path: String): String {
         val trackId = path.removePrefix("/api/v1/tracks/").removeSuffix("/playback")
-        val variantId = fixtureId(900)
+        val sessionId = fixtureId(900)
         val audioUrl = server.url("/audio/$trackId")
         return """
-            {"trackId":"$trackId","variantId":"$variantId","selectedQuality":"STANDARD",
-            "url":"$audioUrl","expiresAt":"2030-01-01T00:00:00Z",
+            {"trackId":"$trackId","sessionId":"$sessionId","selectedQuality":"STANDARD",
+            "streamUrl":"$audioUrl","expiresAt":"2030-01-01T00:00:00Z",
             "mimeType":"audio/wav","codec":"pcm_s16le","container":"wav",
             "bitrate":128000,"sampleRate":8000,"contentLength":${audioBytes.size},
             "checksumSha256":null,"cacheKey":"perf-$trackId"}

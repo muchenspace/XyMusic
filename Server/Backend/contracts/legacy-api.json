@@ -263,6 +263,14 @@
       "bodyKind": "json"
     },
     {
+      "method": "PUT",
+      "path": "/api/v1/users/me/avatar/uploads/:id",
+      "scope": "profile",
+      "auth": "bearer",
+      "idempotency": "none",
+      "bodyKind": "binary"
+    },
+    {
       "method": "POST",
       "path": "/api/v1/users/me/avatar/uploads/:id/complete",
       "scope": "profile",
@@ -349,6 +357,14 @@
       "auth": "bearer",
       "idempotency": "none",
       "bodyKind": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/playback/streams/:sessionId",
+      "scope": "playback",
+      "auth": "none",
+      "idempotency": "none",
+      "bodyKind": "none"
     },
     {
       "method": "GET",
@@ -1153,22 +1169,6 @@
     {
       "method": "POST",
       "path": "/api/v1/admin/media/uploads/:id/complete",
-      "scope": "admin-media",
-      "auth": "admin-session",
-      "idempotency": "required",
-      "bodyKind": "json"
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/admin/media/jobs/:id",
-      "scope": "admin-media",
-      "auth": "admin-session",
-      "idempotency": "none",
-      "bodyKind": "none"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/admin/media/jobs/:id/retry",
       "scope": "admin-media",
       "auth": "admin-session",
       "idempotency": "required",

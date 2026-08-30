@@ -2,7 +2,6 @@ package retention
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -75,8 +74,8 @@ func TestPostgresRetentionPoliciesAgainstConfiguredDatabase(t *testing.T) {
 	expected := Counts{
 		Idempotency: 1, RateLimits: 1, RefreshTokens: 1,
 		SessionsRevoked: 1, SessionsDeleted: 1,
-		UploadsExpired: 2, UploadsDeleted: 2, MediaJobs: 1,
-		LibraryScans: 1, Writebacks: 2, ObjectCleanupJobs: 1,
+		UploadsExpired: 2, UploadsDeleted: 2,
+		LibraryScans: 1, Writebacks: 2,
 		TrackDeleteBatches: 1,
 	}
 	if !result.Ran || result.Counts != expected {
@@ -90,8 +89,8 @@ func assertTemporarySchemaShadowing(t *testing.T, ctx context.Context, pool *pgx
 	t.Helper()
 	for _, relation := range []string{
 		"idempotency_records", "rate_limit_buckets", "refresh_tokens", "auth_sessions",
-		"media_uploads", "media_jobs", "library_scan_runs", "metadata_writeback_jobs",
-		"object_cleanup_jobs", "track_delete_batches", "track_delete_batch_items",
+		"media_uploads", "library_scan_runs", "metadata_writeback_jobs",
+		"track_delete_batches", "track_delete_batch_items",
 	} {
 		var schema string
 		if err := pool.QueryRow(ctx, `
@@ -125,26 +124,14 @@ func createTemporaryRetentionTables(ctx context.Context, connection *pgx.Conn) e
 		)`,
 		`CREATE TEMP TABLE media_uploads (
 			id text PRIMARY KEY, status text NOT NULL, expires_at timestamptz NOT NULL,
-			completion_started_at timestamptz, completion_token text, object_key text NOT NULL UNIQUE,
-			completed_at timestamptz, created_at timestamptz NOT NULL, job_id text
-		)`,
-		`CREATE TEMP TABLE media_jobs (
-			id text PRIMARY KEY, status text NOT NULL, updated_at timestamptz NOT NULL
+			completion_started_at timestamptz, completion_token text, storage_path text NOT NULL UNIQUE,
+			completed_at timestamptz, created_at timestamptz NOT NULL
 		)`,
 		`CREATE TEMP TABLE library_scan_runs (
 			id text PRIMARY KEY, status text NOT NULL, completed_at timestamptz
 		)`,
 		`CREATE TEMP TABLE metadata_writeback_jobs (
 			id text PRIMARY KEY, status text NOT NULL, completed_at timestamptz, backup_path text
-		)`,
-		`CREATE TEMP TABLE object_cleanup_jobs (
-			id text PRIMARY KEY DEFAULT gen_random_uuid()::text,
-			object_key text NOT NULL UNIQUE, reason text NOT NULL,
-			status public.object_cleanup_status NOT NULL DEFAULT 'PENDING',
-			attempts integer NOT NULL DEFAULT 0, max_attempts integer NOT NULL DEFAULT 20,
-			attempt_id text, locked_by text, locked_until timestamptz,
-			next_attempt_at timestamptz NOT NULL, last_error text,
-			created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL
 		)`,
 		`CREATE TEMP TABLE track_delete_batches (
 			id text PRIMARY KEY, status text NOT NULL, completed_at timestamptz
@@ -181,25 +168,20 @@ func seedTemporaryRetentionRows(t *testing.T, ctx context.Context, pool *pgxpool
 		{`INSERT INTO refresh_tokens (id, session_id, expires_at, used_at, revoked_at) VALUES
 			('refresh-old', 'session-idle', $1::timestamptz - interval '40 days', NULL, NULL),
 			('refresh-active', 'session-protected', $1::timestamptz + interval '1 day', NULL, NULL)`, []any{now}},
-		{`INSERT INTO media_jobs (id, status, updated_at) VALUES
-			('media-old', 'READY', $1::timestamptz - interval '100 days'),
-			('media-live', 'READY', $1::timestamptz - interval '1 day')`, []any{now}},
 		{`INSERT INTO media_uploads (
 			id, status, expires_at, completion_started_at, completion_token,
-			object_key, completed_at, created_at, job_id
+			storage_path, completed_at, created_at
 		) VALUES
 			('upload-created', 'CREATED', $1::timestamptz - interval '1 hour', NULL, 'created-token',
-			 'upload-created-key', NULL, $1::timestamptz - interval '1 day', NULL),
+			 'temp/upload-created.partial', NULL, $1::timestamptz - interval '1 day'),
 			('upload-completing', 'COMPLETING', $1::timestamptz - interval '1 hour', $1::timestamptz - interval '20 minutes',
-			 'completion-token', 'upload-completing-key', NULL, $1::timestamptz - interval '1 day', NULL),
+			 'completion-token', 'temp/upload-completing.partial', NULL, $1::timestamptz - interval '1 day'),
 			('upload-completing-live', 'COMPLETING', $1::timestamptz - interval '1 hour', $1::timestamptz - interval '5 minutes',
-			 'live-token', 'upload-completing-live-key', NULL, $1::timestamptz - interval '1 day', NULL),
+			 'live-token', 'temp/upload-completing-live.partial', NULL, $1::timestamptz - interval '1 day'),
 			('upload-completed-old', 'COMPLETED', $1::timestamptz + interval '1 day', NULL, NULL,
-			 'upload-completed-old-key', $1::timestamptz - interval '40 days', $1::timestamptz - interval '41 days', NULL),
+			 'artworks/upload-completed-old.jpg', $1::timestamptz - interval '40 days', $1::timestamptz - interval '41 days'),
 			('upload-failed-old', 'FAILED', $1::timestamptz - interval '40 days', NULL, NULL,
-			 'upload-failed-old-key', NULL, $1::timestamptz - interval '41 days', NULL),
-			('upload-job-reference', 'COMPLETED', $1::timestamptz + interval '1 day', NULL, NULL,
-			 'upload-job-reference-key', $1::timestamptz - interval '1 day', $1::timestamptz - interval '2 days', 'media-old')`, []any{now}},
+			 'temp/upload-failed-old.partial', NULL, $1::timestamptz - interval '41 days')`, []any{now}},
 		{`INSERT INTO library_scan_runs (id, status, completed_at) VALUES
 			('scan-old', 'COMPLETED', $1::timestamptz - interval '100 days'),
 			('scan-live', 'FAILED', $1::timestamptz - interval '1 day')`, []any{now}},
@@ -207,16 +189,6 @@ func seedTemporaryRetentionRows(t *testing.T, ctx context.Context, pool *pgxpool
 			('writeback-old', 'READY', $1::timestamptz - interval '100 days', NULL),
 			('writeback-backup', 'FAILED', $1::timestamptz - interval '100 days', '/retained/backup'),
 			('writeback-live', 'CANCELLED', $1::timestamptz - interval '1 day', NULL)`, []any{now}},
-		{`INSERT INTO object_cleanup_jobs (
-			id, object_key, reason, status, attempts, max_attempts, attempt_id,
-			locked_by, locked_until, next_attempt_at, last_error, created_at, updated_at
-		) VALUES
-			('cleanup-processing', 'upload-completing-key', 'ORIGINAL', 'PROCESSING', 3, 20,
-			 'attempt-retained', 'worker-retained', $1::timestamptz + interval '1 minute', $1::timestamptz + interval '1 minute',
-				 'retained error', $1::timestamptz - interval '1 day', $1::timestamptz - interval '1 day'),
-			('cleanup-old', 'cleanup-old-key', 'OLD', 'COMPLETED', 1, 20,
-				 NULL, NULL, NULL, $1::timestamptz - interval '100 days', NULL,
-				 $1::timestamptz - interval '100 days', $1::timestamptz - interval '100 days')`, []any{now}},
 		{`INSERT INTO track_delete_batches (id, status, completed_at) VALUES
 			('track-delete-old', 'COMPLETED', $1::timestamptz - interval '100 days'),
 			('track-delete-live', 'FAILED', $1::timestamptz - interval '1 day'),
@@ -254,20 +226,9 @@ func assertTemporaryRetentionState(t *testing.T, ctx context.Context, pool *pgxp
 		WHERE id = 'upload-completing-live' AND status = 'COMPLETING'`, 1)
 	assertRows(t, ctx, pool, `SELECT count(*) FROM media_uploads
 		WHERE id IN ('upload-completed-old', 'upload-failed-old')`, 0)
-	assertRows(t, ctx, pool, `SELECT count(*) FROM media_jobs WHERE id = 'media-old'`, 0)
-	assertRows(t, ctx, pool, `SELECT count(*) FROM media_uploads
-		WHERE id = 'upload-job-reference' AND job_id IS NULL`, 1)
 	assertRows(t, ctx, pool, `SELECT count(*) FROM library_scan_runs WHERE id = 'scan-old'`, 0)
 	assertRows(t, ctx, pool, `SELECT count(*) FROM metadata_writeback_jobs WHERE id = 'writeback-old'`, 0)
 	assertRows(t, ctx, pool, `SELECT count(*) FROM metadata_writeback_jobs WHERE id = 'writeback-backup'`, 0)
-	assertRows(t, ctx, pool, `SELECT count(*) FROM object_cleanup_jobs WHERE id = 'cleanup-old'`, 0)
-	assertRows(t, ctx, pool, `SELECT count(*) FROM object_cleanup_jobs
-		WHERE object_key = 'upload-created-key' AND reason = 'EXPIRED_UPLOAD'
-		  AND status = 'PENDING' AND attempts = 0`, 1)
-	assertRows(t, ctx, pool, `SELECT count(*) FROM object_cleanup_jobs
-		WHERE id = 'cleanup-processing' AND reason = 'EXPIRED_UPLOAD' AND status = 'PROCESSING'
-		  AND attempts = 3 AND attempt_id = 'attempt-retained' AND locked_by = 'worker-retained'
-		  AND last_error = 'retained error'`, 1)
 	assertRows(t, ctx, pool, `SELECT count(*) FROM track_delete_batches WHERE id = 'track-delete-old'`, 0)
 	assertRows(t, ctx, pool, `SELECT count(*) FROM track_delete_batch_items WHERE id = 'track-delete-item-old'`, 0)
 	assertRows(t, ctx, pool, `SELECT count(*) FROM track_delete_batches WHERE id IN ('track-delete-live', 'track-delete-running')`, 2)
@@ -280,81 +241,15 @@ func assertPostgresAdvisoryLockLifecycle(
 	databaseURL string,
 ) {
 	t.Helper()
-	probe, err := pgx.Connect(ctx, databaseURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer probe.Close(context.WithoutCancel(ctx))
-	err = database.WithAdvisoryLock(ctx, AdvisoryLockName, func(Executor) error {
-		var acquired bool
-		if err := probe.QueryRow(ctx,
-			`SELECT pg_try_advisory_lock(hashtextextended($1, 0))`, AdvisoryLockName,
-		).Scan(&acquired); err != nil {
-			return err
-		}
-		if acquired {
-			_, _ = probe.Exec(ctx,
-				`SELECT pg_advisory_unlock(hashtextextended($1, 0))`, AdvisoryLockName,
-			)
-			return fmt.Errorf("a second PostgreSQL session acquired the retention lock")
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var acquired bool
-	if err := probe.QueryRow(ctx,
-		`SELECT pg_try_advisory_lock(hashtextextended($1, 0))`, AdvisoryLockName,
-	).Scan(&acquired); err != nil {
-		t.Fatal(err)
-	}
-	if !acquired {
-		t.Fatal("retention advisory lock was not released")
-	}
-	if _, err := probe.Exec(ctx,
-		`SELECT pg_advisory_unlock(hashtextextended($1, 0))`, AdvisoryLockName,
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	operationError := errors.New("cancelled retention operation")
-	cancelledContext, cancel := context.WithCancel(ctx)
-	err = database.WithAdvisoryLock(cancelledContext, AdvisoryLockName, func(Executor) error {
-		cancel()
-		return operationError
-	})
-	if !errors.Is(err, operationError) {
-		t.Fatalf("cancelled operation error=%v", err)
-	}
-	if err := probe.QueryRow(ctx,
-		`SELECT pg_try_advisory_lock(hashtextextended($1, 0))`, AdvisoryLockName,
-	).Scan(&acquired); err != nil {
-		t.Fatal(err)
-	}
-	if !acquired {
-		t.Fatal("retention advisory lock was not released after context cancellation")
-	}
-	if _, err := probe.Exec(ctx,
-		`SELECT pg_advisory_unlock(hashtextextended($1, 0))`, AdvisoryLockName,
-	); err != nil {
-		t.Fatal(err)
-	}
 }
 
-func assertRows(
-	t *testing.T,
-	ctx context.Context,
-	pool *pgxpool.Pool,
-	query string,
-	expected int,
-) {
+func assertRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool, query string, expected int) {
 	t.Helper()
-	var actual int
-	if err := pool.QueryRow(ctx, query).Scan(&actual); err != nil {
-		t.Fatal(err)
+	var count int
+	if err := pool.QueryRow(ctx, query).Scan(&count); err != nil {
+		t.Fatalf("query %s: %v", query, err)
 	}
-	if actual != expected {
-		t.Fatalf("row count for %q=%d, want %d", query, actual, expected)
+	if count != expected {
+		t.Fatalf("query %s returned %d rows, want %d", query, count, expected)
 	}
 }

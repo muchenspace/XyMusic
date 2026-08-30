@@ -33,10 +33,8 @@ func TestRunIfDueAppliesEveryPolicyInBatchesAndLogsCounts(t *testing.T) {
 	executor.responses[sessionsDeletedStatement] = []executeResult{{rows: 6}}
 	executor.responses[uploadsExpiredStatement] = []executeResult{{rows: 7}}
 	executor.responses[uploadsDeletedStatement] = []executeResult{{rows: 8}}
-	executor.responses[mediaJobsStatement] = []executeResult{{rows: 9}}
 	executor.responses[libraryScansStatement] = []executeResult{{rows: 10}}
 	executor.responses[writebacksStatement] = []executeResult{{rows: 11}}
-	executor.responses[objectCleanupJobsStatement] = []executeResult{{rows: 12}}
 	executor.responses[trackDeleteBatchesStatement] = []executeResult{{rows: 13}}
 	database := &fakeDatabase{executor: executor}
 	logger := &recordingLogger{}
@@ -53,8 +51,8 @@ func TestRunIfDueAppliesEveryPolicyInBatchesAndLogsCounts(t *testing.T) {
 	expected := Counts{
 		Idempotency: 1003, RateLimits: BatchSize * MaxBatchesPerPolicy,
 		RefreshTokens: 4, SessionsRevoked: 5, SessionsDeleted: 6,
-		UploadsExpired: 7, UploadsDeleted: 8, MediaJobs: 9,
-		LibraryScans: 10, Writebacks: 11, ObjectCleanupJobs: 12,
+		UploadsExpired: 7, UploadsDeleted: 8,
+		LibraryScans: 10, Writebacks: 11,
 		TrackDeleteBatches: 13,
 	}
 	if !result.Ran || result.Counts != expected {
@@ -214,10 +212,8 @@ func assertPolicyArguments(t *testing.T, executor *scriptedExecutor, now time.Ti
 		{sessionsDeletedStatement, []any{cutoffs.RevokedSessions}},
 		{uploadsExpiredStatement, []any{now, now.Add(-10 * time.Minute)}},
 		{uploadsDeletedStatement, []any{cutoffs.Uploads}},
-		{mediaJobsStatement, []any{cutoffs.OperationalJobs}},
 		{libraryScansStatement, []any{cutoffs.OperationalJobs}},
 		{writebacksStatement, []any{cutoffs.OperationalJobs}},
-		{objectCleanupJobsStatement, []any{cutoffs.OperationalJobs}},
 		{trackDeleteBatchesStatement, []any{cutoffs.OperationalJobs}},
 	}
 	for _, check := range checks {

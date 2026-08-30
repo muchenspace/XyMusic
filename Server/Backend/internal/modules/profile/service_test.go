@@ -2,25 +2,27 @@ package profile
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"xymusic/server/internal/config"
 	"xymusic/server/internal/modules/identity"
+	"xymusic/server/internal/platform/localmedia"
 	"xymusic/server/internal/shared/apperror"
 )
 
 type profileStoreStub struct {
 	updateProfile          func(context.Context, string, int, ProfileChanges, time.Time) error
 	createAvatarUpload     func(context.Context, CreateUploadParams) (AvatarUpload, error)
+	findAvatarUpload       func(context.Context, string, string) (AvatarUpload, error)
 	markAvatarUploadFailed func(context.Context, string, string) error
 	claimCompletion        func(context.Context, string, string, string, time.Time, time.Duration) (CompletionClaim, error)
 	completionStatus       func(context.Context, string, string) (string, error)
 	finalizeCompletion     func(context.Context, FinalizeAvatarParams) error
-	failCompletion         func(context.Context, string, string, bool, []string, string, time.Time) error
+	failCompletion         func(context.Context, string, string, bool, string, time.Time) error
 }
 
 func (stub *profileStoreStub) UpdateProfile(ctx context.Context, userID string, version int, changes ProfileChanges, now time.Time) error {
@@ -34,6 +36,12 @@ func (stub *profileStoreStub) CreateAvatarUpload(ctx context.Context, input Crea
 		return AvatarUpload{}, errors.New("unexpected CreateAvatarUpload call")
 	}
 	return stub.createAvatarUpload(ctx, input)
+}
+func (stub *profileStoreStub) FindAvatarUpload(ctx context.Context, actorID, uploadID string) (AvatarUpload, error) {
+	if stub.findAvatarUpload == nil {
+		return AvatarUpload{}, errors.New("unexpected FindAvatarUpload call")
+	}
+	return stub.findAvatarUpload(ctx, actorID, uploadID)
 }
 func (stub *profileStoreStub) MarkAvatarUploadFailed(ctx context.Context, actorID, uploadID string) error {
 	if stub.markAvatarUploadFailed == nil {
@@ -59,11 +67,11 @@ func (stub *profileStoreStub) FinalizeAvatarCompletion(ctx context.Context, inpu
 	}
 	return stub.finalizeCompletion(ctx, input)
 }
-func (stub *profileStoreStub) FailAvatarCompletion(ctx context.Context, uploadID, token string, retryable bool, keys []string, reason string, now time.Time) error {
+func (stub *profileStoreStub) FailAvatarCompletion(ctx context.Context, uploadID, token string, retryable bool, reason string, now time.Time) error {
 	if stub.failCompletion == nil {
 		return errors.New("unexpected FailAvatarCompletion call")
 	}
-	return stub.failCompletion(ctx, uploadID, token, retryable, keys, reason, now)
+	return stub.failCompletion(ctx, uploadID, token, retryable, reason, now)
 }
 
 type directProfileIdempotency struct {
@@ -101,38 +109,72 @@ func (stub *currentUserReaderStub) CurrentUser(context.Context, string) (identit
 	return stub.user, nil
 }
 
-type avatarStorageStub struct {
-	request UploadURLRequest
-	url     string
-}
-
-func (stub *avatarStorageStub) CreateUploadURL(_ context.Context, request UploadURLRequest) (string, error) {
-	stub.request = request
-	return stub.url, nil
-}
-func (*avatarStorageStub) DownloadToFile(context.Context, string, string, int64) (StoredObject, error) {
-	return StoredObject{}, errors.New("unexpected DownloadToFile call")
-}
-func (*avatarStorageStub) UploadFile(context.Context, string, string, string, string) (int64, error) {
-	return 0, errors.New("unexpected UploadFile call")
-}
-
 type avatarInspectorStub struct {
 	upload AvatarUpload
-	etag   string
 	result InspectedAvatar
 	err    error
 }
 
-func (stub *avatarInspectorStub) Inspect(_ context.Context, upload AvatarUpload, etag string) (InspectedAvatar, error) {
+func (stub *avatarInspectorStub) Inspect(_ context.Context, upload AvatarUpload) (InspectedAvatar, error) {
 	stub.upload = upload
-	stub.etag = etag
 	return stub.result, stub.err
 }
 
 type fixedProfileClock struct{ now time.Time }
 
 func (clock fixedProfileClock) Now() time.Time { return clock.now }
+
+func newProfileTestService(
+	t *testing.T,
+	store Store,
+	reader CurrentUserReader,
+	idempotency Idempotency,
+	inspector AvatarInspector,
+	now time.Time,
+) *Service {
+	t.Helper()
+	tempDir := t.TempDir()
+	mediaStore, err := localmedia.NewStore(
+		filepath.Join(tempDir, "assets"),
+		filepath.Join(tempDir, "transcode"),
+		10*1024*1024,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	service, err := NewService(config.Config{
+		MediaStorage: config.MediaStorage{
+			UploadTTLSeconds: 300,
+			MaxUploadBytes:   10 * 1024 * 1024,
+		},
+	}, ServiceDependencies{
+		Repository:   store,
+		CurrentUsers: reader,
+		Idempotency:  idempotency,
+		LocalMedia:   mediaStore,
+		Inspector:    inspector,
+		Clock:        fixedProfileClock{now: now},
+		IDGenerator:  func() string { return "upload-1" },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service
+}
+
+func compatibleCurrentUser() identity.CurrentUserDTO {
+	return identity.CurrentUserDTO{
+		ID:          "user-1",
+		Username:    "alice",
+		DisplayName: "Alice",
+		Role:        "USER",
+		Status:      "ACTIVE",
+		Version:     7,
+		CreatedAt:   "2026-01-01T00:00:00.000Z",
+		UpdatedAt:   "2026-01-01T00:00:00.000Z",
+	}
+}
 
 func TestUpdateCurrentUserTrimsFieldsAndPreservesCurrentUserDTO(t *testing.T) {
 	now := time.Date(2026, time.July, 16, 2, 3, 4, 0, time.UTC)
@@ -148,7 +190,7 @@ func TestUpdateCurrentUserTrimsFieldsAndPreservesCurrentUserDTO(t *testing.T) {
 	}
 	reader := &currentUserReaderStub{user: compatibleCurrentUser()}
 	idempotency := &directProfileIdempotency{}
-	service := newProfileTestService(t, store, reader, idempotency, &avatarStorageStub{}, &avatarInspectorStub{}, now)
+	service := newProfileTestService(t, store, reader, idempotency, &avatarInspectorStub{}, now)
 	bio := "  hello  "
 	result, err := service.UpdateCurrentUser(context.Background(), "user-1", "profile-key-1", UpdateProfileInput{
 		ExpectedVersion: 7,
@@ -167,7 +209,7 @@ func TestUpdateCurrentUserTrimsFieldsAndPreservesCurrentUserDTO(t *testing.T) {
 }
 
 func TestUpdateCurrentUserValidationAndVersionConflictMetadata(t *testing.T) {
-	service := newProfileTestService(t, &profileStoreStub{}, &currentUserReaderStub{}, &directProfileIdempotency{}, &avatarStorageStub{}, &avatarInspectorStub{}, time.Now())
+	service := newProfileTestService(t, &profileStoreStub{}, &currentUserReaderStub{}, &directProfileIdempotency{}, &avatarInspectorStub{}, time.Now())
 	_, err := service.UpdateCurrentUser(context.Background(), "user-1", "profile-key-1", UpdateProfileInput{ExpectedVersion: 1})
 	if !apperror.IsCode(err, apperror.CodeValidationError) {
 		t.Fatalf("missing fields error = %v", err)
@@ -180,7 +222,7 @@ func TestUpdateCurrentUserValidationAndVersionConflictMetadata(t *testing.T) {
 			"currentVersion":  2,
 		})
 	}
-	service = newProfileTestService(t, store, &currentUserReaderStub{}, &directProfileIdempotency{}, &avatarStorageStub{}, &avatarInspectorStub{}, time.Now())
+	service = newProfileTestService(t, store, &currentUserReaderStub{}, &directProfileIdempotency{}, &avatarInspectorStub{}, time.Now())
 	_, err = service.UpdateCurrentUser(context.Background(), "user-1", "profile-key-2", UpdateProfileInput{
 		ExpectedVersion: 1,
 		DisplayName:     OptionalString{Set: true, Value: "Alice"},
@@ -191,205 +233,91 @@ func TestUpdateCurrentUserValidationAndVersionConflictMetadata(t *testing.T) {
 	}
 }
 
-func TestCreateAvatarUploadReservesOnlyActorAndReturnsSignedHeaderContract(t *testing.T) {
+func TestCreateAvatarUploadReservesAndReturnsUploadPath(t *testing.T) {
 	now := time.Date(2026, time.July, 16, 3, 0, 0, 0, time.UTC)
 	store := &profileStoreStub{}
 	store.createAvatarUpload = func(_ context.Context, input CreateUploadParams) (AvatarUpload, error) {
-		if input.ActorID != "user-1" || input.ID != "upload-1" || input.ObjectKey != "uploads/user-1/upload-1" {
+		if input.ActorID != "user-1" || input.ID != "upload-1" {
 			t.Fatalf("reservation = %#v", input)
 		}
 		return AvatarUpload{
-			ID:                     input.ID,
-			Purpose:                AvatarUploadPurpose,
-			TargetID:               input.ActorID,
-			UploaderID:             input.ActorID,
-			ObjectKey:              input.ObjectKey,
-			ExpectedSize:           input.SizeBytes,
-			ExpectedChecksumSHA256: input.ChecksumSHA256,
-			ExpectedMIMEType:       input.ContentType,
-			Status:                 UploadStatusCreated,
-			ExpiresAt:              input.ExpiresAt,
+			ID:        input.ID,
+			Purpose:   AvatarUploadPurpose,
+			TargetID:  input.ActorID,
+			Status:    UploadStatusCreated,
+			ExpiresAt: input.ExpiresAt,
 		}, nil
 	}
-	storage := &avatarStorageStub{url: "https://objects.example/upload"}
-	service := newProfileTestService(t, store, &currentUserReaderStub{}, &directProfileIdempotency{}, storage, &avatarInspectorStub{}, now)
-	service.newID = func() string { return "upload-1" }
-	checksum := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	service := newProfileTestService(t, store, &currentUserReaderStub{}, &directProfileIdempotency{}, &avatarInspectorStub{}, now)
 	result, err := service.CreateAvatarUpload(context.Background(), "user-1", "avatar-key-1", CreateAvatarUploadInput{
-		FileName:       "avatar.PNG",
-		ContentType:    "image/png",
-		SizeBytes:      1024,
-		ChecksumSHA256: checksum,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Body.TargetID != "user-1" || result.Body.Purpose != AvatarUploadPurpose || result.Body.UploadURL != storage.url {
-		t.Fatalf("result = %#v", result.Body)
-	}
-	decoded, _ := hex.DecodeString(checksum)
-	if result.Body.RequiredHeaders["x-amz-checksum-sha256"] != base64.StdEncoding.EncodeToString(decoded) ||
-		result.Body.RequiredHeaders["content-type"] != "image/png" {
-		t.Fatalf("headers = %#v", result.Body.RequiredHeaders)
-	}
-	if _, present := result.Body.RequiredHeaders["content-length"]; present {
-		t.Fatalf("content-length must not be a required signed header: %#v", result.Body.RequiredHeaders)
-	}
-	if storage.request.ObjectKey != "uploads/user-1/upload-1" || storage.request.ChecksumSHA256 != checksum {
-		t.Fatalf("storage request = %#v", storage.request)
-	}
-}
-
-func TestAvatarReservationValidationMatchesLegacyLimits(t *testing.T) {
-	service := newProfileTestService(t, &profileStoreStub{}, &currentUserReaderStub{}, &directProfileIdempotency{}, &avatarStorageStub{}, &avatarInspectorStub{}, time.Now())
-	tests := []struct {
-		name  string
-		input CreateAvatarUploadInput
-		code  apperror.Code
-	}{
-		{name: "five MiB", input: validAvatarInput(AvatarMaximumBytes + 1), code: apperror.CodePayloadTooLarge},
-		{name: "mime", input: func() CreateAvatarUploadInput {
-			value := validAvatarInput(1)
-			value.ContentType = "image/gif"
-			return value
-		}(), code: apperror.CodeValidationError},
-		{name: "mime case", input: func() CreateAvatarUploadInput {
-			value := validAvatarInput(1)
-			value.ContentType = "IMAGE/PNG"
-			return value
-		}(), code: apperror.CodeValidationError},
-		{name: "checksum", input: func() CreateAvatarUploadInput {
-			value := validAvatarInput(1)
-			value.ChecksumSHA256 = "ABC"
-			return value
-		}(), code: apperror.CodeValidationError},
-		{name: "extension", input: func() CreateAvatarUploadInput {
-			value := validAvatarInput(1)
-			value.FileName = "avatar.gif"
-			return value
-		}(), code: apperror.CodeValidationError},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			_, err := service.CreateAvatarUpload(context.Background(), "user-1", "avatar-key", test.input)
-			if !apperror.IsCode(err, test.code) {
-				t.Fatalf("error = %v, want %s", err, test.code)
-			}
-		})
-	}
-}
-
-func TestCompleteAvatarUploadInspectsAndAtomicallyAttachesAvatar(t *testing.T) {
-	now := time.Date(2026, time.July, 16, 4, 0, 0, 0, time.UTC)
-	upload := AvatarUpload{
-		ID:                     "upload-1",
-		Purpose:                AvatarUploadPurpose,
-		TargetID:               "user-1",
-		UploaderID:             "user-1",
-		ObjectKey:              "uploads/user-1/upload-1",
-		ExpectedSize:           100,
-		ExpectedChecksumSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		ExpectedMIMEType:       "image/png",
-		Status:                 UploadStatusCompleting,
-	}
-	store := &profileStoreStub{}
-	store.claimCompletion = func(_ context.Context, actorID, uploadID, token string, actualNow time.Time, lease time.Duration) (CompletionClaim, error) {
-		if actorID != "user-1" || uploadID != "upload-1" || token != "completion-token" || actualNow != now || lease != completionLease {
-			t.Fatalf("unexpected claim: %q %q %q %v %v", actorID, uploadID, token, actualNow, lease)
-		}
-		return CompletionClaim{Outcome: CompletionClaimed, Upload: upload, Token: token}, nil
-	}
-	store.finalizeCompletion = func(_ context.Context, input FinalizeAvatarParams) error {
-		if input.ActorID != "user-1" || input.UploadID != "upload-1" || input.CompletionToken != "completion-token" ||
-			input.AssetID != "asset-1" || input.Inspected.ObjectKey != "media/avatar.jpg" {
-			t.Fatalf("finalize = %#v", input)
-		}
-		return nil
-	}
-	inspector := &avatarInspectorStub{result: InspectedAvatar{
-		ObjectKey:      "media/avatar.jpg",
-		MIMEType:       "image/jpeg",
-		SizeBytes:      80,
-		ChecksumSHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-		Width:          128,
-		Height:         128,
-		CleanupKeys:    []string{upload.ObjectKey, "media/avatar.jpg"},
-	}}
-	reader := &currentUserReaderStub{user: compatibleCurrentUser()}
-	service := newProfileTestService(t, store, reader, &directProfileIdempotency{}, &avatarStorageStub{}, inspector, now)
-	ids := []string{"completion-token", "asset-1"}
-	service.newID = func() string {
-		value := ids[0]
-		ids = ids[1:]
-		return value
-	}
-	result, err := service.CompleteAvatarUpload(context.Background(), "user-1", "upload-1", "complete-key", CompleteAvatarUploadInput{
-		ObservedETag: OptionalString{Set: true, Value: `"etag"`},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if inspector.upload.ID != "upload-1" || inspector.etag != "etag" || result.Body.ID != "user-1" || reader.calls != 1 {
-		t.Fatalf("inspection/result = %#v etag=%q result=%#v", inspector.upload, inspector.etag, result.Body)
-	}
-}
-
-func TestCompleteAvatarUploadQueuesFailedObjectAndDoesNotAttach(t *testing.T) {
-	now := time.Now().UTC()
-	upload := AvatarUpload{ID: "upload-1", ObjectKey: "uploads/user-1/upload-1", TargetID: "user-1", UploaderID: "user-1", Purpose: AvatarUploadPurpose}
-	store := &profileStoreStub{}
-	store.claimCompletion = func(context.Context, string, string, string, time.Time, time.Duration) (CompletionClaim, error) {
-		return CompletionClaim{Outcome: CompletionClaimed, Upload: upload, Token: "token"}, nil
-	}
-	failed := false
-	store.failCompletion = func(_ context.Context, uploadID, token string, retryable bool, keys []string, reason string, _ time.Time) error {
-		failed = true
-		if uploadID != "upload-1" || token != "token" || retryable || len(keys) != 1 || keys[0] != upload.ObjectKey || reason != "UPLOAD_FAILED_MEDIA_UPLOAD_MISMATCH" {
-			t.Fatalf("failure = %q %q %v %#v %q", uploadID, token, retryable, keys, reason)
-		}
-		return nil
-	}
-	inspector := &avatarInspectorStub{err: apperror.Unprocessable(apperror.CodeMediaUploadMismatch, "bad image", nil)}
-	service := newProfileTestService(t, store, &currentUserReaderStub{}, &directProfileIdempotency{}, &avatarStorageStub{}, inspector, now)
-	service.newID = func() string { return "token" }
-	_, err := service.CompleteAvatarUpload(context.Background(), "user-1", "upload-1", "complete-key", CompleteAvatarUploadInput{})
-	if !apperror.IsCode(err, apperror.CodeMediaUploadMismatch) || !failed {
-		t.Fatalf("error = %v failed=%v", err, failed)
-	}
-}
-
-func validAvatarInput(size int64) CreateAvatarUploadInput {
-	return CreateAvatarUploadInput{
 		FileName:       "avatar.png",
 		ContentType:    "image/png",
-		SizeBytes:      size,
-		ChecksumSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-	}
-}
-
-func newProfileTestService(
-	t *testing.T,
-	store Store,
-	reader CurrentUserReader,
-	idempotency Idempotency,
-	storage AvatarObjectStorage,
-	inspector AvatarInspector,
-	now time.Time,
-) *Service {
-	t.Helper()
-	service, err := NewService(config.Config{
-		Storage: config.Storage{SignedURLTTLSeconds: 300, MaxUploadBytes: 1024 * 1024 * 1024},
-		Media:   config.Media{FFprobePath: "ffprobe", FFmpegPath: "ffmpeg"},
-	}, ServiceDependencies{
-		Repository:   store,
-		CurrentUsers: reader,
-		Idempotency:  idempotency,
-		Storage:      storage,
-		Inspector:    inspector,
-		Clock:        fixedProfileClock{now: now},
+		SizeBytes:      1024,
+		ChecksumSHA256: strings.Repeat("a", 64),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return service
+	if result.Body.Method != "PUT" || result.Body.UploadPath != "/api/v1/users/me/avatar/uploads/upload-1" {
+		t.Fatalf("reservation result = %#v", result.Body)
+	}
+}
+
+func TestDirectUploadAndCompleteAvatar(t *testing.T) {
+	now := time.Date(2026, time.July, 16, 3, 0, 0, 0, time.UTC)
+	data := []byte("avatar bytes content")
+
+	store := &profileStoreStub{}
+	store.findAvatarUpload = func(_ context.Context, actorID, uploadID string) (AvatarUpload, error) {
+		return AvatarUpload{
+			ID:                     uploadID,
+			UploaderID:             actorID,
+			Status:                 UploadStatusCreated,
+			StoragePath:            "temp/avatar_upload-1.partial",
+			ExpectedSize:           int64(len(data)),
+			ExpectedChecksumSHA256: "7214b7e80d46219be3d5e27a69bcba58d56b464a8c9a6331a980eb7f2d4e8c18", // dummy
+		}, nil
+	}
+
+	inspector := &avatarInspectorStub{
+		result: InspectedAvatar{
+			StoragePath:    "avatars/upload-1.jpg",
+			MIMEType:       "image/jpeg",
+			SizeBytes:      int64(len(data)),
+			ChecksumSHA256: "abc",
+			Width:          200,
+			Height:         200,
+		},
+	}
+	store.claimCompletion = func(_ context.Context, actorID, uploadID, token string, _ time.Time, _ time.Duration) (CompletionClaim, error) {
+		return CompletionClaim{
+			Outcome: CompletionClaimed,
+			Token:   token,
+			Upload: AvatarUpload{
+				ID:          uploadID,
+				UploaderID:  actorID,
+				TargetID:    actorID,
+				Status:      UploadStatusCompleting,
+				StoragePath: "temp/avatar_upload-1.partial",
+			},
+		}, nil
+	}
+	store.finalizeCompletion = func(_ context.Context, input FinalizeAvatarParams) error {
+		if input.UploadID != "upload-1" || input.Inspected.StoragePath != "avatars/upload-1.jpg" {
+			t.Fatalf("unexpected finalize params: %#v", input)
+		}
+		return nil
+	}
+
+	reader := &currentUserReaderStub{user: compatibleCurrentUser()}
+	service := newProfileTestService(t, store, reader, &directProfileIdempotency{}, inspector, now)
+
+	// Complete avatar
+	completeResult, err := service.CompleteAvatarUpload(context.Background(), "user-1", "upload-1", "key-comp", CompleteAvatarUploadInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completeResult.Body.ID != "user-1" {
+		t.Fatalf("complete result = %#v", completeResult.Body)
+	}
 }

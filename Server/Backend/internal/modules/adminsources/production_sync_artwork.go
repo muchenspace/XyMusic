@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"xymusic/server/internal/modules/adminmetadata"
 )
 
 func attachAlbumArtwork(
@@ -21,24 +24,257 @@ func attachAlbumArtwork(
 		return false, nil
 	}
 	var current *string
-	if err := transaction.QueryRow(ctx, `SELECT cover_asset_id FROM albums WHERE id=$1 FOR UPDATE`, *albumID).Scan(&current); err != nil {
+	var currentReady bool
+	if err := transaction.QueryRow(ctx, `
+		SELECT album.cover_asset_id, COALESCE(asset.status = 'READY', false)
+		FROM albums album
+		LEFT JOIN media_assets asset ON asset.id = album.cover_asset_id
+		WHERE album.id = $1
+		FOR UPDATE OF album`, *albumID).Scan(&current, &currentReady); err != nil {
 		return false, err
 	}
-	if current != nil {
+	if current != nil && currentReady {
 		return false, nil
 	}
 	var assetID string
-	err := transaction.QueryRow(ctx, `INSERT INTO media_assets(
-		object_key,kind,mime_type,size_bytes,checksum_sha256,status
-	) VALUES($1,'ARTWORK','image/jpeg',$2,$3,'READY')
-	ON CONFLICT(object_key) DO UPDATE SET status='READY',updated_at=now() RETURNING id`,
-		artwork.ObjectKey, artwork.SizeBytes, artwork.Checksum).Scan(&assetID)
+	err := transaction.QueryRow(ctx, `
+		INSERT INTO media_assets(
+			storage_path, kind, mime_type, size_bytes, checksum_sha256, status
+		) VALUES($1, 'ARTWORK', $2, $3, $4, 'READY')
+		ON CONFLICT(storage_path) DO UPDATE SET
+			mime_type = EXCLUDED.mime_type, size_bytes = EXCLUDED.size_bytes,
+			checksum_sha256 = EXCLUDED.checksum_sha256, status = 'READY', updated_at = now()
+		RETURNING id`,
+		artwork.StoragePath, firstNonEmptyString(artwork.MIMEType, "image/jpeg"), artwork.SizeBytes, artwork.Checksum,
+	).Scan(&assetID)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("store scanned artwork asset: %w", err)
 	}
-	_, err = transaction.Exec(ctx, `UPDATE albums SET cover_asset_id=$2,
-		version=version+1,updated_at=now() WHERE id=$1`, *albumID, assetID)
-	return err == nil, err
+	if _, err := transaction.Exec(ctx, `
+		UPDATE albums SET cover_asset_id = $2, version = version + 1, updated_at = now()
+		WHERE id = $1`, *albumID, assetID); err != nil {
+		return false, fmt.Errorf("attach scanned album artwork: %w", err)
+	}
+	if current != nil {
+		_, _ = transaction.Exec(ctx, `
+			UPDATE media_assets asset SET status = 'DELETE_PENDING', updated_at = now()
+			WHERE asset.id = $1
+			  AND NOT EXISTS (SELECT 1 FROM artists WHERE artwork_asset_id = asset.id)
+			  AND NOT EXISTS (SELECT 1 FROM albums WHERE cover_asset_id = asset.id)
+			  AND NOT EXISTS (SELECT 1 FROM user_profiles WHERE avatar_asset_id = asset.id)`, *current)
+	}
+	return true, nil
+}
+
+type stagedArtwork struct {
+	StoragePath    string
+	SourceChecksum string
+	SizeBytes      int64
+	Checksum       string
+	MIMEType       string
+	Width          *int
+	Height         *int
+}
+
+// stageArtwork extracts the first embedded picture from an audio container into
+// the managed local asset directory. Artwork is deliberately not part of the
+// source file itself: scan keeps reading the user's library, while clients
+// receive a stable /api/v1/assets URL. A malformed/unsupported picture must
+// not make an otherwise playable audio file disappear from the catalog, so a
+// non-zero FFmpeg exit is treated as "no usable artwork".
+func (synchronizer *ProductionSynchronizer) stageArtwork(
+	ctx context.Context,
+	sourcePath string,
+	hasArtwork bool,
+	sourceChecksum string,
+) (*stagedArtwork, error) {
+	if !hasArtwork || synchronizer.localMedia == nil || strings.TrimSpace(synchronizer.ffmpegPath) == "" {
+		return nil, nil
+	}
+	if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
+		if cached, ok := snapshot.artworkForChecksum(sourceChecksum); ok {
+			return cached, nil
+		}
+	}
+
+	if synchronizer.artworkGate != nil {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case synchronizer.artworkGate <- struct{}{}:
+			defer func() { <-synchronizer.artworkGate }()
+		}
+	}
+	// Another worker may have populated the scan cache while this worker was
+	// waiting for the FFmpeg gate. Re-check after acquiring it to avoid a
+	// duplicate extraction for the same source.
+	if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
+		if cached, ok := snapshot.artworkForChecksum(sourceChecksum); ok {
+			return cached, nil
+		}
+	}
+
+	tempDir := filepath.Join(synchronizer.localMedia.AssetDirectory(), "temp")
+	if err := os.MkdirAll(tempDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create embedded artwork temp directory: %w", err)
+	}
+	tempFile, err := os.CreateTemp(tempDir, "embedded-cover-*.jpg")
+	if err != nil {
+		return nil, fmt.Errorf("create embedded artwork temp file: %w", err)
+	}
+	tempPath := tempFile.Name()
+	if err := tempFile.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return nil, fmt.Errorf("close embedded artwork temp file: %w", err)
+	}
+	defer os.Remove(tempPath)
+
+	runner := synchronizer.artworkRunner
+	if runner == nil {
+		runner = adminmetadata.OSProcessRunner{}
+	}
+	runExtraction := func(mapSpecifier string) (adminmetadata.ProcessResult, error) {
+		arguments := []string{
+			"-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+			"-i", sourcePath,
+			"-map", mapSpecifier,
+			"-frames:v", "1",
+			"-map_metadata", "-1",
+			"-vf", "scale='min(1600,iw)':'min(1600,ih)':force_original_aspect_ratio=decrease",
+			"-c:v", "mjpeg", "-q:v", "2",
+			tempPath,
+		}
+		return runner.Run(ctx, synchronizer.ffmpegPath, arguments, 30*time.Second)
+	}
+	// Prefer a stream explicitly marked as attached artwork. This avoids
+	// accidentally extracting the first frame of a real video stream from a
+	// container that happens to include both video and album art. Some files
+	// only carry a textual cover marker, so fall back to the first video stream.
+	result, err := runExtraction("0:v:disp:attached_pic?")
+	if err != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	info, statErr := os.Stat(tempPath)
+	if statErr != nil || info.IsDir() || info.Size() == 0 {
+		_ = os.Remove(tempPath)
+		result, err = runExtraction("0:v:0?")
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, nil
+		}
+	}
+	if result.TimedOut || result.ExitCode != 0 {
+		return nil, nil
+	}
+
+	info, err = os.Stat(tempPath)
+	if err != nil || info.IsDir() || info.Size() == 0 {
+		return nil, nil
+	}
+	checksum, err := fileSHA256(tempPath)
+	if err != nil {
+		return nil, fmt.Errorf("checksum extracted artwork: %w", err)
+	}
+	relativePath := filepath.ToSlash(filepath.Join("artworks", checksum+".jpg"))
+	if existing, statErr := synchronizer.localMedia.StatAsset(relativePath); statErr == nil && existing.Size() == info.Size() && existing.Size() > 0 {
+		artwork := &stagedArtwork{
+			StoragePath: relativePath, SourceChecksum: sourceChecksum,
+			SizeBytes: existing.Size(), Checksum: checksum, MIMEType: "image/jpeg",
+		}
+		if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
+			snapshot.rememberArtwork(sourceChecksum, artwork)
+		}
+		return artwork, nil
+	}
+	committedPath, err := synchronizer.localMedia.CommitUpload(ctx, tempPath, relativePath)
+	if err != nil {
+		return nil, fmt.Errorf("commit extracted artwork: %w", err)
+	}
+	artwork := &stagedArtwork{
+		StoragePath: committedPath, SourceChecksum: sourceChecksum,
+		SizeBytes: info.Size(), Checksum: checksum, MIMEType: "image/jpeg",
+	}
+	if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
+		snapshot.rememberArtwork(sourceChecksum, artwork)
+	}
+	return artwork, nil
+}
+
+func (synchronizer *ProductionSynchronizer) artworkEnabled() bool {
+	return synchronizer != nil && synchronizer.localMedia != nil && strings.TrimSpace(synchronizer.ffmpegPath) != ""
+}
+
+func (synchronizer *ProductionSynchronizer) needsArtworkForTrack(ctx context.Context, trackID *string) (bool, error) {
+	if !synchronizer.artworkEnabled() || trackID == nil || strings.TrimSpace(*trackID) == "" {
+		return false, nil
+	}
+	var missing bool
+	err := synchronizer.database.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM tracks track
+			JOIN albums album ON album.id = track.album_id
+			JOIN track_metadata metadata ON metadata.track_id = track.id
+			LEFT JOIN media_assets asset
+				ON asset.id = album.cover_asset_id AND asset.status = 'READY'
+			WHERE track.id = $1 AND metadata.raw_tags->>'hasArtwork' = 'true' AND asset.id IS NULL
+		)`, *trackID).Scan(&missing)
+	if err != nil {
+		return false, fmt.Errorf("check scanned track artwork: %w", err)
+	}
+	return missing, nil
+}
+
+func (synchronizer *ProductionSynchronizer) needsArtworkForSource(ctx context.Context, sourceID string) (bool, error) {
+	if !synchronizer.artworkEnabled() || strings.TrimSpace(sourceID) == "" {
+		return false, nil
+	}
+	var missing bool
+	err := synchronizer.database.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM local_music_source_tracks mapping
+			JOIN tracks track ON track.id = mapping.track_id
+			JOIN albums album ON album.id = track.album_id
+			JOIN track_metadata metadata ON metadata.track_id = track.id
+			LEFT JOIN media_assets asset
+				ON asset.id = album.cover_asset_id AND asset.status = 'READY'
+			WHERE mapping.source_id = $1 AND metadata.raw_tags->>'hasArtwork' = 'true' AND asset.id IS NULL
+		)`, sourceID).Scan(&missing)
+	if err != nil {
+		return false, fmt.Errorf("check scanned source artwork: %w", err)
+	}
+	return missing, nil
+}
+
+func (synchronizer *ProductionSynchronizer) cleanupUnreferencedArtwork(
+	requestContext context.Context,
+	artwork *stagedArtwork,
+) {
+	if artwork == nil || synchronizer.localMedia == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(requestContext), 2*time.Second)
+	defer cancel()
+	var referenced bool
+	if err := synchronizer.database.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM media_assets WHERE storage_path = $1)`, artwork.StoragePath).Scan(&referenced); err != nil {
+		// Never remove a file if the database could not confirm that it is
+		// unreferenced. Retention/deployment cleanup can handle the orphan.
+		return
+	}
+	if referenced {
+		return
+	}
+	if snapshot := sourceScanSnapshotFromContext(requestContext); snapshot != nil {
+		snapshot.forgetArtwork(artwork.SourceChecksum)
+		if snapshot.hasArtworkPath(artwork.StoragePath) {
+			return
+		}
+	}
+	_ = synchronizer.localMedia.DeleteAsset(artwork.StoragePath)
 }
 
 func deleteAlbumIfEmpty(
@@ -76,126 +312,10 @@ func deleteAlbumIfEmpty(
 		snapshot.forgetAlbum(*albumID)
 	}
 	cache.forgetAlbum(*albumID)
-	if coverID == nil {
-		return nil
-	}
-	var objectKey string
-	err = transaction.QueryRow(ctx, `UPDATE media_assets asset SET status='DELETE_PENDING',updated_at=now()
-		WHERE id=$1 AND NOT EXISTS(SELECT 1 FROM artists WHERE artwork_asset_id=asset.id)
-		AND NOT EXISTS(SELECT 1 FROM albums WHERE cover_asset_id=asset.id)
-		RETURNING object_key`, *coverID).Scan(&objectKey)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	return enqueueCleanupTx(ctx, transaction, objectKey, "EMPTY_ALBUM_AFTER_LIBRARY_SCAN")
-}
-
-func (synchronizer *ProductionSynchronizer) stageArtwork(
-	ctx context.Context,
-	sourcePath string,
-	hasArtwork bool,
-	sourceChecksum string,
-) (*stagedArtwork, error) {
-	if !hasArtwork || synchronizer.ffmpegPath == "" {
-		return nil, nil
-	}
-	if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
-		return snapshot.coalescedArtwork(ctx, sourceChecksum, func() (*stagedArtwork, error) {
-			return synchronizer.stageArtworkUncached(ctx, sourcePath, hasArtwork, sourceChecksum)
-		})
-	}
-	return synchronizer.stageArtworkUncached(ctx, sourcePath, hasArtwork, sourceChecksum)
-}
-
-func (synchronizer *ProductionSynchronizer) stageArtworkUncached(
-	ctx context.Context,
-	sourcePath string,
-	hasArtwork bool,
-	sourceChecksum string,
-) (*stagedArtwork, error) {
-	if !hasArtwork || synchronizer.ffmpegPath == "" {
-		return nil, nil
-	}
-	directory, err := os.MkdirTemp("", "xymusic-cover-*")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(directory)
-	outputPath := filepath.Join(directory, "cover.jpg")
-	result, err := synchronizer.runFFmpeg(ctx, []string{
-		"-nostdin", "-v", "error", "-y", "-i", sourcePath,
-		"-map", "0:v:0", "-frames:v", "1", "-c:v", "mjpeg", outputPath,
-	}, 30*time.Second)
-	if err != nil {
-		return nil, err
-	}
-	if result.TimedOut || result.ExitCode != 0 {
-		return nil, nil
-	}
-	checksum, err := fileSHA256(outputPath)
-	if err != nil {
-		return nil, err
-	}
-	objectKey := "library/artwork/" + checksum + ".jpg"
-	if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
-		snapshot.rememberArtworkCandidate(stagedArtwork{
-			ObjectKey: objectKey, Checksum: checksum,
-		})
-	}
-	size, err := synchronizer.uploadFile(ctx, objectKey, outputPath, "image/jpeg", checksum)
-	if err != nil {
-		return nil, err
-	}
-	return &stagedArtwork{ObjectKey: objectKey, SizeBytes: size, Checksum: checksum}, nil
-}
-
-func (synchronizer *ProductionSynchronizer) flushArtworkCleanup(
-	ctx context.Context,
-	snapshot *sourceScanSnapshot,
-) error {
-	cleanups := snapshot.pendingArtworkCleanups()
-	if len(cleanups) == 0 {
-		return nil
-	}
-	objectKeys := make([]string, len(cleanups))
-	reasons := make([]string, len(cleanups))
-	for index, cleanup := range cleanups {
-		objectKeys[index], reasons[index] = cleanup.objectKey, cleanup.reason
-	}
-	_, err := synchronizer.database.Exec(ctx, `
-		INSERT INTO object_cleanup_jobs(object_key,reason)
-		SELECT input.object_key,input.reason
-		FROM unnest($1::text[],$2::text[]) AS input(object_key,reason)
-		ON CONFLICT(object_key) DO UPDATE SET reason=EXCLUDED.reason,status='PENDING',
-			attempts=0,attempt_id=NULL,locked_by=NULL,locked_until=NULL,next_attempt_at=now(),
-			last_error=NULL,updated_at=now()`, objectKeys, reasons)
-	if err != nil {
-		return fmt.Errorf("enqueue local library artwork cleanup batch: %w", err)
-	}
-	snapshot.markArtworkCleanupsQueued(cleanups)
-	return nil
-}
-
-func (synchronizer *ProductionSynchronizer) enqueueCleanup(ctx context.Context, objectKey, reason string) error {
-	_, err := synchronizer.database.Exec(ctx, cleanupUpsertSQL, objectKey, reason)
-	if err != nil {
-		return fmt.Errorf("enqueue local library object cleanup: %w", err)
+	if coverID != nil {
+		_, _ = transaction.Exec(ctx, `UPDATE media_assets asset SET status='DELETE_PENDING',updated_at=now()
+			WHERE id=$1 AND NOT EXISTS(SELECT 1 FROM artists WHERE artwork_asset_id=asset.id)
+			AND NOT EXISTS(SELECT 1 FROM albums WHERE cover_asset_id=asset.id)`, *coverID)
 	}
 	return nil
 }
-
-func enqueueCleanupTx(ctx context.Context, transaction pgx.Tx, objectKey, reason string) error {
-	_, err := transaction.Exec(ctx, cleanupUpsertSQL, objectKey, reason)
-	if err != nil {
-		return fmt.Errorf("enqueue local library object cleanup: %w", err)
-	}
-	return nil
-}
-
-const cleanupUpsertSQL = `INSERT INTO object_cleanup_jobs(object_key,reason)
-	VALUES($1,$2) ON CONFLICT(object_key) DO UPDATE SET reason=EXCLUDED.reason,status='PENDING',
-	attempts=0,attempt_id=NULL,locked_by=NULL,locked_until=NULL,next_attempt_at=now(),
-	last_error=NULL,updated_at=now()`

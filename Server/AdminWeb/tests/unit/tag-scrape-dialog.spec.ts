@@ -37,8 +37,6 @@ function track(): TrackSummary {
     metadataStatus: "NORMAL",
     metadataVersion: 3,
     source: null,
-    mediaProcessing: null,
-    variantSummary: [],
     activeWritebackJobId: null,
     publishedAt: null,
     createdAt: "2026-01-01T00:00:00Z",

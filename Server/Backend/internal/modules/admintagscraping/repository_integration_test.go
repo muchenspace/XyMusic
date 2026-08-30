@@ -16,6 +16,7 @@ import (
 	"xymusic/server/internal/config"
 	"xymusic/server/internal/modules/adminmedia"
 	"xymusic/server/internal/platform/database"
+	"xymusic/server/internal/platform/localmedia"
 	platformsecurity "xymusic/server/internal/platform/security"
 	"xymusic/server/internal/shared/apperror"
 	"xymusic/server/internal/testsupport"
@@ -354,7 +355,8 @@ func TestProductionBatchRetryItemFencingBackoffAndCancellation(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if status != string(ItemPending) || attempts != 1 || lockedBy != nil || !storedNext.Equal(nextAttemptAt) {
+	if status != string(ItemPending) || attempts != 1 || lockedBy != nil ||
+		storedNext.Sub(nextAttemptAt.Truncate(time.Microsecond)) != 0 {
 		t.Fatalf("requeued item state=%s attempts=%d lockedBy=%v next=%s", status, attempts, lockedBy, storedNext)
 	}
 	var stored Candidate
@@ -544,6 +546,8 @@ func TestProductionBatchCancellationAcrossServiceInstances(t *testing.T) {
 
 	suffix := uuid.NewString()
 	actorID := uuid.NewString()
+	rootID := uuid.NewString()
+	sourceID := uuid.NewString()
 	trackID := uuid.NewString()
 	var jobID string
 	cleanup := func() {
@@ -553,7 +557,10 @@ func TestProductionBatchCancellationAcrossServiceInstances(t *testing.T) {
 			_, _ = pool.Exec(cleanupContext, "DELETE FROM tag_scraping_jobs WHERE id = $1", jobID)
 		}
 		_, _ = pool.Exec(cleanupContext, "DELETE FROM metadata_writeback_jobs WHERE track_id = $1", trackID)
+		_, _ = pool.Exec(cleanupContext, "DELETE FROM local_music_source_tracks WHERE source_id = $1", sourceID)
+		_, _ = pool.Exec(cleanupContext, "DELETE FROM local_music_sources WHERE id = $1", sourceID)
 		_, _ = pool.Exec(cleanupContext, "DELETE FROM tracks WHERE id = $1", trackID)
+		_, _ = pool.Exec(cleanupContext, "DELETE FROM library_roots WHERE id = $1", rootID)
 		_, _ = pool.Exec(cleanupContext, "DELETE FROM users WHERE id = $1", actorID)
 	}
 	t.Cleanup(cleanup)
@@ -574,14 +581,30 @@ func TestProductionBatchCancellationAcrossServiceInstances(t *testing.T) {
 	) VALUES($1,'Original title',$2,'READY')`, trackID, "original title "+suffix); err != nil {
 		t.Fatal(err)
 	}
+	rootPath := filepath.Join(os.TempDir(), "tag-cancel-root-"+suffix)
+	if _, err := pool.Exec(ctx, `INSERT INTO library_roots(
+		id,name,path,normalized_path,mode,enabled,scan_on_startup,status
+	) VALUES($1,$2,$3,$3,'READ_WRITE',true,false,'READY')`, rootID, "Tag cancel root "+suffix[:8], rootPath); err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := filepath.Join(rootPath, "track.flac")
+	if _, err := pool.Exec(ctx, `INSERT INTO local_music_sources(
+		id,root_id,track_id,source_path,normalized_source_path,checksum_sha256,size_bytes,modified_at,status
+	) VALUES($1,$2,$3,$4,$4,repeat('a',64),1,now(),'READY')`, sourceID, rootID, trackID, sourcePath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO local_music_source_tracks(source_id,track_id,segment_index,start_ms)
+		VALUES($1,$2,0,0)`, sourceID, trackID); err != nil {
+		t.Fatal(err)
+	}
 	rawTags, err := json.Marshal(MetadataSnapshot{
 		Title: "Original title", Credits: []MetadataCredit{}, AlbumArtists: []string{}, Genres: []string{},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO track_metadata(track_id,raw_tags,overrides,version)
-		VALUES($1,$2::jsonb,'{}'::jsonb,1)`, trackID, rawTags); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO track_metadata(track_id,source_id,raw_tags,overrides,version)
+		VALUES($1,$2,$3::jsonb,'{}'::jsonb,1)`, trackID, sourceID, rawTags); err != nil {
 		t.Fatal(err)
 	}
 
@@ -897,17 +920,10 @@ func TestProductionStaleBatchAttemptCannotCommitMutations(t *testing.T) {
 	assetID := uuid.NewString()
 	raceUploadID := uuid.NewString()
 	raceAssetID := uuid.NewString()
-	objectKeys := []string{
-		"uploads/" + actorID + "/" + uploadID,
-		"media/artwork/album_artwork/" + albumID + "/" + uploadID + ".jpg",
-		"uploads/" + actorID + "/" + raceUploadID,
-		"media/artwork/album_artwork/" + albumID + "/" + raceUploadID + ".jpg",
-	}
 	var jobID, laterJobID string
 	cleanup := func() {
 		cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cleanupCancel()
-		_, _ = pool.Exec(cleanupContext, `delete from object_cleanup_jobs where object_key = any($1::varchar[])`, objectKeys)
 		_, _ = pool.Exec(cleanupContext, `delete from media_uploads where id = any($1::uuid[])`, []string{uploadID, raceUploadID})
 		_, _ = pool.Exec(cleanupContext, `delete from media_assets where id = any($1::uuid[])`, []string{assetID, raceAssetID})
 		for _, cleanupJobID := range []string{jobID, laterJobID} {
@@ -1037,26 +1053,26 @@ func TestProductionStaleBatchAttemptCannotCommitMutations(t *testing.T) {
 
 	mediaRepository := adminmedia.NewRepository(pool.Pool)
 	now := time.Now().UTC()
-	upload, err := mediaRepository.CreateUpload(ctx, adminmedia.CreateUploadParams{
-		ID: uploadID, ActorID: actorID, Purpose: adminmedia.PurposeAlbumArtwork,
-		TargetID: albumID, ObjectKey: objectKeys[0], FileName: "stale.png",
-		ContentType: "image/png", SizeBytes: 64,
-		ChecksumSHA256: strings.Repeat("a", 64), ExpiresAt: now.Add(5 * time.Minute),
-		Now: now, MaximumBytes: cfg.Storage.MaxUploadBytes,
+	err = mediaRepository.CreateUpload(ctx, adminmedia.UploadReservation{
+		ID: uploadID, UploaderID: actorID, Purpose: adminmedia.PurposeAlbumArtwork,
+		TargetID: albumID, StoragePath: "temp/stale.png", OriginalFileName: "stale.png",
+		ExpectedMIMEType: "image/png", ExpectedSize: 64,
+		ExpectedChecksumSHA256: strings.Repeat("a", 64), ExpiresAt: now.Add(5 * time.Minute),
+		CreatedAt: now,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	completion, err := mediaRepository.ClaimCompletion(ctx, actorID, upload.ID, uuid.NewString(), now, 10*time.Minute)
+	completion, err := mediaRepository.ClaimUploadCompletion(ctx, uploadID, uuid.NewString(), now, 10*time.Minute)
 	if err != nil || completion.Outcome != adminmedia.CompletionClaimed {
 		t.Fatalf("media completion claim = %+v error=%v", completion, err)
 	}
-	_, err = mediaRepository.FinalizeCompletion(ctx, adminmedia.FinalizeCompletionParams{
-		ActorID: actorID, UploadID: upload.ID,
+	err = mediaRepository.FinalizeUpload(ctx, adminmedia.FinalizeUploadParams{
+		UploadID:        uploadID,
 		CompletionToken: completion.Token, AssetID: assetID,
-		Inspected: adminmedia.InspectedUpload{
-			ObjectKey: objectKeys[1], MIMEType: "image/jpeg", SizeBytes: 48,
-			ChecksumSHA256: strings.Repeat("b", 64), CleanupKeys: objectKeys,
+		Inspected: adminmedia.InspectedMedia{
+			StoragePath: "artworks/stale.jpg", MIMEType: "image/jpeg", SizeBytes: 48,
+			ChecksumSHA256: strings.Repeat("b", 64),
 		},
 		CompletionFence: batchMutationFenceFromContext(staleContext),
 		Now:             now.Add(time.Second),
@@ -1076,12 +1092,12 @@ func TestProductionStaleBatchAttemptCannotCommitMutations(t *testing.T) {
 		t.Fatalf("stale artwork asset/cover = %d / %v", assetCount, coverAssetID)
 	}
 
-	raceUpload, err := mediaRepository.CreateUpload(ctx, adminmedia.CreateUploadParams{
-		ID: raceUploadID, ActorID: actorID, Purpose: adminmedia.PurposeAlbumArtwork,
-		TargetID: albumID, ObjectKey: objectKeys[2], FileName: "cancel-race.png",
-		ContentType: "image/png", SizeBytes: 64,
-		ChecksumSHA256: strings.Repeat("c", 64), ExpiresAt: now.Add(5 * time.Minute),
-		Now: now, MaximumBytes: cfg.Storage.MaxUploadBytes,
+	err = mediaRepository.CreateUpload(ctx, adminmedia.UploadReservation{
+		ID: raceUploadID, UploaderID: actorID, Purpose: adminmedia.PurposeAlbumArtwork,
+		TargetID: albumID, StoragePath: "temp/race.png", OriginalFileName: "cancel-race.png",
+		ExpectedMIMEType: "image/png", ExpectedSize: 64,
+		ExpectedChecksumSHA256: strings.Repeat("c", 64), ExpiresAt: now.Add(5 * time.Minute),
+		CreatedAt: now,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1089,9 +1105,9 @@ func TestProductionStaleBatchAttemptCannotCommitMutations(t *testing.T) {
 	inspector := &blockingArtworkInspector{
 		started: make(chan struct{}),
 		release: make(chan struct{}),
-		result: adminmedia.InspectedUpload{
-			ObjectKey: objectKeys[3], MIMEType: "image/jpeg", SizeBytes: 48,
-			ChecksumSHA256: strings.Repeat("d", 64), CleanupKeys: objectKeys[2:],
+		result: adminmedia.InspectedMedia{
+			StoragePath: "artworks/race.jpg", MIMEType: "image/jpeg", SizeBytes: 48,
+			ChecksumSHA256: strings.Repeat("d", 64),
 		},
 	}
 	defer func() {
@@ -1103,11 +1119,13 @@ func TestProductionStaleBatchAttemptCannotCommitMutations(t *testing.T) {
 	}()
 	generatedIDs := []string{uuid.NewString(), raceAssetID, uuid.NewString()}
 	generatedIndex := 0
+	localMediaStore, _ := localmedia.NewStore(t.TempDir(), t.TempDir(), 0)
 	mediaService, err := adminmedia.NewService(cfg, adminmedia.ServiceDependencies{
-		Repository: mediaRepository,
-		Storage:    integrationMediaStorage{},
-		Inspector:  inspector,
-		Clock:      integrationMediaClock{now},
+		Repository:  mediaRepository,
+		LocalMedia:  localMediaStore,
+		Idempotency: directMediaIdempotencyStub{},
+		Inspector:   inspector,
+		Clock:       integrationMediaClock{now},
 		IDGenerator: func() string {
 			value := generatedIDs[generatedIndex]
 			generatedIndex++
@@ -1125,10 +1143,11 @@ func TestProductionStaleBatchAttemptCannotCommitMutations(t *testing.T) {
 	defer cancelCompletion()
 	completionResult := make(chan error, 1)
 	go func() {
-		_, completeErr := mediaService.CompleteUpload(
+		_, _, completeErr := mediaService.CompleteUpload(
 			completionContext,
 			actorID,
-			raceUpload.ID,
+			raceUploadID,
+			"",
 			adminmedia.CompleteUploadInput{CompletionFence: &artworkCompletionFence{
 				executionContext: currentContext,
 				mutationFence:    batchMutationFenceFromContext(currentContext),
@@ -1146,23 +1165,19 @@ func TestProductionStaleBatchAttemptCannotCommitMutations(t *testing.T) {
 		t.Fatalf("cancelled artwork completion error = %v", completionErr)
 	}
 	var raceStatus string
-	var raceAssetCount, raceCleanupCount int
-	if err := pool.QueryRow(ctx, `select status::text from media_uploads where id = $1`, raceUpload.ID).Scan(&raceStatus); err != nil {
+	var raceAssetCount int
+	if err := pool.QueryRow(ctx, `select status::text from media_uploads where id = $1`, raceUploadID).Scan(&raceStatus); err != nil {
 		t.Fatal(err)
 	}
 	if err := pool.QueryRow(ctx, `select count(*)::int from media_assets where id = $1`, raceAssetID).Scan(&raceAssetCount); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, `select count(*)::int from object_cleanup_jobs
-		where object_key = any($1::varchar[])`, objectKeys[2:]).Scan(&raceCleanupCount); err != nil {
-		t.Fatal(err)
-	}
 	if err := pool.QueryRow(ctx, `select cover_asset_id from albums where id = $1`, albumID).Scan(&coverAssetID); err != nil {
 		t.Fatal(err)
 	}
-	if raceStatus != adminmedia.UploadStatusFailed || raceAssetCount != 0 || raceCleanupCount != 2 || coverAssetID != nil {
-		t.Fatalf("cancelled artwork status/asset/cleanup/cover = %q / %d / %d / %v",
-			raceStatus, raceAssetCount, raceCleanupCount, coverAssetID)
+	if raceStatus != adminmedia.UploadStatusFailed || raceAssetCount != 0 || coverAssetID != nil {
+		t.Fatalf("cancelled artwork status/asset/cover = %q / %d / %v",
+			raceStatus, raceAssetCount, coverAssetID)
 	}
 	var runningAttempt, lockedBy, itemStatus string
 	if err := pool.QueryRow(ctx, `select attempt_id::text,locked_by,status::text
@@ -1181,24 +1196,41 @@ func TestProductionStaleBatchAttemptCannotCommitMutations(t *testing.T) {
 type blockingArtworkInspector struct {
 	started chan struct{}
 	release chan struct{}
-	result  adminmedia.InspectedUpload
+	result  adminmedia.InspectedMedia
 }
 
 func (inspector *blockingArtworkInspector) Inspect(
 	ctx context.Context,
-	_ adminmedia.MediaUpload,
-	_ string,
-) (adminmedia.InspectedUpload, error) {
+	_ adminmedia.UploadReservation,
+) (adminmedia.InspectedMedia, error) {
 	close(inspector.started)
 	select {
 	case <-ctx.Done():
-		return adminmedia.InspectedUpload{}, ctx.Err()
+		return adminmedia.InspectedMedia{}, ctx.Err()
 	case <-inspector.release:
 		return inspector.result, nil
 	}
 }
 
-type integrationMediaStorage struct{}
+type directMediaIdempotencyStub struct{}
+
+func (directMediaIdempotencyStub) ExecuteReservation(
+	_ context.Context,
+	_ adminmedia.IdempotencyInput,
+	action func() (adminmedia.UploadReservationDTO, error),
+) (adminmedia.UploadReservationDTO, bool, error) {
+	result, err := action()
+	return result, false, err
+}
+
+func (directMediaIdempotencyStub) ExecuteCompletion(
+	_ context.Context,
+	_ adminmedia.IdempotencyInput,
+	action func() (adminmedia.UploadCompletionDTO, error),
+) (adminmedia.UploadCompletionDTO, bool, error) {
+	result, err := action()
+	return result, false, err
+}
 
 func integrationPasswordHash(t *testing.T, suffix string) string {
 	t.Helper()
@@ -1207,32 +1239,6 @@ func integrationPasswordHash(t *testing.T, suffix string) string {
 		t.Fatal(err)
 	}
 	return hash
-}
-
-func (integrationMediaStorage) CreateUploadURL(
-	context.Context,
-	adminmedia.UploadURLRequest,
-) (string, error) {
-	return "", errors.New("unexpected integration CreateUploadURL call")
-}
-
-func (integrationMediaStorage) DownloadToFile(
-	context.Context,
-	string,
-	string,
-	int64,
-) (adminmedia.StoredObject, error) {
-	return adminmedia.StoredObject{}, errors.New("unexpected integration DownloadToFile call")
-}
-
-func (integrationMediaStorage) UploadFile(
-	context.Context,
-	string,
-	string,
-	string,
-	string,
-) (int64, error) {
-	return 0, errors.New("unexpected integration UploadFile call")
 }
 
 type integrationMediaClock struct{ now time.Time }

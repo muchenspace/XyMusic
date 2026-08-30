@@ -1,11 +1,13 @@
 package com.xymusic.app.feature.player.data.media
 
 import android.content.Context
+import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.ContentMetadata
 import androidx.media3.datasource.cache.CacheEvictor
 import androidx.media3.datasource.cache.CacheSpan
 import androidx.media3.datasource.cache.SimpleCache
@@ -89,6 +91,11 @@ constructor(
 
     override fun isFullyCached(cacheKey: String, contentLength: Long): Boolean =
         contentLength > 0 && cache.isCached(cacheKey, 0, contentLength)
+
+    fun cachedContentLength(cacheKey: String): Long? {
+        val length = cache.getContentMetadata(cacheKey).get(ContentMetadata.KEY_CONTENT_LENGTH, C.LENGTH_UNSET.toLong())
+        return length.takeIf { it > 0 }
+    }
 
     override suspend fun remove(cacheKey: String) = withContext(ioDispatcher) {
         clearMutex.withLock {

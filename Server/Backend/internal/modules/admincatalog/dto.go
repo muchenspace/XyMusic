@@ -88,23 +88,6 @@ type SourceDTO struct {
 	WritebackBlockReason *string `json:"writebackBlockReason"`
 }
 
-type MediaProcessingDTO struct {
-	Status      string  `json:"status"`
-	Attempts    int     `json:"attempts"`
-	MaxAttempts int     `json:"maxAttempts"`
-	LastError   *string `json:"lastError"`
-	UpdatedAt   string  `json:"updatedAt"`
-}
-
-type VariantSummaryDTO struct {
-	Quality    string `json:"quality"`
-	Codec      string `json:"codec"`
-	Container  string `json:"container"`
-	Bitrate    int    `json:"bitrate"`
-	SampleRate *int   `json:"sampleRate"`
-	Status     string `json:"status"`
-}
-
 type TrackDTO struct {
 	ID                       string              `json:"id"`
 	Title                    string              `json:"title"`
@@ -120,8 +103,6 @@ type TrackDTO struct {
 	MetadataStatus           MetadataStatus      `json:"metadataStatus"`
 	MetadataVersion          *int                `json:"metadataVersion"`
 	Source                   *SourceDTO          `json:"source"`
-	MediaProcessing          *MediaProcessingDTO `json:"mediaProcessing"`
-	VariantSummary           []VariantSummaryDTO `json:"variantSummary"`
 	ActiveWritebackJobID     *string             `json:"activeWritebackJobId"`
 	LatestWritebackErrorCode *string             `json:"latestWritebackErrorCode"`
 	LatestWritebackError     *string             `json:"latestWritebackError"`
@@ -150,26 +131,13 @@ type LyricDTO struct {
 	UpdatedAt string  `json:"updatedAt"`
 }
 
-type VariantDTO struct {
-	ID         string `json:"id"`
-	Quality    string `json:"quality"`
-	MimeType   string `json:"mimeType"`
-	Codec      string `json:"codec"`
-	Container  string `json:"container"`
-	Bitrate    int    `json:"bitrate"`
-	SampleRate *int   `json:"sampleRate"`
-	Status     string `json:"status"`
-	UpdatedAt  string `json:"updatedAt"`
-}
-
 type TrackDetailDTO struct {
 	TrackDTO
-	Lyrics          []LyricDTO   `json:"lyrics"`
-	LyricPage       int          `json:"lyricPage"`
-	LyricPageSize   int          `json:"lyricPageSize"`
-	LyricTotal      int          `json:"lyricTotal"`
-	LyricTotalPages int          `json:"lyricTotalPages"`
-	Variants        []VariantDTO `json:"variants"`
+	Lyrics          []LyricDTO `json:"lyrics"`
+	LyricPage       int        `json:"lyricPage"`
+	LyricPageSize   int        `json:"lyricPageSize"`
+	LyricTotal      int        `json:"lyricTotal"`
+	LyricTotalPages int        `json:"lyricTotalPages"`
 }
 
 type AlbumDetailDTO struct {

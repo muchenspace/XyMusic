@@ -334,15 +334,18 @@ func (repository *Repository) EnqueueWriteback(
 	jobID := uuid.NewString()
 	row := tx.QueryRow(ctx, `
 		INSERT INTO metadata_writeback_jobs
-			(id, track_id, source_id, requested_by, reason, metadata_snapshot,
-			 metadata_version, expected_source_checksum, root_path_snapshot, source_path_snapshot)
-		VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10)
+			(id, track_id, root_id, source_id, target_path, original_checksum_sha256,
+			 requested_by, reason, metadata_snapshot, metadata_version,
+			 expected_source_checksum, root_path_snapshot, source_path_snapshot,
+			 idempotency_key, payload)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13,
+			gen_random_uuid()::text, '{}'::jsonb)
 		RETURNING id, track_id, source_id, status::text, stage, attempts,
 		          max_attempts, cancel_requested, metadata_version, reason,
 		          output_checksum_sha256, last_error_code, last_error,
 		          version, next_attempt_at, started_at, completed_at, created_at, updated_at`,
-		jobID, trackID, sourceID, actorID, reason, snapshotJSON, version, checksum,
-		rootPath, sourcePath)
+		jobID, trackID, rootID, sourceID, sourcePath, checksum,
+		actorID, reason, snapshotJSON, version, checksum, rootPath, sourcePath)
 	job, err := scanWritebackJob(row)
 	if err != nil {
 		var postgresError *pgconn.PgError
@@ -713,7 +716,7 @@ func (repository *Repository) claimBatchItems(
 				SELECT 1 FROM tag_scraping_job_items claimable
 				WHERE claimable.job_id = tag_scraping_jobs.id
 				  AND claimable.status = 'PENDING'
-				  AND claimable.next_attempt_at <= $1
+				  AND claimable.next_attempt_at <= GREATEST($1::timestamptz, clock_timestamp())
 				  AND claimable.attempts < claimable.max_attempts
 			) OR EXISTS (
 				SELECT 1 FROM tag_scraping_job_items recoverable
@@ -721,7 +724,7 @@ func (repository *Repository) claimBatchItems(
 				  AND (
 					recoverable.status = 'PENDING' AND recoverable.attempts >= recoverable.max_attempts
 					OR recoverable.status = 'RUNNING'
-					   AND (recoverable.locked_until IS NULL OR recoverable.locked_until < $1)
+					   AND (recoverable.locked_until IS NULL OR recoverable.locked_until < GREATEST($1::timestamptz, clock_timestamp()))
 				  )
 			) OR NOT EXISTS (
 				SELECT 1 FROM tag_scraping_job_items active
@@ -759,7 +762,8 @@ func (repository *Repository) claimBatchItems(
 	}
 	rows, err := tx.Query(ctx, claimedBatchItemSelect+`
 		WHERE item.job_id = $1 AND item.status = 'PENDING'
-		  AND item.next_attempt_at <= $2 AND item.attempts < item.max_attempts
+		  AND item.next_attempt_at <= GREATEST($2::timestamptz, clock_timestamp())
+		  AND item.attempts < item.max_attempts
 		ORDER BY item.position FOR UPDATE OF item SKIP LOCKED LIMIT $3`, job.ID, now, limit)
 	if err != nil {
 		return BatchClaimResult{}, fmt.Errorf("query tag scraping items: %w", err)
@@ -798,7 +802,8 @@ func (repository *Repository) claimBatchItems(
 			locked_by = $3, locked_until = $4, started_at = $5, completed_at = NULL,
 			updated_at = $5
 		WHERE id = ANY($6::uuid[]) AND job_id = $1
-		  AND status = 'PENDING' AND next_attempt_at <= $2 AND attempts < max_attempts
+		  AND status = 'PENDING' AND next_attempt_at <= GREATEST($2::timestamptz, clock_timestamp())
+		  AND attempts < max_attempts
 		RETURNING id::text, attempt_id::text`, job.ID, now, workerID, now.Add(lease), now, itemIDs)
 	if err != nil {
 		return BatchClaimResult{}, fmt.Errorf("own tag scraping items: %w", err)
@@ -1676,29 +1681,15 @@ func (repository *Repository) deleteEmptyAlbum(ctx context.Context, tx pgx.Tx, a
 	if coverID == nil {
 		return nil
 	}
-	var objectKey string
-	err = tx.QueryRow(ctx, `
+	_, err = tx.Exec(ctx, `
 		UPDATE media_assets asset SET status = 'DELETE_PENDING', updated_at = now()
 		WHERE id = $1
 		  AND NOT EXISTS (SELECT 1 FROM artists WHERE artwork_asset_id = asset.id)
 		  AND NOT EXISTS (SELECT 1 FROM albums WHERE cover_asset_id = asset.id)
 		  AND NOT EXISTS (SELECT 1 FROM playlists WHERE cover_asset_id = asset.id)
-		  AND NOT EXISTS (SELECT 1 FROM user_profiles WHERE avatar_asset_id = asset.id)
-		RETURNING object_key`, *coverID).Scan(&objectKey)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
+		  AND NOT EXISTS (SELECT 1 FROM user_profiles WHERE avatar_asset_id = asset.id)`, *coverID)
 	if err != nil {
 		return fmt.Errorf("detach projected album artwork: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO object_cleanup_jobs (object_key, reason)
-		VALUES ($1, 'EMPTY_ALBUM_AFTER_METADATA_UPDATE')
-		ON CONFLICT (object_key) DO UPDATE SET
-			reason = EXCLUDED.reason, status = 'PENDING', attempts = 0,
-			attempt_id = NULL, locked_by = NULL, locked_until = NULL,
-			next_attempt_at = now(), last_error = NULL, updated_at = now()`, objectKey); err != nil {
-		return fmt.Errorf("queue projected album artwork cleanup: %w", err)
 	}
 	return nil
 }

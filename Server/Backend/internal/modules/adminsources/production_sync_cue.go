@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -13,19 +12,15 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"xymusic/server/internal/modules/adminmetadata"
 )
 
 type cueMapping struct {
-	TrackID    string
-	MediaJobID *string
-	Segment    int
-	StartMS    int
-	EndMS      *int
-	CuePath    *string
-	Checksum   *string
+	TrackID string
+	Number  *int
+	StartMS *int64
+	EndMS   *int64
 }
 
 func (synchronizer *ProductionSynchronizer) syncCueFile(
@@ -78,19 +73,18 @@ func (synchronizer *ProductionSynchronizer) syncCueFile(
 		}
 	}
 	if found && existing.SizeBytes == audioInfo.Size() &&
-		existing.ModifiedAt.UnixMilli() == audioInfo.ModTime().UnixMilli() {
-		reusable, err := synchronizer.readySourceAssetReusable(ctx, existing)
+		existing.ModifiedAt.UnixMilli() == audioInfo.ModTime().UnixMilli() &&
+		existing.Status == SourceFileReady {
+		mappings, err := synchronizer.sourceMappings(ctx, existing.ID, false)
 		if err != nil {
 			return err
 		}
-		if reusable {
-			mappings, err := synchronizer.sourceMappings(ctx, existing.ID, false)
-			if err != nil {
-				return err
-			}
-			if cueMappingsMatch(mappings, tracks, relativeCue, cueChecksum) {
-				return nil
-			}
+		needsArtwork, err := synchronizer.needsArtworkForSource(ctx, existing.ID)
+		if err != nil {
+			return err
+		}
+		if cueMappingsMatch(mappings, tracks) && !needsArtwork {
+			return nil
 		}
 	}
 	probed, err := synchronizer.probeFile(ctx, file.AudioPath)
@@ -103,9 +97,6 @@ func (synchronizer *ProductionSynchronizer) syncCueFile(
 	if err != nil {
 		return err
 	}
-	if source.SourceAssetID == nil {
-		return errors.New("CUE source asset was not created")
-	}
 	artwork, err := synchronizer.stageArtwork(ctx, file.AudioPath, probed.Metadata.HasArtwork, source.Checksum)
 	if err != nil {
 		return err
@@ -113,23 +104,12 @@ func (synchronizer *ProductionSynchronizer) syncCueFile(
 	used, err := synchronizer.storeCueTracks(ctx, cueMutation{
 		RootID: rootID, ScanRunID: scanRunID, Source: source, File: file, Sheet: sheet, Tracks: tracks,
 		CuePath: relativeCue, CueChecksum: cueChecksum, Base: probed.Metadata, Probed: &probed,
-		SeenAt: seenAt, Artwork: artwork,
+		Artwork: artwork, SeenAt: seenAt,
 	})
-	if err != nil {
-		if artwork != nil {
-			_ = synchronizer.enqueueCleanup(context.WithoutCancel(ctx), artwork.ObjectKey, "UNUSED_CUE_ARTWORK")
-		}
-		return err
+	if err != nil || !used {
+		synchronizer.cleanupUnreferencedArtwork(ctx, artwork)
 	}
-	if artwork != nil && !used {
-		_ = synchronizer.enqueueCleanup(context.WithoutCancel(ctx), artwork.ObjectKey, "UNUSED_CUE_ARTWORK")
-	}
-	if artwork != nil && used {
-		if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
-			snapshot.rememberArtwork(source.Checksum, *artwork)
-		}
-	}
-	return nil
+	return err
 }
 
 type cueMutation struct {
@@ -143,8 +123,8 @@ type cueMutation struct {
 	CueChecksum string
 	Base        adminmetadata.MetadataSnapshot
 	Probed      *adminmetadata.ProbedMetadataFile
-	SeenAt      time.Time
 	Artwork     *stagedArtwork
+	SeenAt      time.Time
 }
 
 func (synchronizer *ProductionSynchronizer) storeCueTracks(ctx context.Context, input cueMutation) (bool, error) {
@@ -157,36 +137,23 @@ func (synchronizer *ProductionSynchronizer) storeCueTracks(ctx context.Context, 
 	if err != nil {
 		return false, err
 	}
-	trackIDs := make([]string, 0, len(mappings))
-	for _, mapping := range mappings {
-		trackIDs = append(trackIDs, mapping.TrackID)
-	}
-	if len(trackIDs) > 0 {
-		if _, err := transaction.Exec(ctx, `UPDATE media_jobs SET
-			status='CANCELLED',cancel_requested=true,locked_by=NULL,locked_until=NULL,heartbeat_at=NULL,
-			last_error_code='SUPERSEDED',last_error='A newer CUE definition superseded this media job',
-			version=version+1,updated_at=now()
-			WHERE track_id=ANY($1::uuid[]) AND status IN('PENDING','PROCESSING')`, trackIDs); err != nil {
-			return false, fmt.Errorf("supersede previous CUE media jobs: %w", err)
-		}
-	}
-	bySegment := make(map[int]cueMapping, len(mappings))
-	for _, mapping := range mappings {
-		bySegment[mapping.Segment] = mapping
+
+	byIndex := make(map[int]cueMapping, len(mappings))
+	for index, mapping := range mappings {
+		byIndex[index] = mapping
 	}
 	newTrackIDs := make([]string, 0, len(input.Tracks))
-	jobIDs := make([]string, 0, len(input.Tracks))
 	catalogCache := newScanCatalogCache()
 	var firstAlbumID *string
 	for index, cueTrack := range input.Tracks {
-		mapping, mapped := bySegment[index]
+		mapping, mapped := byIndex[index]
 		trackID := uuid.NewString()
 		if mapped {
 			trackID = mapping.TrackID
-		} else if index == 0 {
-			trackID = input.Source.TrackID
+		} else if index == 0 && input.Source.TrackID != nil {
+			trackID = *input.Source.TrackID
 		}
-		existingTrack := mapped || trackID == input.Source.TrackID
+		existingTrack := mapped || (input.Source.TrackID != nil && trackID == *input.Source.TrackID)
 		artistNames := []string{cueTrack.Performer}
 		if artistNames[0] == "" {
 			artistNames[0] = input.Sheet.Performer
@@ -269,43 +236,41 @@ func (synchronizer *ProductionSynchronizer) storeCueTracks(ctx context.Context, 
 			value := resolvedAlbum
 			firstAlbumID = &value
 		}
+
+		var durationMs int64
+		if cueTrack.EndMS != nil {
+			durationMs = int64(*cueTrack.EndMS - cueTrack.StartMS)
+		} else if input.Probed != nil && input.Probed.DurationMS != nil && *input.Probed.DurationMS > 0 {
+			durationMs = *input.Probed.DurationMS - int64(cueTrack.StartMS)
+		}
+
 		if err := upsertScanTrack(ctx, transaction, trackID, existingTrack,
-			effective, &resolvedAlbum, artistAssignments, catalogCache); err != nil {
+			effective, &durationMs, &resolvedAlbum, artistAssignments, catalogCache); err != nil {
 			return false, err
 		}
-		var generation int
-		if err := transaction.QueryRow(ctx, `UPDATE tracks SET
-			media_generation=media_generation+1,version=version+1,updated_at=now()
-			WHERE id=$1 RETURNING media_generation`, trackID).Scan(&generation); err != nil {
+
+		if _, err := transaction.Exec(ctx, `UPDATE tracks SET
+			duration_ms=$2,status='READY',version=version+1,updated_at=now()
+			WHERE id=$1`, trackID, durationMs); err != nil {
 			return false, err
 		}
-		payloadFields := map[string]any{
-			"sourcePath": input.File.RelativePath, "cuePath": input.CuePath,
-			"segmentStartMs": cueTrack.StartMS, "segmentEndMs": cueTrack.EndMS,
-			"originalFileName": filepath.Base(input.File.AudioPath),
+
+		startMs := int64(cueTrack.StartMS)
+		var endMs *int64
+		if cueTrack.EndMS != nil {
+			v := int64(*cueTrack.EndMS)
+			endMs = &v
 		}
-		addSourceProbeHint(payloadFields, input.Probed)
-		payload, err := json.Marshal(payloadFields)
-		if err != nil {
-			return false, fmt.Errorf("encode CUE media processing payload: %w", err)
-		}
-		var jobID string
-		err = transaction.QueryRow(ctx, `INSERT INTO media_jobs(
-			type,source_asset_id,track_id,generation,idempotency_key,payload,publish_on_ready,scan_run_id
-		) VALUES('INGEST_TRACK',$1,$2,$3,$4,$5::jsonb,true,NULLIF($6,'')::uuid) RETURNING id`,
-			*input.Source.SourceAssetID, trackID, generation,
-			fmt.Sprintf("cue:%s:%s:%d:%d", input.Source.ID, input.CueChecksum, index, generation), payload, input.ScanRunID,
-		).Scan(&jobID)
-		if err != nil {
-			return false, fmt.Errorf("create CUE media processing job: %w", err)
-		}
+		trackNum := cueTrack.Number
+
 		if _, err := transaction.Exec(ctx, `INSERT INTO local_music_source_tracks(
-			source_id,track_id,media_job_id,segment_index,start_ms,end_ms,cue_path,cue_checksum_sha256
-		) VALUES($1,$2,$3,$4,$5,$6,$7,$8)
-		ON CONFLICT(source_id,track_id) DO UPDATE SET media_job_id=EXCLUDED.media_job_id,
-			segment_index=EXCLUDED.segment_index,start_ms=EXCLUDED.start_ms,end_ms=EXCLUDED.end_ms,
-			cue_path=EXCLUDED.cue_path,cue_checksum_sha256=EXCLUDED.cue_checksum_sha256,updated_at=now()`,
-			input.Source.ID, trackID, jobID, index, cueTrack.StartMS, cueTrack.EndMS, input.CuePath, input.CueChecksum); err != nil {
+			source_id,track_id,cue_track_number,cue_start_time_ms,cue_end_time_ms
+		) VALUES($1,$2,$3,$4,$5)
+		ON CONFLICT(source_id,track_id) DO UPDATE SET
+			cue_track_number=EXCLUDED.cue_track_number,
+			cue_start_time_ms=EXCLUDED.cue_start_time_ms,
+			cue_end_time_ms=EXCLUDED.cue_end_time_ms`,
+			input.Source.ID, trackID, trackNum, startMs, endMs); err != nil {
 			return false, fmt.Errorf("store CUE source mapping: %w", err)
 		}
 		if existingTrack {
@@ -324,7 +289,6 @@ func (synchronizer *ProductionSynchronizer) storeCueTracks(ctx context.Context, 
 			}
 		}
 		newTrackIDs = append(newTrackIDs, trackID)
-		jobIDs = append(jobIDs, jobID)
 	}
 	stale := make([]string, 0)
 	for _, mapping := range mappings {
@@ -343,122 +307,104 @@ func (synchronizer *ProductionSynchronizer) storeCueTracks(ctx context.Context, 
 		}
 	}
 	if _, err := transaction.Exec(ctx, `UPDATE local_music_sources SET
-		track_id=$2,media_job_id=$3,status='PROCESSING',last_error=NULL,last_seen_at=$4,updated_at=now()
-		WHERE id=$1`, input.Source.ID, newTrackIDs[0], jobIDs[0], input.SeenAt); err != nil {
+		status='READY',last_error=NULL,last_seen_at=$2,updated_at=now()
+		WHERE id=$1`, input.Source.ID, input.SeenAt); err != nil {
 		return false, err
 	}
 	used, err := attachAlbumArtwork(ctx, transaction, firstAlbumID, input.Artwork)
 	if err != nil {
 		return false, err
 	}
-	if err := transaction.Commit(ctx); err != nil {
-		return false, fmt.Errorf("commit CUE source synchronization: %w", err)
-	}
-	if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
-		snapshot.rememberCatalog(catalogCache)
-	}
-	return used, nil
-}
-
-func (synchronizer *ProductionSynchronizer) rootPath(ctx context.Context, rootID string) (string, error) {
-	if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
-		return snapshot.rootPath, nil
-	}
-	var path string
-	if err := synchronizer.database.QueryRow(ctx, `SELECT path FROM library_roots WHERE id=$1`, rootID).Scan(&path); err != nil {
-		return "", err
-	}
-	return path, nil
-}
-
-func (synchronizer *ProductionSynchronizer) sourceMappings(ctx context.Context, sourceID string, lock bool) ([]cueMapping, error) {
-	if lock {
-		return nil, errors.New("source mapping locks require a transaction")
-	}
-	if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
-		mappings := snapshot.mappingsBySource[sourceID]
-		return append([]cueMapping(nil), mappings...), nil
-	}
-	rows, err := synchronizer.database.Query(ctx, `SELECT track_id,media_job_id,segment_index,start_ms,
-		end_ms,cue_path,cue_checksum_sha256 FROM local_music_source_tracks
-		WHERE source_id=$1 ORDER BY segment_index`, sourceID)
-	if err != nil {
-		return nil, err
-	}
-	return scanCueMappings(rows)
-}
-
-func sourceMappingsTx(ctx context.Context, transaction pgx.Tx, sourceID string, lock bool) ([]cueMapping, error) {
-	query := `SELECT track_id,media_job_id,segment_index,start_ms,end_ms,cue_path,cue_checksum_sha256
-		FROM local_music_source_tracks WHERE source_id=$1 ORDER BY segment_index`
-	if lock {
-		query += ` FOR UPDATE`
-	}
-	rows, err := transaction.Query(ctx, query, sourceID)
-	if err != nil {
-		return nil, err
-	}
-	return scanCueMappings(rows)
-}
-
-func scanCueMappings(rows pgx.Rows) ([]cueMapping, error) {
-	defer rows.Close()
-	result := make([]cueMapping, 0)
-	for rows.Next() {
-		var mapping cueMapping
-		if err := rows.Scan(&mapping.TrackID, &mapping.MediaJobID, &mapping.Segment,
-			&mapping.StartMS, &mapping.EndMS, &mapping.CuePath, &mapping.Checksum); err != nil {
-			return nil, err
-		}
-		result = append(result, mapping)
-	}
-	return result, rows.Err()
-}
-
-func cueMappingsMatch(mappings []cueMapping, tracks []cueTrack, cuePath, checksum string) bool {
-	if len(mappings) != len(tracks) {
-		return false
-	}
-	for index, track := range tracks {
-		mapping := mappings[index]
-		if mapping.Segment != index || mapping.StartMS != track.StartMS ||
-			!equalOptionalInt(mapping.EndMS, track.EndMS) || mapping.CuePath == nil || *mapping.CuePath != cuePath ||
-			mapping.Checksum == nil || *mapping.Checksum != checksum {
-			return false
-		}
-	}
-	return true
-}
-
-func primaryCreditNames(metadata adminmetadata.MetadataSnapshot) []string {
-	result := make([]string, 0)
-	for _, credit := range metadata.Credits {
-		if credit.Role == adminmetadata.CreditPrimary {
-			result = append(result, credit.Name)
-		}
-	}
-	return result
+	return used, transaction.Commit(ctx)
 }
 
 func cueHasMultiplePerformers(tracks []cueTrack) bool {
-	values := make(map[string]struct{})
+	var first string
 	for _, track := range tracks {
-		if track.Performer != "" {
-			values[normalizeCatalogText(track.Performer)] = struct{}{}
+		if track.Performer == "" {
+			continue
 		}
-	}
-	return len(values) > 1
-}
-
-func containsString(values []string, desired string) bool {
-	for _, value := range values {
-		if value == desired {
+		if first == "" {
+			first = track.Performer
+		} else if first != track.Performer {
 			return true
 		}
 	}
 	return false
 }
 
-func equalOptionalInt(left, right *int) bool {
-	return left == nil && right == nil || left != nil && right != nil && *left == *right
+func (synchronizer *ProductionSynchronizer) sourceMappings(
+	ctx context.Context,
+	sourceID string,
+	forUpdate bool,
+) ([]cueMapping, error) {
+	if !forUpdate {
+		if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
+			if mappings, exists := snapshot.mappingsBySource[sourceID]; exists {
+				return mappings, nil
+			}
+		}
+	}
+	return sourceMappingsTx(ctx, synchronizer.database, sourceID, forUpdate)
+}
+
+func sourceMappingsTx(
+	ctx context.Context,
+	db syncDatabase,
+	sourceID string,
+	forUpdate bool,
+) ([]cueMapping, error) {
+	query := `SELECT track_id, cue_track_number, cue_start_time_ms, cue_end_time_ms
+		FROM local_music_source_tracks WHERE source_id=$1 ORDER BY cue_track_number NULLS FIRST`
+	if forUpdate {
+		query += ` FOR UPDATE`
+	}
+	rows, err := db.Query(ctx, query, sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("load CUE source mappings: %w", err)
+	}
+	defer rows.Close()
+	mappings := make([]cueMapping, 0)
+	for rows.Next() {
+		var m cueMapping
+		if err := rows.Scan(&m.TrackID, &m.Number, &m.StartMS, &m.EndMS); err != nil {
+			return nil, fmt.Errorf("read CUE source mapping: %w", err)
+		}
+		mappings = append(mappings, m)
+	}
+	return mappings, rows.Err()
+}
+
+func cueMappingsMatch(
+	mappings []cueMapping,
+	tracks []cueTrack,
+) bool {
+	if len(mappings) != len(tracks) {
+		return false
+	}
+	for index, track := range tracks {
+		m := mappings[index]
+		if m.Number == nil || *m.Number != track.Number {
+			return false
+		}
+		if m.StartMS == nil || *m.StartMS != int64(track.StartMS) {
+			return false
+		}
+		if (m.EndMS == nil) != (track.EndMS == nil) {
+			return false
+		}
+		if m.EndMS != nil && *m.EndMS != int64(*track.EndMS) {
+			return false
+		}
+	}
+	return true
+}
+
+func containsString(slice []string, value string) bool {
+	for _, item := range slice {
+		if item == value {
+			return true
+		}
+	}
+	return false
 }

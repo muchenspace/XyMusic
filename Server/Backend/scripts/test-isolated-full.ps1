@@ -33,8 +33,7 @@ try {
 	if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 	$SerialPackages = @(
 		'xymusic/server/tests/integration',
-		'xymusic/server/tests/parity',
-		'xymusic/server/internal/workers/media'
+		'xymusic/server/tests/parity'
 	)
 	$RegularPackages = @($Packages | Where-Object { $SerialPackages -notcontains $_ })
 	& $GoScript test '-v' ./tests/integration -count=1
@@ -44,8 +43,6 @@ try {
 	& $GoScript test '-v' '-p=1' @RegularPackages -count=1
 	if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 	& $GoScript test '-v' ./tests/parity -count=1
-	if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-	& $GoScript test '-v' ./internal/workers/media -count=1
 	if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 	& $GoScript vet ./...
     exit $LASTEXITCODE

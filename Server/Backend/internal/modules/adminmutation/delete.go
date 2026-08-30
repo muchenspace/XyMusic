@@ -98,19 +98,6 @@ func (repository *Repository) DeleteTrackPermanently(
 			)
 		}
 	}
-	var mediaActive bool
-	if err := repository.pool.QueryRow(ctx, `
-		SELECT EXISTS(SELECT 1 FROM media_jobs
-		WHERE track_id=$1 AND status IN('PENDING','PROCESSING'))`, id).Scan(&mediaActive); err != nil {
-		return DeleteResult{}, err
-	}
-	if mediaActive {
-		return DeleteResult{}, apperror.Conflict(
-			apperror.CodeResourceConflict,
-			"Wait for media processing to stop before permanent deletion",
-			map[string]any{"conflictResourceType": "media_job"},
-		)
-	}
 	sourceFiles := []string{}
 	for _, source := range sources {
 		if source.trackCount > 1 {
@@ -265,15 +252,14 @@ func (repository *Repository) DeleteTrackPermanently(
 	}
 	for _, sourceID := range primaryIDs {
 		var replacementTrack string
-		var replacementJob *string
-		err := tx.QueryRow(ctx, `SELECT track_id,media_job_id FROM local_music_source_tracks WHERE source_id=$1 AND track_id<>$2 ORDER BY segment_index LIMIT 1`, sourceID, id).Scan(&replacementTrack, &replacementJob)
+		err := tx.QueryRow(ctx, `SELECT track_id FROM local_music_source_tracks WHERE source_id=$1 AND track_id<>$2 ORDER BY segment_index LIMIT 1`, sourceID, id).Scan(&replacementTrack)
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue
 		}
 		if err != nil {
 			return restoreOnError(err)
 		}
-		if _, err := tx.Exec(ctx, `UPDATE local_music_sources SET track_id=$2,media_job_id=$3,updated_at=now() WHERE id=$1`, sourceID, replacementTrack, replacementJob); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE local_music_sources SET track_id=$2,updated_at=now() WHERE id=$1`, sourceID, replacementTrack); err != nil {
 			return restoreOnError(err)
 		}
 	}
@@ -292,30 +278,25 @@ func (repository *Repository) DeleteTrackPermanently(
 	}
 	scheduled := 0
 	if len(assetIDs) > 0 {
-		assetRows, err := tx.Query(ctx, `UPDATE media_assets asset SET status='DELETE_PENDING',updated_at=now() WHERE id=ANY($1::uuid[]) AND NOT EXISTS(SELECT 1 FROM track_variants WHERE asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM media_jobs WHERE source_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM local_music_sources WHERE source_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM lyrics WHERE asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM media_uploads WHERE asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM artists WHERE artwork_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM albums WHERE cover_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM user_profiles WHERE avatar_asset_id=asset.id) RETURNING object_key`, assetIDs)
+		assetRows, err := tx.Query(ctx, `UPDATE media_assets asset SET status='DELETE_PENDING',updated_at=now() WHERE id=ANY($1::uuid[]) AND NOT EXISTS(SELECT 1 FROM local_music_sources WHERE source_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM lyrics WHERE asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM media_uploads WHERE asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM artists WHERE artwork_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM albums WHERE cover_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM user_profiles WHERE avatar_asset_id=asset.id) RETURNING storage_path`, assetIDs)
 		if err != nil {
 			return restoreOnError(err)
 		}
-		objectKeys := []string{}
+		storagePaths := []string{}
 		for assetRows.Next() {
-			var key string
-			if err := assetRows.Scan(&key); err != nil {
+			var path string
+			if err := assetRows.Scan(&path); err != nil {
 				assetRows.Close()
 				return restoreOnError(err)
 			}
-			objectKeys = append(objectKeys, key)
+			storagePaths = append(storagePaths, path)
 		}
 		err = assetRows.Err()
 		assetRows.Close()
 		if err != nil {
 			return restoreOnError(err)
 		}
-		for _, key := range objectKeys {
-			if _, err := tx.Exec(ctx, `INSERT INTO object_cleanup_jobs(object_key,reason) VALUES($1,'TRACK_PERMANENT_DELETE') ON CONFLICT(object_key) DO NOTHING`, key); err != nil {
-				return restoreOnError(err)
-			}
-		}
-		scheduled = len(objectKeys)
+		scheduled = len(storagePaths)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return restoreOnError(err)
@@ -359,7 +340,7 @@ func lockTrackWritebacksForDeletion(
 }
 
 func queryTrackAssetIDs(ctx context.Context, tx pgx.Tx, trackID string) ([]string, error) {
-	rows, err := tx.Query(ctx, `SELECT asset_id FROM track_variants WHERE track_id=$1 UNION SELECT source_asset_id FROM media_jobs WHERE track_id=$1 UNION SELECT source.source_asset_id FROM local_music_source_tracks mapped JOIN local_music_sources source ON source.id=mapped.source_id WHERE mapped.track_id=$1 UNION SELECT asset_id FROM lyrics WHERE track_id=$1 UNION SELECT asset_id FROM media_uploads WHERE track_id=$1`, trackID)
+	rows, err := tx.Query(ctx, `SELECT source.source_asset_id FROM local_music_source_tracks mapped JOIN local_music_sources source ON source.id=mapped.source_id WHERE mapped.track_id=$1 UNION SELECT asset_id FROM lyrics WHERE track_id=$1 UNION SELECT asset_id FROM media_uploads WHERE track_id=$1`, trackID)
 	if err != nil {
 		return nil, err
 	}

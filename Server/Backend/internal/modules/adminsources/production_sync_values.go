@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"golang.org/x/text/unicode/norm"
+
+	"xymusic/server/internal/modules/adminmetadata"
 )
 
 func normalizeCatalogText(value string) string {
@@ -52,4 +54,14 @@ func equalStrings(left, right []string) bool {
 
 func sameOptionalString(left, right *string) bool {
 	return left == nil && right == nil || left != nil && right != nil && *left == *right
+}
+
+func primaryCreditNames(metadata adminmetadata.MetadataSnapshot) []string {
+	names := make([]string, 0, len(metadata.Credits))
+	for _, credit := range metadata.Credits {
+		if credit.Role == adminmetadata.CreditPrimary {
+			names = append(names, credit.Name)
+		}
+	}
+	return names
 }

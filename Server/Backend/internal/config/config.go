@@ -18,10 +18,15 @@ const (
 	MaxServerRequestBodyBytes     int64 = 1024 * 1024 * 1024
 	MaxStructuredRequestBodyBytes int64 = 2 * 1024 * 1024
 
-	DefaultMigrationsDirectory = "migrations"
-	DefaultAdminWebDirectory   = "admin"
-	DefaultMediaToolsDirectory = "tools"
-	DefaultLocalMusicDirectory = "music"
+	DefaultMigrationsDirectory               = "migrations"
+	DefaultAdminWebDirectory                 = "admin"
+	DefaultMediaToolsDirectory               = "tools"
+	DefaultLocalMusicDirectory               = "music"
+	DefaultMediaAssetDirectory               = "assets"
+	DefaultMediaTranscodeDirectory           = "transcode"
+	DefaultMediaTranscodeCacheMaxBytes int64 = 10 * 1024 * 1024 * 1024
+	MinMediaTranscodeCacheMaxBytes     int64 = 128 * 1024 * 1024
+	MaxMediaTranscodeCacheMaxBytes     int64 = 1024 * 1024 * 1024 * 1024
 )
 
 type Environment string
@@ -38,7 +43,7 @@ type Config struct {
 	HTTP         HTTP
 	Database     Database
 	Security     Security
-	Storage      Storage
+	MediaStorage MediaStorage
 	Media        Media
 	Scraping     Scraping
 	LocalLibrary LocalLibrary
@@ -46,10 +51,12 @@ type Config struct {
 }
 
 type Paths struct {
-	MigrationsDirectory string
-	AdminWebDirectory   string
-	MediaToolsDirectory string
-	LocalMusicDirectory string
+	MigrationsDirectory     string
+	AdminWebDirectory       string
+	MediaToolsDirectory     string
+	LocalMusicDirectory     string
+	MediaAssetDirectory     string
+	MediaTranscodeDirectory string
 }
 
 type HTTP struct {
@@ -71,31 +78,28 @@ type Security struct {
 	AccessTokenSecret           string
 	IdempotencyEncryptionSecret string
 	CursorSigningSecret         string
+	PlaybackTicketSecret        string
 	AccessTokenTTLSeconds       int
 	RefreshTokenTTLSeconds      int
 }
 
-type Storage struct {
-	Endpoint            string
-	Region              string
-	Bucket              string
-	AccessKeyID         string
-	SecretAccessKey     string
-	ForcePathStyle      bool
-	PublicBaseURL       string
-	SignedURLTTLSeconds int
-	MaxUploadBytes      int64
+type MediaStorage struct {
+	AssetDirectory           string
+	TranscodeDirectory       string
+	UploadTTLSeconds         int
+	StreamTTLSeconds         int
+	StreamMaxConcurrent      int
+	StreamIdleTimeoutSeconds int
+	TranscodeTimeoutSeconds  int
+	TranscodeCacheMaxBytes   int64
+	MaxUploadBytes           int64
 }
 
 type Media struct {
-	Mode           string
-	FFmpegPath     string
-	FFprobePath    string
-	ProfileVersion string
-	Workers        int
-	ProbeWorkers   int
-	StorageWorkers int
-	FFmpegThreads  int
+	Mode          string
+	FFmpegPath    string
+	FFprobePath   string
+	FFmpegThreads int
 }
 
 type Scraping struct {
@@ -109,27 +113,24 @@ type Scraping struct {
 }
 
 type LocalLibrary struct {
-	Name                            string
-	Directory                       string
-	Mode                            string
-	Enabled                         bool
-	SyncOnStartup                   bool
-	ScanIntervalMinutes             *int
-	IncludePatterns                 []string
-	ExcludePatterns                 []string
-	ScanWorkers                     int
-	ScanCommitWorkers               int
-	ScanCommitBatchSize             int
-	ScanProbeWorkers                int
-	ReadySourceObjectStatTTLSeconds int
+	Name                string
+	Directory           string
+	Mode                string
+	Enabled             bool
+	SyncOnStartup       bool
+	ScanIntervalMinutes *int
+	IncludePatterns     []string
+	ExcludePatterns     []string
+	ScanWorkers         int
+	ScanCommitWorkers   int
+	ScanCommitBatchSize int
+	ScanProbeWorkers    int
 }
 
 type Registration struct {
 	Enabled bool
 }
 
-// Parse preserves the legacy backend's configuration contract. Relative paths
-// remain relative here and are resolved only by ResolveRuntime.
 func Parse(env map[string]string) (Config, error) {
 	environment, err := parseEnvironment(value(env, "NODE_ENV", "development"))
 	if err != nil {
@@ -138,16 +139,20 @@ func Parse(env map[string]string) (Config, error) {
 	production := environment == Production
 
 	paths := Paths{
-		MigrationsDirectory: value(env, "MIGRATIONS_DIRECTORY", DefaultMigrationsDirectory),
-		AdminWebDirectory:   value(env, "ADMIN_WEB_DIRECTORY", DefaultAdminWebDirectory),
-		MediaToolsDirectory: value(env, "MEDIA_TOOLS_DIRECTORY", DefaultMediaToolsDirectory),
-		LocalMusicDirectory: value(env, "LOCAL_MUSIC_DIRECTORY", DefaultLocalMusicDirectory),
+		MigrationsDirectory:     value(env, "MIGRATIONS_DIRECTORY", DefaultMigrationsDirectory),
+		AdminWebDirectory:       value(env, "ADMIN_WEB_DIRECTORY", DefaultAdminWebDirectory),
+		MediaToolsDirectory:     value(env, "MEDIA_TOOLS_DIRECTORY", DefaultMediaToolsDirectory),
+		LocalMusicDirectory:     value(env, "LOCAL_MUSIC_DIRECTORY", DefaultLocalMusicDirectory),
+		MediaAssetDirectory:     value(env, "MEDIA_ASSET_DIRECTORY", DefaultMediaAssetDirectory),
+		MediaTranscodeDirectory: value(env, "MEDIA_TRANSCODE_DIRECTORY", DefaultMediaTranscodeDirectory),
 	}
 	for name, candidate := range map[string]string{
-		"MIGRATIONS_DIRECTORY":  paths.MigrationsDirectory,
-		"ADMIN_WEB_DIRECTORY":   paths.AdminWebDirectory,
-		"MEDIA_TOOLS_DIRECTORY": paths.MediaToolsDirectory,
-		"LOCAL_MUSIC_DIRECTORY": paths.LocalMusicDirectory,
+		"MIGRATIONS_DIRECTORY":      paths.MigrationsDirectory,
+		"ADMIN_WEB_DIRECTORY":       paths.AdminWebDirectory,
+		"MEDIA_TOOLS_DIRECTORY":     paths.MediaToolsDirectory,
+		"LOCAL_MUSIC_DIRECTORY":     paths.LocalMusicDirectory,
+		"MEDIA_ASSET_DIRECTORY":     paths.MediaAssetDirectory,
+		"MEDIA_TRANSCODE_DIRECTORY": paths.MediaTranscodeDirectory,
 	} {
 		if err := validatePath(candidate, name); err != nil {
 			return Config{}, err
@@ -194,7 +199,27 @@ func Parse(env map[string]string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	signedURLTTL, err := integer(env, "MEDIA_SIGNED_URL_TTL_SECONDS", 300, 30, 3600)
+	uploadTTL, err := integer(env, "MEDIA_UPLOAD_TTL_SECONDS", 300, 30, 86400)
+	if err != nil {
+		return Config{}, err
+	}
+	streamTTL, err := integer(env, "MEDIA_STREAM_TTL_SECONDS", 900, 30, 86400)
+	if err != nil {
+		return Config{}, err
+	}
+	streamMaxConcurrent, err := integer(env, "MEDIA_STREAM_MAX_CONCURRENT", 8, 1, 128)
+	if err != nil {
+		return Config{}, err
+	}
+	streamIdleTimeout, err := integer(env, "MEDIA_STREAM_IDLE_TIMEOUT_SECONDS", 60, 5, 3600)
+	if err != nil {
+		return Config{}, err
+	}
+	transcodeTimeout, err := integer(env, "MEDIA_TRANSCODE_TIMEOUT_SECONDS", 120, 10, 3600)
+	if err != nil {
+		return Config{}, err
+	}
+	transcodeCacheMaxBytes, err := integer64(env, "MEDIA_TRANSCODE_CACHE_MAX_BYTES", DefaultMediaTranscodeCacheMaxBytes, MinMediaTranscodeCacheMaxBytes, MaxMediaTranscodeCacheMaxBytes)
 	if err != nil {
 		return Config{}, err
 	}
@@ -202,7 +227,7 @@ func Parse(env map[string]string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	scanWorkers, err := integer(env, "LOCAL_MUSIC_SCAN_WORKERS", defaultScanWorkers(), 1, 64)
+	scanWorkers, err := integer(env, "LOCAL_MUSIC_SCAN_WORKERS", defaultScanWorkers(), 1, 256)
 	if err != nil {
 		return Config{}, err
 	}
@@ -214,25 +239,7 @@ func Parse(env map[string]string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	scanProbeWorkers, err := integer(env, "LOCAL_MUSIC_SCAN_PROBE_WORKERS", defaultScanProbeWorkers(), 1, 64)
-	if err != nil {
-		return Config{}, err
-	}
-	readySourceObjectStatTTLSeconds, err := integer(
-		env, "LOCAL_MUSIC_READY_OBJECT_STAT_TTL_SECONDS", 300, 0, 86400,
-	)
-	if err != nil {
-		return Config{}, err
-	}
-	mediaWorkers, err := integer(env, "MEDIA_WORKERS", defaultMediaWorkers(), 1, 32)
-	if err != nil {
-		return Config{}, err
-	}
-	mediaProbeWorkers, err := integer(env, "MEDIA_PROBE_WORKERS", defaultMediaProbeWorkers(mediaWorkers), 1, 64)
-	if err != nil {
-		return Config{}, err
-	}
-	mediaStorageWorkers, err := integer(env, "MEDIA_STORAGE_WORKERS", defaultMediaStorageWorkers(mediaWorkers), 1, 64)
+	scanProbeWorkers, err := integer(env, "LOCAL_MUSIC_SCAN_PROBE_WORKERS", defaultScanProbeWorkers(), 1, 128)
 	if err != nil {
 		return Config{}, err
 	}
@@ -265,7 +272,7 @@ func Parse(env map[string]string) (Config, error) {
 		return Config{}, err
 	}
 	databaseConnections, err := integer(env, "DATABASE_MAX_CONNECTIONS", defaultDatabaseConnections(
-		scanCommitWorkers, mediaWorkers, batchWorkers, artworkWorkers,
+		scanCommitWorkers, batchWorkers, artworkWorkers,
 	), 1, 100)
 	if err != nil {
 		return Config{}, err
@@ -283,35 +290,11 @@ func Parse(env map[string]string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-
-	bucket := strings.TrimSpace(env["S3_BUCKET"])
-	accessKeyID := strings.TrimSpace(env["S3_ACCESS_KEY_ID"])
-	secretAccessKey := strings.TrimSpace(env["S3_SECRET_ACCESS_KEY"])
-	if !production {
-		if bucket == "" {
-			bucket = "xymusic"
-		}
-		if accessKeyID == "" {
-			accessKeyID = "minioadmin"
-		}
-		if secretAccessKey == "" {
-			secretAccessKey = "minioadmin"
-		}
-	}
-	if bucket == "" {
-		return Config{}, errors.New("S3_BUCKET is required")
-	}
-	if accessKeyID == "" {
-		return Config{}, errors.New("S3_ACCESS_KEY_ID is required")
-	}
-	if secretAccessKey == "" {
-		return Config{}, errors.New("S3_SECRET_ACCESS_KEY is required")
-	}
-
-	forcePathStyle, err := boolean(env, "S3_FORCE_PATH_STYLE", true)
+	playbackTicketSecret, err := secret(env, "PLAYBACK_TICKET_SECRET", production)
 	if err != nil {
 		return Config{}, err
 	}
+
 	registrationEnabled, err := boolean(env, "REGISTRATION_ENABLED", false)
 	if err != nil {
 		return Config{}, err
@@ -364,13 +347,6 @@ func Parse(env map[string]string) (Config, error) {
 	if err := validatePath(ffprobePath, "FFPROBE_PATH"); err != nil {
 		return Config{}, err
 	}
-	mediaProfileVersion := strings.TrimSpace(value(env, "MEDIA_VARIANT_PROFILE_VERSION", "v1"))
-	if mediaProfileVersion == "" {
-		return Config{}, errors.New("MEDIA_VARIANT_PROFILE_VERSION must not be empty")
-	}
-	if len(mediaProfileVersion) > 100 {
-		return Config{}, errors.New("MEDIA_VARIANT_PROFILE_VERSION is too long")
-	}
 
 	localMode := value(env, "LOCAL_MUSIC_SOURCE_MODE", "READ_ONLY")
 	if localMode != "READ_ONLY" && localMode != "READ_WRITE" {
@@ -413,79 +389,72 @@ func Parse(env map[string]string) (Config, error) {
 			AccessTokenSecret:           accessSecret,
 			IdempotencyEncryptionSecret: idempotencySecret,
 			CursorSigningSecret:         cursorSecret,
+			PlaybackTicketSecret:        playbackTicketSecret,
 			AccessTokenTTLSeconds:       accessTTL,
 			RefreshTokenTTLSeconds:      refreshTTL,
 		},
-		Storage: Storage{
-			Endpoint:            strings.TrimRight(strings.TrimSpace(env["S3_ENDPOINT"]), "/"),
-			Region:              value(env, "S3_REGION", "us-east-1"),
-			Bucket:              bucket,
-			AccessKeyID:         accessKeyID,
-			SecretAccessKey:     secretAccessKey,
-			ForcePathStyle:      forcePathStyle,
-			PublicBaseURL:       strings.TrimRight(strings.TrimSpace(env["S3_PUBLIC_BASE_URL"]), "/"),
-			SignedURLTTLSeconds: signedURLTTL,
-			MaxUploadBytes:      maxUploadBytes,
+		MediaStorage: MediaStorage{
+			AssetDirectory:           paths.MediaAssetDirectory,
+			TranscodeDirectory:       paths.MediaTranscodeDirectory,
+			UploadTTLSeconds:         uploadTTL,
+			StreamTTLSeconds:         streamTTL,
+			StreamMaxConcurrent:      streamMaxConcurrent,
+			StreamIdleTimeoutSeconds: streamIdleTimeout,
+			TranscodeTimeoutSeconds:  transcodeTimeout,
+			TranscodeCacheMaxBytes:   transcodeCacheMaxBytes,
+			MaxUploadBytes:           maxUploadBytes,
 		},
-		Media: Media{Mode: mediaMode, FFmpegPath: ffmpegPath, FFprobePath: ffprobePath,
-			ProfileVersion: mediaProfileVersion, Workers: mediaWorkers, ProbeWorkers: mediaProbeWorkers,
-			StorageWorkers: mediaStorageWorkers, FFmpegThreads: mediaFFmpegThreads},
-		Scraping: Scraping{FPcalcPath: fpcalcPath, AcoustIDClient: acoustIDClient,
-			BatchWorkers: batchWorkers, BatchClaimWindow: batchClaimWindow,
-			RequestWorkers: requestWorkers, ArtworkWorkers: artworkWorkers, ArtworkClaimWindow: artworkClaimWindow},
+		Media: Media{
+			Mode:          mediaMode,
+			FFmpegPath:    ffmpegPath,
+			FFprobePath:   ffprobePath,
+			FFmpegThreads: mediaFFmpegThreads,
+		},
+		Scraping: Scraping{
+			FPcalcPath:         fpcalcPath,
+			AcoustIDClient:     acoustIDClient,
+			BatchWorkers:       batchWorkers,
+			BatchClaimWindow:   batchClaimWindow,
+			RequestWorkers:     requestWorkers,
+			ArtworkWorkers:     artworkWorkers,
+			ArtworkClaimWindow: artworkClaimWindow,
+		},
 		LocalLibrary: LocalLibrary{
-			Name:                            value(env, "LOCAL_MUSIC_SOURCE_NAME", "Music"),
-			Directory:                       paths.LocalMusicDirectory,
-			Mode:                            localMode,
-			Enabled:                         localEnabled,
-			SyncOnStartup:                   syncOnStartup,
-			ScanIntervalMinutes:             scanInterval,
-			IncludePatterns:                 includePatterns,
-			ExcludePatterns:                 excludePatterns,
-			ScanWorkers:                     scanWorkers,
-			ScanCommitWorkers:               scanCommitWorkers,
-			ScanCommitBatchSize:             scanCommitBatchSize,
-			ScanProbeWorkers:                scanProbeWorkers,
-			ReadySourceObjectStatTTLSeconds: readySourceObjectStatTTLSeconds,
+			Name:                value(env, "LOCAL_MUSIC_SOURCE_NAME", "Music"),
+			Directory:           paths.LocalMusicDirectory,
+			Mode:                localMode,
+			Enabled:             localEnabled,
+			SyncOnStartup:       syncOnStartup,
+			ScanIntervalMinutes: scanInterval,
+			IncludePatterns:     includePatterns,
+			ExcludePatterns:     excludePatterns,
+			ScanWorkers:         scanWorkers,
+			ScanCommitWorkers:   scanCommitWorkers,
+			ScanCommitBatchSize: scanCommitBatchSize,
+			ScanProbeWorkers:    scanProbeWorkers,
 		},
 		Registration: Registration{Enabled: registrationEnabled},
 	}, nil
 }
 
 func defaultScanWorkers() int {
-	return max(4, min(32, runtime.GOMAXPROCS(0)*2))
+	return max(8, min(128, runtime.GOMAXPROCS(0)*4))
 }
 
 func defaultScanCommitWorkers() int {
-	return max(1, min(4, runtime.GOMAXPROCS(0)/2))
+	return max(4, min(16, runtime.GOMAXPROCS(0)*2))
 }
 
 func defaultScanProbeWorkers() int {
-	return max(1, min(4, runtime.GOMAXPROCS(0)))
-}
-
-func defaultMediaWorkers() int {
-	return max(1, min(8, runtime.GOMAXPROCS(0)/2))
-}
-
-func defaultMediaProbeWorkers(mediaWorkers int) int {
-	return max(1, min(mediaWorkers, 4))
-}
-
-func defaultMediaStorageWorkers(mediaWorkers int) int {
-	return max(1, min(mediaWorkers*2, 16))
+	return max(8, min(64, runtime.GOMAXPROCS(0)*4))
 }
 
 func defaultScrapingClaimWindow(workers int) int {
 	return min(64, max(1, workers*4))
 }
 
-// defaultDatabaseConnections leaves room for HTTP and maintenance work while
-// covering the independently active scan, media, scraping, and artwork pools.
-// DATABASE_MAX_CONNECTIONS remains the authoritative override for a shared
-// or tightly sized PostgreSQL instance.
-func defaultDatabaseConnections(scanCommitWorkers, mediaWorkers, batchWorkers, artworkWorkers int) int {
-	activeWorkers := scanCommitWorkers + mediaWorkers + batchWorkers + artworkWorkers
+func defaultDatabaseConnections(scanCommitWorkers, batchWorkers, artworkWorkers int) int {
+	activeWorkers := scanCommitWorkers + batchWorkers + artworkWorkers
 	return max(16, min(64, activeWorkers+4))
 }
 
@@ -529,6 +498,12 @@ func ResolveRuntime(cfg Config, root string) (Config, error) {
 	if cfg.Paths.LocalMusicDirectory, err = resolve(cfg.Paths.LocalMusicDirectory, "LOCAL_MUSIC_DIRECTORY"); err != nil {
 		return Config{}, err
 	}
+	if cfg.Paths.MediaAssetDirectory, err = resolve(cfg.Paths.MediaAssetDirectory, "MEDIA_ASSET_DIRECTORY"); err != nil {
+		return Config{}, err
+	}
+	if cfg.Paths.MediaTranscodeDirectory, err = resolve(cfg.Paths.MediaTranscodeDirectory, "MEDIA_TRANSCODE_DIRECTORY"); err != nil {
+		return Config{}, err
+	}
 	if cfg.Media.FFmpegPath, err = resolveExecutable(cfg.Media.FFmpegPath, "FFMPEG_PATH"); err != nil {
 		return Config{}, err
 	}
@@ -541,6 +516,8 @@ func ResolveRuntime(cfg Config, root string) (Config, error) {
 		}
 	}
 	cfg.LocalLibrary.Directory = cfg.Paths.LocalMusicDirectory
+	cfg.MediaStorage.AssetDirectory = cfg.Paths.MediaAssetDirectory
+	cfg.MediaStorage.TranscodeDirectory = cfg.Paths.MediaTranscodeDirectory
 	return cfg, nil
 }
 

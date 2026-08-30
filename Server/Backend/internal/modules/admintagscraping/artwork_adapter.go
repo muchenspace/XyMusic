@@ -9,15 +9,16 @@ import (
 	"io"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"xymusic/server/internal/modules/adminmedia"
 )
 
 type AdminMediaAPI interface {
-	CreateUpload(context.Context, string, adminmedia.CreateUploadInput) (adminmedia.UploadReservationDTO, error)
-	UploadContent(context.Context, string, string, string, int64, io.Reader) error
-	CompleteUpload(context.Context, string, string, adminmedia.CompleteUploadInput) (adminmedia.UploadCompletionDTO, error)
+	CreateUpload(context.Context, string, string, adminmedia.CreateUploadInput) (adminmedia.UploadReservationDTO, bool, error)
+	UploadDirect(context.Context, string, io.Reader, int64) error
+	CompleteUpload(context.Context, string, string, string, adminmedia.CompleteUploadInput) (adminmedia.UploadCompletionDTO, bool, error)
 	AbandonUpload(context.Context, string, string) error
 }
 
@@ -44,7 +45,7 @@ func (adapter *AdminMediaArtworkApplier) ApplyAlbumArtwork(
 	artwork DownloadedArtwork,
 ) error {
 	digest := sha256.Sum256(artwork.Bytes)
-	upload, err := adapter.media.CreateUpload(ctx, actorID, adminmedia.CreateUploadInput{
+	upload, _, err := adapter.media.CreateUpload(ctx, actorID, uuid.NewString(), adminmedia.CreateUploadInput{
 		Purpose:        adminmedia.PurposeAlbumArtwork,
 		TargetID:       albumID,
 		FileName:       "scraped-cover." + artwork.Extension,
@@ -55,16 +56,17 @@ func (adapter *AdminMediaArtworkApplier) ApplyAlbumArtwork(
 	if err != nil {
 		return err
 	}
-	if err := adapter.media.UploadContent(
-		ctx, actorID, upload.ID, artwork.ContentType, int64(len(artwork.Bytes)), bytes.NewReader(artwork.Bytes),
+	if err := adapter.media.UploadDirect(
+		ctx, upload.ID, bytes.NewReader(artwork.Bytes), int64(len(artwork.Bytes)),
 	); err != nil {
 		return adapter.abandonAfterFailure(ctx, actorID, upload.ID, err)
 	}
 	completionContext, cancelCompletion := artworkFollowupContext(ctx)
-	_, err = adapter.media.CompleteUpload(
+	_, _, err = adapter.media.CompleteUpload(
 		completionContext,
 		actorID,
 		upload.ID,
+		uuid.NewString(),
 		adminmedia.CompleteUploadInput{CompletionFence: &artworkCompletionFence{
 			executionContext: ctx,
 			mutationFence:    completionMutationFenceFromContext(ctx),
@@ -108,6 +110,9 @@ func (fence *artworkCompletionFence) Lock(ctx context.Context, tx pgx.Tx) error 
 		if err := fence.executionContext.Err(); err != nil {
 			return err
 		}
+	}
+	if fence.mutationFence == nil {
+		return nil
 	}
 	return fence.mutationFence.Lock(ctx, tx)
 }

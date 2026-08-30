@@ -508,7 +508,6 @@ func (repository *Repository) enrichTracks(ctx context.Context, records []TrackR
 	ids := trackIDs(records)
 	for index := range records {
 		records[index].Credits = []CreditRecord{}
-		records[index].Variants = []VariantRecord{}
 		records[index].MetadataStatus = MetadataNormal
 		records[index].Lyrics = []LyricRecord{}
 	}
@@ -641,61 +640,6 @@ func (repository *Repository) enrichTracks(ctx context.Context, records []TrackR
 		}
 	}
 	if err := closeRows(writebackRows, "iterate admin track writebacks"); err != nil {
-		return err
-	}
-	variantRows, err := repository.pool.Query(ctx, `
-		SELECT track_id, id, quality, mime_type, codec, container, bitrate, sample_rate, status::text, updated_at
-		FROM track_variants WHERE track_id = ANY($1::uuid[])
-		ORDER BY track_id, quality ASC
-	`, ids)
-	if err != nil {
-		return fmt.Errorf("query admin track variants: %w", err)
-	}
-	for variantRows.Next() {
-		var trackID string
-		var variant VariantRecord
-		if err := variantRows.Scan(
-			&trackID, &variant.ID, &variant.Quality, &variant.MimeType, &variant.Codec,
-			&variant.Container, &variant.Bitrate, &variant.SampleRate, &variant.Status, &variant.UpdatedAt,
-		); err != nil {
-			variantRows.Close()
-			return fmt.Errorf("scan admin track variant: %w", err)
-		}
-		if record := byID[trackID]; record != nil {
-			record.Variants = append(record.Variants, variant)
-		}
-	}
-	if err := closeRows(variantRows, "iterate admin track variants"); err != nil {
-		return err
-	}
-	jobRows, err := repository.pool.Query(ctx, `
-		SELECT DISTINCT ON (job.track_id) job.track_id, job.status::text, job.attempts, job.max_attempts,
-		       job.last_error, job.last_error_code, job.updated_at
-		FROM media_jobs job
-		JOIN tracks current_track ON current_track.id = job.track_id
-			AND current_track.media_generation = job.generation
-		WHERE job.track_id = ANY($1::uuid[])
-		ORDER BY job.track_id, job.created_at DESC, job.id DESC
-	`, ids)
-	if err != nil {
-		return fmt.Errorf("query admin track media jobs: %w", err)
-	}
-	for jobRows.Next() {
-		var trackID string
-		var job MediaProcessingRecord
-		if err := jobRows.Scan(
-			&trackID, &job.Status, &job.Attempts, &job.MaxAttempts,
-			&job.LastError, &job.LastErrorCode, &job.UpdatedAt,
-		); err != nil {
-			jobRows.Close()
-			return fmt.Errorf("scan admin track media job: %w", err)
-		}
-		if record := byID[trackID]; record != nil {
-			copy := job
-			record.MediaProcessing = &copy
-		}
-	}
-	if err := closeRows(jobRows, "iterate admin track media jobs"); err != nil {
 		return err
 	}
 	return nil

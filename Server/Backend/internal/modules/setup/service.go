@@ -25,7 +25,7 @@ import (
 	"xymusic/server/internal/shared/apperror"
 )
 
-const fpcalcDescription = "fpcalc 由 Chromaprint 提供，用于生成 AcoustID 音频指纹；它不属于 FFmpeg，未配置时只会禁用音频指纹识别。"
+const fpcalcDescription = "fpcalc 鐢?Chromaprint 鎻愪緵锛岀敤浜庣敓鎴?AcoustID 闊抽鎸囩汗锛涘畠涓嶅睘浜?FFmpeg锛屾湭閰嶇疆鏃跺彧浼氱鐢ㄩ煶棰戞寚绾硅瘑鍒€?"
 
 const (
 	databaseActionReusePartial = "reuse_partial"
@@ -43,7 +43,7 @@ type Options struct {
 	Runtime             RuntimeController
 	Store               ConfigurationRepository
 	Databases           DatabaseFactory
-	ObjectStorage       ObjectStorageFactory
+	MediaStorage        MediaStorageFactory
 	MediaTool           MediaTool
 	ListenerProbe       ListenerProbe
 	SourceValidator     SourceValidator
@@ -57,7 +57,7 @@ type Service struct {
 	runtime         RuntimeController
 	store           ConfigurationRepository
 	databases       DatabaseFactory
-	objectStorage   ObjectStorageFactory
+	mediaStorage    MediaStorageFactory
 	mediaTool       MediaTool
 	listenerProbe   ListenerProbe
 	sourceValidator SourceValidator
@@ -99,9 +99,9 @@ func NewService(options Options) (*Service, error) {
 	if databases == nil {
 		databases = ProductionDatabaseFactory{}
 	}
-	objects := options.ObjectStorage
-	if objects == nil {
-		objects = ProductionObjectStorageFactory{}
+	mediaStorage := options.MediaStorage
+	if mediaStorage == nil {
+		mediaStorage = ProductionMediaStorageFactory{}
 	}
 	mediaTool := options.MediaTool
 	if mediaTool == nil {
@@ -146,7 +146,7 @@ func NewService(options Options) (*Service, error) {
 		runtime:         options.Runtime,
 		store:           store,
 		databases:       databases,
-		objectStorage:   objects,
+		mediaStorage:    mediaStorage,
 		mediaTool:       mediaTool,
 		listenerProbe:   listener,
 		sourceValidator: sources,
@@ -180,7 +180,7 @@ func (s *Service) RequireSetup() error {
 	configured := s.configured
 	s.stateMu.RUnlock()
 	if configured || s.runtime.Status().Phase == RuntimePhaseReady {
-		return apperror.Forbidden("初始化已经完成，不能再次执行初始化操作。")
+		return apperror.Forbidden("鍒濆鍖栧凡缁忓畬鎴愶紝涓嶈兘鍐嶆鎵ц鍒濆鍖栨搷浣溿€?")
 	}
 	return nil
 }
@@ -219,12 +219,12 @@ func (s *Service) testHTTP(ctx context.Context, input HTTPInput) (OKResponse, er
 			}
 			return OKResponse{}, apperror.New(
 				apperror.CodeValidationError,
-				probe.label+" 监听地址不可用，IP 无法绑定、端口已被占用或当前进程没有监听权限。",
+				probe.label+" 鐩戝惉鍦板潃涓嶅彲鐢紝IP 鏃犳硶缁戝畾銆佺鍙ｅ凡琚崰鐢ㄦ垨褰撳墠杩涚▼娌℃湁鐩戝惉鏉冮檺銆?",
 				apperror.WithCause(err),
 				apperror.WithMetadata(map[string]any{
 					"fieldErrors": map[string][]string{
-						hostField: {probe.label + " 监听 IP 无法绑定"},
-						portField: {probe.label + " 监听端口不可用"},
+						hostField: {probe.label + " 鐩戝惉 IP 鏃犳硶缁戝畾"},
+						portField: {probe.label + " 鐩戝惉绔彛涓嶅彲鐢?"},
 					},
 				}),
 			)
@@ -248,11 +248,11 @@ func (s *Service) testPaths(_ context.Context, input PathsInput) (PathsTestRespo
 	if _, err := database.ReadMigrations(resolved.MigrationsDirectory); err != nil {
 		return PathsTestResponse{}, apperror.New(
 			apperror.CodeValidationError,
-			"数据库迁移目录无效，无法读取迁移记录。",
+			"鏁版嵁搴撹縼绉荤洰褰曟棤鏁堬紝鏃犳硶璇诲彇杩佺Щ璁板綍銆?",
 			apperror.WithCause(err),
 			apperror.WithMetadata(map[string]any{
 				"fieldErrors": map[string][]string{
-					"migrationsDirectory": {"该目录不包含有效的数据库迁移文件"},
+					"migrationsDirectory": {"璇ョ洰褰曚笉鍖呭惈鏈夋晥鐨勬暟鎹簱杩佺Щ鏂囦欢"},
 				},
 			}),
 		)
@@ -279,7 +279,7 @@ func (s *Service) testDatabase(ctx context.Context, input DatabaseTestInput) (Da
 	if strings.TrimSpace(input.MigrationsDirectory) == "" || len(input.MigrationsDirectory) > 4000 {
 		return DatabaseTestResponse{}, databaseInputValidation(
 			"migrationsDirectory",
-			"数据库迁移目录不能为空且不能超过 4000 个字符。",
+			"鏁版嵁搴撹縼绉荤洰褰曚笉鑳戒负绌轰笖涓嶈兘瓒呰繃 4000 涓瓧绗︺€?",
 		)
 	}
 	migrationsDirectory, err := s.resolvePath(input.MigrationsDirectory, "migrationsDirectory")
@@ -289,11 +289,11 @@ func (s *Service) testDatabase(ctx context.Context, input DatabaseTestInput) (Da
 	if _, err := database.ReadMigrations(migrationsDirectory); err != nil {
 		return DatabaseTestResponse{}, apperror.New(
 			apperror.CodeValidationError,
-			"数据库迁移目录无效，无法读取迁移记录。",
+			"鏁版嵁搴撹縼绉荤洰褰曟棤鏁堬紝鏃犳硶璇诲彇杩佺Щ璁板綍銆?",
 			apperror.WithCause(err),
 			apperror.WithMetadata(map[string]any{
 				"fieldErrors": map[string][]string{
-					"migrationsDirectory": {"该目录不包含有效的数据库迁移文件"},
+					"migrationsDirectory": {"璇ョ洰褰曚笉鍖呭惈鏈夋晥鐨勬暟鎹簱杩佺Щ鏂囦欢"},
 				},
 			}),
 		)
@@ -338,18 +338,24 @@ func (s *Service) TestStorage(ctx context.Context, input StorageInput) (StorageT
 }
 
 func (s *Service) testStorage(ctx context.Context, input StorageInput) (StorageTestResponse, error) {
-	storageConfig, err := storageConfig(input)
+	storageConfig, err := s.storageConfig(input)
 	if err != nil {
 		return StorageTestResponse{}, err
 	}
-	objects, err := s.objectStorage.Open(storageConfig)
+	mediaStorage, err := s.mediaStorage.Open(storageConfig)
 	if err != nil {
-		return StorageTestResponse{}, storageFailure("Object storage client could not be created", err)
+		return StorageTestResponse{}, storageFailure("Local media storage could not be initialized", err)
 	}
-	defer objects.Close()
-	inspection, err := objects.Inspect(ctx)
+	defer mediaStorage.Close()
+	if err := mediaStorage.EnsureDirectories(ctx); err != nil {
+		return StorageTestResponse{}, storageFailure("Media storage directories could not be created", err)
+	}
+	if err := mediaStorage.VerifyReadWrite(ctx); err != nil {
+		return StorageTestResponse{}, storageFailure("Media storage read/write check failed", err)
+	}
+	inspection, err := mediaStorage.Inspect(ctx)
 	if err != nil {
-		return StorageTestResponse{}, storageFailure("Object storage could not be inspected", err)
+		return StorageTestResponse{}, storageFailure("Media storage could not be inspected", err)
 	}
 	return StorageTestResponse{OK: true, StorageInspection: inspection}, nil
 }
@@ -439,19 +445,19 @@ func (s *Service) complete(ctx context.Context, input SetupInput) (CompletionRes
 	if s.runtime.Status().Phase == RuntimePhaseReady {
 		return CompletionResponse{}, apperror.Conflict(
 			apperror.CodeResourceConflict,
-			"初始化已经完成，不能再次提交初始化配置。",
+			"鍒濆鍖栧凡缁忓畬鎴愶紝涓嶈兘鍐嶆鎻愪氦鍒濆鍖栭厤缃€?",
 			nil,
 		)
 	}
 	if input.DatabaseAction != "" && input.DatabaseAction != databaseActionReusePartial &&
 		input.DatabaseAction != databaseActionMigrate && input.DatabaseAction != databaseActionReset {
-		return CompletionResponse{}, apperror.Validation("数据库处理方式无效", map[string][]string{
-			"databaseAction": {"请选择复用部分数据、迁移并复用或全部清除"},
+		return CompletionResponse{}, apperror.Validation("鏁版嵁搴撳鐞嗘柟寮忔棤鏁?", map[string][]string{
+			"databaseAction": {"璇烽€夋嫨澶嶇敤閮ㄥ垎鏁版嵁銆佽縼绉诲苟澶嶇敤鎴栧叏閮ㄦ竻闄?"},
 		})
 	}
 	if input.StorageAction != "" && input.StorageAction != storageActionReuse && input.StorageAction != storageActionReset {
-		return CompletionResponse{}, apperror.Validation("对象存储处理方式无效", map[string][]string{
-			"storageAction": {"请选择继续复用 Bucket 或全部清除 Bucket"},
+		return CompletionResponse{}, apperror.Validation("瀵硅薄瀛樺偍澶勭悊鏂瑰紡鏃犳晥", map[string][]string{
+			"storageAction": {"璇烽€夋嫨缁х画澶嶇敤 Bucket 鎴栧叏閮ㄦ竻闄?Bucket"},
 		})
 	}
 
@@ -509,7 +515,7 @@ func (s *Service) complete(ctx context.Context, input SetupInput) (CompletionRes
 		s.markConfigured()
 		return CompletionResponse{}, apperror.Conflict(
 			apperror.CodeResourceConflict,
-			"初始化已经完成，不能再次提交初始化配置。",
+			"鍒濆鍖栧凡缁忓畬鎴愶紝涓嶈兘鍐嶆鎻愪氦鍒濆鍖栭厤缃€?",
 			nil,
 		)
 	}
@@ -532,8 +538,7 @@ func (s *Service) complete(ctx context.Context, input SetupInput) (CompletionRes
 	}
 
 	var provisioned *ProvisionedInstallation
-	var objects SetupObjectStorage
-	var bucketCreated bool
+	var mediaStorage SetupMediaStorage
 	var databaseInspection InstallationInspection
 	var storageInspection StorageInspection
 	runtimeInitialized := false
@@ -542,27 +547,26 @@ func (s *Service) complete(ctx context.Context, input SetupInput) (CompletionRes
 	operationErr := func() error {
 		if err := runSetupStage("storage_prepare", func() error {
 			var err error
-			objects, err = s.objectStorage.Open(candidate.Storage)
+			mediaStorage, err = s.mediaStorage.Open(candidate.MediaStorage)
 			if err != nil {
-				return storageFailure("Object storage client could not be created", err)
+				return storageFailure("Media storage client could not be created", err)
 			}
-			storageInspection, err = objects.Inspect(ctx)
+			storageInspection, err = mediaStorage.Inspect(ctx)
 			if err != nil {
-				return storageFailure("Object storage contents could not be inspected", err)
+				return storageFailure("Media storage contents could not be inspected", err)
 			}
-			if storageInspection.HasObjects && input.StorageAction == "" {
+			if storageInspection.HasAssets && input.StorageAction == "" {
 				return apperror.New(
 					apperror.CodeSetupDecisionRequired,
-					"目标 MinIO Bucket 已包含对象，必须先选择继续复用或全部清除。",
+					"濯掍綋璧勬簮鐩綍宸插寘鍚幇鏈夋枃浠讹紝蹇呴』鍏堥€夋嫨缁х画澶嶇敤鎴栧叏閮ㄦ竻闄ゃ€?",
 					apperror.WithMetadata(map[string]any{"decisionResource": "storage"}),
 				)
 			}
-			bucketCreated, err = objects.EnsureBucket(ctx)
-			if err != nil {
-				return storageFailure("Object storage bucket could not be prepared", err)
+			if err := mediaStorage.EnsureDirectories(ctx); err != nil {
+				return storageFailure("Media storage directories could not be prepared", err)
 			}
-			if err := objects.VerifyReadWrite(ctx); err != nil {
-				return storageFailure("Object storage read/write verification failed", err)
+			if err := mediaStorage.VerifyReadWrite(ctx); err != nil {
+				return storageFailure("Media storage read/write verification failed", err)
 			}
 			return nil
 		}); err != nil {
@@ -593,16 +597,16 @@ func (s *Service) complete(ctx context.Context, input SetupInput) (CompletionRes
 				return err
 			}
 		}
-		if storageInspection.HasObjects && input.StorageAction == storageActionReset {
+		if storageInspection.HasAssets && input.StorageAction == storageActionReset {
 			destructiveStageStarted = true
-			if err := runSetupStage("storage_clear", func() error { return objects.Clear(ctx) }); err != nil {
+			if err := runSetupStage("storage_clear", func() error { return mediaStorage.Clear(ctx) }); err != nil {
 				return err
 			}
 		}
-		if storageInspection.HasObjects && input.StorageAction != storageActionReuse && input.StorageAction != storageActionReset {
+		if storageInspection.HasAssets && input.StorageAction != storageActionReuse && input.StorageAction != storageActionReset {
 			return apperror.New(
 				apperror.CodeSetupDecisionRequired,
-				"目标 MinIO Bucket 已包含对象，必须先选择继续复用或全部清除。",
+				"濯掍綋璧勬簮鐩綍宸插寘鍚幇鏈夋枃浠讹紝蹇呴』鍏堥€夋嫨缁х画澶嶇敤鎴栧叏閮ㄦ竻闄ゃ€?",
 				apperror.WithMetadata(map[string]any{"decisionResource": "storage"}),
 			)
 		}
@@ -658,8 +662,8 @@ func (s *Service) complete(ctx context.Context, input SetupInput) (CompletionRes
 		configurationSaved = true
 		return nil
 	}()
-	if objects != nil {
-		defer objects.Close()
+	if mediaStorage != nil {
+		defer mediaStorage.Close()
 	}
 
 	if operationErr != nil {
@@ -680,11 +684,6 @@ func (s *Service) complete(ctx context.Context, input SetupInput) (CompletionRes
 				rollbackErrors = append(rollbackErrors, fmt.Errorf("compensate installation data: %w", err))
 			}
 		}
-		if bucketCreated && objects != nil {
-			if err := objects.RemoveBucket(rollbackContext); err != nil {
-				rollbackErrors = append(rollbackErrors, fmt.Errorf("remove setup-created bucket: %w", err))
-			}
-		}
 		if len(rollbackErrors) > 0 {
 			return CompletionResponse{}, &setupRollbackError{primary: operationErr, rollback: rollbackErrors}
 		}
@@ -692,7 +691,7 @@ func (s *Service) complete(ctx context.Context, input SetupInput) (CompletionRes
 			stage := setupErrorStage(operationErr)
 			return CompletionResponse{}, apperror.New(
 				apperror.CodeSetupFailed,
-				setupStageDetail(stage, false)+" 数据清除阶段已经开始，原有数据可能已无法恢复。",
+				setupStageDetail(stage, false)+" 鏁版嵁娓呴櫎闃舵宸茬粡寮€濮嬶紝鍘熸湁鏁版嵁鍙兘宸叉棤娉曟仮澶嶃€?",
 				apperror.WithCause(operationErr),
 				apperror.WithMetadata(map[string]any{
 					"setupStage":              stage,
@@ -736,7 +735,7 @@ func (s *Service) buildConfig(input SetupInput) (config.Config, error) {
 	if err != nil {
 		return config.Config{}, err
 	}
-	storageValue, err := storageConfig(input.Storage)
+	storageValue, err := s.storageConfig(input.Storage)
 	if err != nil {
 		return config.Config{}, err
 	}
@@ -759,6 +758,10 @@ func (s *Service) buildConfig(input SetupInput) (config.Config, error) {
 	if err != nil {
 		return config.Config{}, fmt.Errorf("generate cursor secret: %w", err)
 	}
+	ticketSecret, err := s.secretGenerator()
+	if err != nil {
+		return config.Config{}, fmt.Errorf("generate playback ticket secret: %w", err)
+	}
 	mediaDirectory := config.DefaultMediaToolsDirectory
 	mediaMode := "ADVANCED"
 	ffmpegConfigured := strings.TrimSpace(valueOrEmpty(input.Media.FFmpegPath))
@@ -779,10 +782,12 @@ func (s *Service) buildConfig(input SetupInput) (config.Config, error) {
 	candidate := config.Config{
 		Environment: config.Production,
 		Paths: config.Paths{
-			MigrationsDirectory: strings.TrimSpace(input.Paths.MigrationsDirectory),
-			AdminWebDirectory:   strings.TrimSpace(input.Paths.AdminWebDirectory),
-			MediaToolsDirectory: mediaDirectory,
-			LocalMusicDirectory: strings.TrimSpace(input.Source.Directory),
+			MigrationsDirectory:     strings.TrimSpace(input.Paths.MigrationsDirectory),
+			AdminWebDirectory:       strings.TrimSpace(input.Paths.AdminWebDirectory),
+			MediaToolsDirectory:     mediaDirectory,
+			LocalMusicDirectory:     strings.TrimSpace(input.Source.Directory),
+			MediaAssetDirectory:     storageValue.AssetDirectory,
+			MediaTranscodeDirectory: storageValue.TranscodeDirectory,
 		},
 		HTTP: config.HTTP{
 			IPv4Host:              ipv4Listener.Host,
@@ -798,10 +803,11 @@ func (s *Service) buildConfig(input SetupInput) (config.Config, error) {
 			AccessTokenSecret:           accessTokenSecret,
 			IdempotencyEncryptionSecret: idempotencySecret,
 			CursorSigningSecret:         cursorSecret,
+			PlaybackTicketSecret:        ticketSecret,
 			AccessTokenTTLSeconds:       900,
 			RefreshTokenTTLSeconds:      2_592_000,
 		},
-		Storage: storageValue,
+		MediaStorage: storageValue,
 		Media: config.Media{
 			Mode:        mediaMode,
 			FFmpegPath:  ffmpegConfigured,
@@ -827,7 +833,7 @@ func (s *Service) buildConfig(input SetupInput) (config.Config, error) {
 	if err != nil {
 		return config.Config{}, apperror.New(
 			apperror.CodeValidationError,
-			"初始化配置内容无效，请检查标记字段后重试。",
+			"鍒濆鍖栭厤缃唴瀹规棤鏁堬紝璇锋鏌ユ爣璁板瓧娈靛悗閲嶈瘯銆?",
 			apperror.WithCause(err),
 		)
 	}
@@ -838,7 +844,7 @@ func (s *Service) resolvePaths(input PathsInput) (ResolvedPaths, error) {
 	if strings.TrimSpace(input.MigrationsDirectory) == "" || len(input.MigrationsDirectory) > 4000 {
 		return ResolvedPaths{}, databaseInputValidation(
 			"migrationsDirectory",
-			"数据库迁移目录不能为空且不能超过 4000 个字符。",
+			"鏁版嵁搴撹縼绉荤洰褰曚笉鑳戒负绌轰笖涓嶈兘瓒呰繃 4000 涓瓧绗︺€?",
 		)
 	}
 	if strings.TrimSpace(input.AdminWebDirectory) == "" || len(input.AdminWebDirectory) > 4000 {
@@ -948,24 +954,24 @@ func BuildSetupDatabaseURL(input DatabaseInput) (string, error) {
 	databaseName := strings.TrimSpace(input.Database)
 	username := strings.TrimSpace(input.Username)
 	if databaseName == "" || len(databaseName) > 255 {
-		return "", databaseInputValidation("database", "数据库名不能为空且不能超过 255 个字符。")
+		return "", databaseInputValidation("database", "鏁版嵁搴撳悕涓嶈兘涓虹┖涓斾笉鑳借秴杩?255 涓瓧绗︺€?")
 	}
 	if username == "" || len(username) > 255 {
-		return "", databaseInputValidation("username", "数据库用户名不能为空且不能超过 255 个字符。")
+		return "", databaseInputValidation("username", "鏁版嵁搴撶敤鎴峰悕涓嶈兘涓虹┖涓斾笉鑳借秴杩?255 涓瓧绗︺€?")
 	}
 	if input.Password == "" || len(input.Password) > 2000 {
-		return "", databaseInputValidation("password", "数据库密码不能为空且不能超过 2000 个字符。")
+		return "", databaseInputValidation("password", "鏁版嵁搴撳瘑鐮佷笉鑳戒负绌轰笖涓嶈兘瓒呰繃 2000 涓瓧绗︺€?")
 	}
 	if input.Port < 1 || input.Port > 65535 {
-		return "", databaseInputValidation("port", "数据库端口必须是 1 到 65535 之间的整数。")
+		return "", databaseInputValidation("port", "鏁版嵁搴撶鍙ｅ繀椤绘槸 1 鍒?65535 涔嬮棿鐨勬暣鏁般€?")
 	}
 	if input.MaxConnections < 1 || input.MaxConnections > 100 {
-		return "", databaseInputValidation("maxConnections", "数据库最大连接数必须是 1 到 100 之间的整数。")
+		return "", databaseInputValidation("maxConnections", "鏁版嵁搴撴渶澶ц繛鎺ユ暟蹇呴』鏄?1 鍒?100 涔嬮棿鐨勬暣鏁般€?")
 	}
 	switch input.SSLMode {
 	case "disable", "prefer", "require", "verify-full":
 	default:
-		return "", databaseInputValidation("sslMode", "数据库 SSL 模式无效。")
+		return "", databaseInputValidation("sslMode", "鏁版嵁搴?SSL 妯″紡鏃犳晥銆?")
 	}
 	host, err := parseDatabaseHost(input.Host)
 	if err != nil {
@@ -996,83 +1002,98 @@ func databaseInputValidation(field, detail string) error {
 	return apperror.Validation(detail, map[string][]string{field: {detail}})
 }
 
-func storageConfig(input StorageInput) (config.Storage, error) {
-	endpoint, err := requiredHTTPURL(input.Endpoint, "Storage endpoint", false)
+func (s *Service) storageConfig(input StorageInput) (config.MediaStorage, error) {
+	assetDir := strings.TrimSpace(input.AssetDirectory)
+	if assetDir == "" {
+		assetDir = config.DefaultMediaAssetDirectory
+	}
+	transcodeDir := strings.TrimSpace(input.TranscodeDirectory)
+	if transcodeDir == "" {
+		transcodeDir = config.DefaultMediaTranscodeDirectory
+	}
+	resolvedAsset, err := s.resolvePath(assetDir, "storage.assetDirectory")
 	if err != nil {
-		return config.Storage{}, err
+		return config.MediaStorage{}, err
 	}
-	publicBaseURL := ""
-	if input.PublicBaseURL != nil && strings.TrimSpace(*input.PublicBaseURL) != "" {
-		publicBaseURL, err = requiredHTTPURL(*input.PublicBaseURL, "Storage public base URL", true)
-		if err != nil {
-			return config.Storage{}, err
-		}
+	resolvedTranscode, err := s.resolvePath(transcodeDir, "storage.transcodeDirectory")
+	if err != nil {
+		return config.MediaStorage{}, err
 	}
-	if strings.TrimSpace(input.Region) == "" || len(input.Region) > 100 {
-		return config.Storage{}, apperror.Validation("Storage region is invalid")
+	uploadTTL := 3600
+	if input.UploadTTLSeconds != nil {
+		uploadTTL = *input.UploadTTLSeconds
 	}
-	if strings.TrimSpace(input.Bucket) == "" || len(input.Bucket) > 255 {
-		return config.Storage{}, apperror.Validation("Storage bucket is invalid")
+	streamTTL := 1800
+	if input.StreamTTLSeconds != nil {
+		streamTTL = *input.StreamTTLSeconds
 	}
-	if strings.TrimSpace(input.AccessKeyID) == "" || len(input.AccessKeyID) > 500 {
-		return config.Storage{}, apperror.Validation("Storage access key is invalid")
+	maxConcurrent := 4
+	if input.StreamMaxConcurrent != nil {
+		maxConcurrent = *input.StreamMaxConcurrent
 	}
-	if input.SecretAccessKey == "" || len(input.SecretAccessKey) > 2000 {
-		return config.Storage{}, apperror.Validation("Storage secret key is invalid")
+	idleTimeout := 120
+	if input.StreamIdleTimeoutSeconds != nil {
+		idleTimeout = *input.StreamIdleTimeoutSeconds
 	}
-	if input.ForcePathStyle == nil {
-		return config.Storage{}, apperror.Validation("Storage path-style flag is required")
+	transcodeTimeout := 300
+	if input.TranscodeTimeoutSeconds != nil {
+		transcodeTimeout = *input.TranscodeTimeoutSeconds
 	}
-	if input.SignedURLTTLSeconds < 30 || input.SignedURLTTLSeconds > 3600 {
-		return config.Storage{}, apperror.Validation("Storage signed URL TTL is invalid")
+	transcodeCacheMaxBytes := config.DefaultMediaTranscodeCacheMaxBytes
+	if input.TranscodeCacheMaxBytes != nil {
+		transcodeCacheMaxBytes = *input.TranscodeCacheMaxBytes
 	}
-	if input.MaxUploadBytes < 1 || input.MaxUploadBytes > config.MaxServerRequestBodyBytes {
-		return config.Storage{}, apperror.Validation("Storage maximum upload size is invalid")
+	maxUploadBytes := int64(config.MaxServerRequestBodyBytes)
+	if input.MaxUploadBytes != nil {
+		maxUploadBytes = *input.MaxUploadBytes
 	}
-	return config.Storage{
-		Endpoint:            endpoint,
-		PublicBaseURL:       publicBaseURL,
-		Region:              strings.TrimSpace(input.Region),
-		Bucket:              strings.TrimSpace(input.Bucket),
-		AccessKeyID:         input.AccessKeyID,
-		SecretAccessKey:     input.SecretAccessKey,
-		ForcePathStyle:      *input.ForcePathStyle,
-		SignedURLTTLSeconds: input.SignedURLTTLSeconds,
-		MaxUploadBytes:      input.MaxUploadBytes,
+	if transcodeCacheMaxBytes < config.MinMediaTranscodeCacheMaxBytes || transcodeCacheMaxBytes > config.MaxMediaTranscodeCacheMaxBytes {
+		return config.MediaStorage{}, apperror.Validation("storage.transcodeCacheMaxBytes is invalid")
+	}
+	return config.MediaStorage{
+		AssetDirectory:           resolvedAsset,
+		TranscodeDirectory:       resolvedTranscode,
+		UploadTTLSeconds:         uploadTTL,
+		StreamTTLSeconds:         streamTTL,
+		StreamMaxConcurrent:      maxConcurrent,
+		StreamIdleTimeoutSeconds: idleTimeout,
+		TranscodeTimeoutSeconds:  transcodeTimeout,
+		TranscodeCacheMaxBytes:   transcodeCacheMaxBytes,
+		MaxUploadBytes:           maxUploadBytes,
 	}, nil
 }
 
 func validateHTTP(input HTTPInput) error {
 	ipv4, ipv6 := normalizedHTTPListeners(input)
 	if address := net.ParseIP(ipv4.Host); address == nil || address.To4() == nil {
-		return apperror.Validation("IPv4 监听 IP 无效，请填写 IPv4 地址。", map[string][]string{
-			"ipv4Host": {"请输入有效的 IPv4 地址"},
+		return apperror.Validation("IPv4 鐩戝惉 IP 鏃犳晥锛岃濉啓 IPv4 鍦板潃銆?", map[string][]string{
+			"ipv4Host": {"璇疯緭鍏ユ湁鏁堢殑 IPv4 鍦板潃"},
 		})
 	}
 	if address := net.ParseIP(ipv6.Host); address == nil || address.To4() != nil {
-		return apperror.Validation("IPv6 监听 IP 无效，请填写 IPv6 地址。", map[string][]string{
-			"ipv6Host": {"请输入有效的 IPv6 地址"},
+		return apperror.Validation("IPv6 鐩戝惉 IP 鏃犳晥锛岃濉啓 IPv6 鍦板潃銆?", map[string][]string{
+			"ipv6Host": {"璇疯緭鍏ユ湁鏁堢殑 IPv6 鍦板潃"},
 		})
 	}
 	if ipv4.Port < 1 || ipv4.Port > 65535 {
-		return apperror.Validation("IPv4 监听端口必须在 1 到 65535 之间。", map[string][]string{
-			"ipv4Port": {"端口必须在 1 到 65535 之间"},
+		return apperror.Validation("IPv4 鐩戝惉绔彛蹇呴』鍦?1 鍒?65535 涔嬮棿銆?", map[string][]string{
+			"ipv4Port": {"绔彛蹇呴』鍦?1 鍒?65535 涔嬮棿"},
 		})
 	}
 	if ipv6.Port < 1 || ipv6.Port > 65535 {
-		return apperror.Validation("IPv6 监听端口必须在 1 到 65535 之间。", map[string][]string{
-			"ipv6Port": {"端口必须在 1 到 65535 之间"},
+		return apperror.Validation("IPv6 鐩戝惉绔彛蹇呴』鍦?1 鍒?65535 涔嬮棿銆?", map[string][]string{
+			"ipv6Port": {"绔彛蹇呴』鍦?1 鍒?65535 涔嬮棿"},
 		})
 	}
 	if len(input.TrustedProxyAddresses) > 100 {
-		return apperror.Validation("反向代理 IP 不能超过 100 个。", map[string][]string{
-			"trustedProxyAddresses": {"最多填写 100 个反向代理 IP"},
+		return apperror.Validation("鍙嶅悜浠ｇ悊 IP 涓嶈兘瓒呰繃 100 涓€?", map[string][]string{
+			"trustedProxyAddresses": {"鏈€澶氬～鍐?100 涓弽鍚戜唬鐞?IP"},
 		})
 	}
 	for _, address := range input.TrustedProxyAddresses {
 		if net.ParseIP(strings.TrimSpace(address)) == nil {
-			return apperror.Validation("反向代理地址必须是有效的 IPv4 或 IPv6 地址。", map[string][]string{
-				"trustedProxyAddresses": {"请输入有效的 IPv4 或 IPv6 地址"},
+			return apperror.Validation("鍙嶅悜浠ｇ悊鍦板潃蹇呴』鏄湁鏁堢殑 IPv4 鎴?IPv6 鍦板潃銆?", map[string][]string{
+				"trustedProxyAddresses": {"璇疯緭鍏ユ湁鏁堢殑 IPv4 鎴?IPv6 鍦板潃"},
 			})
 		}
 	}
@@ -1140,7 +1161,7 @@ func validateFingerprintConfiguration(input MediaInput) error {
 	fpcalc := optionalTrim(input.FPcalcPath)
 	client := optionalTrim(input.AcoustIDClient)
 	if (fpcalc != "") != (client != "") {
-		return apperror.Validation("启用音频指纹时必须同时配置 fpcalc 路径和 AcoustID Client ID")
+		return apperror.Validation("鍚敤闊抽鎸囩汗鏃跺繀椤诲悓鏃堕厤缃?fpcalc 璺緞鍜?AcoustID Client ID")
 	}
 	if len(client) > 500 {
 		return apperror.Validation("AcoustID Client ID is too long")
@@ -1151,15 +1172,15 @@ func validateFingerprintConfiguration(input MediaInput) error {
 func parseDatabaseHost(raw string) (string, error) {
 	candidate := strings.TrimSpace(raw)
 	if candidate == "" || len(candidate) > 255 || strings.ContainsAny(candidate, " \t\r\n/@?#") {
-		return "", databaseInputValidation("host", "数据库地址无效，请填写 IP 或主机名，不要包含端口或协议。")
+		return "", databaseInputValidation("host", "鏁版嵁搴撳湴鍧€鏃犳晥锛岃濉啓 IP 鎴栦富鏈哄悕锛屼笉瑕佸寘鍚鍙ｆ垨鍗忚銆?")
 	}
 	if strings.HasPrefix(candidate, "[") || strings.HasSuffix(candidate, "]") {
 		if !strings.HasPrefix(candidate, "[") || !strings.HasSuffix(candidate, "]") || len(candidate) < 3 {
-			return "", databaseInputValidation("host", "数据库 IPv6 地址格式无效。")
+			return "", databaseInputValidation("host", "鏁版嵁搴?IPv6 鍦板潃鏍煎紡鏃犳晥銆?")
 		}
 		candidate = candidate[1 : len(candidate)-1]
 		if strings.ContainsAny(candidate, "[]") || net.ParseIP(candidate) == nil || !strings.Contains(candidate, ":") {
-			return "", databaseInputValidation("host", "数据库 IPv6 地址格式无效。")
+			return "", databaseInputValidation("host", "鏁版嵁搴?IPv6 鍦板潃鏍煎紡鏃犳晥銆?")
 		}
 		return strings.ToLower(candidate), nil
 	}
@@ -1167,23 +1188,23 @@ func parseDatabaseHost(raw string) (string, error) {
 		return strings.ToLower(candidate), nil
 	}
 	if strings.Contains(candidate, ":") {
-		return "", databaseInputValidation("host", "数据库地址不能包含端口；请在端口字段单独填写。")
+		return "", databaseInputValidation("host", "鏁版嵁搴撳湴鍧€涓嶈兘鍖呭惈绔彛锛涜鍦ㄧ鍙ｅ瓧娈靛崟鐙～鍐欍€?")
 	}
 	hostname, err := idna.Lookup.ToASCII(candidate)
 	if err != nil {
-		return "", databaseInputValidation("host", "数据库主机名格式无效。")
+		return "", databaseInputValidation("host", "鏁版嵁搴撲富鏈哄悕鏍煎紡鏃犳晥銆?")
 	}
 	hostname = strings.ToLower(hostname)
 	if hostname == "" || len(hostname) > 253 || strings.HasSuffix(hostname, ".") {
-		return "", databaseInputValidation("host", "数据库主机名格式无效。")
+		return "", databaseInputValidation("host", "鏁版嵁搴撲富鏈哄悕鏍煎紡鏃犳晥銆?")
 	}
 	for _, label := range strings.Split(hostname, ".") {
 		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
-			return "", databaseInputValidation("host", "数据库主机名格式无效。")
+			return "", databaseInputValidation("host", "鏁版嵁搴撲富鏈哄悕鏍煎紡鏃犳晥銆?")
 		}
 		for _, character := range label {
 			if !(character >= 'a' && character <= 'z') && !(character >= '0' && character <= '9') && character != '-' {
-				return "", databaseInputValidation("host", "数据库主机名格式无效。")
+				return "", databaseInputValidation("host", "鏁版嵁搴撲富鏈哄悕鏍煎紡鏃犳晥銆?")
 			}
 		}
 	}
@@ -1281,7 +1302,7 @@ func normalizeCompletionError(err error) error {
 	if errors.Is(err, ErrInvalidConfiguration) {
 		return apperror.Conflict(
 			apperror.CodeResourceConflict,
-			"检测到已有但无效的 .env 文件，请修复或删除该文件后重新初始化。",
+			"妫€娴嬪埌宸叉湁浣嗘棤鏁堢殑 .env 鏂囦欢锛岃淇鎴栧垹闄よ鏂囦欢鍚庨噸鏂板垵濮嬪寲銆?",
 			nil,
 		)
 	}
@@ -1300,31 +1321,31 @@ func normalizeCompletionError(err error) error {
 
 func setupStageDetail(stage string, rollbackIncomplete bool) string {
 	labels := map[string]string{
-		"configuration_validation": "配置内容校验",
-		"http_probe":               "HTTP 监听地址检查",
-		"paths_probe":              "运行目录检查",
-		"database_probe":           "数据库连接和权限检查",
-		"storage_probe":            "对象存储连接检查",
-		"media_probe":              "媒体工具检查",
-		"source_probe":             "音乐目录检查",
-		"configuration_check":      "已有配置文件检查",
-		"database_open":            "数据库连接",
-		"storage_prepare":          "对象存储 Bucket 准备",
-		"database_migration":       "数据库迁移",
-		"database_inspection":      "已有数据库配置检查",
-		"storage_clear":            "对象存储清除",
-		"database_clear":           "数据库数据清除",
-		"installation_provision":   "管理员和音源配置",
-		"runtime_initialize":       "服务运行时启动",
-		"configuration_save":       "配置文件保存",
+		"configuration_validation": "configuration validation",
+		"http_probe":               "HTTP listener probe",
+		"paths_probe":              "path probe",
+		"database_probe":           "database probe",
+		"storage_probe":            "media storage probe",
+		"media_probe":              "media tools probe",
+		"source_probe":             "music source probe",
+		"configuration_check":      "configuration check",
+		"database_open":            "database open",
+		"storage_prepare":          "media storage preparation",
+		"database_migration":       "database migration",
+		"database_inspection":      "database inspection",
+		"storage_clear":            "media storage cleanup",
+		"database_clear":           "database cleanup",
+		"installation_provision":   "installation provisioning",
+		"runtime_initialize":       "runtime initialization",
+		"configuration_save":       "configuration save",
 	}
 	label := labels[stage]
 	if label == "" {
-		label = "未知步骤"
+		label = "setup"
 	}
-	detail := "初始化在“" + label + "”阶段失败，系统未能完成配置。"
+	detail := "setup stage failed: " + label
 	if rollbackIncomplete {
-		detail += " 自动回滚未完整完成，请勿重复初始化，先使用追踪 ID 检查服务端日志。"
+		detail += "; the rollback is incomplete and manual cleanup may be required"
 	}
 	return detail
 }
@@ -1337,7 +1358,7 @@ func validateDatabaseDecision(inspection InstallationInspection, action string) 
 		}
 		return apperror.Conflict(
 			apperror.CodeResourceConflict,
-			"数据库状态已经变化，当前数据库为空，请重新验证后继续。",
+			"鏁版嵁搴撶姸鎬佸凡缁忓彉鍖栵紝褰撳墠鏁版嵁搴撲负绌猴紝璇烽噸鏂伴獙璇佸悗缁х画銆?",
 			nil,
 		)
 	case DatabaseStatePartial:
@@ -1346,7 +1367,7 @@ func validateDatabaseDecision(inspection InstallationInspection, action string) 
 		}
 		return apperror.New(
 			apperror.CodeSetupDecisionRequired,
-			"数据库包含部分 XyMusic 配置，请选择复用部分数据或全部清除。",
+			"鏁版嵁搴撳寘鍚儴鍒?XyMusic 閰嶇疆锛岃閫夋嫨澶嶇敤閮ㄥ垎鏁版嵁鎴栧叏閮ㄦ竻闄ゃ€?",
 			apperror.WithMetadata(map[string]any{
 				"decisionResource": "database", "databaseState": inspection.State,
 				"reusable": inspection.Reusable, "missing": inspection.Missing,
@@ -1358,7 +1379,7 @@ func validateDatabaseDecision(inspection InstallationInspection, action string) 
 		}
 		return apperror.New(
 			apperror.CodeSetupDecisionRequired,
-			"检测到完整的 XyMusic 数据库，请选择迁移并复用现有数据或全部清除。",
+			"妫€娴嬪埌瀹屾暣鐨?XyMusic 鏁版嵁搴擄紝璇烽€夋嫨杩佺Щ骞跺鐢ㄧ幇鏈夋暟鎹垨鍏ㄩ儴娓呴櫎銆?",
 			apperror.WithMetadata(map[string]any{
 				"decisionResource": "database", "databaseState": inspection.State,
 				"migrationRequired": inspection.MigrationRequired,
@@ -1366,7 +1387,7 @@ func validateDatabaseDecision(inspection InstallationInspection, action string) 
 			}),
 		)
 	default:
-		return apperror.New(apperror.CodeSetupFailed, "无法识别数据库配置状态，请检查迁移记录后重试。")
+		return apperror.New(apperror.CodeSetupFailed, "鏃犳硶璇嗗埆鏁版嵁搴撻厤缃姸鎬侊紝璇锋鏌ヨ縼绉昏褰曞悗閲嶈瘯銆?")
 	}
 }
 

@@ -1202,8 +1202,8 @@ export class PlaybackSession implements PlaybackSessionPort {
   private loadAudioGrant(grant: PlaybackGrant, signal: AbortSignal): Promise<void> {
     const bitrate = validBitrate(grant.bitrate);
     return bitrate
-      ? this.audio.load(grant.url, signal, { bitrate })
-      : this.audio.load(grant.url, signal);
+      ? this.audio.load(grant.streamUrl, signal, { bitrate })
+      : this.audio.load(grant.streamUrl, signal);
   }
 
   private preloadAudioGrant(grant: PlaybackGrant, signal: AbortSignal): Promise<void> {
@@ -1211,8 +1211,8 @@ export class PlaybackSession implements PlaybackSessionPort {
     if (!preload) return Promise.resolve();
     const bitrate = validBitrate(grant.bitrate);
     return bitrate
-      ? preload.call(this.audio, grant.url, signal, { bitrate })
-      : preload.call(this.audio, grant.url, signal);
+      ? preload.call(this.audio, grant.streamUrl, signal, { bitrate })
+      : preload.call(this.audio, grant.streamUrl, signal);
   }
 
   private refreshPrefetch(): void {

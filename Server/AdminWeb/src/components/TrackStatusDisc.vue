@@ -4,11 +4,9 @@ import StatusBadge from "@/components/StatusBadge.vue";
 import type { TrackSummary } from "@/features/music/domain/models";
 import {
   audioTechnicalStagePresentation,
-  mediaProcessingStatusPresentation,
   metadataStatusPresentation,
   sourceFileStatusPresentation,
   trackAudioStatusPresentation,
-  variantStatusPresentation,
 } from "@/shared/presentation/audio-status";
 
 const props = defineProps<{ track: TrackSummary }>();
@@ -30,10 +28,8 @@ const discState = computed(() => {
 const technicalStage = computed(() => audioTechnicalStagePresentation(
   statusValue.value,
   props.track.source?.status,
-  props.track.mediaProcessing?.status,
 ));
 const sourceStage = computed(() => sourceFileStatusPresentation(props.track.source?.status));
-const mediaStage = computed(() => mediaProcessingStatusPresentation(props.track.mediaProcessing?.status));
 const metadataStage = computed(() => metadataStatusPresentation(props.track.metadataStatus));
 const writebackErrorDetail = computed(() => props.track.metadataStatus === "WRITE_FAILED"
   ? props.track.latestWritebackError?.trim() || null
@@ -94,8 +90,6 @@ onBeforeUnmount(() => {
   stopViewportListeners();
 });
 
-function bitrate(value: number | null): string { return value ? `${Math.round(value / 1_000)} kbps` : "—"; }
-function sampleRate(value: number | null): string { return value ? `${(value / 1_000).toFixed(value % 1_000 ? 1 : 0)} kHz` : "—"; }
 </script>
 
 <template>
@@ -111,13 +105,11 @@ function sampleRate(value: number | null): string { return value ? `${(value / 1
           <dl class="mt-4 grid grid-cols-[88px_1fr] gap-x-3 gap-y-2 text-xs">
             <dt class="text-[var(--muted)]">当前阶段</dt><dd class="font-semibold">{{ technicalStage.label }}</dd>
             <dt class="text-[var(--muted)]">源文件分析</dt><dd>{{ sourceStage.label }}</dd>
-            <dt class="text-[var(--muted)]">媒体处理</dt><dd>{{ mediaStage.label }}</dd>
-            <dt class="text-[var(--muted)]">Tag</dt><dd>{{ metadataStage.label }}</dd>
+              <dt class="text-[var(--muted)]">Tag</dt><dd>{{ metadataStage.label }}</dd>
             <dt class="text-[var(--muted)]">音源</dt><dd class="truncate" :title="track.source?.relativePath">{{ track.source?.rootName ?? '—' }}</dd>
           </dl>
-          <div class="mt-4 border-t border-[var(--border)] pt-3"><div class="flex items-center justify-between"><p class="text-xs font-bold">转码输出</p><span class="text-[10px] text-[var(--muted)]">{{ track.variantSummary.length }} 个</span></div><div v-if="track.variantSummary.length" class="mt-2 space-y-2"><div v-for="variant in track.variantSummary" :key="`${variant.quality}-${variant.codec}`" class="rounded-xl bg-[var(--surface-muted)] px-3 py-2"><div class="flex items-center justify-between gap-2"><span class="font-mono text-xs font-bold">{{ variant.quality }}</span><StatusBadge :status="variant.status" :label="variantStatusPresentation(variant.status).label" :tone="variantStatusPresentation(variant.status).tone" /></div><p class="mt-1 text-[10px] text-[var(--muted)]">{{ variant.codec.toUpperCase() }} / {{ variant.container.toUpperCase() }} · {{ bitrate(variant.bitrate) }} · {{ sampleRate(variant.sampleRate) }}</p></div></div><p v-else class="mt-2 text-xs text-[var(--muted)]">尚未生成转码变体</p></div>
+          <div class="mt-4 border-t border-[var(--border)] pt-3"><p class="text-xs font-bold">播放时动态转码</p><p class="mt-2 text-xs leading-5 text-[var(--muted)]">服务端不会预先生成转码变体；开始播放时才根据客户端能力生成临时音频。</p></div>
           <p v-if="writebackErrorDetail" class="mt-3 rounded-xl bg-rose-500/10 p-3 text-xs leading-5 text-[var(--danger)]"><span class="font-semibold">Tag 写回：</span>{{ writebackErrorDetail }}</p>
-          <p v-if="track.mediaProcessing?.lastError" class="mt-3 rounded-xl bg-rose-500/10 p-3 text-xs leading-5 text-[var(--danger)]">{{ track.mediaProcessing.lastError }}</p>
         </div>
       </Transition>
     </Teleport>

@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
+﻿import { test, expect, type Page, type Route } from "@playwright/test";
 
 const runMockSuite = !process.env.ADMIN_E2E_CREDENTIALS_FILE;
 
@@ -364,11 +364,10 @@ test.describe("administrator browser contract", () => {
     await inputs.nth(4).fill("secret");
     await page.getByRole("button", { name: "验证并继续" }).click();
 
-    await expect(page.getByRole("heading", { name: "配置 S3 兼容存储" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "配置本地资产与转码存储" })).toBeVisible();
     inputs = page.locator("main input:visible");
-    await inputs.nth(0).fill("minio.example.com");
-    await inputs.nth(2).fill("access-key");
-    await inputs.nth(3).fill("secret-key");
+    await inputs.nth(0).fill("assets");
+    await inputs.nth(1).fill("transcode");
     await page.getByRole("button", { name: "验证并继续" }).click();
 
     await expect(page.getByRole("heading", { name: "检测 FFmpeg" })).toBeVisible();
@@ -531,11 +530,10 @@ test.describe("administrator browser contract", () => {
     await inputs.nth(3).fill("admin");
     await inputs.nth(4).fill("secret");
     await page.getByRole("button", { name: "验证并继续" }).click();
-    await expect(page.getByRole("heading", { name: "配置 S3 兼容存储" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "配置本地资产与转码存储" })).toBeVisible();
     inputs = page.locator("main input:visible");
-    await inputs.nth(0).fill("minio.example.com");
-    await inputs.nth(2).fill("access-key");
-    await inputs.nth(3).fill("secret-key");
+    await inputs.nth(0).fill("assets");
+    await inputs.nth(1).fill("transcode");
     await page.getByRole("button", { name: "验证并继续" }).click();
     await expect(page.getByRole("heading", { name: "检测 FFmpeg" })).toBeVisible();
     await page.getByRole("button", { name: "验证并继续" }).click();
@@ -626,11 +624,10 @@ async function reachSetupDatabaseDecision(page: Page): Promise<void> {
 }
 
 async function advanceSetupFromStorageToAdministrator(page: Page): Promise<void> {
-  await expect(page.getByRole("heading", { name: "配置 S3 兼容存储" })).toBeVisible();
-  let inputs = page.locator("main input:visible");
-  await inputs.nth(0).fill("minio.example.com");
-  await inputs.nth(2).fill("access-key");
-  await inputs.nth(3).fill("secret-key");
+  await expect(page.getByRole("heading", { name: "配置本地资产与转码存储" })).toBeVisible();
+  const inputs = page.locator("main input:visible");
+  await inputs.nth(0).fill("assets");
+  await inputs.nth(1).fill("transcode");
   await page.getByRole("button", { name: "验证并继续" }).click();
 
   await expect(page.getByRole("heading", { name: "检测 FFmpeg" })).toBeVisible();
@@ -848,7 +845,7 @@ function track(
     id, title, artistCredits: [{ artist: { id: "artist-1", name: "Mock artist" }, role: "PRIMARY", sortOrder: 0 }], artists: ["Mock artist"], album: { id: "album-1", title: "Mock album" }, artwork: null,
     durationMs: 120_000, trackNumber: 1, discNumber: 1, status, audioStatus: state.audioStatus ?? status, metadataStatus: state.latestWritebackErrorCode ? "WRITE_FAILED" : "NORMAL", metadataVersion: 1,
     source: { id: `asset-${id}`, rootId: "source-1", rootName: "Mock source", relativePath: `${id}.flac`, format: "FLAC", status: state.sourceStatus ?? "READY", checksumSha256: null, mode: "READ_WRITE", canWriteBack: true, writebackBlockReason: null },
-    mediaProcessing: { status: "READY", attempts: 1, maxAttempts: 5, lastError: null, updatedAt: "2026-01-01T00:00:00Z" }, variantSummary: [], activeWritebackJobId: null,
+    activeWritebackJobId: null,
     latestWritebackErrorCode: state.latestWritebackErrorCode ?? null, latestWritebackError: state.latestWritebackError ?? null,
     publishedAt: "2026-01-01T00:00:00Z", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z", version,
   };
@@ -944,7 +941,7 @@ function settings() {
   return {
     version: 1, environment: "test", configurationSource: "managed", actualListener: { ipv4: { host: "127.0.0.1", port: 3000 }, ipv6: { host: "::1", port: 3000 } }, restartRequiredFields: [],
     database: { host: "db", port: 5432, database: "xymusic", username: "admin", sslMode: "prefer", maximumConnections: 10, passwordConfigured: true, lockedFields: [] },
-    storage: { endpoint: "http://minio:9000", publicBaseUrl: null, region: "us-east-1", bucket: "xymusic", accessKeyId: "key", secretAccessKeyConfigured: true, forcePathStyle: true, signedUrlTtlSeconds: 300, maxUploadBytes: 1024, lockedFields: [] },
+    storage: { assetDirectory: "assets", transcodeDirectory: "transcode", uploadTtlSeconds: 3600, streamTtlSeconds: 900, streamMaxConcurrent: 4, streamIdleTimeoutSeconds: 30, transcodeTimeoutSeconds: 30, maxUploadBytes: 1024, lockedFields: [] },
     mediaTools: { directory: "tools", ffmpegPath: "", ffprobePath: "", lockedFields: [] }, scraping: { fpcalcPath: "", acoustIdClient: "", lockedFields: [] },
     localLibrary: { name: "Music", directory: "music", mode: "READ_ONLY", enabled: true, syncOnStartup: true, scanIntervalMinutes: null, includePatterns: [], excludePatterns: [], lockedFields: [] },
     registration: { enabled: false, lockedFields: [] }, security: { accessTokenTtlSeconds: 900, refreshTokenTtlSeconds: 86400, lockedFields: [] },

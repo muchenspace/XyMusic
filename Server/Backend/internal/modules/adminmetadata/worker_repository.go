@@ -363,9 +363,9 @@ func (repository *Repository) CommitWriteback(ctx context.Context, input Writeba
 			return NewWritebackError("SOURCE_ASSET_UPLOAD_FAILED", "The rewritten source MIME type is unavailable")
 		}
 		if err := tx.QueryRow(ctx, `
-			insert into media_assets(object_key,kind,mime_type,size_bytes,checksum_sha256,status)
+			insert into media_assets(storage_path,kind,mime_type,size_bytes,checksum_sha256,status)
 			values($1,'AUDIO_SOURCE',$2,$3,$4,'READY')
-			on conflict(object_key) do update set mime_type=excluded.mime_type,
+			on conflict(storage_path) do update set mime_type=excluded.mime_type,
 				size_bytes=excluded.size_bytes,checksum_sha256=excluded.checksum_sha256,
 				status='READY',updated_at=now()
 			returning id::text`, input.SourceObjectKey, input.SourceMIMEType,
@@ -385,14 +385,6 @@ func (repository *Repository) CommitWriteback(ctx context.Context, input Writeba
 	}
 	if sourceCommand.RowsAffected() != 1 {
 		return NewWritebackError("SOURCE_CHANGED", "The source record changed before writeback completion")
-	}
-	if sourceAssetID != "" {
-		if _, err := tx.Exec(ctx, `
-			update track_variants set source_checksum_sha256 = $2, updated_at = now()
-			where track_id = $1 and source_checksum_sha256 = $3`,
-			contextRecord.Metadata.TrackID, input.OutputSHA256, input.OriginalSHA256); err != nil {
-			return fmt.Errorf("refresh rewritten source variant fingerprints: %w", err)
-		}
 	}
 	metadataJSON, err := encodeJSON(input.Metadata)
 	if err != nil {
@@ -635,7 +627,7 @@ func loadWritebackContext(
 				  AND active_scan.status = 'RUNNING' AND active_scan.locked_until > now()
 			),
 			track.status::text,
-			artwork.object_key, artwork.mime_type
+			artwork.storage_path, artwork.mime_type
 		from metadata_writeback_jobs job
 		join track_metadata metadata on metadata.track_id = job.track_id
 		join local_music_sources source on source.id = job.source_id

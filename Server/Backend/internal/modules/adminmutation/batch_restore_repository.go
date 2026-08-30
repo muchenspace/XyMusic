@@ -53,14 +53,20 @@ func (repository *Repository) RestoreTracksBatch(
 		}
 		var playable bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(
-			SELECT 1 FROM track_variants WHERE track_id=$1 AND status='READY'
+			SELECT 1 FROM local_music_source_tracks mapped
+			JOIN local_music_sources source ON source.id=mapped.source_id
+			WHERE mapped.track_id=$1 AND source.status='READY'
+			UNION
+			SELECT 1 FROM media_uploads upload
+			JOIN media_assets asset ON asset.id=upload.asset_id
+			WHERE upload.track_id=$1 AND asset.status='READY'
 		)`, item.TrackID).Scan(&playable); err != nil {
-			return nil, fmt.Errorf("inspect batch restore playable variant: %w", err)
+			return nil, fmt.Errorf("inspect batch restore playable source: %w", err)
 		}
 		if !playable {
 			return nil, apperror.Unprocessable(
 				apperror.CodeTrackNotPlayable,
-				"Track has no ready playback variant",
+				"Track has no ready audio source",
 				map[string]any{"trackId": item.TrackID},
 			)
 		}
