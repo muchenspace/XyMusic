@@ -8,6 +8,7 @@ import type {
   JobPage,
   JobSummary,
   MetadataWritebackJob,
+  WritebackListQuery,
 } from "@/features/jobs/domain/models";
 
 export class JobAdminUseCases {
@@ -29,8 +30,8 @@ export class JobAdminUseCases {
     return this.gateway.cancel(jobId);
   }
 
-  listWritebacks(page: number, pageSize: number, status: string, signal?: AbortSignal): Promise<JobPage<MetadataWritebackJob>> {
-    return this.gateway.listWritebacks(page, pageSize, status, signal);
+  listWritebacks(query: WritebackListQuery, signal?: AbortSignal): Promise<JobPage<MetadataWritebackJob>> {
+    return this.gateway.listWritebacks(query, signal);
   }
 
   changeWriteback(

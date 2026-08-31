@@ -999,6 +999,12 @@ func databaseConfig(input DatabaseInput) (config.Database, error) {
 }
 
 func databaseInputValidation(field, detail string) error {
+	// Keep a stable, field-specific prefix even when the detailed localized
+	// message is supplied by an older configuration layer. The admin UI uses
+	// this to distinguish database input errors from connectivity failures.
+	if !strings.Contains(detail, "\u6570\u636e\u5e93") {
+		detail = "\u6570\u636e\u5e93\uff1a" + detail
+	}
 	return apperror.Validation(detail, map[string][]string{field: {detail}})
 }
 

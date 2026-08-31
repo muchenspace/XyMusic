@@ -456,6 +456,101 @@ func TestCompletedTranscodeIsPersistedAndReusedByNewManager(t *testing.T) {
 	}
 }
 
+func TestCompletedCachedSessionSurvivesIdleTimeout(t *testing.T) {
+	tempDir := t.TempDir()
+	mediaStore, err := localmedia.NewStore(filepath.Join(tempDir, "assets"), filepath.Join(tempDir, "transcode"), 10*1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewTranscodeSessionManager(mediaStore, "ffmpeg-that-must-not-run", 0, 1, time.Second, time.Minute, 10*1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+
+	fixedNow := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	manager.now = func() time.Time { return fixedNow }
+	cacheKey := "track:pause-resume-cache"
+	profile := OutputProfile{Quality: QualityStandard, Codec: "mp3", Container: "mp3", MimeType: "audio/mpeg", Bitrate: 128000}
+	finalPath, _ := manager.cachePaths(cacheKey, profile.Container)
+	if err := os.WriteFile(finalPath, []byte("persisted-variant"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sessionID := uuid.NewString()
+	manager.RegisterSession(TranscodeSessionParams{
+		SessionID: sessionID, TrackID: uuid.NewString(), SourcePath: "unused",
+		CacheKey: cacheKey, Profile: profile, ExpiresAt: fixedNow.Add(time.Hour),
+	})
+	manager.cleanupExpiredSessionsAt(fixedNow.Add(2 * time.Second))
+
+	manager.sessionsMu.RLock()
+	_, stillRegistered := manager.sessions[sessionID]
+	manager.sessionsMu.RUnlock()
+	if !stillRegistered {
+		t.Fatal("completed cacheable session was removed by idle timeout")
+	}
+	if _, err := os.Stat(finalPath); err != nil {
+		t.Fatalf("cache file removed during idle cleanup: %v", err)
+	}
+}
+
+func TestExpiredPlaybackSessionDoesNotDeleteReusableTranscodeCache(t *testing.T) {
+	tempDir := t.TempDir()
+	mediaStore, err := localmedia.NewStore(filepath.Join(tempDir, "assets"), filepath.Join(tempDir, "transcode"), 10*1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewTranscodeSessionManager(mediaStore, "ffmpeg-that-must-not-run", 0, 1, time.Minute, time.Minute, 10*1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+
+	fixedNow := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	manager.now = func() time.Time { return fixedNow }
+	cacheKey := "track:expired-session-cache"
+	profile := OutputProfile{Quality: QualityStandard, Codec: "mp3", Container: "mp3", MimeType: "audio/mpeg", Bitrate: 128000}
+	finalPath, partialPath := manager.cachePaths(cacheKey, profile.Container)
+	if err := os.WriteFile(finalPath, []byte("persisted-variant"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(partialPath)
+
+	expiredSession := uuid.NewString()
+	manager.RegisterSession(TranscodeSessionParams{
+		SessionID: expiredSession, TrackID: uuid.NewString(), SourcePath: "unused",
+		CacheKey: cacheKey, Profile: profile, ExpiresAt: fixedNow.Add(-time.Minute),
+	})
+	manager.cleanupExpiredSessions()
+
+	if _, err := os.Stat(finalPath); err != nil {
+		t.Fatalf("expired session removed reusable cache: %v", err)
+	}
+	manager.sessionsMu.RLock()
+	_, stillRegistered := manager.sessions[expiredSession]
+	manager.sessionsMu.RUnlock()
+	if stillRegistered {
+		t.Fatal("expired playback session was not removed")
+	}
+
+	nextSession := uuid.NewString()
+	manager.RegisterSession(TranscodeSessionParams{
+		SessionID: nextSession, TrackID: uuid.NewString(), SourcePath: "unused",
+		CacheKey: cacheKey, Profile: profile, ExpiresAt: fixedNow.Add(time.Minute),
+	})
+	path, err := manager.GetOrStartTranscode(nil, nextSession)
+	if err != nil {
+		t.Fatalf("reuse persisted cache: %v", err)
+	}
+	if path != finalPath {
+		t.Fatalf("reused path = %q, want %q", path, finalPath)
+	}
+	if manager.metrics.TotalStarted != 0 {
+		t.Fatalf("cache reuse started FFmpeg: %+v", manager.metrics)
+	}
+}
+
 func TestGrowingFileReaderReturnsBytesBeforeTranscodeCompletes(t *testing.T) {
 	tempDir := t.TempDir()
 	partialPath := filepath.Join(tempDir, "stream.partial.mp3")

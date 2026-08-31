@@ -145,6 +145,11 @@ export interface TrackTagValues {
 
 export interface TrackDetail extends TrackSummary {
   lyrics: Array<{ id: string; language: string; format: "PLAIN" | "LRC"; timing: LyricTiming; content: string; isDefault: boolean; version: number; updatedAt: string }>;
+  lyricPage: number;
+  lyricPageSize: number;
+  lyricTotal: number;
+  lyricTotalPages: number;
+  nextCursor?: string;
 }
 
 export interface TrackMetadataRecord {
@@ -180,6 +185,7 @@ export interface AlbumDetail extends AlbumSummary {
   trackPageSize: number;
   trackTotal: number;
   trackTotalPages: number;
+  nextCursor?: string;
 }
 
 export interface AlbumDuplicateGroup {
@@ -191,6 +197,7 @@ export interface AlbumDuplicateGroup {
   albumPageSize: number;
   albumTotal: number;
   albumTotalPages: number;
+  albumNextCursor?: string;
 }
 
 export interface AlbumDuplicateQuery {
@@ -199,6 +206,10 @@ export interface AlbumDuplicateQuery {
   albumId?: string;
   albumPage?: number;
   albumPageSize?: number;
+  cursor?: string;
+  cursorMode?: "cursor" | "offset";
+  albumCursor?: string;
+  albumCursorMode?: "cursor" | "offset";
 }
 
 export interface AlbumDuplicateSummary {
@@ -209,6 +220,7 @@ export interface AlbumDuplicateSummary {
   pageSize: number;
   total: number;
   totalPages: number;
+  nextCursor?: string;
 }
 
 export interface AlbumMergeResult {
@@ -244,6 +256,7 @@ export interface MusicPage<T> {
   pageSize: number;
   total: number;
   totalPages?: number;
+  nextCursor?: string;
 }
 
 export interface MusicListQuery {
@@ -252,6 +265,8 @@ export interface MusicListQuery {
   search?: string;
   sort?: string;
   order?: "asc" | "desc";
+  cursor?: string;
+  cursorMode?: "cursor" | "offset";
 }
 
 export interface TrackListQuery extends MusicListQuery {

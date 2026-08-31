@@ -36,13 +36,8 @@ func TestBatchPresentationSeparatesSkippedAndKeepsUnsuccessful(t *testing.T) {
 	}
 }
 
-func TestCreateBatchRejectsMixedSelectionBeforeCreatingWritebackJob(t *testing.T) {
-	preflightErr := apperror.New(
-		apperror.CodeForbidden,
-		"The music source is read-only",
-		apperror.WithMetadata(map[string]any{"trackId": "track-read-only"}),
-	)
-	store := &storeStub{validateBatchWritebackErr: preflightErr}
+func TestCreateBatchAllowsMixedSelectionForPerItemWriteback(t *testing.T) {
+	store := &storeStub{createBatchID: "job-mixed"}
 	processor := &batchProcessorStub{metadataByTrack: map[string]TrackMetadata{
 		"track-writable":  metadataFixture(1),
 		"track-read-only": metadataFixture(2),
@@ -61,10 +56,10 @@ func TestCreateBatchRejectsMixedSelectionBeforeCreatingWritebackJob(t *testing.T
 			Fields: ApplyFields{Title: true}, WriteBack: true, Reason: "batch writeback preflight",
 		},
 	}
-	if _, err := service.Create(context.Background(), "admin", input); !errors.Is(err, preflightErr) {
+	if _, err := service.Create(context.Background(), "admin", input); err != nil {
 		t.Fatalf("create error = %v", err)
 	}
-	if store.validateBatchWritebackCalls != 1 || len(store.validateBatchWritebackItems) != 2 || store.createBatchCalls != 0 {
+	if store.validateBatchWritebackCalls != 1 || len(store.validateBatchWritebackItems) != 2 || store.createBatchCalls != 1 {
 		t.Fatalf(
 			"preflight/create calls = %d/%d, items=%#v",
 			store.validateBatchWritebackCalls,
@@ -91,6 +86,23 @@ func TestCreateBatchValidatesItemsBeforeMissingFieldPrefilter(t *testing.T) {
 	}
 	if len(processor.metadataTrackIDs) != 0 || store.createBatchCalls != 0 {
 		t.Fatalf("metadata/create calls = %d/%d", len(processor.metadataTrackIDs), store.createBatchCalls)
+	}
+}
+
+func TestCreateBatchValidationAllowsMoreThanFiveThousandTracks(t *testing.T) {
+	items := make([]BatchItemInput, 5001)
+	for index := range items {
+		items[index] = BatchItemInput{TrackID: fmt.Sprintf("track-%d", index), ExpectedVersion: 1}
+	}
+	input := CreateBatchInput{
+		Items: items,
+		Options: BatchOptions{
+			Sources: []Source{SourceQMusic}, MatchMode: MatchStrict,
+			Fields: ApplyFields{Title: true}, Reason: "large batch validation",
+		},
+	}
+	if err := validateCreateBatch(input); err != nil {
+		t.Fatalf("large batch validation error = %v", err)
 	}
 }
 
@@ -289,6 +301,103 @@ func TestBatchItemAppliesFirstReliableCandidate(t *testing.T) {
 	}
 }
 
+func TestBatchItemLooseMatchAppliesCandidateBelowStrictThreshold(t *testing.T) {
+	processor := &batchProcessorStub{
+		metadata: metadataFixture(1),
+		matches: []Candidate{{
+			ID: "candidate", Name: "Song", Source: SourceQMusic,
+			TitleScore: floatPointer(1), Score: floatPointer(1),
+		}},
+	}
+	service, err := NewBatchService(BatchServiceDependencies{Store: &storeStub{}, Processor: processor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := "admin"
+	status, candidate, _ := service.executeItem(context.Background(), ClaimedBatchItem{
+		Job: BatchJobRecord{ID: "job", RequestedBy: &actor, Options: BatchOptions{
+			Sources: []Source{SourceQMusic}, MatchMode: MatchSimple,
+			Fields: ApplyFields{Title: true}, Reason: "loose match",
+		}},
+		Item: BatchItemRecord{ID: "item", TrackID: "track", ExpectedVersion: 1},
+	}, nilAtomicBool())
+	if status != ItemSucceeded || candidate == nil || candidate.ID != "candidate" || processor.applyCalls != 1 {
+		t.Fatalf("item result/apply = %s/%#v/%d", status, candidate, processor.applyCalls)
+	}
+}
+
+func TestBatchItemLooseMatchAppliesHighestScoringCandidateAcrossSources(t *testing.T) {
+	processor := &batchProcessorStub{
+		metadata: metadataFixture(1),
+		matchesBySource: map[Source][]Candidate{
+			SourceQMusic:  {{ID: "qmusic", Name: "Song", Source: SourceQMusic, TitleScore: floatPointer(2), Score: floatPointer(2)}},
+			SourceNetease: {{ID: "netease", Name: "Song", Source: SourceNetease, TitleScore: floatPointer(2), Score: floatPointer(6)}},
+			SourceKugou:   {{ID: "kugou", Name: "Song", Source: SourceKugou, TitleScore: floatPointer(2), Score: floatPointer(4)}},
+		},
+	}
+	service, err := NewBatchService(BatchServiceDependencies{Store: &storeStub{}, Processor: processor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := "admin"
+	status, candidate, _ := service.executeItem(context.Background(), ClaimedBatchItem{
+		Job: BatchJobRecord{ID: "job", RequestedBy: &actor, Options: BatchOptions{
+			Sources: []Source{SourceQMusic, SourceNetease, SourceKugou}, MatchMode: MatchSimple,
+			Fields: ApplyFields{Title: true}, Reason: "best loose match",
+		}},
+		Item: BatchItemRecord{ID: "item", TrackID: "track", ExpectedVersion: 1},
+	}, nilAtomicBool())
+	if status != ItemSucceeded || candidate == nil || candidate.ID != "netease" || processor.applyCalls != 1 {
+		t.Fatalf("item result/apply = %s/%#v/%d", status, candidate, processor.applyCalls)
+	}
+	if processor.applyInput.Candidate.ID != "netease" {
+		t.Fatalf("applied candidate = %#v", processor.applyInput.Candidate)
+	}
+}
+
+func TestBatchItemLooseMatchSkipsOnlyWhenAllSourcesHaveNoResults(t *testing.T) {
+	processor := &batchProcessorStub{metadata: metadataFixture(1), matchesBySource: map[Source][]Candidate{
+		SourceQMusic: nil, SourceNetease: {},
+	}}
+	service, err := NewBatchService(BatchServiceDependencies{Store: &storeStub{}, Processor: processor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := "admin"
+	status, candidate, message := service.executeItem(context.Background(), ClaimedBatchItem{
+		Job: BatchJobRecord{ID: "job", RequestedBy: &actor, Options: BatchOptions{
+			Sources: []Source{SourceQMusic, SourceNetease}, MatchMode: MatchSimple,
+			Fields: ApplyFields{Title: true}, Reason: "empty loose search",
+		}},
+		Item: BatchItemRecord{ID: "item", TrackID: "track", ExpectedVersion: 1},
+	}, nilAtomicBool())
+	if status != ItemSkipped || candidate != nil || message != "No search result was found" || processor.applyCalls != 0 {
+		t.Fatalf("item result/apply = %s/%#v/%q/%d", status, candidate, message, processor.applyCalls)
+	}
+}
+
+func TestBatchItemStrictMatchStillSkipsWithoutReliableCandidate(t *testing.T) {
+	processor := &batchProcessorStub{metadata: metadataFixture(1), matches: []Candidate{{
+		ID: "candidate", Name: "Song", Source: SourceQMusic,
+		TitleScore: floatPointer(1), Score: floatPointer(2),
+	}}}
+	service, err := NewBatchService(BatchServiceDependencies{Store: &storeStub{}, Processor: processor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := "admin"
+	status, candidate, message := service.executeItem(context.Background(), ClaimedBatchItem{
+		Job: BatchJobRecord{ID: "job", RequestedBy: &actor, Options: BatchOptions{
+			Sources: []Source{SourceQMusic}, MatchMode: MatchStrict,
+			Fields: ApplyFields{Title: true}, Reason: "strict no match",
+		}},
+		Item: BatchItemRecord{ID: "item", TrackID: "track", ExpectedVersion: 1},
+	}, nilAtomicBool())
+	if status != ItemSkipped || candidate != nil || message != "No reliable match was found" || processor.applyCalls != 0 {
+		t.Fatalf("item result/apply = %s/%#v/%q/%d", status, candidate, message, processor.applyCalls)
+	}
+}
+
 func TestBatchItemUsesMetadataAttachedToClaim(t *testing.T) {
 	metadata := metadataFixture(3)
 	processor := &batchProcessorStub{
@@ -316,6 +425,35 @@ func TestBatchItemUsesMetadataAttachedToClaim(t *testing.T) {
 	}
 	if len(processor.metadataTrackIDs) != 0 {
 		t.Fatalf("metadata lookup calls = %d", len(processor.metadataTrackIDs))
+	}
+}
+
+func TestBatchItemSkipsWritebackForNonWritableSource(t *testing.T) {
+	reason := "The music source is read-only"
+	metadata := metadataFixture(1)
+	metadata.Source = &MetadataSource{ID: "source", CanWriteBack: false, WritebackBlockReason: &reason}
+	processor := &batchProcessorStub{matches: []Candidate{{
+		ID: "candidate", Name: "Song", Source: SourceQMusic,
+		TitleScore: floatPointer(2), Score: floatPointer(4),
+	}}}
+	service, err := NewBatchService(BatchServiceDependencies{Store: &storeStub{}, Processor: processor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := "admin"
+	status, candidate, message := service.executeItem(context.Background(), ClaimedBatchItem{
+		Job: BatchJobRecord{ID: "job", RequestedBy: &actor, Options: BatchOptions{
+			Sources: []Source{SourceQMusic}, MatchMode: MatchStrict,
+			Fields: ApplyFields{Title: true}, WriteBack: true, Reason: "mixed batch writeback",
+		}},
+		Item:     BatchItemRecord{ID: "item", TrackID: "track", ExpectedVersion: 1},
+		Metadata: &metadata,
+	}, nilAtomicBool())
+	if status != ItemSucceeded || candidate == nil || !strings.Contains(message, "Tag writeback skipped: The music source is read-only") {
+		t.Fatalf("item result = %s/%#v/%q", status, candidate, message)
+	}
+	if processor.applyCalls != 1 || processor.applyInput.WriteBack {
+		t.Fatalf("apply writeback = %d/%t", processor.applyCalls, processor.applyInput.WriteBack)
 	}
 }
 
@@ -860,6 +998,7 @@ type batchProcessorStub struct {
 	metadataByTrack  map[string]TrackMetadata
 	metadataTrackIDs []string
 	matches          []Candidate
+	matchesBySource  map[Source][]Candidate
 	searchErr        error
 	searchCalls      int
 	applyResult      ApplyResult
@@ -1236,8 +1375,11 @@ func (stub *batchProcessorStub) TrackMetadata(_ context.Context, trackID string)
 	}
 	return stub.metadata, stub.metadataErr
 }
-func (stub *batchProcessorStub) Search(context.Context, SearchInput) ([]Candidate, error) {
+func (stub *batchProcessorStub) Search(_ context.Context, input SearchInput) ([]Candidate, error) {
 	stub.searchCalls++
+	if stub.matchesBySource != nil {
+		return stub.matchesBySource[input.Source], stub.searchErr
+	}
 	return stub.matches, stub.searchErr
 }
 func (stub *batchProcessorStub) Apply(_ context.Context, _, _ string, input ApplyInput) (ApplyResult, error) {

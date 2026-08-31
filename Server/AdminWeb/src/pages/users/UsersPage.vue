@@ -12,6 +12,7 @@ import BaseDialog from "@/components/BaseDialog.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import StatePanel from "@/components/StatePanel.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
+import VirtualTable from "@/components/VirtualTable.vue";
 import type { CreateUserInput, UpdateUserInput, UserRole, UserSessionSummary, UserStatus, UserSummary } from "@/features/users/domain/models";
 import { useUserAdmin } from "@/app/services/users";
 import { DEFAULT_PAGE_SIZE } from "@/shared/presentation/pagination";
@@ -29,8 +30,12 @@ const status = ref("");
 const role = ref("");
 const page = ref(1);
 const pageSize = ref(DEFAULT_PAGE_SIZE);
+const cursor = ref("");
+const cursorHistory = ref(new Map<number, string>());
 const sessionPage = ref(1);
 const sessionPageSize = ref(DEFAULT_PAGE_SIZE);
+const sessionCursor = ref("");
+const sessionCursorHistory = ref(new Map<number, string>());
 const editorOpen = ref(false);
 const detailOpen = ref(false);
 const avatarOpen = ref(false);
@@ -51,19 +56,58 @@ let allowConfirmClose = false;
 let allowSessionClose = false;
 
 const usersQuery = useQuery({
-  queryKey: computed(() => ["admin", "users", { page: page.value, pageSize: pageSize.value, query: debouncedSearch.value, status: status.value, role: role.value }]),
-  queryFn: ({ signal }) => userAdmin.list({ page: page.value, pageSize: pageSize.value, search: debouncedSearch.value, status: status.value, role: role.value }, signal),
+  queryKey: computed(() => ["admin", "users", { page: page.value, pageSize: pageSize.value, query: debouncedSearch.value, status: status.value, role: role.value, cursor: cursor.value }]),
+  queryFn: ({ signal }) => userAdmin.list({ page: page.value, pageSize: pageSize.value, search: debouncedSearch.value, status: status.value, role: role.value, cursor: cursor.value || undefined, cursorMode: "cursor" }, signal),
   placeholderData: keepPreviousData,
 });
+watch([status, role, debouncedSearch], () => resetPaging());
 const detailQuery = useQuery({
-  queryKey: computed(() => ["admin", "users", selected.value?.id, "sessions", sessionPage.value, sessionPageSize.value]),
-  queryFn: ({ signal }) => userAdmin.detail(selected.value!.id, sessionPage.value, sessionPageSize.value, signal),
+  queryKey: computed(() => ["admin", "users", selected.value?.id, "sessions", { page: sessionPage.value, pageSize: sessionPageSize.value, cursor: sessionCursor.value }]),
+  queryFn: ({ signal }) => userAdmin.detail(selected.value!.id, { page: sessionPage.value, pageSize: sessionPageSize.value, cursor: sessionCursor.value || undefined, cursorMode: "cursor" }, signal),
   enabled: computed(() => detailOpen.value && Boolean(selected.value)),
 });
 
-function resetFilters(): void { search.value = ""; status.value = ""; role.value = ""; page.value = 1; }
-function changePageSize(value: number): void { pageSize.value = value; page.value = 1; }
-function changeSessionPageSize(value: number): void { sessionPageSize.value = value; sessionPage.value = 1; }
+function resetPaging(): void {
+  page.value = 1;
+  cursor.value = "";
+  cursorHistory.value = new Map([[1, ""]]);
+}
+function userKey(user: UserSummary): string { return user.id; }
+
+function resetSessionPaging(): void {
+  sessionPage.value = 1;
+  sessionCursor.value = "";
+  sessionCursorHistory.value = new Map([[1, ""]]);
+}
+function changePage(nextPage: number): void {
+  if (usersQuery.isFetching.value || !Number.isSafeInteger(nextPage) || nextPage < 1 || nextPage === page.value) return;
+  const next = new Map(cursorHistory.value);
+  if (nextPage < page.value) cursor.value = next.get(nextPage) ?? "";
+  else {
+    const nextCursor = usersQuery.data.value?.nextCursor;
+    if (!nextCursor) return;
+    next.set(nextPage, nextCursor);
+    cursor.value = nextCursor;
+  }
+  cursorHistory.value = next;
+  page.value = nextPage;
+}
+function changeSessionPage(nextPage: number): void {
+  if (detailQuery.isFetching.value || !Number.isSafeInteger(nextPage) || nextPage < 1 || nextPage === sessionPage.value) return;
+  const next = new Map(sessionCursorHistory.value);
+  if (nextPage < sessionPage.value) sessionCursor.value = next.get(nextPage) ?? "";
+  else {
+    const nextCursor = detailQuery.data.value?.nextSessionCursor;
+    if (!nextCursor) return;
+    next.set(nextPage, nextCursor);
+    sessionCursor.value = nextCursor;
+  }
+  sessionCursorHistory.value = next;
+  sessionPage.value = nextPage;
+}
+function resetFilters(): void { search.value = ""; status.value = ""; role.value = ""; resetPaging(); }
+function changePageSize(value: number): void { pageSize.value = value; resetPaging(); }
+function changeSessionPageSize(value: number): void { sessionPageSize.value = value; resetSessionPaging(); }
 function openCreate(): void {
   Object.assign(form, { id: "", username: "", displayName: "", bio: "", role: "USER", status: "ACTIVE", password: "", reason: "", version: 0 });
   fieldErrors.value = {}; actionError.value = ""; editorOpen.value = true;
@@ -73,7 +117,7 @@ function openEdit(user: UserSummary): void {
   Object.assign(form, { id: user.id, username: user.username, displayName: user.displayName, bio: user.bio ?? "", role: user.role, status: user.status, password: "", reason: "", version: user.version });
   fieldErrors.value = {}; actionError.value = ""; editorOpen.value = true;
 }
-function openDetail(user: UserSummary): void { selected.value = user; sessionPage.value = 1; detailOpen.value = true; }
+function openDetail(user: UserSummary): void { selected.value = user; resetSessionPaging(); detailOpen.value = true; }
 function openAvatar(user: UserSummary): void { selected.value = user; avatarOpen.value = true; }
 function openPassword(user: UserSummary): void { selected.value = user; Object.assign(passwordForm, { password: "", reason: "" }); actionError.value = ""; passwordOpen.value = true; }
 function askUserAction(user: UserSummary, action: "delete" | "restore"): void { selected.value = user; confirmAction.value = action; operationReason.value = ""; actionError.value = ""; confirmOpen.value = true; }
@@ -182,7 +226,22 @@ watch(sessionOpen, (value) => { if (!value && sessionMutation.isPending.value &&
     <section class="ui-card overflow-hidden">
       <div class="flex flex-col gap-3 border-b border-[var(--border)] p-4 lg:flex-row"><div class="relative flex-1"><Search :size="16" class="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--muted)]" /><input v-model="search" class="ui-input !pl-10" type="search" placeholder="搜索用户名或显示名称" @input="page = 1" /></div><select v-model="status" class="ui-select lg:w-40" @change="page = 1"><option value="">全部状态</option><option value="ACTIVE">正常</option><option value="SUSPENDED">已停用</option><option value="DELETED">已删除</option></select><select v-model="role" class="ui-select lg:w-36" @change="page = 1"><option value="">全部角色</option><option value="ADMIN">管理员</option><option value="USER">普通用户</option></select><AppButton variant="ghost" :disabled="!search && !status && !role" @click="resetFilters"><template #icon><X :size="15" /></template>清除</AppButton><AppButton icon-only :loading="usersQuery.isFetching.value" @click="usersQuery.refetch()"><template #icon><RefreshCw :size="16" /></template>刷新</AppButton></div>
       <StatePanel v-if="usersQuery.isPending.value" state="loading" /><StatePanel v-else-if="usersQuery.isError.value" state="error" :detail="apiErrorMessage(usersQuery.error.value, '无法读取用户列表。')" @retry="usersQuery.refetch()" /><StatePanel v-else-if="!usersQuery.data.value?.items.length" state="empty" title="没有符合条件的用户" />
-      <template v-else><div class="overflow-x-auto"><table class="data-table min-w-[800px]"><thead><tr><th>用户</th><th>角色</th><th>状态</th><th>最近更新</th><th>创建时间</th><th>操作</th></tr></thead><tbody><tr v-for="user in usersQuery.data.value.items" :key="user.id" class="cursor-pointer" tabindex="0" :aria-label="`查看用户：${user.displayName}`" @click="openDetail(user)" @keydown.enter="openDetail(user)" @keydown.space.prevent="openDetail(user)"><td><div class="flex items-center gap-3"><span class="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--primary-soft)] text-sm font-extrabold text-[var(--primary)]"><img v-if="user.avatar" :src="user.avatar.url" :alt="`${user.displayName}的头像`" class="h-full w-full object-cover" width="40" height="40" loading="lazy" decoding="async" /><span v-else>{{ (user.displayName || user.username).slice(0, 2).toUpperCase() }}</span></span><div><p class="font-semibold">{{ user.displayName }}</p><p class="mt-0.5 text-xs text-[var(--muted)]">@{{ user.username }}</p></div></div></td><td><span class="inline-flex items-center gap-1.5 font-semibold"><Shield v-if="user.role === 'ADMIN'" :size="14" class="text-[var(--primary)]" /><UserRound v-else :size="14" />{{ user.role === 'ADMIN' ? '管理员' : '普通用户' }}</span></td><td><StatusBadge :status="user.status" dot /></td><td class="text-xs text-[var(--muted)]">{{ formatDate(user.updatedAt) }}</td><td class="text-xs text-[var(--muted)]">{{ formatDate(user.createdAt) }}</td><td @click.stop @keydown.stop><div class="flex gap-1"><button class="btn btn-ghost btn-icon" type="button" :aria-label="`修改用户头像：${user.displayName}`" @click="openAvatar(user)"><Camera :size="15" /></button><button class="btn btn-ghost btn-icon" type="button" :aria-label="`编辑用户：${user.displayName}`" @click="openEdit(user)"><Pencil :size="15" /></button><button class="btn btn-ghost btn-icon" type="button" :aria-label="`重置密码：${user.displayName}`" @click="openPassword(user)"><KeyRound :size="15" /></button><button v-if="user.status === 'DELETED'" class="btn btn-ghost btn-icon" type="button" :aria-label="`恢复用户：${user.displayName}`" @click="askUserAction(user, 'restore')"><RotateCcw :size="15" /></button><button v-else class="btn btn-ghost btn-icon text-[var(--danger)]" type="button" :aria-label="`删除用户：${user.displayName}`" :disabled="user.id === auth.profile?.id" @click="askUserAction(user, 'delete')"><Trash2 :size="15" /></button></div></td></tr></tbody></table></div><AppPagination :page="page" :page-size="pageSize" :total="usersQuery.data.value.total" @change="page = $event" @page-size-change="changePageSize" /></template>
+      <template v-else><VirtualTable
+          :items="usersQuery.data.value.items"
+          :columns="6"
+          :row-height="72"
+          :overscan="8"
+          min-width="800px"
+          :row-key="userKey"
+        >
+          <template #header>
+<tr><th>用户</th><th>角色</th><th>状态</th><th>最近更新</th><th>创建时间</th><th>操作</th></tr>
+          </template>
+          <template #default="{ item: user }">
+<tr class="cursor-pointer" tabindex="0" :aria-label="`查看用户：${user.displayName}`" @click="openDetail(user)" @keydown.enter="openDetail(user)" @keydown.space.prevent="openDetail(user)"><td><div class="flex items-center gap-3"><span class="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--primary-soft)] text-sm font-extrabold text-[var(--primary)]"><img v-if="user.avatar" :src="user.avatar.url" :alt="`${user.displayName}的头像`" class="h-full w-full object-cover" width="40" height="40" loading="lazy" decoding="async" /><span v-else>{{ (user.displayName || user.username).slice(0, 2).toUpperCase() }}</span></span><div><p class="font-semibold">{{ user.displayName }}</p><p class="mt-0.5 text-xs text-[var(--muted)]">@{{ user.username }}</p></div></div></td><td><span class="inline-flex items-center gap-1.5 font-semibold"><Shield v-if="user.role === 'ADMIN'" :size="14" class="text-[var(--primary)]" /><UserRound v-else :size="14" />{{ user.role === 'ADMIN' ? '管理员' : '普通用户' }}</span></td><td><StatusBadge :status="user.status" dot /></td><td class="text-xs text-[var(--muted)]">{{ formatDate(user.updatedAt) }}</td><td class="text-xs text-[var(--muted)]">{{ formatDate(user.createdAt) }}</td><td @click.stop @keydown.stop><div class="flex gap-1"><button class="btn btn-ghost btn-icon" type="button" :aria-label="`修改用户头像：${user.displayName}`" @click="openAvatar(user)"><Camera :size="15" /></button><button class="btn btn-ghost btn-icon" type="button" :aria-label="`编辑用户：${user.displayName}`" @click="openEdit(user)"><Pencil :size="15" /></button><button class="btn btn-ghost btn-icon" type="button" :aria-label="`重置密码：${user.displayName}`" @click="openPassword(user)"><KeyRound :size="15" /></button><button v-if="user.status === 'DELETED'" class="btn btn-ghost btn-icon" type="button" :aria-label="`恢复用户：${user.displayName}`" @click="askUserAction(user, 'restore')"><RotateCcw :size="15" /></button><button v-else class="btn btn-ghost btn-icon text-[var(--danger)]" type="button" :aria-label="`删除用户：${user.displayName}`" :disabled="user.id === auth.profile?.id" @click="askUserAction(user, 'delete')"><Trash2 :size="15" /></button></div></td></tr>
+          </template>
+        </VirtualTable>
+        <AppPagination :page="page" :page-size="pageSize" :total="usersQuery.data.value.total" :total-pages="usersQuery.data.value.totalPages" cursor @change="changePage" @page-size-change="changePageSize" /></template>
     </section>
 
     <BaseDialog v-model="editorOpen" :title="form.id ? '编辑用户' : '创建用户'" :description="form.id ? '修改内容会记录操作原因。' : '创建可立即登录的新账户。'">
@@ -192,7 +251,7 @@ watch(sessionOpen, (value) => { if (!value && sessionMutation.isPending.value &&
 
     <BaseDialog v-model="detailOpen" title="用户详情" description="账户资料与登录会话。" side="right">
       <StatePanel v-if="detailQuery.isPending.value" state="loading" compact /><StatePanel v-else-if="detailQuery.isError.value" state="error" compact :detail="apiErrorMessage(detailQuery.error.value, '无法读取用户详情。')" @retry="detailQuery.refetch()" />
-      <template v-else-if="detailQuery.data.value"><div class="flex items-center gap-4 rounded-2xl bg-[var(--surface-muted)] p-4"><span class="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--primary-soft)] font-extrabold text-[var(--primary)]"><img v-if="detailQuery.data.value.avatar" :src="detailQuery.data.value.avatar.url" :alt="`${detailQuery.data.value.displayName}的头像`" class="h-full w-full object-cover" width="48" height="48" decoding="async" /><span v-else>{{ detailQuery.data.value.displayName.slice(0, 2).toUpperCase() }}</span></span><div class="min-w-0 flex-1"><p class="truncate text-lg font-bold">{{ detailQuery.data.value.displayName }}</p><p class="truncate text-sm text-[var(--muted)]">@{{ detailQuery.data.value.username }}</p></div><button class="btn btn-ghost btn-icon" type="button" aria-label="修改用户头像" @click="openAvatar(detailQuery.data.value)"><Camera :size="15" /></button><StatusBadge :status="detailQuery.data.value.status" /></div><p v-if="detailQuery.data.value.bio" class="mt-4 text-sm leading-6 text-[var(--muted)]">{{ detailQuery.data.value.bio }}</p><h3 class="mt-6 font-bold">登录会话</h3><div v-if="detailQuery.data.value.sessions.length" class="mt-3 space-y-3"><article v-for="session in detailQuery.data.value.sessions" :key="session.id" class="rounded-xl border border-[var(--border)] p-4"><div class="flex items-start gap-3"><Laptop :size="18" class="mt-0.5 text-[var(--primary)]" /><div class="min-w-0 flex-1"><p class="font-semibold">{{ session.deviceName }}</p><p class="mt-1 text-xs text-[var(--muted)]">{{ session.platform }} · {{ session.appVersion }}</p><p class="mt-2 text-xs text-[var(--muted)]">最后活动 {{ formatRelative(session.lastSeenAt) }}</p></div><StatusBadge :status="session.active ? 'ACTIVE' : 'DELETED'" :label="session.active ? '有效' : '已撤销'" /></div><button v-if="session.active" class="btn btn-danger mt-3 w-full" type="button" @click="askRevoke(session)">撤销此会话</button></article><AppPagination :page="sessionPage" :page-size="sessionPageSize" :total="detailQuery.data.value.sessionTotal" :total-pages="detailQuery.data.value.sessionTotalPages" @change="sessionPage = $event" @page-size-change="changeSessionPageSize" /></div><StatePanel v-else state="empty" compact title="没有登录会话" /></template>
+      <template v-else-if="detailQuery.data.value"><div class="flex items-center gap-4 rounded-2xl bg-[var(--surface-muted)] p-4"><span class="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--primary-soft)] font-extrabold text-[var(--primary)]"><img v-if="detailQuery.data.value.avatar" :src="detailQuery.data.value.avatar.url" :alt="`${detailQuery.data.value.displayName}的头像`" class="h-full w-full object-cover" width="48" height="48" decoding="async" /><span v-else>{{ detailQuery.data.value.displayName.slice(0, 2).toUpperCase() }}</span></span><div class="min-w-0 flex-1"><p class="truncate text-lg font-bold">{{ detailQuery.data.value.displayName }}</p><p class="truncate text-sm text-[var(--muted)]">@{{ detailQuery.data.value.username }}</p></div><button class="btn btn-ghost btn-icon" type="button" aria-label="修改用户头像" @click="openAvatar(detailQuery.data.value)"><Camera :size="15" /></button><StatusBadge :status="detailQuery.data.value.status" /></div><p v-if="detailQuery.data.value.bio" class="mt-4 text-sm leading-6 text-[var(--muted)]">{{ detailQuery.data.value.bio }}</p><h3 class="mt-6 font-bold">登录会话</h3><div v-if="detailQuery.data.value.sessions.length" class="mt-3 space-y-3"><article v-for="session in detailQuery.data.value.sessions" :key="session.id" class="rounded-xl border border-[var(--border)] p-4"><div class="flex items-start gap-3"><Laptop :size="18" class="mt-0.5 text-[var(--primary)]" /><div class="min-w-0 flex-1"><p class="font-semibold">{{ session.deviceName }}</p><p class="mt-1 text-xs text-[var(--muted)]">{{ session.platform }} · {{ session.appVersion }}</p><p class="mt-2 text-xs text-[var(--muted)]">最后活动 {{ formatRelative(session.lastSeenAt) }}</p></div><StatusBadge :status="session.active ? 'ACTIVE' : 'DELETED'" :label="session.active ? '有效' : '已撤销'" /></div><button v-if="session.active" class="btn btn-danger mt-3 w-full" type="button" @click="askRevoke(session)">撤销此会话</button></article><AppPagination :page="sessionPage" :page-size="sessionPageSize" :total="detailQuery.data.value.sessionTotal" :total-pages="detailQuery.data.value.sessionTotalPages" cursor @change="changeSessionPage" @page-size-change="changeSessionPageSize" /></div><StatePanel v-else state="empty" compact title="没有登录会话" /></template>
     </BaseDialog>
 
     <BaseDialog v-model="avatarOpen" title="用户头像" :description="selected ? `为 ${selected.displayName} 上传或更换头像。` : ''">

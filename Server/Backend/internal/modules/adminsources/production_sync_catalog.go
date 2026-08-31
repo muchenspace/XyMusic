@@ -58,11 +58,29 @@ func (synchronizer *ProductionSynchronizer) storeStandardFile(
 	ctx context.Context,
 	input standardFileMutation,
 ) (localSourceRecord, bool, error) {
+	if transaction := scanTransactionFromContext(ctx); transaction != nil {
+		return synchronizer.storeStandardFileInTransaction(ctx, transaction, input)
+	}
 	transaction, err := synchronizer.database.Begin(ctx)
 	if err != nil {
 		return localSourceRecord{}, false, fmt.Errorf("begin local library file synchronization: %w", err)
 	}
-	defer transaction.Rollback(ctx)
+	defer transaction.Rollback(context.WithoutCancel(ctx))
+	source, artworkUsed, err := synchronizer.storeStandardFileInTransaction(ctx, transaction, input)
+	if err != nil {
+		return localSourceRecord{}, false, err
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return localSourceRecord{}, false, fmt.Errorf("commit local library file synchronization: %w", err)
+	}
+	return source, artworkUsed, nil
+}
+
+func (synchronizer *ProductionSynchronizer) storeStandardFileInTransaction(
+	ctx context.Context,
+	transaction pgx.Tx,
+	input standardFileMutation,
+) (localSourceRecord, bool, error) {
 	locked, exists, err := lockStandardFileSource(ctx, transaction, input)
 	if err != nil {
 		return localSourceRecord{}, false, fmt.Errorf("lock local library source: %w", err)
@@ -117,7 +135,10 @@ func (synchronizer *ProductionSynchronizer) storeStandardFile(
 			return localSourceRecord{}, false, err
 		}
 	}
-	catalogCache := newScanCatalogCache()
+	catalogCache := input.CatalogCache
+	if catalogCache == nil {
+		catalogCache = newScanCatalogCache()
+	}
 	artistIDs, albumArtistIDs, err := resolveMetadataArtists(ctx, transaction, effective, catalogCache)
 	if err != nil {
 		return localSourceRecord{}, false, err
@@ -217,12 +238,6 @@ func (synchronizer *ProductionSynchronizer) storeStandardFile(
 			return localSourceRecord{}, false, lyricErr
 		}
 	}
-	if err := transaction.Commit(ctx); err != nil {
-		return localSourceRecord{}, false, fmt.Errorf("commit local library file synchronization: %w", err)
-	}
-	if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
-		snapshot.rememberCatalog(catalogCache)
-	}
 	return source, artworkUsed, nil
 }
 
@@ -311,6 +326,18 @@ func newScanCatalogCache() *scanCatalogCache {
 	return &scanCatalogCache{
 		artistIDs: make(map[string]string),
 		albumIDs:  make(map[string]string),
+	}
+}
+
+func (cache *scanCatalogCache) merge(other *scanCatalogCache) {
+	if cache == nil || other == nil {
+		return
+	}
+	for key, id := range other.artistIDs {
+		cache.artistIDs[key] = id
+	}
+	for key, id := range other.albumIDs {
+		cache.albumIDs[key] = id
 	}
 }
 
@@ -445,6 +472,15 @@ func resolveScanArtists(
 				continue
 			}
 		}
+		if batchCache := scanBatchCatalogFromContext(ctx); batchCache != nil {
+			if id := batchCache.artistIDs[key]; id != "" {
+				result[key] = id
+				if cache != nil {
+					cache.artistIDs[key] = id
+				}
+				continue
+			}
+		}
 		if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
 			if id, exists := snapshot.catalogArtist(key); exists {
 				result[key] = id
@@ -553,6 +589,14 @@ func resolveScanAlbum(
 	cacheKey := scanAlbumCacheKey(normalizedTitle, artistIDs, preferredID)
 	if cache != nil {
 		if albumID := cache.albumIDs[cacheKey]; albumID != "" {
+			return albumID, nil
+		}
+	}
+	if batchCache := scanBatchCatalogFromContext(ctx); batchCache != nil {
+		if albumID := batchCache.albumIDs[cacheKey]; albumID != "" {
+			if cache != nil {
+				cache.albumIDs[cacheKey] = albumID
+			}
 			return albumID, nil
 		}
 	}

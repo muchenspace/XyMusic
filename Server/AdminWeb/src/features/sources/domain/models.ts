@@ -47,11 +47,20 @@ export interface LibrarySource {
   updatedAt: string;
 }
 
+export interface SourcePageQuery {
+  page: number;
+  pageSize: number;
+  cursor?: string;
+  cursorMode?: "cursor" | "offset";
+}
+
 export interface SourceScanPage {
   items: SourceScan[];
   page: number;
   pageSize: number;
   total: number;
+  totalPages?: number;
+  nextCursor?: string;
 }
 
 export interface SourcePage {
@@ -60,6 +69,7 @@ export interface SourcePage {
   pageSize: number;
   total: number;
   totalPages?: number;
+  nextCursor?: string;
 }
 
 export interface SourceProcessingJob {
@@ -92,4 +102,5 @@ export interface DirectoryListing {
   pageSize: number;
   total: number;
   totalPages: number;
+  nextCursor?: string;
 }

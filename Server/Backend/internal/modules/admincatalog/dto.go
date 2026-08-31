@@ -26,6 +26,7 @@ type ArtistPageDTO struct {
 	PageSize   int         `json:"pageSize"`
 	Total      int         `json:"total"`
 	TotalPages int         `json:"totalPages"`
+	NextCursor *string     `json:"nextCursor,omitempty"`
 }
 
 type AlbumDTO struct {
@@ -47,6 +48,7 @@ type AlbumPageDTO struct {
 	PageSize   int        `json:"pageSize"`
 	Total      int        `json:"total"`
 	TotalPages int        `json:"totalPages"`
+	NextCursor *string    `json:"nextCursor,omitempty"`
 }
 
 type DuplicateAlbumGroupDTO struct {
@@ -58,6 +60,7 @@ type DuplicateAlbumGroupDTO struct {
 	AlbumPageSize   int                          `json:"albumPageSize"`
 	AlbumTotal      int                          `json:"albumTotal"`
 	AlbumTotalPages int                          `json:"albumTotalPages"`
+	AlbumNextCursor *string                      `json:"albumNextCursor,omitempty"`
 }
 
 type DuplicateAlbumsDTO struct {
@@ -68,6 +71,7 @@ type DuplicateAlbumsDTO struct {
 	PageSize            int                      `json:"pageSize"`
 	Total               int                      `json:"total"`
 	TotalPages          int                      `json:"totalPages"`
+	NextCursor          *string                  `json:"nextCursor,omitempty"`
 }
 
 type AlbumReferenceDTO struct {
@@ -118,6 +122,7 @@ type TrackPageDTO struct {
 	PageSize   int        `json:"pageSize"`
 	Total      int        `json:"total"`
 	TotalPages int        `json:"totalPages"`
+	NextCursor *string    `json:"nextCursor,omitempty"`
 }
 
 type LyricDTO struct {
@@ -138,6 +143,7 @@ type TrackDetailDTO struct {
 	LyricPageSize   int        `json:"lyricPageSize"`
 	LyricTotal      int        `json:"lyricTotal"`
 	LyricTotalPages int        `json:"lyricTotalPages"`
+	NextCursor      *string    `json:"nextCursor,omitempty"`
 }
 
 type AlbumDetailDTO struct {
@@ -147,4 +153,5 @@ type AlbumDetailDTO struct {
 	TrackPageSize   int        `json:"trackPageSize"`
 	TrackTotal      int        `json:"trackTotal"`
 	TrackTotalPages int        `json:"trackTotalPages"`
+	NextCursor      *string    `json:"nextCursor,omitempty"`
 }

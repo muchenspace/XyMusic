@@ -37,8 +37,10 @@ export function batchWritebackCapability(tracks: readonly TrackSummary[]): Batch
     reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
   }
   return {
-    canWriteBack: tracks.length > 0 && blockedCount === 0,
-    blockReason: blockedCount > 0 ? `${blockedCount} 首曲目不可写回` : tracks.length ? null : "未选择曲目",
+    canWriteBack: tracks.length > 0 && blockedCount < tracks.length,
+    blockReason: blockedCount === tracks.length
+      ? (tracks.length ? `${blockedCount} 首曲目不可写回` : "未选择曲目")
+      : null,
     total: tracks.length,
     blockedCount,
     blockedReasons: [...reasonCounts].map(([reason, count]) => ({ reason, count })),
@@ -46,10 +48,11 @@ export function batchWritebackCapability(tracks: readonly TrackSummary[]): Batch
 }
 
 export function batchWritebackHint(capability: BatchWritebackCapability): string {
-  if (capability.canWriteBack) return `全部 ${capability.total} 首曲目均可创建安全写回任务。`;
   if (!capability.total) return "未选择曲目，不能写回源文件 Tag。";
   const reasons = capability.blockedReasons.map(({ reason, count }) => `${reason}（${count} 首）`).join("；");
-  return `已选择 ${capability.total} 首，其中 ${capability.blockedCount} 首不能写回：${reasons}`;
+  if (capability.blockedCount === 0) return `全部 ${capability.total} 首曲目均可创建安全写回任务。`;
+  if (!capability.canWriteBack) return `已选择 ${capability.total} 首，其中 ${capability.blockedCount} 首不能写回：${reasons}`;
+  return `已选择 ${capability.total} 首，其中 ${capability.total - capability.blockedCount} 首可写回，${capability.blockedCount} 首不能写回；勾选后仅对可写曲目创建安全写回任务：${reasons}`;
 }
 
 export function writebackBlockedMessage(capability: WritebackCapability): string {

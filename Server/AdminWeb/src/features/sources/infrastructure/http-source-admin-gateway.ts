@@ -11,11 +11,12 @@ import type {
   SourceScan,
   SourceScanPage,
   SourcePage,
+  SourcePageQuery,
 } from "@/features/sources/domain/models";
 
 export class HttpSourceAdminGateway implements SourceAdminGateway {
-  list(page: number, pageSize: number, signal?: AbortSignal): Promise<SourcePage> {
-    return adminApi.sources({ page, pageSize }, signal);
+  list(query: SourcePageQuery, signal?: AbortSignal): Promise<SourcePage> {
+    return adminApi.sources(query, signal);
   }
 
   create(input: LibrarySourceInput): Promise<LibrarySource> {
@@ -30,8 +31,8 @@ export class HttpSourceAdminGateway implements SourceAdminGateway {
     await adminApi.deleteSource(sourceId, expectedVersion, false);
   }
 
-  browse(path: string, page: number, pageSize: number, signal?: AbortSignal): Promise<DirectoryListing> {
-    return adminApi.browseSourceDirectories(path, { page, pageSize }, signal);
+  browse(path: string, query: SourcePageQuery, signal?: AbortSignal): Promise<DirectoryListing> {
+    return adminApi.browseSourceDirectories(path, query, signal);
   }
 
   startScan(sourceId: string): Promise<SourceScan> {
@@ -42,8 +43,8 @@ export class HttpSourceAdminGateway implements SourceAdminGateway {
     return adminApi.sourceProcessing(sourceId, signal);
   }
 
-  listScans(sourceId: string, page: number, pageSize: number, signal?: AbortSignal): Promise<SourceScanPage> {
-    return adminApi.scans(sourceId, { page, pageSize }, signal);
+  listScans(sourceId: string, query: SourcePageQuery, signal?: AbortSignal): Promise<SourceScanPage> {
+    return adminApi.scans(sourceId, query, signal);
   }
 
   async cancelScan(sourceId: string, scanId: string): Promise<void> {

@@ -18,6 +18,7 @@ import StatePanel from "@/components/StatePanel.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
 import TagScrapeDialog from "@/components/TagScrapeDialog.vue";
 import TrackStatusDisc from "@/components/TrackStatusDisc.vue";
+import VirtualTable from "@/components/VirtualTable.vue";
 import type { CreditRole, MusicPage, PermanentDeleteTrackJobItem, PermanentDeleteTracksJob, TrackMetadataRecord, TrackSummary, TrackTagValues } from "@/features/music/domain/models";
 import type { ApplyTagResult } from "@/features/scraping/domain/models";
 import { useMusicAdmin } from "@/app/services/music";
@@ -31,7 +32,7 @@ type EditorTab = "metadata" | "lyrics";
 type EditableField = Exclude<keyof TrackTagValues, "hasArtwork">;
 type TrackStateAction = "publish" | "archive" | "restore";
 type TrackSelectionKind = "ACTIVE" | "ARCHIVED" | "MIXED" | null;
-type TrackListQueryKey = readonly ["admin", "tracks", { page: number; pageSize: number; search: string; status: string; metadataStatus: string }];
+type TrackListQueryKey = readonly ["admin", "tracks", { page: number; pageSize: number; search: string; status: string; metadataStatus: string; cursor: string }];
 type PermanentDeleteJobQueryKey = readonly ["admin", "tracks", "permanent-delete", string];
 type TrackMetadataQueryKey = readonly ["admin", "track", string | undefined, "metadata"];
 interface TagForm { title: string; primary: string; albumArtists: string; featured: string; composers: string; lyricists: string; producers: string; album: string; releaseDate: string; trackNumber: string; trackTotal: string; discNumber: string; discTotal: string; genres: string; bpm: string; isrc: string; copyright: string; comment: string; lyrics: string; lyricsFormat: "PLAIN" | "LRC"; lyricsTiming: "LINE" | "WORD"; lyricsLanguage: string; reason: string }
@@ -46,6 +47,8 @@ const status = ref("READY");
 const metadataStatus = ref("");
 const page = ref(1);
 const pageSize = ref(DEFAULT_CATALOG_PAGE_SIZE);
+const cursor = ref("");
+const cursorHistory = ref(new Map<number, string>());
 const selectedTracks = ref(new Map<string, TrackSummary>());
 const selectedIds = computed(() => new Set(selectedTracks.value.keys()));
 const selectedTrack = ref<TrackSummary>();
@@ -80,10 +83,10 @@ const bulk = reactive({ primary: "", albumArtists: "", album: "", genres: "", co
 const tags = reactive<TagForm>({ title: "", primary: "", albumArtists: "", featured: "", composers: "", lyricists: "", producers: "", album: "", releaseDate: "", trackNumber: "", trackTotal: "", discNumber: "", discTotal: "", genres: "", bpm: "", isrc: "", copyright: "", comment: "", lyrics: "", lyricsFormat: "PLAIN", lyricsTiming: "LINE", lyricsLanguage: "und", reason: "" });
 
 const tracksQuery = useQuery<MusicPage<TrackSummary>, Error, MusicPage<TrackSummary>, TrackListQueryKey>({
-  queryKey: computed<TrackListQueryKey>(() => ["admin", "tracks", { page: page.value, pageSize: pageSize.value, search: debouncedSearch.value, status: status.value, metadataStatus: metadataStatus.value }]),
+  queryKey: computed<TrackListQueryKey>(() => ["admin", "tracks", { page: page.value, pageSize: pageSize.value, search: debouncedSearch.value, status: status.value, metadataStatus: metadataStatus.value, cursor: cursor.value }]),
   queryFn: ({ signal, queryKey }: QueryFunctionContext<TrackListQueryKey>) => {
     const params = queryKey[2];
-    return musicAdmin.listTracks({ ...params, sort: "updatedAt", order: "desc" }, signal);
+    return musicAdmin.listTracks({ ...params, cursorMode: "cursor", cursor: params.cursor || undefined, sort: "updatedAt", order: "desc" }, signal);
   },
   placeholderData: keepPreviousData,
   refetchInterval: (state) => trackListAudioRefetchInterval(state.state.data),
@@ -141,7 +144,7 @@ watch(editorOpen, (value, previous) => {
 });
 watch(() => route.query.search, (value) => {
   const next = typeof value === "string" ? value : "";
-  if (search.value !== next) { search.value = next; page.value = 1; }
+  if (search.value !== next) { search.value = next; resetPaging(); }
 });
 function desired(): TrackTagValues {
   const makeCredits = (value: string, role: CreditRole) => nameList(value).map((name) => ({ name, role }));
@@ -173,8 +176,28 @@ function edit(track: TrackSummary): void {
 }
 function askArchive(track: TrackSummary): void { deletionTrack.value = track; actionError.value = ""; archiveOpen.value = true; }
 function askPermanentDelete(track: TrackSummary): void { openPermanentDelete([track]); }
-function clearFilters(): void { search.value = ""; status.value = "READY"; metadataStatus.value = ""; page.value = 1; }
-function changePageSize(value: number): void { pageSize.value = value; page.value = 1; }
+function resetPaging(): void {
+  page.value = 1;
+  cursor.value = "";
+  cursorHistory.value = new Map([[1, ""]]);
+}
+function changePage(nextPage: number): void {
+  if (tracksQuery.isFetching.value || !Number.isSafeInteger(nextPage) || nextPage < 1 || nextPage === page.value) return;
+  const next = new Map(cursorHistory.value);
+  if (nextPage < page.value) {
+    cursor.value = next.get(nextPage) ?? "";
+  } else {
+    const nextCursor = tracksQuery.data.value?.nextCursor;
+    if (!nextCursor) return;
+    next.set(nextPage, nextCursor);
+    cursor.value = nextCursor;
+  }
+  cursorHistory.value = next;
+  page.value = nextPage;
+}
+function trackKey(track: TrackSummary): string { return track.id; }
+function clearFilters(): void { search.value = ""; status.value = "READY"; metadataStatus.value = ""; resetPaging(); }
+function changePageSize(value: number): void { pageSize.value = value; resetPaging(); }
 function clearSelection(): void { selectedTracks.value = new Map(); }
 function removeSelected(trackIds: Iterable<string>): void {
   const next = new Map(selectedTracks.value);
@@ -226,7 +249,10 @@ function togglePage(): void {
 }
 const pageSelected = computed(() => selectablePageTracks.value.length > 0 && selectablePageTracks.value.every((track) => selectedIds.value.has(track.id)));
 const pagePartiallySelected = computed(() => !pageSelected.value && selectablePageTracks.value.some((track) => selectedIds.value.has(track.id)));
-watch([status, metadataStatus, search], () => clearSelection());
+watch([debouncedSearch, status, metadataStatus], () => {
+  resetPaging();
+  clearSelection();
+});
 watch(() => tracksQuery.data.value?.items, (items) => {
   if (!items?.length || !selectedTracks.value.size) return;
   const next = new Map(selectedTracks.value);
@@ -519,21 +545,29 @@ watch(bulkOpen, (value) => { if (!value && bulkMutation.isPending.value && !allo
       <div class="flex flex-col gap-3 border-b border-[var(--border)] p-4 lg:flex-row">
         <div class="relative flex-1">
           <Search :size="16" class="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--muted)]" aria-hidden="true" />
-          <input v-model="search" class="ui-input !pl-10" type="search" aria-label="搜索曲目" placeholder="搜索标题、艺术家、专辑或路径" @input="page = 1" />
+          <input v-model="search" class="ui-input !pl-10" type="search" aria-label="搜索曲目" placeholder="搜索标题、艺术家、专辑或路径" @input="resetPaging()" />
         </div>
-        <select v-model="status" class="ui-select lg:!w-40" aria-label="音频状态" @change="page = 1"><option value="READY">可用</option><option value="PROCESSING">处理中</option><option value="ERROR">异常</option><option value="ARCHIVED">已归档</option></select>
-        <select v-model="metadataStatus" class="ui-select lg:!w-48" aria-label="Tag 状态" @change="page = 1"><option value="">全部 Tag 状态</option><option value="NORMAL">正常</option><option value="PENDING_WRITE">等待写回</option><option value="WRITE_FAILED">写回失败</option></select>
+        <select v-model="status" class="ui-select lg:!w-40" aria-label="音频状态" @change="resetPaging()"><option value="READY">可用</option><option value="PROCESSING">处理中</option><option value="ERROR">异常</option><option value="ARCHIVED">已归档</option></select>
+        <select v-model="metadataStatus" class="ui-select lg:!w-48" aria-label="Tag 状态" @change="resetPaging()"><option value="">全部 Tag 状态</option><option value="NORMAL">正常</option><option value="PENDING_WRITE">等待写回</option><option value="WRITE_FAILED">写回失败</option></select>
         <AppButton class="shrink-0 whitespace-nowrap" variant="ghost" @click="clearFilters"><template #icon><ListFilter :size="15" /></template>清除</AppButton>
       </div>
       <StatePanel v-if="tracksQuery.isPending.value" state="loading" />
       <StatePanel v-else-if="tracksQuery.isError.value" state="error" @retry="tracksQuery.refetch()" />
       <StatePanel v-else-if="!tracksQuery.data.value?.items.length" state="empty" :title="status === 'ARCHIVED' ? '回收站为空' : '没有符合条件的曲目'" />
       <template v-else>
-        <div class="overflow-x-auto">
-          <table class="data-table min-w-[1080px]">
-            <thead><tr><th><input type="checkbox" :checked="pageSelected" :indeterminate="pagePartiallySelected" :disabled="!selectablePageTracks.length || selectionLocked" :aria-label="selectionScope === 'ARCHIVED' ? '选择当前页全部已归档曲目' : '选择当前页全部曲目'" @change="togglePage" /></th><th>曲目</th><th>专辑</th><th>时长 / 格式</th><th>音源</th><th>音频状态</th><th>Tag 状态</th><th>操作</th></tr></thead>
-            <tbody>
-              <tr v-for="track in tracksQuery.data.value.items" :key="track.id" :class="track.status !== 'ARCHIVED' ? 'cursor-pointer' : undefined" :tabindex="track.status === 'ARCHIVED' ? -1 : 0" :aria-label="track.status === 'ARCHIVED' ? `已归档曲目：${track.title}` : `编辑曲目：${track.title}`" @click="track.status !== 'ARCHIVED' && edit(track)" @keydown.enter="track.status !== 'ARCHIVED' && edit(track)" @keydown.space.prevent="track.status !== 'ARCHIVED' && edit(track)">
+        <VirtualTable
+          :items="tracksQuery.data.value.items"
+          :columns="8"
+          :row-height="76"
+          :overscan="10"
+          min-width="1080px"
+          :row-key="trackKey"
+        >
+          <template #header>
+            <tr><th><input type="checkbox" :checked="pageSelected" :indeterminate="pagePartiallySelected" :disabled="!selectablePageTracks.length || selectionLocked" :aria-label="selectionScope === 'ARCHIVED' ? '选择当前页全部已归档曲目' : '选择当前页全部曲目'" @change="togglePage" /></th><th>曲目</th><th>专辑</th><th>时长 / 格式</th><th>音源</th><th>音频状态</th><th>Tag 状态</th><th>操作</th></tr>
+          </template>
+          <template #default="{ item: track }">
+              <tr :style="{ height: '76px' }" :class="track.status !== 'ARCHIVED' ? 'cursor-pointer' : undefined" :tabindex="track.status === 'ARCHIVED' ? -1 : 0" :aria-label="track.status === 'ARCHIVED' ? `已归档曲目：${track.title}` : `编辑曲目：${track.title}`" @click="track.status !== 'ARCHIVED' && edit(track)" @keydown.enter="track.status !== 'ARCHIVED' && edit(track)" @keydown.space.prevent="track.status !== 'ARCHIVED' && edit(track)">
                 <td @click.stop @keydown.stop><input type="checkbox" :checked="selectedIds.has(track.id)" :disabled="!isSelectableTrack(track) || selectionLocked" :aria-label="track.status === 'ARCHIVED' ? `选择已归档曲目：${track.title}` : `选择曲目：${track.title}`" @change="toggle(track)" /></td>
                 <td><div class="flex items-center gap-3"><span class="grid h-11 w-11 place-items-center overflow-hidden rounded-xl bg-[var(--surface-muted)]"><img v-if="track.artwork" :src="track.artwork.url" class="h-full w-full object-cover" alt="封面" width="44" height="44" loading="lazy" decoding="async" /><FileAudio v-else :size="18" /></span><div><p class="max-w-72 truncate font-semibold">{{ track.title }}</p><p class="mt-0.5 max-w-72 truncate text-xs text-[var(--muted)]">{{ track.artists.join('、') || '未知艺术家' }}</p></div></div></td>
                 <td>{{ track.album?.title ?? '—' }}</td>
@@ -543,10 +577,9 @@ watch(bulkOpen, (value) => { if (!value && bulkMutation.isPending.value && !allo
                 <td><StatusBadge :status="track.metadataStatus" /></td>
                 <td @click.stop @keydown.stop><div class="flex gap-1"><button v-if="track.status !== 'ARCHIVED'" class="btn btn-ghost btn-icon" type="button" :aria-label="`编辑曲目：${track.title}`" :disabled="selectionLocked" @click="edit(track)"><Pencil :size="15" /></button><button v-if="track.status === 'ERROR'" class="btn btn-ghost btn-icon" type="button" :aria-label="`恢复曲目为可用：${track.title}`" :disabled="stateMutation.isPending.value || selectionLocked" @click="stateMutation.mutate({ track, action: 'publish' })"><Upload :size="15" /></button><button v-if="track.status === 'READY' || track.status === 'ERROR'" class="btn btn-ghost btn-icon text-[var(--danger)]" type="button" :aria-label="`移入回收站：${track.title}`" :disabled="selectionLocked" @click="askArchive(track)"><Archive :size="15" /></button><template v-if="track.status === 'ARCHIVED'"><button class="btn btn-ghost btn-icon" type="button" :aria-label="`恢复已归档曲目：${track.title}`" :disabled="stateMutation.isPending.value || selectionLocked" @click="stateMutation.mutate({ track, action: 'restore' })"><RotateCcw :size="15" /></button><button class="btn btn-ghost btn-icon text-[var(--danger)]" type="button" :aria-label="`永久删除曲目：${track.title}`" :disabled="selectionLocked" @click="askPermanentDelete(track)"><Trash2 :size="15" /></button></template></div></td>
               </tr>
-            </tbody>
-          </table>
-        </div>
-        <AppPagination :page="page" :page-size="pageSize" :total="tracksQuery.data.value.total" @change="page = $event" @page-size-change="changePageSize" />
+          </template>
+        </VirtualTable>
+        <AppPagination :page="page" :page-size="pageSize" :total="tracksQuery.data.value.total" :total-pages="tracksQuery.data.value.totalPages" cursor @change="changePage" @page-size-change="changePageSize" />
       </template>
     </section>
 

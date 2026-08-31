@@ -7,7 +7,7 @@ function album(id: string): AlbumSummary {
   return { id } as AlbumSummary;
 }
 
-function response(albumPage: number, albums: AlbumSummary[], albumTotal = 3, albumTotalPages = 2): AlbumDuplicateSummary {
+function response(albumPage: number, albums: AlbumSummary[], albumTotal = 3, albumTotalPages = 2, albumNextCursor?: string): AlbumDuplicateSummary {
   const group: AlbumDuplicateGroup = {
     key: "same",
     title: "Same",
@@ -17,6 +17,7 @@ function response(albumPage: number, albums: AlbumSummary[], albumTotal = 3, alb
     albumPageSize: 100,
     albumTotal,
     albumTotalPages,
+    albumNextCursor,
   };
   return { groupCount: 1, duplicateAlbumCount: 2, groups: [group], page: 1, pageSize: 1, total: 1, totalPages: 1 };
 }
@@ -24,8 +25,8 @@ function response(albumPage: number, albums: AlbumSummary[], albumTotal = 3, alb
 describe("album duplicate member pagination", () => {
   it("loads every bounded member page before returning merge candidates", async () => {
     const getAlbumDuplicates = vi.fn()
-      .mockResolvedValueOnce(response(1, [album("album-2"), album("album-3")]))
-      .mockResolvedValueOnce(response(2, [album("album-1")]));
+      .mockResolvedValueOnce(response(1, [album("album-2"), album("album-3")], 3, 2, "album-cursor-2"))
+      .mockResolvedValueOnce(response(2, [album("album-1")], 3, 2));
     const useCases = new MusicAdminUseCases({ getAlbumDuplicates } as unknown as MusicAdminGateway);
 
     const group = await useCases.getCompleteAlbumDuplicateGroup("album-1");
@@ -33,9 +34,11 @@ describe("album duplicate member pagination", () => {
     expect(group?.albums.map((item) => item.id)).toEqual(["album-2", "album-3", "album-1"]);
     expect(getAlbumDuplicates).toHaveBeenNthCalledWith(1, {
       page: 1, pageSize: 1, albumId: "album-1", albumPage: 1, albumPageSize: 100,
+      cursorMode: "cursor", albumCursorMode: "cursor",
     }, undefined);
     expect(getAlbumDuplicates).toHaveBeenNthCalledWith(2, {
       page: 1, pageSize: 1, albumId: "album-1", albumPage: 2, albumPageSize: 100,
+      cursorMode: "cursor", albumCursor: "album-cursor-2", albumCursorMode: "cursor",
     }, undefined);
   });
 
@@ -43,6 +46,6 @@ describe("album duplicate member pagination", () => {
     const getAlbumDuplicates = vi.fn().mockResolvedValue(response(1, [album("album-1")], 3, 1));
     const useCases = new MusicAdminUseCases({ getAlbumDuplicates } as unknown as MusicAdminGateway);
 
-    await expect(useCases.getCompleteAlbumDuplicateGroup("album-1")).rejects.toThrow("未执行部分合并");
+    await expect(useCases.getCompleteAlbumDuplicateGroup("album-1")).rejects.toThrow("cursor pagination stopped");
   });
 });

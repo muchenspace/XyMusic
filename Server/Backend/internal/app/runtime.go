@@ -149,6 +149,9 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	if err := database.RunMigrations(ctx, db.Pool, resolved.Paths.MigrationsDirectory); err != nil {
 		return nil, fmt.Errorf("run database migrations: %w", err)
 	}
+	if err := database.EnsureLargeLibraryIndexes(ctx, db.Pool); err != nil {
+		return nil, fmt.Errorf("ensure large-library indexes: %w", err)
+	}
 
 	localMedia, err := localmedia.NewStore(resolved.MediaStorage.AssetDirectory, resolved.MediaStorage.TranscodeDirectory, resolved.MediaStorage.MaxUploadBytes)
 	if err != nil {
@@ -201,7 +204,9 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	}
 
 	metadataRepository := adminmetadata.NewRepository(db.Pool)
-	adminMetadataService, err := adminmetadata.NewService(metadataRepository)
+	adminMetadataService, err := adminmetadata.NewServiceWithOptions(
+		metadataRepository, pagination.NewCursorCodec(resolved.Security.CursorSigningSecret),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("create admin metadata service: %w", err)
 	}
@@ -217,7 +222,10 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	if err != nil {
 		return nil, fmt.Errorf("create admin metadata job adapter: %w", err)
 	}
-	adminJobsService, err := adminjobs.NewService(adminjobs.NewRepository(db.Pool), metadataJobs)
+	adminJobsService, err := adminjobs.NewServiceWithOptions(
+		adminjobs.NewRepository(db.Pool), metadataJobs,
+		pagination.NewCursorCodec(resolved.Security.CursorSigningSecret),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("create admin jobs service: %w", err)
 	}
@@ -280,9 +288,9 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 		}
 		return false, nil
 	}
-	adminSourcesService, err := adminsources.NewService(adminsources.ServiceDependencies{
+	adminSourcesService, err := adminsources.NewServiceWithOptions(adminsources.ServiceDependencies{
 		Store: sourceRepository, RootDirectory: options.RootDirectory, WorkerAvailability: workerAvailable,
-	})
+	}, pagination.NewCursorCodec(resolved.Security.CursorSigningSecret))
 	if err != nil {
 		return nil, fmt.Errorf("create administrator sources service: %w", err)
 	}
@@ -468,11 +476,11 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	}
 
 	adminManagementIdempotency := adminmanagement.NewPersistentIdempotency(idempotencyService)
-	adminManagementService, err := adminmanagement.NewService(adminmanagement.ServiceDependencies{
+	adminManagementService, err := adminmanagement.NewServiceWithOptions(adminmanagement.ServiceDependencies{
 		Store:     adminmanagement.NewRepository(db.Pool),
 		Artworks:  adminArtworkPresenter{delegate: playlistUsers},
 		Passwords: identity.SecurityPasswordManager{},
-	})
+	}, pagination.NewCursorCodec(resolved.Security.CursorSigningSecret))
 	if err != nil {
 		return nil, fmt.Errorf("create admin management service: %w", err)
 	}
@@ -483,8 +491,9 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 		return nil, fmt.Errorf("create admin management routes: %w", err)
 	}
 
-	adminCatalogService, err := admincatalog.NewService(
+	adminCatalogService, err := admincatalog.NewServiceWithOptions(
 		admincatalog.NewRepository(db.Pool), adminArtworkPresenter{delegate: playlistUsers},
+		pagination.NewCursorCodec(resolved.Security.CursorSigningSecret),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create admin catalog service: %w", err)
@@ -627,8 +636,7 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 			cleanupCancel()
 			return nil, fmt.Errorf("start artist artwork scraping batch service: %w", err)
 		}
-		metadataWorkerID := "metadata-" + uuid.NewString()
-		backgroundTasks := make([]backgroundTask, 0, 5)
+		backgroundTasks := make([]backgroundTask, 0, 5+resolved.Scraping.WritebackWorkers)
 		backgroundTasks = append(backgroundTasks,
 			backgroundTask{
 				name: "local-asset-cleanup",
@@ -638,10 +646,15 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 				name: "library-source-scan",
 				run:  func(ctx context.Context) (bool, error) { return sourceWorker.RunNextScan(ctx) },
 			},
-			backgroundTask{
-				name: "metadata-writeback",
-				run:  func(ctx context.Context) (bool, error) { return metadataWorker.RunNext(ctx, metadataWorkerID) },
-			},
+		)
+		for index := 0; index < max(1, resolved.Scraping.WritebackWorkers); index++ {
+			workerID := fmt.Sprintf("metadata-%d-%s", index, uuid.NewString())
+			backgroundTasks = append(backgroundTasks, backgroundTask{
+				name: fmt.Sprintf("metadata-writeback-%d", index),
+				run:  func(ctx context.Context) (bool, error) { return metadataWorker.RunNext(ctx, workerID) },
+			})
+		}
+		backgroundTasks = append(backgroundTasks,
 			backgroundTask{
 				name: "track-permanent-delete",
 				run:  func(ctx context.Context) (bool, error) { return permanentDeleteWorker.RunNext(ctx) },

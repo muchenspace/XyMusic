@@ -75,6 +75,7 @@ class PlaybackService : MediaSessionService() {
     private lateinit var persistenceController: PlaybackPersistenceController
     private lateinit var sleepTimerController: PlaybackSleepTimerController
     private lateinit var codecFallbackController: PlaybackCodecFallbackController
+    private lateinit var grantRecoveryController: PlaybackGrantRecoveryController
     private lateinit var automaticQualityPlaybackController: AutomaticQualityPlaybackController
 
     override fun onCreate() {
@@ -120,6 +121,12 @@ class PlaybackService : MediaSessionService() {
                 },
             )
         player.addListener(codecFallbackController)
+        grantRecoveryController =
+            PlaybackGrantRecoveryController(
+                player = player,
+                grantRepository = grantRepository,
+            )
+        player.addListener(grantRecoveryController)
         automaticQualityPlaybackController =
             AutomaticQualityPlaybackController(
                 player = player,
@@ -165,6 +172,9 @@ class PlaybackService : MediaSessionService() {
             sleepTimerController.cancelPendingJob()
         }
         serviceScope.cancel()
+        if (::grantRecoveryController.isInitialized && ::player.isInitialized) {
+            player.removeListener(grantRecoveryController)
+        }
         if (::codecFallbackController.isInitialized && ::player.isInitialized) {
             player.removeListener(codecFallbackController)
         }
@@ -220,12 +230,14 @@ class PlaybackService : MediaSessionService() {
             AppSessionState.Loading -> Unit
             AppSessionState.SignedOut -> {
                 codecFallbackController.resetForAccountChange()
+                grantRecoveryController.resetForAccountChange()
                 automaticQualityPlaybackController.resetForAccountChange()
                 persistenceController.clearForAccountChange(null)
             }
             is AppSessionState.SignedIn -> {
                 if (persistenceController.isActiveUser(state.userId)) return
                 codecFallbackController.resetForAccountChange()
+                grantRecoveryController.resetForAccountChange()
                 automaticQualityPlaybackController.resetForAccountChange()
                 persistenceController.clearForAccountChange(state.userId)
                 persistenceController.restoreQueue()

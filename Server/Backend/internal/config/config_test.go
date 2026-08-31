@@ -28,7 +28,7 @@ func TestDevelopmentDefaultsAreCompatible(t *testing.T) {
 	}
 	wantDatabaseConnections := defaultDatabaseConnections(
 		cfg.LocalLibrary.ScanCommitWorkers,
-		cfg.Scraping.BatchWorkers, cfg.Scraping.ArtworkWorkers,
+		cfg.Scraping.BatchWorkers, cfg.Scraping.ArtworkWorkers, cfg.Scraping.WritebackWorkers,
 	)
 	if cfg.HTTP.Port != 3000 || int(cfg.Database.MaxConnections) != wantDatabaseConnections {
 		t.Fatalf("unexpected defaults: %+v", cfg)
@@ -66,20 +66,21 @@ func TestPerformanceWorkerLimitsAreConfigurable(t *testing.T) {
 		"TAG_SCRAPING_CLAIM_WINDOW":          "17",
 		"TAG_SCRAPING_ARTWORK_WORKERS":       "3",
 		"TAG_SCRAPING_ARTWORK_CLAIM_WINDOW":  "13",
+		"TAG_WRITEBACK_WORKERS":              "4",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.LocalLibrary.ScanCommitWorkers != 3 || cfg.LocalLibrary.ScanCommitBatchSize != 11 || cfg.LocalLibrary.ScanProbeWorkers != 5 ||
 		cfg.Media.FFmpegThreads != 2 ||
-		cfg.Scraping.BatchWorkers != 4 || cfg.Scraping.BatchClaimWindow != 17 || cfg.Scraping.ArtworkWorkers != 3 || cfg.Scraping.ArtworkClaimWindow != 13 {
+		cfg.Scraping.BatchWorkers != 4 || cfg.Scraping.BatchClaimWindow != 17 || cfg.Scraping.ArtworkWorkers != 3 || cfg.Scraping.ArtworkClaimWindow != 13 || cfg.Scraping.WritebackWorkers != 4 {
 		t.Fatalf("performance limits = %#v/%#v", cfg.LocalLibrary, cfg.Media)
 	}
 	environment := ToEnvironment(cfg)
 	if environment["LOCAL_MUSIC_SCAN_COMMIT_WORKERS"] != "3" || environment["LOCAL_MUSIC_SCAN_COMMIT_BATCH_SIZE"] != "11" ||
 		environment["LOCAL_MUSIC_SCAN_PROBE_WORKERS"] != "5" || environment["MEDIA_FFMPEG_THREADS"] != "2" ||
 		environment["TAG_SCRAPING_WORKERS"] != "4" || environment["TAG_SCRAPING_CLAIM_WINDOW"] != "17" ||
-		environment["TAG_SCRAPING_ARTWORK_WORKERS"] != "3" || environment["TAG_SCRAPING_ARTWORK_CLAIM_WINDOW"] != "13" {
+		environment["TAG_SCRAPING_ARTWORK_WORKERS"] != "3" || environment["TAG_SCRAPING_ARTWORK_CLAIM_WINDOW"] != "13" || environment["TAG_WRITEBACK_WORKERS"] != "4" {
 		t.Fatalf("performance limits were not persisted: %#v", environment)
 	}
 }
@@ -93,7 +94,7 @@ func TestDatabaseConnectionDefaultFollowsConfiguredWorkerBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := defaultDatabaseConnections(12, 20, 4)
+	want := defaultDatabaseConnections(12, 20, 4, 2)
 	if int(cfg.Database.MaxConnections) != want {
 		t.Fatalf("default database connections=%d want %d", cfg.Database.MaxConnections, want)
 	}

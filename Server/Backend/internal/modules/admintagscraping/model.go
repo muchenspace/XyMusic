@@ -9,8 +9,6 @@ import (
 
 type Source string
 
-const maxTagScrapingBatchItems = 5_000
-
 const (
 	SourceSmart    Source = "smart"
 	SourceNetease  Source = "netease"

@@ -8,6 +8,13 @@
       "when": 1783700000000,
       "tag": "0000_initial",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788300000000,
+      "tag": "0001_remove_tag_scraping_batch_limit",
+      "breakpoints": true
     }
   ]
 }

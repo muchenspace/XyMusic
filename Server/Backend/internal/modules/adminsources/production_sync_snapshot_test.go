@@ -22,10 +22,10 @@ func TestSourceScanSnapshotServesReadOnlyLookups(t *testing.T) {
 	mappings := []cueMapping{{TrackID: "track", Number: &num, StartMS: &start}}
 	snapshot := &sourceScanSnapshot{
 		rootPath:           `C:\Music`,
-		sourcesByPath:      map[string]localSourceRecord{source.NormalizedPath: source},
-		renameCandidates:   map[string][]localSourceRecord{checksum: {source}},
+		sourcesByPath:      map[string]*localSourceRecord{source.NormalizedPath: &source},
+		renameCandidates:   map[string][]*localSourceRecord{checksum: {&source}},
 		mappingsBySource:   map[string][]cueMapping{source.ID: mappings},
-		externalLyricsByID: map[string]bool{source.ID: true},
+		externalLyricsByID: map[string]struct{}{source.ID: {}},
 		seenSourceIDs:      make(map[string]struct{}),
 		renameClaimedIDs:   make(map[string]struct{}),
 	}
@@ -126,12 +126,13 @@ func TestSourceScanSnapshotIndexesSidecarDirectoryOnce(t *testing.T) {
 }
 
 func BenchmarkSourceScanSnapshotLookup(b *testing.B) {
-	sources := make(map[string]localSourceRecord, 5_000)
+	sources := make(map[string]*localSourceRecord, 5_000)
 	paths := make([]string, 5_000)
 	for index := 0; index < 5_000; index++ {
 		path := "album/track-" + strconv.Itoa(index)
 		paths[index] = path
-		sources[path] = localSourceRecord{ID: path, NormalizedPath: path}
+		source := &localSourceRecord{ID: path, NormalizedPath: path}
+		sources[path] = source
 	}
 	snapshot := &sourceScanSnapshot{
 		sourcesByPath: sources,

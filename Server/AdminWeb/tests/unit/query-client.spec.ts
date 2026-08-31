@@ -16,7 +16,7 @@ describe("query error notifications", () => {
     expect(shouldNotifyQueryError(null)).toBe(true);
   });
 
-  it("refreshes cached catalog lists while keeping inactive detail queries stale", async () => {
+  it("refreshes only visible catalog lists while keeping inactive pages stale", async () => {
     const invalidate = vi.spyOn(queryClient, "invalidateQueries")
       .mockImplementation(async () => undefined);
 
@@ -27,9 +27,9 @@ describe("query error notifications", () => {
       return [resolved?.queryKey, resolved?.refetchType];
     });
     expect(calls).toEqual(expect.arrayContaining([
-      [["admin", "tracks"], "all"],
-      [["admin", "albums"], "all"],
-      [["admin", "artists"], "all"],
+      [["admin", "tracks"], "active"],
+      [["admin", "albums"], "active"],
+      [["admin", "artists"], "active"],
       [["admin", "track"], "active"],
       [["admin", "album"], "active"],
       [["admin", "dashboard"], "active"],

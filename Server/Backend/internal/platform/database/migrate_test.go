@@ -12,8 +12,8 @@ func TestMigrationsCanBeRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(migrations) != 1 {
-		t.Fatalf("expected 1 baseline migration, got %d", len(migrations))
+	if len(migrations) != 2 {
+		t.Fatalf("expected baseline plus one migration, got %d", len(migrations))
 	}
 	if migrations[0].Tag != "0000_initial" {
 		t.Fatalf("unexpected migration tag: %s", migrations[0].Tag)
@@ -49,6 +49,14 @@ func TestMigrationsCanBeRead(t *testing.T) {
 		if strings.Contains(sql, forbidden) {
 			t.Fatalf("baseline migration contains forbidden legacy element %q", forbidden)
 		}
+	}
+	if migrations[1].Tag != "0001_remove_tag_scraping_batch_limit" || len(migrations[1].Hash) != 64 {
+		t.Fatalf("unexpected tag scraping batch migration: %#v", migrations[1])
+	}
+	batchSQL := strings.ToUpper(strings.Join(migrations[1].SQL, "\n"))
+	if !strings.Contains(batchSQL, "DROP CONSTRAINT IF EXISTS TAG_SCRAPING_JOBS_TOTAL_CHECK") ||
+		!strings.Contains(batchSQL, "CHECK (TOTAL >= 1)") {
+		t.Fatalf("tag scraping batch migration does not remove the upper bound: %s", batchSQL)
 	}
 }
 
@@ -87,8 +95,8 @@ func TestBaselineMigrationDoesNotDuplicateTagScrapingAttemptsConstraint(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(migrations) != 1 {
-		t.Fatalf("expected one baseline migration, got %d", len(migrations))
+	if len(migrations) < 1 {
+		t.Fatalf("expected a baseline migration, got %d", len(migrations))
 	}
 	sql := strings.Join(migrations[0].SQL, "\n")
 	start := strings.Index(sql, "CREATE TABLE tag_scraping_job_items (")

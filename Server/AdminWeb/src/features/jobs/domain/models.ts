@@ -59,6 +59,8 @@ export interface JobListQuery {
   search?: string;
   sort?: string;
   order?: "asc" | "desc";
+  cursor?: string;
+  cursorMode?: "cursor" | "offset";
 }
 
 export interface JobPage<T> {
@@ -66,4 +68,14 @@ export interface JobPage<T> {
   page: number;
   pageSize: number;
   total: number;
+  totalPages?: number;
+  nextCursor?: string;
+}
+
+export interface WritebackListQuery {
+  page: number;
+  pageSize: number;
+  status?: string;
+  cursor?: string;
+  cursorMode?: "cursor" | "offset";
 }

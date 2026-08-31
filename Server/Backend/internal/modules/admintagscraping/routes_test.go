@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -125,6 +126,53 @@ func TestRoutesExposeAllFifteenTagScrapingAPIs(t *testing.T) {
 	}
 	if artistBatches.updatedAfter == nil || !artistBatches.updatedAfter.Equal(time.Date(2026, 7, 16, 1, 2, 3, 0, time.UTC)) {
 		t.Fatalf("artist updatedAfter=%v", artistBatches.updatedAfter)
+	}
+}
+
+func TestCreateBatchRouteAcceptsLargeBatchesWithoutQuantityLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	batches := &batchAPIStub{}
+	identityService := &scrapingIdentityStub{actor: identity.AuthenticatedActor{UserID: "admin", Role: identity.RoleAdmin}}
+	idempotency := &scrapingIdempotencyStub{}
+	routes, err := NewRoutes(&scrapingAPIStub{}, batches, &artistArtworkBatchAPIStub{}, identityService, idempotency)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := gin.New()
+	routes.Register(engine)
+	items := make([]BatchItemInput, 50_001)
+	for index := range items {
+		items[index] = BatchItemInput{
+			TrackID:         fmt.Sprintf("00000000-0000-4000-8000-%012d", index+1),
+			ExpectedVersion: 1,
+		}
+	}
+	input := CreateBatchInput{
+		Items: items,
+		Options: BatchOptions{
+			Sources: []Source{SourceQMusic}, MatchMode: MatchStrict, MissingFields: []MissingField{},
+			Fields: ApplyFields{Title: true}, Reason: "large batch route contract",
+		},
+	}
+	body, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/tag-scraping/batches", bytes.NewReader(body))
+	request.Header.Set("Authorization", "Bearer admin")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "large-batch-key")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if batches.createCalls != 1 || len(idempotency.payloads) != 1 {
+		t.Fatalf("batch/idempotency calls=%d/%d", batches.createCalls, len(idempotency.payloads))
+	}
+	created, ok := idempotency.payloads[0].(CreateBatchInput)
+	if !ok || len(created.Items) != len(items) {
+		t.Fatalf("created payload=%#v", idempotency.payloads[0])
 	}
 }
 

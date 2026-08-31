@@ -25,6 +25,10 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 60_000,
+      // Large cursor pages are intentionally discarded quickly when no page
+      // is visible; retaining many 10k/100k-row responses for five minutes
+      // can otherwise consume hundreds of MB in the browser.
+      gcTime: 60_000,
       refetchOnWindowFocus: false,
       retry: shouldRetryQuery,
     },
@@ -54,9 +58,10 @@ const ADMIN_MUSIC_ACTIVE_QUERY_PREFIXES = [
 
 export async function invalidateAdminMusicQueries(): Promise<void> {
   await Promise.all([
-    // Keep inactive catalog pages current so navigation never shows a fresh-looking stale list.
+    // Mark inactive cursor pages stale without refetching every page the
+    // operator has visited. Only the visible page needs an immediate refresh.
     ...ADMIN_MUSIC_LIST_QUERY_PREFIXES.map((queryKey) =>
-      queryClient.invalidateQueries({ queryKey, refetchType: "all" }),
+      queryClient.invalidateQueries({ queryKey, refetchType: "active" }),
     ),
     // A detail can legitimately disappear after archiving its last track; mark inactive details stale without fetching them.
     ...ADMIN_MUSIC_ACTIVE_QUERY_PREFIXES.map((queryKey) =>

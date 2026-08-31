@@ -103,7 +103,7 @@ func TestRouteValidationPrecedesAuthenticationAndKeepsTypeBoxBounds(t *testing.T
 	requests := []struct{ method, path, body string }{
 		{http.MethodGet, "/api/v1/admin/sources/browse?path=" + strings.Repeat("a", 4001), ""},
 		{http.MethodGet, "/api/v1/admin/sources/browse?page=0", ""},
-		{http.MethodGet, "/api/v1/admin/sources?pageSize=1001", ""},
+		{http.MethodGet, "/api/v1/admin/sources?pageSize=100001", ""},
 		{http.MethodGet, "/api/v1/admin/sources/not-a-uuid", ""},
 		{http.MethodGet, "/api/v1/admin/sources/" + testRootID + "/files?page=0", ""},
 		{http.MethodGet, "/api/v1/admin/sources/" + testRootID + "/files?status=INVALID", ""},

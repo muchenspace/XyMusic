@@ -44,23 +44,34 @@ const (
 )
 
 type ListInput struct {
-	Page     int
-	PageSize int
-	Search   string
-	Status   JobStatus
-	Type     JobType
-	Sort     SortField
-	Order    SortOrder
+	Page       int
+	PageSize   int
+	Search     string
+	Status     JobStatus
+	Type       JobType
+	Sort       SortField
+	Order      SortOrder
+	Cursor     string
+	CursorMode bool
 }
 
 type ListQuery struct {
-	Search string
-	Status JobStatus
-	Type   JobType
-	Sort   SortField
-	Order  SortOrder
-	Limit  int
-	Offset int
+	Search     string
+	Status     JobStatus
+	Type       JobType
+	Sort       SortField
+	Order      SortOrder
+	Limit      int
+	Offset     int
+	After      *JobCursor
+	CursorMode bool
+	TotalHint  *int
+}
+
+type JobCursor struct {
+	Value string
+	ID    string
+	Total *int
 }
 
 type JobRecord struct {

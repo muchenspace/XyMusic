@@ -9,6 +9,7 @@ import AppPagination from "@/components/AppPagination.vue";
 import AudioStatusBadge from "@/components/AudioStatusBadge.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import StatePanel from "@/components/StatePanel.vue";
+import VirtualTable from "@/components/VirtualTable.vue";
 import { useMusicAdmin } from "@/app/services/music";
 import type { AlbumMergeResult, AlbumSummary } from "@/features/music/domain/models";
 import { DEFAULT_CATALOG_PAGE_SIZE } from "@/shared/presentation/pagination";
@@ -25,9 +26,11 @@ const mergeLoading = ref(false);
 const mergeCandidates = ref<AlbumSummary[]>([]);
 const trackPage = ref(1);
 const trackPageSize = ref(DEFAULT_CATALOG_PAGE_SIZE);
+const trackCursor = ref("");
+const trackCursorHistory = ref(new Map<number, string>());
 const query = useQuery({
-  queryKey: computed(() => ["admin", "album", albumId.value, { page: trackPage.value, pageSize: trackPageSize.value }]),
-  queryFn: ({ signal }) => musicAdmin.getAlbum(albumId.value, trackPage.value, trackPageSize.value, signal),
+  queryKey: computed(() => ["admin", "album", albumId.value, { page: trackPage.value, pageSize: trackPageSize.value, cursor: trackCursor.value }]),
+  queryFn: ({ signal }) => musicAdmin.getAlbum(albumId.value, { page: trackPage.value, pageSize: trackPageSize.value, cursor: trackCursor.value || undefined, cursorMode: "cursor" }, signal),
 });
 const duplicatesQuery = useQuery({
   queryKey: computed(() => ["admin", "albums", "duplicates", { albumId: albumId.value }]),
@@ -35,7 +38,25 @@ const duplicatesQuery = useQuery({
 });
 const duplicateGroup = computed(() => duplicatesQuery.data.value?.groups[0]);
 
-watch(albumId, () => { trackPage.value = 1; mergeCandidates.value = []; mergeOpen.value = false; });
+watch(albumId, () => { resetTrackPaging(); mergeCandidates.value = []; mergeOpen.value = false; });
+function resetTrackPaging(): void {
+  trackPage.value = 1;
+  trackCursor.value = "";
+  trackCursorHistory.value = new Map([[1, ""]]);
+}
+function changeTrackPage(nextPage: number): void {
+  if (query.isFetching.value || !Number.isSafeInteger(nextPage) || nextPage < 1 || nextPage === trackPage.value) return;
+  const next = new Map(trackCursorHistory.value);
+  if (nextPage < trackPage.value) trackCursor.value = next.get(nextPage) ?? "";
+  else {
+    const nextCursor = query.data.value?.nextCursor;
+    if (!nextCursor) return;
+    next.set(nextPage, nextCursor);
+    trackCursor.value = nextCursor;
+  }
+  trackCursorHistory.value = next;
+  trackPage.value = nextPage;
+}
 
 async function openMerge(): Promise<void> {
   if (!duplicateGroup.value) {
@@ -66,6 +87,8 @@ async function merged(result: AlbumMergeResult): Promise<void> {
   }
 }
 
+function albumTrackKey(track: { id: string }): string { return track.id; }
+
 function trackPosition(discNumber: number, trackNumber: number | null): string {
   if (trackNumber === null) return "—";
   return discNumber > 1 ? `${discNumber}-${trackNumber}` : String(trackNumber);
@@ -73,7 +96,7 @@ function trackPosition(discNumber: number, trackNumber: number | null): string {
 
 function changeTrackPageSize(value: number): void {
   trackPageSize.value = value;
-  trackPage.value = 1;
+  resetTrackPaging();
 }
 </script>
 
@@ -118,26 +141,34 @@ function changeTrackPageSize(value: number): void {
           <h2 class="font-bold">专辑曲目</h2>
         </div>
         <StatePanel v-if="!query.data.value.tracks.length" state="empty" title="该专辑暂无曲目" />
-        <div v-else class="overflow-x-auto">
-          <table class="data-table min-w-[760px]">
-            <thead><tr><th class="w-20">音轨</th><th>曲目</th><th>时长 / 格式</th><th>音频状态</th></tr></thead>
-            <tbody>
-              <tr v-for="track in query.data.value.tracks" :key="track.id">
+        <VirtualTable
+          :items="query.data.value.tracks"
+          :columns="4"
+          :row-height="64"
+          :overscan="8"
+          min-width="760px"
+          :row-key="albumTrackKey"
+        >
+          <template #header>
+<tr><th class="w-20">音轨</th><th>曲目</th><th>时长 / 格式</th><th>音频状态</th></tr>
+          </template>
+          <template #default="{ item: track }">
+<tr>
                 <td class="font-mono text-xs">{{ trackPosition(track.discNumber, track.trackNumber) }}</td>
                 <td><div class="flex items-center gap-3"><span class="grid h-10 w-10 place-items-center overflow-hidden rounded-lg bg-[var(--surface-muted)]"><img v-if="track.artwork" :src="track.artwork.url" class="h-full w-full object-cover" alt="封面" width="40" height="40" loading="lazy" decoding="async" /><FileAudio v-else :size="17" /></span><div class="min-w-0"><p class="max-w-md truncate font-semibold">{{ track.title }}</p><p class="mt-0.5 max-w-md truncate text-xs text-[var(--muted)]">{{ track.artists.join('、') || '未知艺术家' }}</p></div></div></td>
                 <td><p class="font-mono text-xs">{{ formatDuration(track.durationMs) }}</p><p class="text-[10px] text-[var(--muted)]">{{ track.source?.format ?? '—' }}</p></td>
                 <td><AudioStatusBadge :status="track.audioStatus" :source-status="track.source?.status" /></td>
               </tr>
-            </tbody>
-          </table>
-        </div>
+          </template>
+        </VirtualTable>
         <AppPagination
           v-if="query.data.value.trackTotal"
           :page="trackPage"
           :page-size="trackPageSize"
           :total="query.data.value.trackTotal"
           :total-pages="query.data.value.trackTotalPages"
-          @change="trackPage = $event"
+          cursor
+          @change="changeTrackPage"
           @page-size-change="changeTrackPageSize"
         />
       </section>

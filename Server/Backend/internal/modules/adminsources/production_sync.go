@@ -80,6 +80,46 @@ type syncDatabase interface {
 	Begin(context.Context) (pgx.Tx, error)
 }
 
+type scanTransactionContextKey struct{}
+type scanBatchCatalogContextKey struct{}
+type scanPreparedStabilityContextKey struct{}
+
+func withScanTransaction(ctx context.Context, transaction pgx.Tx) context.Context {
+	return context.WithValue(ctx, scanTransactionContextKey{}, transaction)
+}
+
+func scanTransactionFromContext(ctx context.Context) pgx.Tx {
+	if ctx == nil {
+		return nil
+	}
+	transaction, _ := ctx.Value(scanTransactionContextKey{}).(pgx.Tx)
+	return transaction
+}
+
+func withScanBatchCatalog(ctx context.Context, cache *scanCatalogCache) context.Context {
+	return context.WithValue(ctx, scanBatchCatalogContextKey{}, cache)
+}
+
+func scanBatchCatalogFromContext(ctx context.Context) *scanCatalogCache {
+	if ctx == nil {
+		return nil
+	}
+	cache, _ := ctx.Value(scanBatchCatalogContextKey{}).(*scanCatalogCache)
+	return cache
+}
+
+func withPreparedStabilityChecked(ctx context.Context) context.Context {
+	return context.WithValue(ctx, scanPreparedStabilityContextKey{}, true)
+}
+
+func preparedStabilityWasChecked(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	checked, _ := ctx.Value(scanPreparedStabilityContextKey{}).(bool)
+	return checked
+}
+
 type scanBatchDatabase struct {
 	transaction pgx.Tx
 }
@@ -184,11 +224,6 @@ func (synchronizer *ProductionSynchronizer) PrepareFile(
 	if err != nil {
 		return nil, true, err
 	}
-	if found {
-		if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
-			snapshot.markSourceSeen(existing.ID)
-		}
-	}
 	unchanged := found && existing.SizeBytes == metadata.Size() &&
 		existing.ModifiedAt.UnixMilli() == metadata.ModTime().UnixMilli()
 	needsArtwork, err := synchronizer.needsArtworkForTrack(ctx, existing.TrackID)
@@ -196,6 +231,9 @@ func (synchronizer *ProductionSynchronizer) PrepareFile(
 		return nil, true, err
 	}
 	if unchanged && existing.Status == SourceFileReady && !needsArtwork {
+		if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
+			snapshot.markSourceSeen(existing.ID)
+		}
 		sidecars, err := readSidecarLyricsCached(sourceScanSnapshotFromContext(ctx), file.AudioPath)
 		if err != nil {
 			return nil, true, err
@@ -303,9 +341,16 @@ func (synchronizer *ProductionSynchronizer) ProcessPreparedFile(
 	if !ok || value == nil {
 		return errors.New("local library prepared file has an invalid type")
 	}
-	stable, err := synchronizer.preparedFileStillStable(file, value)
-	if err != nil {
-		return synchronizer.finishPreparedFileError(ctx, rootID, file, seenAt, err)
+	stable := true
+	var err error
+	if !preparedStabilityWasChecked(ctx) {
+		stable, err = synchronizer.preparedFileStillStable(file, value)
+		if err != nil {
+			if scanTransactionFromContext(ctx) != nil {
+				return err
+			}
+			return synchronizer.finishPreparedFileError(ctx, rootID, file, seenAt, err)
+		}
 	}
 	if !stable {
 		return synchronizer.ProcessFile(ctx, rootID, scanRunID, file, seenAt)
@@ -317,10 +362,18 @@ func (synchronizer *ProductionSynchronizer) ProcessPreparedFile(
 		if !value.ExistingFound {
 			return errors.New("local library reusable source is missing its source record")
 		}
-		return synchronizer.finishPreparedFileError(
-			ctx, rootID, file, seenAt,
-			synchronizer.syncUnchangedSidecars(ctx, value.Existing, value.Sidecars, seenAt),
-		)
+		sidecarErr := synchronizer.syncUnchangedSidecars(ctx, value.Existing, value.Sidecars, seenAt)
+		if scanTransactionFromContext(ctx) != nil {
+			return sidecarErr
+		}
+		return synchronizer.finishPreparedFileError(ctx, rootID, file, seenAt, sidecarErr)
+	}
+	if scanTransactionFromContext(ctx) != nil {
+		_, err := synchronizer.syncStandardFileWithOptions(ctx, rootID, scanRunID, file, seenAt, standardSyncOptions{
+			Metadata: value.Metadata, Probed: value.Probed, Checksum: value.Checksum,
+			Sidecars: value.Sidecars, SidecarsReady: value.SidecarsReady,
+		})
+		return err
 	}
 	return synchronizer.processStablePreparedFile(ctx, rootID, scanRunID, file, seenAt, value)
 }
@@ -387,11 +440,130 @@ func (synchronizer *ProductionSynchronizer) ProcessPreparedFileBatch(
 	batch []PreparedScanBatchFile,
 	seenAt time.Time,
 ) []error {
-	errors := make([]error, len(batch))
-	for index, item := range batch {
-		errors[index] = synchronizer.ProcessPreparedFile(ctx, rootID, scanRunID, item.File, seenAt, item.Prepared)
+	result := make([]error, len(batch))
+	if len(batch) == 0 {
+		return result
 	}
-	return errors
+
+	// Only the stable, non-reusable standard-file path is safe to place in a
+	// shared transaction. Reusable files may need their own sidecar transaction
+	// and a file that changed after preparation must fall back to the normal
+	// path. Keeping this guard cheap preserves the per-file error contract.
+	preparedFiles := make([]*preparedStandardFile, len(batch))
+	for index, item := range batch {
+		prepared, ok := item.Prepared.(*preparedStandardFile)
+		if !ok || prepared == nil || prepared.UnchangedReady {
+			return synchronizer.processPreparedFilesIndividually(ctx, rootID, scanRunID, batch, seenAt)
+		}
+		stable, err := synchronizer.preparedFileStillStable(item.File, prepared)
+		if err != nil || !stable {
+			return synchronizer.processPreparedFilesIndividually(ctx, rootID, scanRunID, batch, seenAt)
+		}
+		preparedFiles[index] = prepared
+	}
+
+	transaction, err := synchronizer.database.Begin(ctx)
+	if err != nil {
+		return synchronizer.processPreparedFilesIndividually(ctx, rootID, scanRunID, batch, seenAt)
+	}
+	defer transaction.Rollback(context.WithoutCancel(ctx))
+	batchCatalog := newScanCatalogCache()
+	batchContext := withPreparedStabilityChecked(withScanBatchCatalog(withScanTransaction(ctx, transaction), batchCatalog))
+
+	for index, item := range batch {
+		if err := ctx.Err(); err != nil {
+			return synchronizer.abortPreparedFileBatch(ctx, rootID, batch, seenAt, transaction, result, err)
+		}
+		// A savepoint isolates one bad file while allowing the remaining files
+		// to share the transaction and its catalog/index work.
+		savepoint := fmt.Sprintf("xymusic_scan_file_%d", index)
+		if _, err := transaction.Exec(batchContext, "SAVEPOINT "+savepoint); err != nil {
+			batchErr := fmt.Errorf("create prepared local library scan savepoint: %w", err)
+			return synchronizer.abortPreparedFileBatch(ctx, rootID, batch, seenAt, transaction, result, batchErr)
+		}
+		result[index] = synchronizer.ProcessPreparedFile(
+			batchContext, rootID, scanRunID, item.File, seenAt, preparedFiles[index],
+		)
+		if result[index] != nil {
+			if rollbackErr := rollbackScanSavepoint(batchContext, transaction, savepoint); rollbackErr != nil {
+				batchErr := errors.Join(result[index], rollbackErr)
+				return synchronizer.abortPreparedFileBatch(ctx, rootID, batch, seenAt, transaction, result, batchErr)
+			}
+			continue
+		}
+		if _, releaseErr := transaction.Exec(batchContext, "RELEASE SAVEPOINT "+savepoint); releaseErr != nil {
+			result[index] = releaseErr
+			if rollbackErr := rollbackScanSavepoint(batchContext, transaction, savepoint); rollbackErr != nil {
+				batchErr := errors.Join(result[index], rollbackErr)
+				return synchronizer.abortPreparedFileBatch(ctx, rootID, batch, seenAt, transaction, result, batchErr)
+			}
+		}
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		batchErr := fmt.Errorf("commit prepared local library scan batch: %w", err)
+		return synchronizer.abortPreparedFileBatch(ctx, rootID, batch, seenAt, transaction, result, batchErr)
+	}
+	if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
+		snapshot.rememberCatalog(batchCatalog)
+	}
+	for index, item := range batch {
+		if result[index] != nil && !errors.Is(result[index], context.Canceled) && !errors.Is(result[index], ErrScanCancelled) {
+			result[index] = synchronizer.finishPreparedFileError(ctx, rootID, item.File, seenAt, result[index])
+		}
+	}
+	return result
+}
+
+func (synchronizer *ProductionSynchronizer) abortPreparedFileBatch(
+	ctx context.Context,
+	rootID string,
+	batch []PreparedScanBatchFile,
+	seenAt time.Time,
+	transaction pgx.Tx,
+	result []error,
+	batchErr error,
+) []error {
+	fillUncommittedBatchErrors(result, batchErr)
+	cleanupContext := context.WithoutCancel(ctx)
+	_ = transaction.Rollback(cleanupContext)
+	for index, item := range batch {
+		if result[index] == nil || errors.Is(result[index], context.Canceled) || errors.Is(result[index], ErrScanCancelled) {
+			continue
+		}
+		result[index] = synchronizer.finishPreparedFileError(cleanupContext, rootID, item.File, seenAt, result[index])
+	}
+	return result
+}
+
+func fillUncommittedBatchErrors(result []error, err error) {
+	for index := range result {
+		if result[index] == nil {
+			result[index] = err
+		}
+	}
+}
+
+func rollbackScanSavepoint(ctx context.Context, transaction pgx.Tx, savepoint string) error {
+	cleanupContext := context.WithoutCancel(ctx)
+	if _, err := transaction.Exec(cleanupContext, "ROLLBACK TO SAVEPOINT "+savepoint); err != nil {
+		return err
+	}
+	_, err := transaction.Exec(cleanupContext, "RELEASE SAVEPOINT "+savepoint)
+	return err
+}
+
+func (synchronizer *ProductionSynchronizer) processPreparedFilesIndividually(
+	ctx context.Context,
+	rootID string,
+	scanRunID string,
+	batch []PreparedScanBatchFile,
+	seenAt time.Time,
+) []error {
+	result := make([]error, len(batch))
+	for index, item := range batch {
+		result[index] = synchronizer.ProcessPreparedFile(ctx, rootID, scanRunID, item.File, seenAt, item.Prepared)
+	}
+	return result
 }
 
 func (synchronizer *ProductionSynchronizer) FlushScan(
@@ -412,7 +584,7 @@ func (synchronizer *ProductionSynchronizer) FlushScan(
 
 	if len(seenIDs) > 0 {
 		now := synchronizer.now()
-		const batchSize = 1000
+		const batchSize = 10_000
 		for i := 0; i < len(seenIDs); i += batchSize {
 			end := min(i+batchSize, len(seenIDs))
 			chunk := seenIDs[i:end]
@@ -439,44 +611,56 @@ func (synchronizer *ProductionSynchronizer) DeleteMissing(
 	if err != nil {
 		return 0, fmt.Errorf("begin delete missing sources: %w", err)
 	}
-	defer transaction.Rollback(ctx)
+	defer transaction.Rollback(context.WithoutCancel(ctx))
 
-	rows, err := transaction.Query(ctx, `
-		SELECT id::text
-		FROM local_music_sources
-		WHERE root_id = $1 AND last_seen_at < $2
-		FOR UPDATE`, rootID, seenCutoff)
-	if err != nil {
-		return 0, fmt.Errorf("list missing sources for deletion: %w", err)
-	}
-	sourceIDs := make([]string, 0)
-	for rows.Next() {
-		var sourceID string
-		if err := rows.Scan(&sourceID); err != nil {
-			rows.Close()
-			return 0, fmt.Errorf("scan missing source for deletion: %w", err)
+	// Never materialize every missing source from a large root. Deleting in
+	// bounded chunks keeps both the Go heap and PostgreSQL array parameters
+	// predictable when a library was moved or a mount temporarily disappeared.
+	const batchSize = 5_000
+	deletedTracks := 0
+	for {
+		rows, err := transaction.Query(ctx, `
+			SELECT id::text
+			FROM local_music_sources
+			WHERE root_id = $1 AND last_seen_at < $2
+			ORDER BY id
+			LIMIT $3
+			FOR UPDATE SKIP LOCKED`, rootID, seenCutoff, batchSize)
+		if err != nil {
+			return 0, fmt.Errorf("list missing sources for deletion: %w", err)
 		}
-		sourceIDs = append(sourceIDs, sourceID)
-	}
-	if err := rows.Err(); err != nil {
+		sourceIDs := make([]string, 0, batchSize)
+		for rows.Next() {
+			var sourceID string
+			if err := rows.Scan(&sourceID); err != nil {
+				rows.Close()
+				return 0, fmt.Errorf("scan missing source for deletion: %w", err)
+			}
+			sourceIDs = append(sourceIDs, sourceID)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("iterate missing sources for deletion: %w", err)
+		}
 		rows.Close()
-		return 0, fmt.Errorf("iterate missing sources for deletion: %w", err)
-	}
-	rows.Close()
+		if len(sourceIDs) == 0 {
+			break
+		}
 
-	trackIDs, err := querySourceTrackIDs(ctx, transaction, sourceIDs)
-	if err != nil {
-		return 0, err
-	}
-	if len(sourceIDs) > 0 {
+		trackIDs, err := querySourceTrackIDs(ctx, transaction, sourceIDs)
+		if err != nil {
+			return 0, err
+		}
 		if _, err := transaction.Exec(ctx, `DELETE FROM local_music_sources WHERE id = ANY($1::uuid[])`, sourceIDs); err != nil {
 			return 0, fmt.Errorf("delete missing source records: %w", err)
 		}
+		deleted, err := deleteOrphanedTracks(ctx, transaction, trackIDs)
+		if err != nil {
+			return 0, err
+		}
+		deletedTracks += deleted
 	}
-	deletedTracks, err := deleteOrphanedTracks(ctx, transaction, trackIDs)
-	if err != nil {
-		return 0, err
-	}
+
 	if err := transaction.Commit(ctx); err != nil {
 		return 0, fmt.Errorf("commit missing source deletion: %w", err)
 	}
@@ -570,11 +754,6 @@ func (synchronizer *ProductionSynchronizer) syncStandardFileWithOptions(
 	if err != nil {
 		return localSourceRecord{}, err
 	}
-	if found {
-		if snapshot != nil {
-			snapshot.markSourceSeen(existing.ID)
-		}
-	}
 	unchanged := found && existing.SizeBytes == metadata.Size() &&
 		existing.ModifiedAt.UnixMilli() == metadata.ModTime().UnixMilli()
 	needsArtwork, err := synchronizer.needsArtworkForTrack(ctx, existing.TrackID)
@@ -582,6 +761,9 @@ func (synchronizer *ProductionSynchronizer) syncStandardFileWithOptions(
 		return localSourceRecord{}, err
 	}
 	if unchanged && existing.Status == SourceFileReady && !needsArtwork {
+		if snapshot != nil {
+			snapshot.markSourceSeen(existing.ID)
+		}
 		externalLyrics, err := synchronizer.sourceHasExternalLyrics(ctx, existing.ID)
 		if err != nil {
 			return localSourceRecord{}, err
@@ -684,14 +866,15 @@ func (synchronizer *ProductionSynchronizer) syncStandardFileWithOptions(
 			return localSourceRecord{}, err
 		}
 	}
+	catalogCache := newScanCatalogCache()
 	source, artworkUsed, err := synchronizer.storeStandardFile(ctx, standardFileMutation{
 		RootID: rootID, ScanRunID: scanRunID, File: file, Metadata: metadata,
 		Raw: probed.Metadata, Probed: probed, Checksum: checksum,
 		Existing: existing, ExistingFound: found,
 		PreserveCueMappings: options.PreserveCueMappings,
 		Lyrics:              mergeLyrics(sidecars, probed.Metadata.Lyrics),
-		Artwork:             artwork,
-		SeenAt:              seenAt,
+		Artwork:             artwork, CatalogCache: catalogCache,
+		SeenAt: seenAt,
 	})
 	if err != nil {
 		synchronizer.cleanupUnreferencedArtwork(ctx, artwork)
@@ -699,6 +882,16 @@ func (synchronizer *ProductionSynchronizer) syncStandardFileWithOptions(
 	}
 	if artwork != nil && !artworkUsed {
 		synchronizer.cleanupUnreferencedArtwork(ctx, artwork)
+	}
+	if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
+		if batchCache := scanBatchCatalogFromContext(ctx); batchCache != nil {
+			batchCache.merge(catalogCache)
+		} else {
+			// storeStandardFile commits before returning in the normal path; the
+			// batch path publishes this cache only after its outer transaction
+			// commits.
+			snapshot.rememberCatalog(catalogCache)
+		}
 	}
 	return source, nil
 }
@@ -808,9 +1001,12 @@ func (synchronizer *ProductionSynchronizer) findRenameCandidates(
 	if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
 		candidates := snapshot.renameCandidates[checksum]
 		valid := make([]localSourceRecord, 0, len(candidates))
-		for _, c := range candidates {
-			if !c.LastSeenAt.Equal(seenAt) && c.Status == SourceFileReady {
-				valid = append(valid, c)
+		for _, candidate := range candidates {
+			if candidate == nil {
+				continue
+			}
+			if !candidate.LastSeenAt.Equal(seenAt) && candidate.Status == SourceFileReady {
+				valid = append(valid, *candidate)
 			}
 		}
 		return valid, nil
@@ -841,7 +1037,8 @@ func (synchronizer *ProductionSynchronizer) sourceHasExternalLyrics(
 	sourceID string,
 ) (bool, error) {
 	if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
-		return snapshot.externalLyricsByID[sourceID], nil
+		_, exists := snapshot.externalLyricsByID[sourceID]
+		return exists, nil
 	}
 	var hasExternal bool
 	err := synchronizer.database.QueryRow(ctx, `

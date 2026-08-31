@@ -63,4 +63,5 @@ type WritebackJobPageDTO struct {
 	PageSize   int               `json:"pageSize"`
 	Total      int               `json:"total"`
 	TotalPages int               `json:"totalPages"`
+	NextCursor *string           `json:"nextCursor,omitempty"`
 }

@@ -38,10 +38,26 @@ func TestOffsetPaginationBounds(t *testing.T) {
 	if _, err := ParseOffset(1, MaxPageSize+1, 25); !apperror.IsCode(err, apperror.CodeValidationError) {
 		t.Fatalf("expected page size bound error, got %v", err)
 	}
-	if _, err := ParseOffset(102, 100, 25); !apperror.IsCode(err, apperror.CodeValidationError) {
-		t.Fatalf("expected offset bound error, got %v", err)
+	if page, err := ParseOffset(4_001, 25, 25); err != nil || page.Offset != 100_000 {
+		t.Fatalf("expected deep offsets to remain available, got %#v/%v", page, err)
 	}
-	if pages := BoundedTotalPages(100_000, 25); pages != 401 {
-		t.Fatalf("unexpected bounded pages: %d", pages)
+	if pages := BoundedTotalPages(200_000, 100); pages != 2_000 {
+		t.Fatalf("unexpected exact page count: %d", pages)
+	}
+}
+
+func TestPaginationHasNoTotalRowBoundary(t *testing.T) {
+	page, err := ParseCursor(1_001, 100, 25)
+	if err != nil || page.Page != 1_001 || page.PageSize != 100 || CursorLimit(page.Page, page.PageSize) != 101 {
+		t.Fatalf("unexpected deep cursor page: %#v/%v", page, err)
+	}
+	if page, err := ParseOffset(1, 100_000, 25); err != nil || page.PageSize != 100_000 {
+		t.Fatalf("expected 100000 rows per page to be accepted, got %#v/%v", page, err)
+	}
+	if pages := BoundedTotalPages(20_000_000, 100_000); pages != 200 {
+		t.Fatalf("unexpected page count for large result: %d", pages)
+	}
+	if got := CursorLimit(301, 333); got != 334 {
+		t.Fatalf("unexpected cursor look-ahead limit: %d", got)
 	}
 }

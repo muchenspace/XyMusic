@@ -8,6 +8,7 @@ import { ApiError } from "@/shared/application/api-error";
 import { invalidateAdminMusicQueries } from "@/app/query-client";
 import AppButton from "@/components/AppButton.vue";
 import AppPagination from "@/components/AppPagination.vue";
+import VirtualGrid from "@/components/VirtualGrid.vue";
 import ArtistArtworkScrapeDialog from "@/components/ArtistArtworkScrapeDialog.vue";
 import ArtworkUploadField from "@/components/ArtworkUploadField.vue";
 import BaseDialog from "@/components/BaseDialog.vue";
@@ -20,7 +21,7 @@ import { DEFAULT_CATALOG_PAGE_SIZE } from "@/shared/presentation/pagination";
 import { useUiStore } from "@/stores/ui";
 import { formatDate } from "@/utils/format";
 
-type ArtistListQueryKey = readonly ["admin", "artists", { page: number; pageSize: number; search: string }];
+type ArtistListQueryKey = readonly ["admin", "artists", { page: number; pageSize: number; search: string; cursor: string }];
 
 const ui = useUiStore();
 const musicAdmin = useMusicAdmin();
@@ -28,6 +29,8 @@ const search = ref("");
 const debounced = refDebounced(search, 300);
 const page = ref(1);
 const pageSize = ref(DEFAULT_CATALOG_PAGE_SIZE);
+const cursor = ref("");
+const cursorHistory = ref(new Map<number, string>());
 const selected = ref<ArtistSummary>();
 const selectedArtists = ref(new Map<string, ArtistSummary>());
 const selectedIds = computed(() => new Set(selectedArtists.value.keys()));
@@ -40,21 +43,43 @@ const form = reactive({ name: "", description: "" });
 const maximumBatchArtists = 200;
 
 const query = useQuery<MusicPage<ArtistSummary>, Error, MusicPage<ArtistSummary>, ArtistListQueryKey>({
-  queryKey: computed<ArtistListQueryKey>(() => ["admin", "artists", { page: page.value, pageSize: pageSize.value, search: debounced.value }]),
+  queryKey: computed<ArtistListQueryKey>(() => ["admin", "artists", { page: page.value, pageSize: pageSize.value, search: debounced.value, cursor: cursor.value }]),
   queryFn: ({ signal, queryKey }: QueryFunctionContext<ArtistListQueryKey>) => {
     const params = queryKey[2];
-    return musicAdmin.listArtists({ ...params, sort: "name", order: "asc" }, signal);
+    return musicAdmin.listArtists({ ...params, cursorMode: "cursor", cursor: params.cursor || undefined, sort: "name", order: "asc" }, signal);
   },
   placeholderData: keepPreviousData,
 });
+
+watch(debounced, () => resetPaging());
 
 const pageArtists = computed(() => query.data.value?.items ?? []);
 const pageSelected = computed(() => pageArtists.value.length > 0 && pageArtists.value.every((artist) => selectedIds.value.has(artist.id)));
 const pagePartiallySelected = computed(() => !pageSelected.value && pageArtists.value.some((artist) => selectedIds.value.has(artist.id)));
 
+function resetPaging(): void {
+  page.value = 1;
+  cursor.value = "";
+  cursorHistory.value = new Map([[1, ""]]);
+}
+function changePage(nextPage: number): void {
+  if (query.isFetching.value || !Number.isSafeInteger(nextPage) || nextPage < 1 || nextPage === page.value) return;
+  const next = new Map(cursorHistory.value);
+  if (nextPage < page.value) cursor.value = next.get(nextPage) ?? "";
+  else {
+    const nextCursor = query.data.value?.nextCursor;
+    if (!nextCursor) return;
+    next.set(nextPage, nextCursor);
+    cursor.value = nextCursor;
+  }
+  cursorHistory.value = next;
+  page.value = nextPage;
+}
+function artistKey(artist: ArtistSummary): string { return artist.id; }
+
 function changePageSize(value: number): void {
   pageSize.value = value;
-  page.value = 1;
+  resetPaging();
 }
 
 function edit(artist: ArtistSummary): void {
@@ -216,18 +241,24 @@ watch(editorOpen, (value) => {
         </label>
         <div class="relative max-w-lg flex-1">
           <Search :size="16" class="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
-          <input v-model="search" class="ui-input !pl-10" type="search" placeholder="搜索艺术家名称或简介" @input="page = 1" />
+          <input v-model="search" class="ui-input !pl-10" type="search" placeholder="搜索艺术家名称或简介" @input="resetPaging()" />
         </div>
       </div>
       <StatePanel v-if="query.isPending.value" state="loading" />
       <StatePanel v-else-if="query.isError.value" state="error" @retry="query.refetch()" />
       <StatePanel v-else-if="!query.data.value?.items.length" state="empty" title="没有符合条件的艺术家" />
       <template v-else>
-        <div class="grid gap-px bg-[var(--border)] sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-          <article
-            v-for="(artist, index) in query.data.value.items"
-            :key="artist.id"
-            class="group motion-item media-tile relative flex items-center gap-4 bg-[var(--surface-solid)] p-4 hover:bg-[var(--surface-muted)]"
+        <VirtualGrid
+          :items="query.data.value.items"
+          :item-height="120"
+          :min-item-width="280"
+          :gap="1"
+          :overscan="2"
+          :row-key="artistKey"
+        >
+          <template #default="{ item: artist, index }">
+            <article
+            class="group motion-item media-tile relative flex h-full items-center gap-4 bg-[var(--surface-solid)] p-4 hover:bg-[var(--surface-muted)]"
             :style="{ '--motion-index': index }"
           >
             <label
@@ -257,8 +288,9 @@ watch(editorOpen, (value) => {
               <Pencil :size="15" />
             </button>
           </article>
-        </div>
-        <AppPagination :page="page" :page-size="pageSize" :total="query.data.value.total" @change="page = $event" @page-size-change="changePageSize" />
+          </template>
+        </VirtualGrid>
+        <AppPagination :page="page" :page-size="pageSize" :total="query.data.value.total" :total-pages="query.data.value.totalPages" cursor @change="changePage" @page-size-change="changePageSize" />
       </template>
     </section>
 

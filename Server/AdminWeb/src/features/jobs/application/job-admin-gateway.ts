@@ -4,6 +4,7 @@ import type {
   JobPage,
   JobSummary,
   MetadataWritebackJob,
+  WritebackListQuery,
 } from "@/features/jobs/domain/models";
 
 export interface JobEventSubscription {
@@ -15,7 +16,7 @@ export interface JobAdminGateway {
   detail(jobId: string, signal?: AbortSignal): Promise<JobDetail>;
   retry(jobId: string): Promise<JobSummary>;
   cancel(jobId: string): Promise<void>;
-  listWritebacks(page: number, pageSize: number, status: string, signal?: AbortSignal): Promise<JobPage<MetadataWritebackJob>>;
+  listWritebacks(query: WritebackListQuery, signal?: AbortSignal): Promise<JobPage<MetadataWritebackJob>>;
   retryWriteback(jobId: string, expectedVersion: number, reason: string): Promise<MetadataWritebackJob>;
   cancelWriteback(jobId: string, expectedVersion: number, reason: string): Promise<MetadataWritebackJob>;
   watch(onOpen: () => void, onUpdate: () => void, onError: () => void): JobEventSubscription;

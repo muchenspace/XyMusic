@@ -235,8 +235,8 @@ type metadataMutationRequest struct {
 }
 
 type batchMutationRequest struct {
-	Items  []BatchMutationItem `json:"items"`
-	Patch  map[string]any      `json:"patch"`
+	Items []BatchMutationItem `json:"items"`
+	Patch map[string]any      `json:"patch"`
 }
 
 type versionReasonRequest struct {
@@ -657,7 +657,25 @@ func bindWritebackList(c *gin.Context) (WritebackListInput, error) {
 	if trackPresent && !routeUUIDPattern.MatchString(trackID) {
 		return WritebackListInput{}, routeContractError()
 	}
-	return WritebackListInput{Page: page, PageSize: pageSize, Status: status, TrackID: trackID}, nil
+	cursor, cursorPresent := routeLastQuery(c, "cursor")
+	if cursorPresent && len(cursor) > 4096 {
+		return WritebackListInput{}, routeContractError()
+	}
+	cursorModeValue, cursorModePresent := routeLastQuery(c, "cursorMode")
+	cursorMode := !cursorModePresent
+	if cursorModePresent {
+		if cursorModeValue != "cursor" && cursorModeValue != "offset" {
+			return WritebackListInput{}, routeContractError()
+		}
+		cursorMode = cursorModeValue == "cursor"
+	}
+	if cursor != "" && !cursorModePresent {
+		cursorMode = true
+	}
+	return WritebackListInput{
+		Page: page, PageSize: pageSize, Status: status, TrackID: trackID,
+		Cursor: cursor, CursorMode: cursorMode,
+	}, nil
 }
 
 func routeOptionalQueryInteger(c *gin.Context, name string, minimum, maximum int) (int, error) {

@@ -9,6 +9,7 @@ import type {
   JobPage,
   JobSummary,
   MetadataWritebackJob,
+  WritebackListQuery,
 } from "@/features/jobs/domain/models";
 
 export class HttpJobAdminGateway implements JobAdminGateway {
@@ -28,8 +29,8 @@ export class HttpJobAdminGateway implements JobAdminGateway {
     await adminApi.cancelJob(jobId);
   }
 
-  listWritebacks(page: number, pageSize: number, status: string, signal?: AbortSignal): Promise<JobPage<MetadataWritebackJob>> {
-    return adminApi.writebackJobs({ page, pageSize, status }, signal);
+  listWritebacks(query: WritebackListQuery, signal?: AbortSignal): Promise<JobPage<MetadataWritebackJob>> {
+    return adminApi.writebackJobs(query, signal);
   }
 
   retryWriteback(jobId: string, expectedVersion: number, reason: string): Promise<MetadataWritebackJob> {

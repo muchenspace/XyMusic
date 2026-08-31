@@ -30,11 +30,8 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 
 func (repository *Repository) ListJobs(ctx context.Context, input ListQuery) ([]JobRecord, int, error) {
 	where, arguments := jobWhere(input)
-	var total int
-	if err := repository.database.QueryRow(ctx, `WITH admin_jobs AS (`+jobUnionSQL+`)
-		SELECT count(*)::int FROM admin_jobs`+where, arguments...).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count administrator jobs: %w", err)
-	}
+	countWhere := where
+	countArguments := append([]any(nil), arguments...)
 	orderColumn := map[SortField]string{
 		SortCreatedAt: "created_at",
 		SortUpdatedAt: "updated_at",
@@ -51,11 +48,37 @@ func (repository *Repository) ListJobs(ctx context.Context, input ListQuery) ([]
 	} else if input.Order != SortDescending {
 		return nil, 0, fmt.Errorf("unsupported administrator job order %q", input.Order)
 	}
-	arguments = append(arguments, input.Limit, input.Offset)
-	rows, err := repository.database.Query(ctx, `WITH admin_jobs AS (`+jobUnionSQL+`)
-		SELECT `+jobColumns+` FROM admin_jobs`+where+`
-		ORDER BY `+orderColumn+` `+direction+`, id `+direction+`
-		LIMIT $`+fmt.Sprint(len(arguments)-1)+` OFFSET $`+fmt.Sprint(len(arguments)), arguments...)
+	if input.CursorMode && input.After != nil {
+		operator := "<"
+		if input.Order == SortAscending {
+			operator = ">"
+		}
+		valuePosition := len(arguments) + 1
+		idPosition := len(arguments) + 2
+		arguments = append(arguments, input.After.Value, input.After.ID)
+		value := fmt.Sprintf("$%d", valuePosition)
+		if input.Sort == SortCreatedAt || input.Sort == SortUpdatedAt {
+			value += "::timestamptz"
+		}
+		seek := fmt.Sprintf("(%s %s %s OR (%s = %s AND id %s $%d))", orderColumn, operator, value, orderColumn, value, operator, idPosition)
+		if where == "" {
+			where = " WHERE " + seek
+		} else {
+			where += " AND " + seek
+		}
+	}
+	limitPosition := len(arguments) + 1
+	arguments = append(arguments, input.Limit)
+	statement := `WITH admin_jobs AS (` + jobUnionSQL + `)
+		SELECT ` + jobColumns + ` FROM admin_jobs` + where + `
+		ORDER BY ` + orderColumn + ` ` + direction + `, id ` + direction + `
+		LIMIT $` + fmt.Sprint(limitPosition)
+	if !input.CursorMode {
+		offsetPosition := len(arguments) + 1
+		arguments = append(arguments, input.Offset)
+		statement += ` OFFSET $` + fmt.Sprint(offsetPosition)
+	}
+	rows, err := repository.database.Query(ctx, statement, arguments...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list administrator jobs: %w", err)
 	}
@@ -70,6 +93,16 @@ func (repository *Repository) ListJobs(ctx context.Context, input ListQuery) ([]
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("iterate administrator jobs: %w", err)
+	}
+	var total int
+	if input.TotalHint != nil {
+		if *input.TotalHint < 0 {
+			return nil, 0, fmt.Errorf("pagination total hint is invalid")
+		}
+		total = *input.TotalHint
+	} else if err := repository.database.QueryRow(ctx, `WITH admin_jobs AS (`+jobUnionSQL+`)
+		SELECT count(*)::int FROM admin_jobs`+countWhere, countArguments...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count administrator jobs: %w", err)
 	}
 	return result, total, nil
 }

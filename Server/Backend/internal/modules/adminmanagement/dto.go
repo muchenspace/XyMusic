@@ -54,6 +54,7 @@ type UserDetailDTO struct {
 	SessionPageSize   int          `json:"sessionPageSize"`
 	SessionTotal      int          `json:"sessionTotal"`
 	SessionTotalPages int          `json:"sessionTotalPages"`
+	NextSessionCursor *string      `json:"nextSessionCursor,omitempty"`
 }
 
 type UserPageDTO struct {
@@ -62,8 +63,8 @@ type UserPageDTO struct {
 	PageSize   int       `json:"pageSize"`
 	Total      int       `json:"total"`
 	TotalPages int       `json:"totalPages"`
+	NextCursor *string   `json:"nextCursor,omitempty"`
 }
-
 
 type DashboardDTO struct {
 	Users struct {
@@ -81,16 +82,20 @@ type DashboardDTO struct {
 }
 
 type ListUsersInput struct {
-	Page     int
-	PageSize int
-	Query    string
-	Role     UserRole
-	Status   UserStatus
+	Page       int
+	PageSize   int
+	Query      string
+	Role       UserRole
+	Status     UserStatus
+	Cursor     string
+	CursorMode bool
 }
 
 type SessionPageInput struct {
-	Page     int
-	PageSize int
+	Page       int
+	PageSize   int
+	Cursor     string
+	CursorMode bool
 }
 
 type CreateUserInput struct {
@@ -166,7 +171,6 @@ type PasswordInput struct {
 type VersionInput struct {
 	ExpectedVersion int `json:"expectedVersion"`
 }
-
 
 type UpdatedDTO struct {
 	Updated bool `json:"updated"`

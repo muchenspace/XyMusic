@@ -205,15 +205,26 @@ type BatchUpdateRecord struct {
 }
 
 type WritebackListInput struct {
-	Page     int
-	PageSize int
-	Status   WritebackStatus
-	TrackID  string
+	Page       int
+	PageSize   int
+	Status     WritebackStatus
+	TrackID    string
+	Cursor     string
+	CursorMode bool
 }
 
 type WritebackListQuery struct {
-	Limit   int
-	Offset  int
-	Status  WritebackStatus
-	TrackID string
+	Limit      int
+	Offset     int
+	Status     WritebackStatus
+	TrackID    string
+	After      *WritebackCursor
+	CursorMode bool
+	TotalHint  *int
+}
+
+type WritebackCursor struct {
+	CreatedAt string
+	ID        string
+	Total     *int
 }

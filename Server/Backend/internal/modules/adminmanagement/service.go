@@ -31,9 +31,14 @@ type Service struct {
 	store     Store
 	artworks  ArtworkPresenter
 	passwords PasswordHasher
+	cursors   *pagination.CursorCodec
 }
 
 func NewService(dependencies ServiceDependencies) (*Service, error) {
+	return NewServiceWithOptions(dependencies, nil)
+}
+
+func NewServiceWithOptions(dependencies ServiceDependencies, cursors *pagination.CursorCodec) (*Service, error) {
 	if dependencies.Store == nil {
 		return nil, errors.New("admin management store is required")
 	}
@@ -45,6 +50,7 @@ func NewService(dependencies ServiceDependencies) (*Service, error) {
 	}
 	return &Service{
 		store: dependencies.Store, artworks: dependencies.Artworks, passwords: dependencies.Passwords,
+		cursors: cursors,
 	}, nil
 }
 
@@ -67,13 +73,64 @@ func (service *Service) Dashboard(ctx context.Context) (DashboardDTO, error) {
 }
 
 func (service *Service) ListUsers(ctx context.Context, input ListUsersInput) (UserPageDTO, error) {
+	query := strings.TrimSpace(input.Query)
+	input.Query = query
+	if javascriptStringLength(query) > 100 || !validRoleFilter(input.Role) || !validStatusFilter(input.Status) {
+		return UserPageDTO{}, apperror.Validation("User filters are invalid")
+	}
+	if input.CursorMode {
+		page, err := pagination.ParseCursor(input.Page, input.PageSize, 25)
+		if err != nil {
+			return UserPageDTO{}, err
+		}
+		if service.cursors == nil {
+			return UserPageDTO{}, errors.New("admin management cursor codec is required")
+		}
+		if page.Page > 1 && input.Cursor == "" {
+			return UserPageDTO{}, apperror.Validation("cursor is required for deep user pages")
+		}
+		scope := userCursorScope(input)
+		after, err := decodeUserCursor(service.cursors, scope, input.Cursor)
+		if err != nil {
+			return UserPageDTO{}, err
+		}
+		records, total, err := service.store.ListUsers(ctx, ListUsersQuery{
+			Search: query, Role: input.Role, Status: input.Status,
+			Limit: pagination.CursorLimit(page.Page, page.PageSize), After: after, CursorMode: true,
+			TotalHint: userCursorTotalHint(after),
+		})
+		if err != nil {
+			return UserPageDTO{}, err
+		}
+		hasNext := len(records) > page.PageSize
+		if len(records) > page.PageSize {
+			records = records[:page.PageSize]
+		}
+		artworks, err := service.presentArtworks(ctx, records)
+		if err != nil {
+			return UserPageDTO{}, err
+		}
+		items := make([]UserDTO, 0, len(records))
+		for _, record := range records {
+			items = append(items, presentUser(record, artworks))
+		}
+		result := UserPageDTO{
+			Items: items, Page: page.Page, PageSize: page.PageSize, Total: total,
+			TotalPages: pagination.BoundedTotalPages(total, page.PageSize),
+		}
+		if hasNext && len(records) > 0 {
+			next, err := encodeUserCursor(service.cursors, scope, records[len(records)-1], total)
+			if err != nil {
+				return UserPageDTO{}, err
+			}
+			result.NextCursor = &next
+		}
+		return result, nil
+	}
+
 	page, err := pagination.ParseOffset(input.Page, input.PageSize, 25)
 	if err != nil {
 		return UserPageDTO{}, err
-	}
-	query := strings.TrimSpace(input.Query)
-	if javascriptStringLength(query) > 100 || !validRoleFilter(input.Role) || !validStatusFilter(input.Status) {
-		return UserPageDTO{}, apperror.Validation("User filters are invalid")
 	}
 	records, total, err := service.store.ListUsers(ctx, ListUsersQuery{
 		Search: query, Role: input.Role, Status: input.Status, Limit: page.PageSize, Offset: page.Offset,
@@ -96,6 +153,55 @@ func (service *Service) ListUsers(ctx context.Context, input ListUsersInput) (Us
 }
 
 func (service *Service) User(ctx context.Context, userID string, input SessionPageInput) (UserDetailDTO, error) {
+	if input.CursorMode {
+		page, err := pagination.ParseCursor(input.Page, input.PageSize, 25)
+		if err != nil {
+			return UserDetailDTO{}, err
+		}
+		if service.cursors == nil {
+			return UserDetailDTO{}, errors.New("admin management cursor codec is required")
+		}
+		if page.Page > 1 && input.Cursor == "" {
+			return UserDetailDTO{}, apperror.Validation("cursor is required for deep session pages")
+		}
+		scope := sessionCursorScope(userID)
+		after, err := decodeSessionCursor(service.cursors, scope, input.Cursor)
+		if err != nil {
+			return UserDetailDTO{}, err
+		}
+		record, sessions, total, err := service.store.FindUser(ctx, userID, SessionQuery{
+			Limit: pagination.CursorLimit(page.Page, page.PageSize), After: after, CursorMode: true,
+			TotalHint: sessionCursorTotalHint(after),
+		})
+		if err != nil {
+			return UserDetailDTO{}, err
+		}
+		hasNext := len(sessions) > page.PageSize
+		if len(sessions) > page.PageSize {
+			sessions = sessions[:page.PageSize]
+		}
+		artworks, err := service.presentArtworks(ctx, []UserRecord{record})
+		if err != nil {
+			return UserDetailDTO{}, err
+		}
+		result := UserDetailDTO{
+			UserDTO: presentUser(record, artworks), Sessions: make([]SessionDTO, 0, len(sessions)),
+			SessionPage: page.Page, SessionPageSize: page.PageSize, SessionTotal: total,
+			SessionTotalPages: pagination.BoundedTotalPages(total, page.PageSize),
+		}
+		if hasNext && len(sessions) > 0 {
+			next, err := encodeSessionCursor(service.cursors, scope, sessions[len(sessions)-1], total)
+			if err != nil {
+				return UserDetailDTO{}, err
+			}
+			result.NextSessionCursor = &next
+		}
+		for _, session := range sessions {
+			result.Sessions = append(result.Sessions, presentSession(session))
+		}
+		return result, nil
+	}
+
 	page, err := pagination.ParseOffset(input.Page, input.PageSize, 25)
 	if err != nil {
 		return UserDetailDTO{}, err
@@ -116,19 +222,23 @@ func (service *Service) User(ctx context.Context, userID string, input SessionPa
 		SessionTotalPages: pagination.BoundedTotalPages(total, page.PageSize),
 	}
 	for _, session := range sessions {
-		var revokedAt *string
-		if session.RevokedAt != nil {
-			value := formatTimestamp(*session.RevokedAt)
-			revokedAt = &value
-		}
-		result.Sessions = append(result.Sessions, SessionDTO{
-			ID: session.ID, InstallationID: session.InstallationID, DeviceName: session.DeviceName,
-			Platform: session.Platform, AppVersion: session.AppVersion, Active: session.RevokedAt == nil,
-			CreatedAt: formatTimestamp(session.CreatedAt), LastSeenAt: formatTimestamp(session.LastSeenAt),
-			RevokedAt: revokedAt,
-		})
+		result.Sessions = append(result.Sessions, presentSession(session))
 	}
 	return result, nil
+}
+
+func presentSession(session SessionRecord) SessionDTO {
+	var revokedAt *string
+	if session.RevokedAt != nil {
+		value := formatTimestamp(*session.RevokedAt)
+		revokedAt = &value
+	}
+	return SessionDTO{
+		ID: session.ID, InstallationID: session.InstallationID, DeviceName: session.DeviceName,
+		Platform: session.Platform, AppVersion: session.AppVersion, Active: session.RevokedAt == nil,
+		CreatedAt: formatTimestamp(session.CreatedAt), LastSeenAt: formatTimestamp(session.LastSeenAt),
+		RevokedAt: revokedAt,
+	}
 }
 
 func (service *Service) CreateUser(ctx context.Context, input CreateUserInput) (UserDetailDTO, error) {
@@ -362,5 +472,5 @@ func nonNilCounts(input map[string]int) map[string]int {
 }
 
 var (
-	usernamePattern         = regexp.MustCompile(`^[A-Za-z0-9_]{3,32}$`)
+	usernamePattern = regexp.MustCompile(`^[A-Za-z0-9_]{3,32}$`)
 )
