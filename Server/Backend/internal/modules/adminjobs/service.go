@@ -19,24 +19,26 @@ const defaultRetryReason = "Retried by an administrator from the job center"
 type Service struct {
 	store    Store
 	metadata MetadataMutator
+	cursors  *pagination.CursorCodec
 }
 
 func NewService(store Store, metadata MetadataMutator) (*Service, error) {
+	return NewServiceWithOptions(store, metadata, nil)
+}
+
+func NewServiceWithOptions(store Store, metadata MetadataMutator, cursors *pagination.CursorCodec) (*Service, error) {
 	if store == nil {
 		return nil, errors.New("admin jobs store is required")
 	}
 	if metadata == nil {
 		return nil, errors.New("admin jobs metadata mutator is required")
 	}
-	return &Service{store: store, metadata: metadata}, nil
+	return &Service{store: store, metadata: metadata, cursors: cursors}, nil
 }
 
 func (service *Service) List(ctx context.Context, input ListInput) (JobPageDTO, error) {
-	page, err := pagination.ParseOffset(input.Page, input.PageSize, 25)
-	if err != nil {
-		return JobPageDTO{}, err
-	}
 	search := strings.TrimSpace(input.Search)
+	input.Search = search
 	if javascriptStringLength(search) > 200 || !validStatusFilter(input.Status) ||
 		!validTypeFilter(input.Type) || !validSort(input.Sort) || !validOrder(input.Order) {
 		return JobPageDTO{}, apperror.Validation("Job filters are invalid")
@@ -48,6 +50,55 @@ func (service *Service) List(ctx context.Context, input ListInput) (JobPageDTO, 
 	order := input.Order
 	if order == "" {
 		order = SortDescending
+	}
+	if input.CursorMode {
+		page, err := pagination.ParseCursor(input.Page, input.PageSize, 25)
+		if err != nil {
+			return JobPageDTO{}, err
+		}
+		if service.cursors == nil {
+			return JobPageDTO{}, errors.New("admin jobs cursor codec is required")
+		}
+		if page.Page > 1 && input.Cursor == "" {
+			return JobPageDTO{}, apperror.Validation("cursor is required for deep job pages")
+		}
+		scope := jobCursorScope(input, sort, order)
+		after, err := decodeJobCursor(service.cursors, scope, input.Cursor, sort)
+		if err != nil {
+			return JobPageDTO{}, err
+		}
+		records, total, err := service.store.ListJobs(ctx, ListQuery{
+			Search: search, Status: input.Status, Type: input.Type, Sort: sort, Order: order,
+			Limit: pagination.CursorLimit(page.Page, page.PageSize), After: after, CursorMode: true, TotalHint: jobCursorTotalHint(after),
+		})
+		if err != nil {
+			return JobPageDTO{}, err
+		}
+		hasNext := len(records) > page.PageSize
+		if len(records) > page.PageSize {
+			records = records[:page.PageSize]
+		}
+		items := make([]JobDTO, 0, len(records))
+		for _, record := range records {
+			items = append(items, presentJob(record))
+		}
+		result := JobPageDTO{
+			Items: items, Page: page.Page, PageSize: page.PageSize, Total: total,
+			TotalPages: pagination.BoundedTotalPages(total, page.PageSize),
+		}
+		if hasNext && len(records) > 0 {
+			next, err := encodeJobCursor(service.cursors, scope, sort, records[len(records)-1], total)
+			if err != nil {
+				return JobPageDTO{}, err
+			}
+			result.NextCursor = &next
+		}
+		return result, nil
+	}
+
+	page, err := pagination.ParseOffset(input.Page, input.PageSize, 25)
+	if err != nil {
+		return JobPageDTO{}, err
 	}
 	records, total, err := service.store.ListJobs(ctx, ListQuery{
 		Search: search, Status: input.Status, Type: input.Type, Sort: sort, Order: order,

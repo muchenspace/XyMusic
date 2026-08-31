@@ -147,7 +147,11 @@ func bindPage(c *gin.Context) (PageInput, error) {
 	if err != nil {
 		return PageInput{}, err
 	}
-	return PageInput{Page: page, PageSize: pageSize}, nil
+	cursor, cursorMode, err := bindNamedCursor(c, "cursor", "cursorMode")
+	if err != nil {
+		return PageInput{}, err
+	}
+	return PageInput{Page: page, PageSize: pageSize, Cursor: cursor, CursorMode: cursorMode}, nil
 }
 
 func bindDuplicateAlbums(c *gin.Context) (DuplicateAlbumInput, error) {
@@ -170,8 +174,13 @@ func bindDuplicateAlbums(c *gin.Context) (DuplicateAlbumInput, error) {
 			return DuplicateAlbumInput{}, err
 		}
 	}
+	albumCursor, albumCursorMode, err := bindNamedCursor(c, "albumCursor", "albumCursorMode")
+	if err != nil {
+		return DuplicateAlbumInput{}, err
+	}
 	return DuplicateAlbumInput{
 		PageInput: page, AlbumID: albumID, AlbumPage: albumPage, AlbumPageSize: albumPageSize,
+		AlbumCursor: albumCursor, AlbumCursorMode: albumCursorMode,
 	}, nil
 }
 
@@ -238,7 +247,23 @@ func bindLyricPage(c *gin.Context) (PageInput, error) {
 	if err != nil {
 		return PageInput{}, err
 	}
-	return PageInput{Page: page, PageSize: pageSize}, nil
+	cursor, cursorMode, err := bindNamedCursor(c, "lyricCursor", "lyricCursorMode")
+	if err != nil {
+		return PageInput{}, err
+	}
+	return PageInput{Page: page, PageSize: pageSize, Cursor: cursor, CursorMode: cursorMode}, nil
+}
+
+func bindNamedCursor(c *gin.Context, cursorName, modeName string) (string, bool, error) {
+	cursor, cursorPresent := httpserver.LastQueryValue(c, cursorName)
+	if cursorPresent && len(cursor) > 4096 {
+		return "", false, queryContractError()
+	}
+	mode, modePresent := httpserver.LastQueryValue(c, modeName)
+	if modePresent && mode != "cursor" && mode != "offset" {
+		return "", false, queryContractError()
+	}
+	return cursor, mode == "cursor" || !modePresent, nil
 }
 
 func (routes *Routes) authenticate(c *gin.Context) error {
@@ -268,7 +293,25 @@ func bindList(c *gin.Context, allowedSorts []string) (ListInput, error) {
 	if orderPresent && !validOrder(order) {
 		return ListInput{}, queryContractError()
 	}
-	return ListInput{Page: page, PageSize: pageSize, Search: search, Sort: sortValue, Order: order}, nil
+	cursor, cursorPresent := httpserver.LastQueryValue(c, "cursor")
+	if cursorPresent && len(cursor) > 4096 {
+		return ListInput{}, queryContractError()
+	}
+	cursorModeValue, cursorModePresent := httpserver.LastQueryValue(c, "cursorMode")
+	cursorMode := !cursorModePresent
+	if cursorModePresent {
+		if cursorModeValue != "cursor" && cursorModeValue != "offset" {
+			return ListInput{}, queryContractError()
+		}
+		cursorMode = cursorModeValue == "cursor"
+	}
+	if cursor != "" && !cursorModePresent {
+		cursorMode = true
+	}
+	return ListInput{
+		Page: page, PageSize: pageSize, Search: search, Sort: sortValue, Order: order,
+		Cursor: cursor, CursorMode: cursorMode,
+	}, nil
 }
 
 func queryOptionalInteger(c *gin.Context, name string, minimum, maximum int) (int, error) {

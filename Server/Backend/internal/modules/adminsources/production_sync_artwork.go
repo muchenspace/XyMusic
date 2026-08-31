@@ -210,6 +210,9 @@ func (synchronizer *ProductionSynchronizer) needsArtworkForTrack(ctx context.Con
 	if !synchronizer.artworkEnabled() || trackID == nil || strings.TrimSpace(*trackID) == "" {
 		return false, nil
 	}
+	if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
+		return snapshot.needsArtwork(*trackID), nil
+	}
 	var missing bool
 	err := synchronizer.database.QueryRow(ctx, `
 		SELECT EXISTS(
@@ -230,6 +233,9 @@ func (synchronizer *ProductionSynchronizer) needsArtworkForTrack(ctx context.Con
 func (synchronizer *ProductionSynchronizer) needsArtworkForSource(ctx context.Context, sourceID string) (bool, error) {
 	if !synchronizer.artworkEnabled() || strings.TrimSpace(sourceID) == "" {
 		return false, nil
+	}
+	if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
+		return snapshot.needsArtworkForSource(sourceID), nil
 	}
 	var missing bool
 	err := synchronizer.database.QueryRow(ctx, `
@@ -312,6 +318,9 @@ func deleteAlbumIfEmpty(
 		snapshot.forgetAlbum(*albumID)
 	}
 	cache.forgetAlbum(*albumID)
+	if batchCache := scanBatchCatalogFromContext(ctx); batchCache != nil {
+		batchCache.forgetAlbum(*albumID)
+	}
 	if coverID != nil {
 		_, _ = transaction.Exec(ctx, `UPDATE media_assets asset SET status='DELETE_PENDING',updated_at=now()
 			WHERE id=$1 AND NOT EXISTS(SELECT 1 FROM artists WHERE artwork_asset_id=asset.id)

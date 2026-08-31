@@ -76,6 +76,7 @@ export interface PageResult<T> {
   pageSize: number;
   total: number;
   totalPages?: number;
+  nextCursor?: string;
 }
 
 export interface ListQuery {
@@ -84,4 +85,6 @@ export interface ListQuery {
   search?: string;
   sort?: string;
   order?: "asc" | "desc";
+  cursor?: string;
+  cursorMode?: "cursor" | "offset";
 }

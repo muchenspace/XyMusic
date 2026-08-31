@@ -1,6 +1,8 @@
 package httpserver
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -271,9 +273,14 @@ func TestHostGuardRejectsInvalidConfiguration(t *testing.T) {
 
 func TestDeclaredRequestBodyLimits(t *testing.T) {
 	var mediaHandlerCalls int
+	var batchHandlerCalls int
 	engine := mustEngine(t, Options{
 		RegisterRoutes: func(engine *gin.Engine) {
 			engine.POST("/structured", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+			engine.POST("/api/v1/admin/tag-scraping/batches", func(c *gin.Context) {
+				batchHandlerCalls++
+				c.Status(http.StatusNoContent)
+			})
 			engine.PUT("/api/v1/admin/media/uploads/:uploadID/content", func(c *gin.Context) {
 				mediaHandlerCalls++
 				c.Status(http.StatusNoContent)
@@ -285,6 +292,21 @@ func TestDeclaredRequestBodyLimits(t *testing.T) {
 	structured.ContentLength = MaxStructuredRequestBodyBytes + 1
 	structuredResponse := execute(engine, structured)
 	assertProblem(t, structuredResponse, http.StatusRequestEntityTooLarge, string(apperror.CodePayloadTooLarge))
+
+	largeBatch := request(t, http.MethodPost, "/api/v1/admin/tag-scraping/batches", nil)
+	largeBatch.ContentLength = MaxStructuredRequestBodyBytes + 1
+	largeBatchResponse := execute(engine, largeBatch)
+	if largeBatchResponse.Code != http.StatusNoContent || batchHandlerCalls != 1 {
+		t.Fatalf("large tag scraping batch status/calls = %d/%d", largeBatchResponse.Code, batchHandlerCalls)
+	}
+
+	oversizeBatch := request(t, http.MethodPost, "/api/v1/admin/tag-scraping/batches", nil)
+	oversizeBatch.ContentLength = MaxTagScrapingBatchRequestBodyBytes + 1
+	oversizeBatchResponse := execute(engine, oversizeBatch)
+	assertProblem(t, oversizeBatchResponse, http.StatusRequestEntityTooLarge, string(apperror.CodePayloadTooLarge))
+	if batchHandlerCalls != 1 {
+		t.Fatalf("oversize tag scraping batch reached handler; calls = %d", batchHandlerCalls)
+	}
 
 	mediaPath := "/api/v1/admin/media/uploads/01234567-89ab-cdef-0123-456789abcdef/content"
 	allowedMedia := request(t, http.MethodPut, mediaPath, nil)
@@ -566,5 +588,50 @@ func assertHeader(t *testing.T, response *httptest.ResponseRecorder, name, want 
 	t.Helper()
 	if got := response.Header().Get(name); got != want {
 		t.Fatalf("header %s = %q, want %q", name, got, want)
+	}
+}
+
+func TestGzipJSONCompressesLargeJSONButLeavesSSEUntouched(t *testing.T) {
+	engine, err := NewEngine(Options{
+		AllowedHosts: []string{"example.test"},
+		RegisterRoutes: func(router *gin.Engine) {
+			router.GET("/json", func(c *gin.Context) {
+				c.JSON(http.StatusOK, gin.H{"items": strings.Repeat("track,", 10_000)})
+			})
+			router.GET("/events", func(c *gin.Context) {
+				c.Header("Content-Type", "text/event-stream")
+				c.String(http.StatusOK, "data: ping\\n\\n")
+			})
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	jsonRequest := httptest.NewRequest(http.MethodGet, "http://example.test/json", nil)
+	jsonRequest.Header.Set("Accept-Encoding", "gzip")
+	jsonResponse := httptest.NewRecorder()
+	engine.ServeHTTP(jsonResponse, jsonRequest)
+	if jsonResponse.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatalf("JSON content encoding = %q", jsonResponse.Header().Get("Content-Encoding"))
+	}
+	reader, err := gzip.NewReader(bytes.NewReader(jsonResponse.Body.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = reader.Close()
+	if !bytes.Contains(decoded, []byte("track")) {
+		t.Fatalf("decoded JSON does not contain payload: %q", decoded[:min(len(decoded), 50)])
+	}
+
+	eventRequest := httptest.NewRequest(http.MethodGet, "http://example.test/events", nil)
+	eventRequest.Header.Set("Accept-Encoding", "gzip")
+	eventResponse := httptest.NewRecorder()
+	engine.ServeHTTP(eventResponse, eventRequest)
+	if eventResponse.Header().Get("Content-Encoding") != "" || eventResponse.Body.String() != "data: ping\\n\\n" {
+		t.Fatalf("SSE response was transformed: encoding=%q body=%q", eventResponse.Header().Get("Content-Encoding"), eventResponse.Body.String())
 	}
 }

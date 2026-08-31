@@ -35,6 +35,7 @@ const knownMessages: Record<string, string> = {
   "The artist artwork batch item lease was lost": "任务处理权已转移",
   "The administrator who created the job no longer exists": "任务创建者已不存在",
   "No reliable match was found": "未找到可靠匹配",
+  "No search result was found": "未找到搜索结果",
   "No reliable artist artwork match was found": "未找到可靠头像",
   "The batch was cancelled": "任务已取消",
   "The batch item lease was lost": "任务处理权已转移",
@@ -52,6 +53,10 @@ export function batchItemStatusPresentation(status: BatchItemStatus): BatchStatu
 
 export function batchItemMessage(status: BatchItemStatus, message: string | null): string {
   if (message?.startsWith("No trustworthy exact artist match with artwork was found")) return "未找到可靠头像";
+  if (message?.startsWith("Tag writeback skipped:")) {
+    const reason = message.slice("Tag writeback skipped:".length).trim();
+    return reason ? `已应用刮削结果，未写回 Tag：${reason}` : "已应用刮削结果，未写回 Tag";
+  }
   if (message) return knownMessages[message] ?? message;
   return itemStatusPresentations[status].label;
 }

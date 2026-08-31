@@ -524,7 +524,11 @@ func bindFileQuery(c *gin.Context) (FileQuery, error) {
 	if statusPresent && !validFileStatus(status) {
 		return FileQuery{}, routeContractError()
 	}
-	return FileQuery{Page: page, PageSize: pageSize, Query: query, Status: status}, nil
+	cursor, cursorMode, err := bindSourceCursor(c)
+	if err != nil {
+		return FileQuery{}, err
+	}
+	return FileQuery{Page: page, PageSize: pageSize, Query: query, Status: status, Cursor: cursor, CursorMode: cursorMode}, nil
 }
 
 func bindPageQuery(c *gin.Context) (PageQuery, error) {
@@ -536,7 +540,23 @@ func bindPageQuery(c *gin.Context) (PageQuery, error) {
 	if err != nil {
 		return PageQuery{}, err
 	}
-	return PageQuery{Page: page, PageSize: pageSize}, nil
+	cursor, cursorMode, err := bindSourceCursor(c)
+	if err != nil {
+		return PageQuery{}, err
+	}
+	return PageQuery{Page: page, PageSize: pageSize, Cursor: cursor, CursorMode: cursorMode}, nil
+}
+
+func bindSourceCursor(c *gin.Context) (string, bool, error) {
+	cursor, cursorPresent := lastQuery(c, "cursor")
+	if cursorPresent && len(cursor) > 4096 {
+		return "", false, routeContractError()
+	}
+	mode, modePresent := lastQuery(c, "cursorMode")
+	if modePresent && mode != "cursor" && mode != "offset" {
+		return "", false, routeContractError()
+	}
+	return cursor, mode == "cursor" || !modePresent, nil
 }
 
 func optionalInteger(c *gin.Context, name string, minimum, maximum int) (int, error) {

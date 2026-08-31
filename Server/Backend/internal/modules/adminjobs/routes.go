@@ -240,9 +240,27 @@ func bindJobList(c *gin.Context) (ListInput, error) {
 	if orderPresent && !validOrder(order) {
 		return ListInput{}, routeContractError()
 	}
+	cursor, cursorMode, err := bindJobCursor(c)
+	if err != nil {
+		return ListInput{}, err
+	}
 	return ListInput{
 		Page: page, PageSize: pageSize, Search: search, Status: status, Type: jobType, Sort: sort, Order: order,
+		Cursor: cursor, CursorMode: cursorMode,
 	}, nil
+}
+
+func bindJobCursor(c *gin.Context) (string, bool, error) {
+	cursor, cursorPresent := routeLastQuery(c, "cursor")
+	if cursorPresent && len(cursor) > 4096 {
+		return "", false, routeContractError()
+	}
+	mode, modePresent := routeLastQuery(c, "cursorMode")
+	if modePresent && mode != "cursor" && mode != "offset" {
+		return "", false, routeContractError()
+	}
+	useCursor := mode == "cursor" || !modePresent
+	return cursor, useCursor, nil
 }
 
 func routeOptionalInteger(c *gin.Context, name string, minimum, maximum int) (int, error) {

@@ -85,6 +85,11 @@ export class PlaybackSession implements PlaybackSessionPort {
   private miniModeRequestActive = false;
   private disposed = false;
   private mediaErrorRecovery: Promise<void> | null = null;
+  // A browser can report a media error after play() has been requested but
+  // before the first non-paused snapshot. Keep that explicit resume intent so
+  // an expired server grant is retried instead of being mistaken for a
+  // background error on an intentionally paused track.
+  private resumeAttemptActive = false;
   private activeRequestQuality: ConcretePlaybackQuality = "STANDARD";
   private activeSelectedQuality: ConcretePlaybackQuality = "STANDARD";
   private prefetchedRequestQuality: ConcretePlaybackQuality | null = null;
@@ -271,6 +276,7 @@ export class PlaybackSession implements PlaybackSessionPort {
         this.loadRequest += 1;
         this.clearPrefetch();
       }
+      this.resumeAttemptActive = false;
       this.audio.pause();
       if (cancelledTransition) void this.prepareNext();
       const pauseRecord = this.record("PAUSED");
@@ -289,6 +295,7 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.loadController = controller;
     const sessionId = this.playbackSessionId;
     const resumePosition = this.audio.snapshot().currentTime;
+    this.resumeAttemptActive = true;
     this.updateState({ loading: true, error: "" });
     try {
       const resolution = await this.playbackGrants.getForResume(
@@ -318,6 +325,7 @@ export class PlaybackSession implements PlaybackSessionPort {
         } catch (retryCause) {
           if (request !== this.loadRequest || controller.signal.aborted || isAbortError(retryCause)) return;
           const message = errorMessage(retryCause, "播放失败");
+          this.resumeAttemptActive = false;
           this.lastNativeStatus = "stopped";
           this.updateState({ error: message, isPlaying: false });
           this.desktopPlayback.setPlayback("stopped", this.stateValue.currentTime, this.stateValue.duration);
@@ -440,6 +448,7 @@ export class PlaybackSession implements PlaybackSessionPort {
 
   stopPlayback(terminalEvent: PlaybackTerminalEvent | null = "PAUSED"): void {
     if (this.disposed) return;
+    this.resumeAttemptActive = false;
     const currentTrack = this.currentTrack;
     const stoppingPendingResume = currentTrack?.id === this.pendingResumeTrackId;
     const previousPosition = stoppingPendingResume
@@ -473,6 +482,7 @@ export class PlaybackSession implements PlaybackSessionPort {
 
   reset(): void {
     if (this.disposed) return;
+    this.resumeAttemptActive = false;
     this.finishPlaybackSession(this.capturePlaybackSession(), "PAUSED");
     this.resetAutomaticQualitySession();
     this.loadRequest += 1;
@@ -634,6 +644,7 @@ export class PlaybackSession implements PlaybackSessionPort {
   }
 
   private cancelActivePlaybackForRestore(): void {
+    this.resumeAttemptActive = false;
     this.loadRequest += 1;
     this.loadController?.abort();
     this.loadController = null;
@@ -691,6 +702,7 @@ export class PlaybackSession implements PlaybackSessionPort {
     const duration = Number.isFinite(snapshot.duration) && snapshot.duration > 0
       ? snapshot.duration
       : this.stateValue.duration;
+    if (!snapshot.paused) this.resumeAttemptActive = false;
     this.updateState({
       currentTime: snapshot.currentTime,
       duration,
@@ -809,7 +821,12 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.desktopPlayback.setPlayback("stopped", this.stateValue.currentTime, this.stateValue.duration);
     this.diagnostics.error("playback", message);
     const track = this.currentTrack;
-    if (!wasPlaying || !track || this.stateValue.loading || this.mediaErrorRecovery) return;
+    if (
+      (!wasPlaying && !this.resumeAttemptActive) ||
+      !track ||
+      (this.stateValue.loading && !this.resumeAttemptActive) ||
+      this.mediaErrorRecovery
+    ) return;
     const recovery = this.retryCurrentTrackAfterMediaError(track).finally(() => {
       if (this.mediaErrorRecovery === recovery) this.mediaErrorRecovery = null;
     });
@@ -870,6 +887,7 @@ export class PlaybackSession implements PlaybackSessionPort {
     } catch (cause) {
       if (request === this.loadRequest && !controller.signal.aborted && !isAbortError(cause) && this.currentTrack === track) {
         const message = errorMessage(cause, "播放失败");
+        this.resumeAttemptActive = false;
         this.lastNativeStatus = "stopped";
         this.updateState({ error: message, isPlaying: false });
         this.desktopPlayback.setPlayback("stopped", this.stateValue.currentTime, this.stateValue.duration);
@@ -895,6 +913,7 @@ export class PlaybackSession implements PlaybackSessionPort {
     replaceQueue: boolean,
   ): Promise<boolean> {
     this.resumeWhenQueueExtends = false;
+    this.resumeAttemptActive = false;
     const previousSession = this.capturePlaybackSession();
     const request = ++this.loadRequest;
     this.loadController?.abort();

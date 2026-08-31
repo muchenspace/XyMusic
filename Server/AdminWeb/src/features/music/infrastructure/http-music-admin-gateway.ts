@@ -78,8 +78,8 @@ export class HttpMusicAdminGateway implements MusicAdminGateway {
     return adminApi.albums(query, signal);
   }
 
-  getAlbum(albumId: string, page: number, pageSize: number, signal?: AbortSignal): Promise<AlbumDetail> {
-    return adminApi.album(albumId, { page, pageSize }, signal);
+  getAlbum(albumId: string, query: Pick<MusicListQuery, "page" | "pageSize" | "cursor" | "cursorMode">, signal?: AbortSignal): Promise<AlbumDetail> {
+    return adminApi.album(albumId, query, signal);
   }
 
   getAlbumDuplicates(query: AlbumDuplicateQuery, signal?: AbortSignal): Promise<AlbumDuplicateSummary> {

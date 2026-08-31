@@ -15,14 +15,19 @@ import (
 )
 
 type Service struct {
-	store Store
+	store   Store
+	cursors *pagination.CursorCodec
 }
 
 func NewService(store Store) (*Service, error) {
+	return NewServiceWithOptions(store, nil)
+}
+
+func NewServiceWithOptions(store Store, cursors *pagination.CursorCodec) (*Service, error) {
 	if store == nil {
 		return nil, errors.New("admin metadata store is required")
 	}
-	return &Service{store: store}, nil
+	return &Service{store: store, cursors: cursors}, nil
 }
 
 func (service *Service) Metadata(ctx context.Context, trackID string) (MetadataDTO, error) {
@@ -138,12 +143,57 @@ func (service *Service) ListWritebacks(
 	ctx context.Context,
 	input WritebackListInput,
 ) (WritebackJobPageDTO, error) {
+	if !validWritebackStatus(input.Status, true) {
+		return WritebackJobPageDTO{}, apperror.Validation("Metadata writeback filters are invalid")
+	}
+	if input.CursorMode {
+		page, err := pagination.ParseCursor(input.Page, input.PageSize, 25)
+		if err != nil {
+			return WritebackJobPageDTO{}, err
+		}
+		if service.cursors == nil {
+			return WritebackJobPageDTO{}, errors.New("admin metadata cursor codec is required")
+		}
+		if page.Page > 1 && input.Cursor == "" {
+			return WritebackJobPageDTO{}, apperror.Validation("cursor is required for deep writeback pages")
+		}
+		scope := writebackCursorScope(input)
+		after, err := decodeWritebackCursor(service.cursors, scope, input.Cursor)
+		if err != nil {
+			return WritebackJobPageDTO{}, err
+		}
+		records, total, err := service.store.ListWritebacks(ctx, WritebackListQuery{
+			Limit: pagination.CursorLimit(page.Page, page.PageSize), Status: input.Status, TrackID: input.TrackID,
+			After: after, CursorMode: true, TotalHint: writebackCursorTotalHint(after),
+		})
+		if err != nil {
+			return WritebackJobPageDTO{}, err
+		}
+		hasNext := len(records) > page.PageSize
+		if len(records) > page.PageSize {
+			records = records[:page.PageSize]
+		}
+		items := make([]WritebackJobDTO, 0, len(records))
+		for _, record := range records {
+			items = append(items, presentWriteback(record))
+		}
+		result := WritebackJobPageDTO{
+			Items: items, Page: page.Page, PageSize: page.PageSize, Total: total,
+			TotalPages: exactWritebackTotalPages(total, page.PageSize),
+		}
+		if hasNext && len(records) > 0 {
+			encoded, err := encodeWritebackCursor(service.cursors, scope, records[len(records)-1], total)
+			if err != nil {
+				return WritebackJobPageDTO{}, err
+			}
+			result.NextCursor = &encoded
+		}
+		return result, nil
+	}
+
 	page, err := pagination.ParseOffset(input.Page, input.PageSize, 25)
 	if err != nil {
 		return WritebackJobPageDTO{}, err
-	}
-	if !validWritebackStatus(input.Status, true) {
-		return WritebackJobPageDTO{}, apperror.Validation("Metadata writeback filters are invalid")
 	}
 	records, total, err := service.store.ListWritebacks(ctx, WritebackListQuery{
 		Limit: page.PageSize, Offset: page.Offset, Status: input.Status, TrackID: input.TrackID,
@@ -159,6 +209,10 @@ func (service *Service) ListWritebacks(
 		Items: items, Page: page.Page, PageSize: page.PageSize, Total: total,
 		TotalPages: pagination.BoundedTotalPages(total, page.PageSize),
 	}, nil
+}
+
+func exactWritebackTotalPages(total, pageSize int) int {
+	return pagination.BoundedTotalPages(total, pageSize)
 }
 
 func (service *Service) WritebackJob(ctx context.Context, jobID string) (WritebackJobDTO, error) {

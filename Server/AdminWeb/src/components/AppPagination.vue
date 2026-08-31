@@ -8,17 +8,15 @@ const props = defineProps<{
   pageSize: number;
   total: number;
   totalPages?: number;
+  cursor?: boolean;
 }>();
 const emit = defineEmits<{
   change: [page: number];
   pageSizeChange: [pageSize: number];
 }>();
-const MAX_OFFSET_ROWS = 10_000;
 const actualPages = computed(() => Math.ceil(props.total / props.pageSize));
 const reportedPages = computed(() => props.totalPages ?? actualPages.value);
-const maxOffsetPages = computed(() => Math.floor(MAX_OFFSET_ROWS / props.pageSize) + 1);
-const pages = computed(() => Math.max(1, Math.min(reportedPages.value, maxOffsetPages.value)));
-const isCapped = computed(() => Math.max(actualPages.value, reportedPages.value) > pages.value);
+const pages = computed(() => Math.max(1, reportedPages.value, actualPages.value));
 
 function changePageSize(event: Event): void {
   const value = Number((event.target as HTMLSelectElement).value);
@@ -37,7 +35,6 @@ watch([() => props.page, pages], ([page, totalPages]) => {
     <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
       <span aria-live="polite">
         共 {{ total.toLocaleString() }} 条，第 {{ page }} / {{ pages }} 页
-        <span v-if="isCapped">（仅开放前 {{ pages }} 页，请缩小筛选范围查看其余结果）</span>
       </span>
       <label class="flex items-center gap-2 whitespace-nowrap">
         每页

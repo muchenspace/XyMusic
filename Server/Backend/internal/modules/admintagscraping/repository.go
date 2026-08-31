@@ -366,6 +366,21 @@ func (repository *Repository) ValidateBatchWriteback(ctx context.Context, items 
 		trackIDs = append(trackIDs, item.TrackID)
 	}
 	rows, err := repository.pool.Query(ctx, `
+		WITH requested AS (
+			SELECT track_id, position
+			FROM unnest($1::uuid[]) WITH ORDINALITY input(track_id, position)
+		), source_stats AS (
+			SELECT mapping.source_id, count(*)::int AS mapping_count,
+			       COALESCE(bool_or(mapping.cue_path IS NOT NULL), false) AS cue
+			FROM local_music_source_tracks mapping
+			WHERE mapping.source_id IN (
+				SELECT metadata.source_id
+				FROM track_metadata metadata
+				JOIN requested ON requested.track_id = metadata.track_id
+				WHERE metadata.source_id IS NOT NULL
+			)
+			GROUP BY mapping.source_id
+		)
 		SELECT requested.track_id::text, track.status::text,
 		       source.id::text, source.source_path, source.status,
 		       root.mode::text, root.enabled, EXISTS (
@@ -373,22 +388,21 @@ func (repository *Repository) ValidateBatchWriteback(ctx context.Context, items 
 		         WHERE active_scan.root_id = root.id
 		           AND active_scan.status = 'RUNNING' AND active_scan.locked_until > now()
 		       ),
-		       mapping_stats.mapping_count, mapping_stats.cue
-		FROM unnest($1::uuid[]) WITH ORDINALITY requested(track_id, position)
+		       COALESCE(source_stats.mapping_count, 0), COALESCE(source_stats.cue, false)
+		FROM requested
 		LEFT JOIN tracks track ON track.id = requested.track_id
 		LEFT JOIN track_metadata metadata ON metadata.track_id = requested.track_id
 		LEFT JOIN local_music_sources source ON source.id = metadata.source_id
 		LEFT JOIN library_roots root ON root.id = source.root_id
-		LEFT JOIN LATERAL (
-			SELECT count(*)::int AS mapping_count,
-			       COALESCE(bool_or(mapping.cue_path IS NOT NULL), false) AS cue
-			FROM local_music_source_tracks mapping WHERE mapping.source_id = source.id
-		) mapping_stats ON true
+		LEFT JOIN source_stats ON source_stats.source_id = source.id
 		ORDER BY requested.position`, trackIDs)
+
 	if err != nil {
 		return fmt.Errorf("validate batch Tag writeback sources: %w", err)
 	}
 	defer rows.Close()
+	var firstIneligible error
+	writableCount := 0
 	for rows.Next() {
 		var trackID string
 		var trackStatus, sourceID, sourcePath, sourceStatus, rootMode *string
@@ -416,12 +430,19 @@ func (repository *Repository) ValidateBatchWriteback(ctx context.Context, items 
 			SourcePath: pointerValue(sourcePath), MappingCount: intPointerValue(mappingCount),
 			Cue: boolPointerValue(cue),
 		})
-		if err := eligibility.Error(trackID); err != nil {
-			return err
+		if eligibility.CanWriteBack {
+			writableCount++
+			continue
+		}
+		if firstIneligible == nil {
+			firstIneligible = eligibility.Error(trackID)
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate batch Tag writeback sources: %w", err)
+	}
+	if writableCount == 0 && firstIneligible != nil {
+		return firstIneligible
 	}
 	return nil
 }
@@ -1430,6 +1451,16 @@ func (repository *Repository) MetadataBatch(
 		identifiers[index] = identifier
 	}
 	rows, err := repository.pool.Query(ctx, `
+		WITH source_stats AS (
+			SELECT mapping.source_id, count(*)::int AS mapping_count,
+			       COALESCE(bool_or(mapping.cue_path IS NOT NULL), false) AS cue
+			FROM local_music_source_tracks mapping
+			WHERE mapping.source_id IN (
+				SELECT source_id FROM track_metadata
+				WHERE track_id = ANY($1::uuid[]) AND source_id IS NOT NULL
+			)
+			GROUP BY mapping.source_id
+		)
 		SELECT metadata.track_id, metadata.raw_tags, metadata.overrides, metadata.version,
 		       metadata.last_scanned_at, metadata.updated_by, metadata.created_at, metadata.updated_at,
 		       source.id, source.root_id, source.source_path, source.status, source.checksum_sha256,
@@ -1437,18 +1468,15 @@ func (repository *Repository) MetadataBatch(
 			         SELECT 1 FROM library_scan_runs active_scan
 			         WHERE active_scan.root_id = root.id
 			           AND active_scan.status = 'RUNNING' AND active_scan.locked_until > now()
-			       ), track.status::text,
-		       COALESCE(mapping_stats.mapping_count, 0), COALESCE(mapping_stats.cue, false)
+		       ), track.status::text,
+		       COALESCE(source_stats.mapping_count, 0), COALESCE(source_stats.cue, false)
 		FROM track_metadata metadata
 		LEFT JOIN local_music_sources source ON source.id = metadata.source_id
 		LEFT JOIN library_roots root ON root.id = source.root_id
 		LEFT JOIN tracks track ON track.id = metadata.track_id
-		LEFT JOIN LATERAL (
-			SELECT count(*)::int AS mapping_count,
-			       COALESCE(bool_or(mapping.cue_path IS NOT NULL), false) AS cue
-			FROM local_music_source_tracks mapping WHERE mapping.source_id = source.id
-		) mapping_stats ON true
+		LEFT JOIN source_stats ON source_stats.source_id = source.id
 		WHERE metadata.track_id = ANY($1::uuid[])`, identifiers)
+
 	if err != nil {
 		return nil, fmt.Errorf("query track metadata batch: %w", err)
 	}

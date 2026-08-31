@@ -29,16 +29,34 @@ type SessionRecord struct {
 }
 
 type ListUsersQuery struct {
-	Search string
-	Role   UserRole
-	Status UserStatus
-	Limit  int
-	Offset int
+	Search     string
+	Role       UserRole
+	Status     UserStatus
+	Limit      int
+	Offset     int
+	After      *UserCursor
+	CursorMode bool
+	TotalHint  *int
 }
 
 type SessionQuery struct {
-	Limit  int
-	Offset int
+	Limit      int
+	Offset     int
+	After      *SessionCursor
+	CursorMode bool
+	TotalHint  *int
+}
+
+type UserCursor struct {
+	CreatedAt string
+	ID        string
+	Total     *int
+}
+
+type SessionCursor struct {
+	LastSeenAt string
+	ID         string
+	Total      *int
 }
 
 type CreateUserParams struct {

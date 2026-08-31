@@ -134,7 +134,7 @@ func NewFilesystemScannerWithOptions(options FilesystemScannerOptions) (*Filesys
 	}
 	commitBatchSize := options.CommitBatchSize
 	if commitBatchSize <= 0 {
-		commitBatchSize = max(1, min(8, commitWorkers*2))
+		commitBatchSize = max(1, min(32, commitWorkers*4))
 	}
 	if commitBatchSize > 64 {
 		return nil, errors.New("local library scanner commit batch size must not exceed 64")
@@ -163,7 +163,9 @@ func startLibraryFileDiscovery(
 	root string,
 	include, exclude []*regexp.Regexp,
 ) (<-chan DiscoveredFile, <-chan libraryDiscoveryResult) {
-	files := make(chan DiscoveredFile, 1)
+	// Keep filesystem enumeration a few hundred entries ahead of the CPU/DB
+	// stages without materializing the whole library in memory.
+	files := make(chan DiscoveredFile, 256)
 	done := make(chan libraryDiscoveryResult, 1)
 	go func() {
 		count, err := discoverLibraryFilesStream(ctx, root, include, exclude, func(file DiscoveredFile) error {
@@ -310,7 +312,7 @@ func (scanner *FilesystemScanner) runFileStream(
 	startedAt time.Time,
 	checkCancelled func(context.Context) (bool, error),
 ) (ScanProgress, bool, error) {
-	jobs := make(chan DiscoveredFile)
+	jobs := make(chan DiscoveredFile, max(64, scanner.workers*2))
 	var discoveredCount atomic.Int64
 	var processedFiles atomic.Int64
 	var failedFiles atomic.Int64
@@ -479,8 +481,8 @@ func (scanner *FilesystemScanner) runPipelineStream(
 	checkCancelled func(context.Context) (bool, error),
 	pipeline ScanPipeline,
 ) (ScanProgress, bool, error) {
-	jobs := make(chan DiscoveredFile)
-	prepared := make(chan streamPreparedScanFileResult, max(1, scanner.commitWorkers*2))
+	jobs := make(chan DiscoveredFile, max(64, scanner.workers*2))
+	prepared := make(chan streamPreparedScanFileResult, max(1, scanner.commitWorkers*4))
 	var discoveredCount atomic.Int64
 	var processedFiles atomic.Int64
 	var failedFiles atomic.Int64
@@ -861,7 +863,8 @@ func discoverLibraryFilesStream(
 				cueError(cuePath, resolveErr)
 				continue
 			}
-			relative := normalizedRelativeLibraryPath(root, target)
+			rawRelative := relativeLibraryPath(root, target)
+			relative := normalizePlatformPath(rawRelative)
 			if !matchesPatterns(relative, include, exclude) {
 				continue
 			}
@@ -871,7 +874,7 @@ func discoverLibraryFilesStream(
 				continue
 			}
 			ownedByTarget[normalizedTarget] = DiscoveredFile{
-				AudioPath: target, RelativePath: relativeLibraryPath(root, target), CuePath: cuePath,
+				AudioPath: target, RelativePath: rawRelative, CuePath: cuePath,
 			}
 		}
 		return nil
@@ -924,7 +927,8 @@ func discoverLibraryFilesStream(
 		if _, supported := supportedAudioExtensions[extension]; !supported {
 			return nil
 		}
-		relative := normalizedRelativeLibraryPath(root, path)
+		relativePath := relativeLibraryPath(root, path)
+		relative := normalizePlatformPath(relativePath)
 		if !matchesPatterns(relative, include, exclude) {
 			return nil
 		}
@@ -939,7 +943,7 @@ func discoverLibraryFilesStream(
 			delete(ownedByTarget, normalizedPath)
 			return nil
 		}
-		file := DiscoveredFile{AudioPath: path, RelativePath: relativeLibraryPath(root, path)}
+		file := DiscoveredFile{AudioPath: path, RelativePath: relativePath}
 		if info, infoErr := entry.Info(); infoErr == nil {
 			file.FileInfo = info
 		}

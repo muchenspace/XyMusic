@@ -46,6 +46,7 @@ type standardFileMutation struct {
 	PreserveCueMappings bool
 	Lyrics              []scannedLyric
 	Artwork             *stagedArtwork
+	CatalogCache        *scanCatalogCache
 	SeenAt              time.Time
 }
 

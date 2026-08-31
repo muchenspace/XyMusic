@@ -99,6 +99,7 @@ describe("administrator HTTP API contract", () => {
   it("maps every catalog and metadata API method", async () => {
     const listQuery = { page: 1, pageSize: 25, search: "song", sort: "updatedAt", order: "desc" as const };
     await expectRequest(() => adminApi.tracks({ ...listQuery, status: "READY", metadataStatus: "NORMAL", sourceId: "source-1" }, signal), "/api/v1/admin/tracks", { query: { ...listQuery, status: "READY", metadataStatus: "NORMAL", sourceId: "source-1" }, signal });
+    await expectRequest(() => adminApi.tracks({ ...listQuery, page: 100_001, cursor: "signed-cursor", cursorMode: "cursor" }, signal), "/api/v1/admin/tracks", { query: { ...listQuery, page: 100_001, cursor: "signed-cursor", cursorMode: "cursor" }, signal });
     await expectRequest(() => adminApi.track("track-1", signal), "/api/v1/admin/tracks/track-1", { signal });
     await expectRequest(() => adminApi.trackMetadata("track-1", signal), "/api/v1/admin/tracks/track-1/metadata", { signal });
     const metadataUpdate = { expectedVersion: 3, patch: { title: "Updated" }, reason: "test" };
@@ -136,6 +137,7 @@ describe("administrator HTTP API contract", () => {
     adminApi.jobEvents();
     expect(eventStreamMock).toHaveBeenLastCalledWith("/api/v1/admin/jobs/events");
     await expectRequest(() => adminApi.writebackJobs({ page: 1, pageSize: 10, status: "FAILED", trackId: "track-1" }, signal), "/api/v1/admin/metadata/writeback-jobs", { query: { page: 1, pageSize: 10, status: "FAILED", trackId: "track-1" }, signal });
+    await expectRequest(() => adminApi.writebackJobs({ page: 100_001, pageSize: 100, status: "READY", cursor: "signed-cursor", cursorMode: "cursor" }, signal), "/api/v1/admin/metadata/writeback-jobs", { query: { page: 100_001, pageSize: 100, status: "READY", cursor: "signed-cursor", cursorMode: "cursor" }, signal });
     await expectRequest(() => adminApi.retryWritebackJob("write-1", 2, "retry"), "/api/v1/admin/metadata/writeback-jobs/write-1/retry", { method: "POST", body: { expectedVersion: 2, reason: "retry" } });
     await expectRequest(() => adminApi.cancelWritebackJob("write-1", 2, "cancel"), "/api/v1/admin/metadata/writeback-jobs/write-1/cancel", { method: "POST", body: { expectedVersion: 2, reason: "cancel" } });
 

@@ -484,6 +484,7 @@ func (service *BatchService) processBatchNext(ctx context.Context, store BatchCl
 	group.Wait()
 	close(results)
 	ready := make([]batchItemExecution, 0, len(result.Items))
+	executionsByKey := make(map[string]batchItemExecution, len(result.Items))
 	completionsByJob := make(map[string][]BatchItemCompletion)
 	for execution := range results {
 		if execution.shouldRelease {
@@ -499,6 +500,7 @@ func (service *BatchService) processBatchNext(ctx context.Context, store BatchCl
 			continue
 		}
 		ready = append(ready, execution)
+		executionsByKey[batchExecutionKey(execution.claim.Job.ID, execution.claim.Item.ID)] = execution
 		jobID := execution.claim.Job.ID
 		completionsByJob[jobID] = append(completionsByJob[jobID], execution.completion)
 	}
@@ -526,7 +528,7 @@ func (service *BatchService) processBatchNext(ctx context.Context, store BatchCl
 				})
 			}
 			for _, completion := range completions {
-				execution := findBatchExecution(ready, jobID, completion.ItemID)
+				execution := executionsByKey[batchExecutionKey(jobID, completion.ItemID)]
 				if _, accepted := completed[completion.ItemID]; !accepted {
 					service.logBatchCompletionRejected(execution.claim)
 					service.completeItem(context.WithoutCancel(ctx), execution)
@@ -782,6 +784,10 @@ func (service *BatchService) logBatchCompletion(claim ClaimedBatchItem, status I
 	})
 }
 
+func batchExecutionKey(jobID, itemID string) string {
+	return jobID + "\x00" + itemID
+}
+
 func findBatchExecution(
 	executions []batchItemExecution,
 	jobID string,
@@ -795,6 +801,23 @@ func findBatchExecution(
 	return batchItemExecution{claim: ClaimedBatchItem{
 		Job: BatchJobRecord{ID: jobID}, Item: BatchItemRecord{ID: itemID},
 	}}
+}
+
+func batchWritebackSkippedMessage(source *MetadataSource) string {
+	reason := "the current track does not have a writable local source"
+	if source != nil && source.WritebackBlockReason != nil && strings.TrimSpace(*source.WritebackBlockReason) != "" {
+		reason = strings.TrimSpace(*source.WritebackBlockReason)
+	}
+	return "Tag writeback skipped: " + reason
+}
+
+func looseBatchCandidateScore(candidate Candidate) float64 {
+	if candidate.Score != nil {
+		return valueOrZero(candidate.Score)
+	}
+	return valueOrZero(candidate.TitleScore) +
+		valueOrZero(candidate.ArtistScore) +
+		valueOrZero(candidate.AlbumScore)
 }
 
 func (service *BatchService) executeItem(
@@ -863,6 +886,7 @@ func (service *BatchService) executeItem(
 	var selected *Candidate
 	sourceErrors := make([]string, 0)
 	successfulSources := 0
+	looseMatch := claim.Job.Options.MatchMode == MatchSimple
 	recordSearch := func(source Source, matches []Candidate, searchErr error) {
 		if searchErr != nil {
 			markTransient(searchErr)
@@ -870,6 +894,15 @@ func (service *BatchService) executeItem(
 			return
 		}
 		successfulSources++
+		if looseMatch {
+			for index := range matches {
+				candidate := matches[index]
+				if selected == nil || looseBatchCandidateScore(candidate) > looseBatchCandidateScore(*selected) {
+					selected = &candidate
+				}
+			}
+			return
+		}
 		if selected != nil {
 			return
 		}
@@ -915,7 +948,7 @@ func (service *BatchService) executeItem(
 		query.Source = source
 		matches, searchErr := service.processor.Search(ctx, query)
 		recordSearch(query.Source, matches, searchErr)
-		if selected != nil {
+		if selected != nil && !looseMatch {
 			break
 		}
 	}
@@ -936,6 +969,9 @@ func (service *BatchService) executeItem(
 			return ItemFailed, nil, "All scraping sources failed: " + strings.Join(sourceErrors, "; ")
 		}
 		message := "No reliable match was found"
+		if looseMatch {
+			message = "No search result was found"
+		}
 		if len(sourceErrors) > 0 {
 			message += "; some sources failed: " + strings.Join(sourceErrors, "; ")
 		}
@@ -944,12 +980,18 @@ func (service *BatchService) executeItem(
 	if err := ensureActive(ctx); err != nil {
 		return service.itemErrorStatus(ctx, err, ownershipLost, retryOutput...)
 	}
+	writeBack := claim.Job.Options.WriteBack
+	writebackWarning := ""
+	if writeBack && (metadata.Source == nil || !metadata.Source.CanWriteBack) {
+		writeBack = false
+		writebackWarning = batchWritebackSkippedMessage(metadata.Source)
+	}
 	applyInput := ApplyInput{
 		ExpectedVersion: claim.Item.ExpectedVersion,
 		Candidate:       *selected,
 		Verbatim:        claim.Job.Options.Verbatim,
 		Fields:          claim.Job.Options.Fields,
-		WriteBack:       claim.Job.Options.WriteBack,
+		WriteBack:       writeBack,
 		Reason:          claim.Job.Options.Reason,
 		cancellationCheck: func(checkContext context.Context) error {
 			// The fresh check immediately before Apply protects the read-to-write
@@ -972,7 +1014,11 @@ func (service *BatchService) executeItem(
 	if err != nil {
 		return service.itemErrorStatus(ctx, err, ownershipLost, retryOutput...)
 	}
-	message := strings.Join(result.Warnings, "; ")
+	warnings := append([]string(nil), result.Warnings...)
+	if writebackWarning != "" {
+		warnings = append(warnings, writebackWarning)
+	}
+	message := strings.Join(warnings, "; ")
 	if message == "" {
 		message = "Scraping completed"
 	}
@@ -1094,8 +1140,8 @@ func (service *BatchService) cancelActive() {
 }
 
 func validateCreateBatch(input CreateBatchInput) error {
-	if len(input.Items) < 1 || len(input.Items) > maxTagScrapingBatchItems {
-		return apperror.Validation("A tag scraping batch must contain 1 to 5000 tracks")
+	if len(input.Items) < 1 {
+		return apperror.Validation("A tag scraping batch must contain at least one track")
 	}
 	seen := make(map[string]struct{}, len(input.Items))
 	for _, item := range input.Items {

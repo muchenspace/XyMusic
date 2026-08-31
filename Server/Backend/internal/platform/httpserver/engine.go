@@ -98,6 +98,7 @@ func NewEngine(options Options) (*gin.Engine, error) {
 		TraceIDMiddleware(options.TraceIDGenerator),
 		RequestMetricsMiddleware(options.Metrics),
 		SecurityHeaders(),
+		GzipJSON(),
 		hostMiddleware,
 		corsMiddleware,
 		limitMiddleware,

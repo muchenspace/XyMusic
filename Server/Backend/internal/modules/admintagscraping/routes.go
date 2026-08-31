@@ -194,7 +194,7 @@ func (routes *Routes) artwork(c *gin.Context) error {
 
 func (routes *Routes) createBatch(c *gin.Context) error {
 	var input CreateBatchInput
-	shape, err := decodeContractJSON(c, &input, "items", "options")
+	shape, err := decodeContractJSONWithLimit(c, &input, httpserver.MaxTagScrapingBatchRequestBodyBytes, "items", "options")
 	if err != nil {
 		return err
 	}
@@ -303,10 +303,14 @@ func (routes *Routes) mutate(
 }
 
 func decodeContractJSON(c *gin.Context, destination any, required ...string) (map[string]json.RawMessage, error) {
+	return decodeContractJSONWithLimit(c, destination, httpserver.MaxStructuredRequestBodyBytes, required...)
+}
+
+func decodeContractJSONWithLimit(c *gin.Context, destination any, maximumBytes int64, required ...string) (map[string]json.RawMessage, error) {
 	if c == nil || c.Request == nil || c.Request.Body == nil || c.Request.Body == http.NoBody {
 		return nil, contractError()
 	}
-	raw, err := io.ReadAll(io.LimitReader(c.Request.Body, 2*1024*1024+1))
+	raw, err := io.ReadAll(io.LimitReader(c.Request.Body, maximumBytes+1))
 	if err != nil {
 		var maximumBytesError *http.MaxBytesError
 		if errors.As(err, &maximumBytesError) {
@@ -314,7 +318,7 @@ func decodeContractJSON(c *gin.Context, destination any, required ...string) (ma
 		}
 		return nil, contractParseError()
 	}
-	if len(raw) > 2*1024*1024 {
+	if int64(len(raw)) > maximumBytes {
 		return nil, apperror.PayloadTooLarge("Request body exceeds the permitted size")
 	}
 	if len(bytes.TrimSpace(raw)) == 0 {
@@ -413,7 +417,7 @@ func validateApplyInput(input ApplyInput, shape map[string]json.RawMessage) erro
 }
 
 func validateBatchInput(input CreateBatchInput, shape map[string]json.RawMessage) error {
-	if len(input.Items) < 1 || len(input.Items) > maxTagScrapingBatchItems {
+	if len(input.Items) < 1 {
 		return contractError()
 	}
 	seenTracks := make(map[string]struct{}, len(input.Items))

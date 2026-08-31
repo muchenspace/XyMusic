@@ -95,16 +95,16 @@ describe("writeback capability", () => {
     expect(() => assertWritebackAllowed(true, readOnly)).toThrow("Library root is read-only");
   });
 
-  it("blocks a mixed batch and groups the unavailable reasons", () => {
+  it("allows a mixed batch and groups the unavailable reasons", () => {
     const capability = batchWritebackCapability([
       track("writable", summarySource(true, null)),
       track("readonly", summarySource(false, "Library root is read-only", "READ_ONLY")),
       track("missing", null),
     ]);
 
-    expect(capability.canWriteBack).toBe(false);
+    expect(capability.canWriteBack).toBe(true);
     expect(capability.blockedCount).toBe(2);
-    expect(batchWritebackHint(capability)).toContain("其中 2 首不能写回");
+    expect(batchWritebackHint(capability)).toContain("其中 1 首可写回，2 首不能写回");
     expect(batchWritebackHint(capability)).toContain("Library root is read-only（1 首）");
     expect(batchWritebackHint(capability)).toContain("无可写本地源（1 首）");
   });
@@ -142,7 +142,7 @@ describe("writeback controls", () => {
     expect(scraping.apply).not.toHaveBeenCalled();
   });
 
-  it("disables and clears batch writeback for a mixed selection", async () => {
+  it("keeps batch writeback enabled for a mixed selection", async () => {
     const writable = track("writable", summarySource(true, null));
     const wrapper = mount(BatchTagScrapeDialog, {
       props: { modelValue: true, tracks: [writable] },
@@ -155,9 +155,9 @@ describe("writeback controls", () => {
     await wrapper.setProps({ tracks: [writable, track("readonly", summarySource(false, "Library root is read-only", "READ_ONLY"))] });
 
     const updated = wrapper.get<HTMLInputElement>("[data-testid='batch-writeback']");
-    expect(updated.element.disabled).toBe(true);
-    expect(updated.element.checked).toBe(false);
-    expect(wrapper.text()).toContain("其中 1 首不能写回");
+    expect(updated.element.disabled).toBe(false);
+    expect(updated.element.checked).toBe(true);
+    expect(wrapper.text()).toContain("其中 1 首可写回，1 首不能写回");
     expect(wrapper.text()).toContain("Library root is read-only");
   });
 

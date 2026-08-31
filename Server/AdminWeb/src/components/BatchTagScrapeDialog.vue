@@ -42,7 +42,7 @@ const writebackControlCapability = computed(() => hasMissingFieldFilter.value
   ? { canWriteBack: props.tracks.length > 0, blockReason: props.tracks.length ? null : "未选择曲目" }
   : writebackCapability.value);
 const writebackHint = computed(() => hasMissingFieldFilter.value
-  ? "后端将只校验实际进入任务的曲目；若其中存在不可写音源，任务会返回明确错误。"
+  ? "后端将只处理实际进入任务的曲目；勾选后仅对可写曲目创建 Tag 写回任务，不可写曲目仍会继续应用刮削结果。"
   : batchWritebackHint(writebackCapability.value));
 const writeBack = useWritebackSelection(writebackControlCapability);
 const reason = ref("批量在线 Tag 刮削");
@@ -103,6 +103,33 @@ function finishIfTerminal(update: TagScrapingBatch): boolean {
 function submittedTrackTitle(trackId: string): string {
   return submittedTrackTitles.value.get(trackId) ?? "未知曲目";
 }
+function buildBatchItems(): Array<{ trackId: string; expectedVersion: number }> | undefined {
+  if (!props.tracks.length) {
+    error.value = "至少选择一首曲目";
+    return undefined;
+  }
+  const seen = new Set<string>();
+  const items: Array<{ trackId: string; expectedVersion: number }> = [];
+  for (const track of props.tracks) {
+    if (typeof track.id !== "string" || !track.id.trim()) {
+      error.value = `曲目“${track.title}”缺少有效 ID，请刷新后重试`;
+      return undefined;
+    }
+    if (seen.has(track.id)) {
+      error.value = `曲目“${track.title}”重复出现在选择中，请刷新后重试`;
+      return undefined;
+    }
+    seen.add(track.id);
+    const version = track.metadataVersion;
+    if (version !== null && version !== undefined && (!Number.isSafeInteger(version) || version < 1)) {
+      error.value = `曲目“${track.title}”的 Tag 版本无效，请刷新后重试`;
+      return undefined;
+    }
+    // A missing metadata row is initialized by the backend at version 1.
+    items.push({ trackId: track.id, expectedVersion: version ?? 1 });
+  }
+  return items;
+}
 async function refresh(id = job.value?.id, generation = pollGeneration) {
   if (!id || generation !== pollGeneration || !open.value) return;
   if (timer) clearTimeout(timer);
@@ -132,8 +159,8 @@ async function refresh(id = job.value?.id, generation = pollGeneration) {
 async function start() {
   if (archivedTrack.value) { error.value = `已归档曲目“${archivedTrack.value.title}”需先恢复后才能批量刮削`; return; }
   if (!sources.value.length) { error.value = "至少选择一个来源"; return; }
-  const invalid = props.tracks.find((track) => track.metadataVersion === null);
-  if (invalid) { error.value = `曲目“${invalid.title}”缺少 Tag 版本，请刷新后重试`; return; }
+  const items = buildBatchItems();
+  if (!items) return;
   try {
     assertWritebackAllowed(writeBack.value, writebackControlCapability.value);
   } catch (cause) {
@@ -144,12 +171,12 @@ async function start() {
   loading.value = true; error.value = ""; notice.value = ""; conditionExcluded.value = 0;
   const generation = pollGeneration;
   const action = ++actionGeneration;
-  const selectedCount = props.tracks.length;
+  const selectedCount = items.length;
   submittedCount.value = selectedCount;
   submittedTrackTitles.value = new Map(props.tracks.map((track) => [track.id, track.title]));
   try {
     const created = await scraping.createBatch({
-      items: props.tracks.map((track) => ({ trackId: track.id, expectedVersion: track.metadataVersion! })),
+      items,
       options: {
         sources: sources.value,
         verbatim: verbatim.value,

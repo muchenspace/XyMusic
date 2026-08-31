@@ -84,8 +84,8 @@ export class MusicAdminUseCases {
     return this.gateway.listAlbums(query, signal);
   }
 
-  getAlbum(albumId: string, page: number, pageSize: number, signal?: AbortSignal): Promise<AlbumDetail> {
-    return this.gateway.getAlbum(albumId, page, pageSize, signal);
+  getAlbum(albumId: string, query: Pick<MusicListQuery, "page" | "pageSize" | "cursor" | "cursorMode">, signal?: AbortSignal): Promise<AlbumDetail> {
+    return this.gateway.getAlbum(albumId, query, signal);
   }
 
   getAlbumDuplicates(query: AlbumDuplicateQuery, signal?: AbortSignal): Promise<AlbumDuplicateSummary> {
@@ -96,6 +96,7 @@ export class MusicAdminUseCases {
     const albumPageSize = 100;
     const albums = new Map<string, AlbumDuplicateGroup["albums"][number]>();
     let albumPage = 1;
+    let albumCursor = "";
     let firstGroup: AlbumDuplicateGroup | undefined;
     for (;;) {
       const result = await this.gateway.getAlbumDuplicates({
@@ -104,11 +105,14 @@ export class MusicAdminUseCases {
         albumId,
         albumPage,
         albumPageSize,
+        cursorMode: "cursor",
+        albumCursor: albumCursor || undefined,
+        albumCursorMode: "cursor",
       }, signal);
       const group = result.groups[0];
       if (!group) {
         if (albumPage === 1) return undefined;
-        throw new Error("同名专辑组在加载期间发生变化，请刷新后重试");
+        throw new Error("Duplicate album group changed while loading; refresh and retry");
       }
       firstGroup ??= group;
       const before = albums.size;
@@ -116,9 +120,10 @@ export class MusicAdminUseCases {
       if (albums.size >= group.albumTotal) {
         return { ...firstGroup, albums: [...albums.values()], albumTotal: group.albumTotal };
       }
-      if (albums.size === before || albumPage >= group.albumTotalPages) {
-        throw new Error(`同名专辑组共有 ${group.albumTotal} 张专辑，当前分页范围只能完整加载 ${albums.size} 张，未执行部分合并`);
+      if (albums.size === before || !group.albumNextCursor) {
+        throw new Error(`Duplicate album group has ${group.albumTotal} albums, but cursor pagination stopped before loading all albums`);
       }
+      albumCursor = group.albumNextCursor;
       albumPage += 1;
     }
   }

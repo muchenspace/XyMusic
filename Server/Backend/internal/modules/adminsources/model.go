@@ -171,20 +171,59 @@ type CancelScanCommand struct {
 }
 
 type FileQuery struct {
-	Page     int
-	PageSize int
-	Query    string
-	Status   SourceFileStatus
+	Page       int
+	PageSize   int
+	Limit      int
+	Offset     int
+	Query      string
+	Status     SourceFileStatus
+	Cursor     string
+	CursorMode bool
+	After      *SourceFileCursor
+	TotalHint  *int
 }
 
 type PageQuery struct {
-	Page     int
-	PageSize int
+	Page           int
+	PageSize       int
+	Limit          int
+	Offset         int
+	Cursor         string
+	CursorMode     bool
+	After          *ScanCursor
+	DirectoryAfter *DirectoryCursor
+	TotalHint      *int
 }
 
 type RootQuery struct {
-	Limit  int
-	Offset int
+	Limit      int
+	Offset     int
+	After      *RootCursor
+	CursorMode bool
+	TotalHint  *int
+}
+
+type RootCursor struct {
+	Name  string
+	ID    string
+	Total *int
+}
+
+type SourceFileCursor struct {
+	Path  string
+	ID    string
+	Total *int
+}
+
+type ScanCursor struct {
+	CreatedAt string
+	ID        string
+	Total     *int
+}
+
+type DirectoryCursor struct {
+	Name  string
+	Total *int
 }
 
 type ClaimedScan struct {

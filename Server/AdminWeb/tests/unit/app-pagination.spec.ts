@@ -19,21 +19,31 @@ describe("AppPagination", () => {
       props: { page: 1, pageSize: 100, total: 1_000 },
     });
 
-    expect(wrapper.findAll("option").map((option) => option.text())).toEqual(["50", "100", "200", "500", "1000"]);
+    expect(wrapper.findAll("option").map((option) => option.text())).toEqual(["50", "100", "200", "500", "1000", "5000", "10000", "100000"]);
 
-    await wrapper.get("select").setValue("1000");
-    expect(wrapper.emitted("pageSizeChange")).toEqual([[1_000]]);
+    await wrapper.get("select").setValue("100000");
+    expect(wrapper.emitted("pageSizeChange")).toEqual([[100_000]]);
   });
 
-  it("caps server-reported pages at the supported offset", async () => {
+  it("keeps the full logical range without a total-row cap", async () => {
     const wrapper = mount(AppPagination, {
-      props: { page: 1, pageSize: 100, total: 50_000, totalPages: 500 },
+      props: { page: 1, pageSize: 100, total: 200_000, totalPages: 2_000 },
     });
 
     await wrapper.vm.$nextTick();
 
-    expect(wrapper.text()).toContain("第 1 / 101 页");
-    expect(wrapper.text()).toContain("仅开放前 101 页");
+    expect(wrapper.text()).toContain("2000");
+    expect(wrapper.emitted("change")).toBeUndefined();
+  });
+
+  it("keeps the full logical range for cursor pagination", async () => {
+    const wrapper = mount(AppPagination, {
+      props: { page: 10_000, pageSize: 100, total: 2_000_000, totalPages: 20_000, cursor: true },
+    });
+
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.text()).toContain("10000 / 20000");
     expect(wrapper.emitted("change")).toBeUndefined();
   });
 });

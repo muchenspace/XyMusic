@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -772,20 +773,33 @@ func (manager *TranscodeSessionManager) runPeriodicCleanup() {
 }
 
 func (manager *TranscodeSessionManager) cleanupExpiredSessions() {
+	manager.cleanupExpiredSessionsAt(manager.now().UTC())
+}
+
+func (manager *TranscodeSessionManager) cleanupExpiredSessionsAt(now time.Time) {
 	if manager.closed.Load() {
 		return
 	}
-	now := manager.now().UTC()
+	now = now.UTC()
 	manager.sessionsMu.Lock()
 	for id, session := range manager.sessions {
 		session.mu.Lock()
 		active := session.started && !session.completed
 		readers := session.activeReaders
-		expired := readers == 0 &&
-			((!session.params.ExpiresAt.IsZero() && !now.Before(session.params.ExpiresAt)) ||
-				(!active && now.Sub(session.lastAccess) > manager.idleTimeout))
+		job := session.job
+		completedCacheable := false
+		if job != nil && job.cacheable {
+			job.mu.RLock()
+			completedCacheable = job.completed
+			job.mu.RUnlock()
+		}
+		ticketExpired := !session.params.ExpiresAt.IsZero() && !now.Before(session.params.ExpiresAt)
+		idleExpired := !active && now.Sub(session.lastAccess) > manager.idleTimeout
+		// A completed cached variant is reusable for the whole ticket lifetime.
+		// Do not let the short stream-idle timeout turn a normal pause into a
+		// 404; the persistent cache still remains governed only by its byte cap.
+		expired := readers == 0 && (ticketExpired || idleExpired && !completedCacheable)
 		if expired {
-			job := session.job
 			if session.cancel != nil {
 				session.cancel()
 			}
@@ -822,6 +836,9 @@ func (manager *TranscodeSessionManager) cleanupJobs(now time.Time) {
 		lastAccess := job.lastAccess
 		cancel := job.cancel
 		job.mu.Unlock()
+		// Completed cacheable jobs intentionally have no time-based cleanup.
+		// Their files live until enforceCacheLimit removes the oldest eligible
+		// entry because the configured byte limit is exceeded.
 		if completed && !job.cacheable && readers == 0 && refs == 0 && now.Sub(lastAccess) > manager.idleTimeout {
 			_ = os.Remove(job.partialPath)
 			manager.cacheMu.Lock()
@@ -932,16 +949,21 @@ func (manager *TranscodeSessionManager) tryFinalizeJob(job *cacheJob) {
 	if err != nil || stat.Size() == 0 {
 		return
 	}
+	now := manager.now().UTC()
+	// Persist the LRU timestamp on the cache file itself. The in-memory index
+	// is rebuilt after a restart, so relying only on cacheRecord.lastAccess
+	// would otherwise make old files look recently used again.
+	_ = os.Chtimes(finalPath, now, now)
 	job.mu.Lock()
 	job.finalized = true
-	job.lastAccess = manager.now().UTC()
+	job.lastAccess = now
 	job.mu.Unlock()
 	manager.cacheMu.Lock()
 	if old, exists := manager.cacheFiles[finalPath]; exists {
 		manager.cacheBytes -= old.size
 	}
 	manager.cacheFiles[finalPath] = cacheRecord{
-		path: finalPath, jobKey: key, size: stat.Size(), lastAccess: manager.now().UTC(),
+		path: finalPath, jobKey: key, size: stat.Size(), lastAccess: now,
 	}
 	manager.cacheBytes += stat.Size()
 	manager.cacheMu.Unlock()
@@ -954,6 +976,8 @@ func (manager *TranscodeSessionManager) loadCacheIndex() {
 	}
 	manager.cacheMu.Lock()
 	defer manager.cacheMu.Unlock()
+	indexed := make(map[string]cacheRecord, len(entries))
+	var total int64
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasPrefix(entry.Name(), cacheFilePrefix) || strings.Contains(entry.Name(), cachePartialMarker) {
 			continue
@@ -963,9 +987,17 @@ func (manager *TranscodeSessionManager) loadCacheIndex() {
 			continue
 		}
 		path := filepath.Join(manager.localMedia.TranscodeDirectory(), entry.Name())
-		manager.cacheFiles[path] = cacheRecord{path: path, size: info.Size(), lastAccess: info.ModTime()}
-		manager.cacheBytes += info.Size()
+		previous := manager.cacheFiles[path]
+		indexed[path] = cacheRecord{
+			path: path, jobKey: previous.jobKey, size: info.Size(), lastAccess: info.ModTime(),
+		}
+		total += info.Size()
 	}
+	// Rebuild rather than incrementing the old counters. This makes startup
+	// indexing idempotent and also lets a running test/admin refresh reconcile
+	// files removed outside the manager.
+	manager.cacheFiles = indexed
+	manager.cacheBytes = total
 }
 
 func (manager *TranscodeSessionManager) touchCacheJob(job *cacheJob) {
@@ -980,13 +1012,21 @@ func (manager *TranscodeSessionManager) touchCacheJob(job *cacheJob) {
 	if path == "" {
 		return
 	}
+	now := manager.now().UTC()
+	shouldTouchFile := false
 	manager.cacheMu.Lock()
 	if record, exists := manager.cacheFiles[path]; exists {
-		record.lastAccess = manager.now().UTC()
+		record.lastAccess = now
 		record.jobKey = jobKey
 		manager.cacheFiles[path] = record
+		shouldTouchFile = true
 	}
 	manager.cacheMu.Unlock()
+	if shouldTouchFile {
+		// Best effort: a timestamp failure must not interrupt playback. The
+		// in-memory timestamp still gives correct eviction for this process.
+		_ = os.Chtimes(path, now, now)
+	}
 }
 
 func (manager *TranscodeSessionManager) enforceCacheLimit() {
@@ -996,75 +1036,87 @@ func (manager *TranscodeSessionManager) enforceCacheLimit() {
 			manager.cacheMu.Unlock()
 			return
 		}
-		candidates := make([]cacheRecord, 0, len(manager.cacheFiles))
+		candidates := make([]cacheCandidate, 0, len(manager.cacheFiles))
 		for _, record := range manager.cacheFiles {
-			candidates = append(candidates, record)
+			candidates = append(candidates, cacheCandidate{
+				record: record,
+				job:    manager.cacheJobs[record.jobKey],
+			})
 		}
 		manager.cacheMu.Unlock()
 		if len(candidates) == 0 {
 			return
 		}
-		oldest := cacheRecord{}
-		found := false
+		sort.Slice(candidates, func(left, right int) bool {
+			if candidates[left].record.lastAccess.Equal(candidates[right].record.lastAccess) {
+				return candidates[left].record.path < candidates[right].record.path
+			}
+			return candidates[left].record.lastAccess.Before(candidates[right].record.lastAccess)
+		})
+
+		removed := false
 		for _, candidate := range candidates {
+			if cacheJobProtected(candidate.job) {
+				continue
+			}
+			// Never hold cacheMu while taking job.mu. Other playback paths update
+			// a job timestamp before touching the cache index; keeping the lock
+			// order separate avoids a cache-eviction deadlock.
 			manager.cacheMu.Lock()
-			job := manager.cacheJobs[candidate.jobKey]
-			manager.cacheMu.Unlock()
-			if job != nil {
-				job.mu.RLock()
-				protected := !job.completed || job.activeReaders > 0 || job.sessionRefs > 0
-				job.mu.RUnlock()
-				if protected {
-					continue
-				}
+			current, exists := manager.cacheFiles[candidate.record.path]
+			if !exists || current.size != candidate.record.size ||
+				!current.lastAccess.Equal(candidate.record.lastAccess) {
+				manager.cacheMu.Unlock()
+				continue
 			}
-			if !found || candidate.lastAccess.Before(oldest.lastAccess) {
-				oldest, found = candidate, true
-			}
-		}
-		if !found {
-			return
-		}
-		manager.cacheMu.Lock()
-		current, exists := manager.cacheFiles[oldest.path]
-		if exists {
-			delete(manager.cacheFiles, oldest.path)
+			delete(manager.cacheFiles, current.path)
 			manager.cacheBytes -= current.size
-			if job := manager.cacheJobs[current.jobKey]; job != nil {
-				job.mu.RLock()
-				protected := !job.completed || job.activeReaders > 0 || job.sessionRefs > 0
-				job.mu.RUnlock()
-				if protected {
-					manager.cacheFiles[oldest.path] = current
+			manager.cacheMu.Unlock()
+
+			if err := os.Remove(current.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				manager.cacheMu.Lock()
+				if _, stillPresent := manager.cacheFiles[current.path]; !stillPresent {
+					manager.cacheFiles[current.path] = current
 					manager.cacheBytes += current.size
+				}
+				manager.cacheMu.Unlock()
+				return
+			}
+			removed = true
+			if candidate.job != nil {
+				candidate.job.mu.Lock()
+				canDropJob := candidate.job.completed && candidate.job.finalized &&
+					candidate.job.finalPath == current.path && candidate.job.sessionRefs == 0 &&
+					candidate.job.activeReaders == 0
+				candidate.job.mu.Unlock()
+				if canDropJob {
+					manager.cacheMu.Lock()
+					if currentJob, stillCurrent := manager.cacheJobs[current.jobKey]; stillCurrent && currentJob == candidate.job {
+						delete(manager.cacheJobs, current.jobKey)
+					}
 					manager.cacheMu.Unlock()
-					continue
 				}
 			}
+			break
 		}
-		manager.cacheMu.Unlock()
-		if !exists {
-			continue
-		}
-		if err := os.Remove(oldest.path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			manager.cacheMu.Lock()
-			if _, stillPresent := manager.cacheFiles[oldest.path]; !stillPresent {
-				manager.cacheFiles[oldest.path] = current
-				manager.cacheBytes += current.size
-			}
-			manager.cacheMu.Unlock()
+		if !removed {
 			return
 		}
-		manager.cacheMu.Lock()
-		if job := manager.cacheJobs[oldest.jobKey]; job != nil {
-			job.mu.Lock()
-			if job.completed && job.finalized && job.finalPath == oldest.path && job.sessionRefs == 0 && job.activeReaders == 0 {
-				delete(manager.cacheJobs, oldest.jobKey)
-			}
-			job.mu.Unlock()
-		}
-		manager.cacheMu.Unlock()
 	}
+}
+
+type cacheCandidate struct {
+	record cacheRecord
+	job    *cacheJob
+}
+
+func cacheJobProtected(job *cacheJob) bool {
+	if job == nil {
+		return false
+	}
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	return !job.completed || job.activeReaders > 0 || job.sessionRefs > 0
 }
 
 type growingFileReader struct {

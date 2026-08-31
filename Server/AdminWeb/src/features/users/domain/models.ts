@@ -34,6 +34,7 @@ export interface UserDetail extends UserSummary {
   sessionPageSize: number;
   sessionTotal: number;
   sessionTotalPages: number;
+  nextSessionCursor?: string;
 }
 
 export interface CreateUserInput {
@@ -59,6 +60,8 @@ export interface UserListQuery {
   search?: string;
   status?: string;
   role?: string;
+  cursor?: string;
+  cursorMode?: "cursor" | "offset";
 }
 
 export interface UserPage {
@@ -66,4 +69,6 @@ export interface UserPage {
   page: number;
   pageSize: number;
   total: number;
+  totalPages?: number;
+  nextCursor?: string;
 }

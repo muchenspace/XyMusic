@@ -163,23 +163,76 @@ describe("BatchTagScrapeDialog", () => {
     expect(wrapper.html()).not.toContain("bg-rose-500/10");
   });
 
-  it("defers writeback validation to eligible items when a missing-field filter is active", async () => {
+  it("submits batches larger than 1000 without dropping expected versions", async () => {
+    const tracks = Array.from({ length: 1001 }, (_, index) => track(`track-${index}`));
+    scraping.createBatch.mockResolvedValue({ ...completedBatch(), total: tracks.length, processed: tracks.length });
+    const wrapper = mountDialog(tracks);
+
+    await startButton(wrapper).trigger("click");
+    await flushPromises();
+
+    const request = scraping.createBatch.mock.calls[0]?.[0];
+    expect(request.items).toHaveLength(1001);
+    expect(request.items.every((item: { expectedVersion: number }) => item.expectedVersion === 1)).toBe(true);
+  });
+
+  it("uses the backend initialization version for tracks without metadata rows", async () => {
+    const missingMetadata = track("missing-metadata");
+    missingMetadata.metadataVersion = null;
+    scraping.createBatch.mockResolvedValue(completedBatch());
+    const wrapper = mountDialog([missingMetadata]);
+
+    await startButton(wrapper).trigger("click");
+    await flushPromises();
+
+    expect(scraping.createBatch).toHaveBeenCalledWith(expect.objectContaining({
+      items: [{ trackId: "missing-metadata", expectedVersion: 1 }],
+    }));
+    expect(wrapper.text()).not.toContain("缺少 Tag 版本");
+  });
+
+  it("blocks invalid metadata versions before sending a batch request", async () => {
+    const invalid = track("invalid-version");
+    invalid.metadataVersion = 0;
+    const wrapper = mountDialog([invalid]);
+
+    await startButton(wrapper).trigger("click");
+    await flushPromises();
+
+    expect(scraping.createBatch).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("Tag 版本无效");
+  });
+
+  it("submits more than 5000 tracks without a client-side quantity limit", async () => {
+    const tracks = Array.from({ length: 5001 }, (_, index) => track(`track-${index}`));
+    scraping.createBatch.mockResolvedValue({ ...completedBatch(), total: tracks.length, processed: tracks.length });
+    const wrapper = mountDialog(tracks);
+
+    await startButton(wrapper).trigger("click");
+    await flushPromises();
+
+    const request = scraping.createBatch.mock.calls[0]?.[0];
+    expect(request.items).toHaveLength(5001);
+    expect(wrapper.text()).not.toContain("一次最多刮削");
+  });
+
+  it("keeps mixed writeback enabled while applying a missing-field filter", async () => {
     scraping.createBatch.mockResolvedValue(completedBatch());
     const wrapper = mountDialog([track("1", source(true)), track("2", source(false))]);
     const missingLyrics = wrapper.get<HTMLInputElement>('input[value="lyrics"]');
     let writeback = wrapper.get<HTMLInputElement>("[data-testid='batch-writeback']");
-    expect(writeback.element.disabled).toBe(true);
+    expect(writeback.element.disabled).toBe(false);
 
     await missingLyrics.setValue(true);
     writeback = wrapper.get<HTMLInputElement>("[data-testid='batch-writeback']");
     expect(writeback.element.disabled).toBe(false);
-    expect(wrapper.text()).toContain("后端将只校验实际进入任务的曲目");
+    expect(wrapper.text()).toContain("仅对可写曲目创建 Tag 写回任务");
     await writeback.setValue(true);
 
     await missingLyrics.setValue(false);
     writeback = wrapper.get<HTMLInputElement>("[data-testid='batch-writeback']");
-    expect(writeback.element.disabled).toBe(true);
-    expect(writeback.element.checked).toBe(false);
+    expect(writeback.element.disabled).toBe(false);
+    expect(writeback.element.checked).toBe(true);
 
     await missingLyrics.setValue(true);
     writeback = wrapper.get<HTMLInputElement>("[data-testid='batch-writeback']");

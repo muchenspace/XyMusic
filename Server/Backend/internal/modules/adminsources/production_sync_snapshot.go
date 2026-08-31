@@ -11,29 +11,24 @@ import (
 )
 
 type sourceScanSnapshot struct {
-	rootPath           string
-	sourcesByPath      map[string]localSourceRecord
-	renameCandidates   map[string][]localSourceRecord
-	assetsByID         map[string]sourceScanAsset
-	mappingsBySource   map[string][]cueMapping
-	externalLyricsByID map[string]bool
-	seenSourcesMu      sync.Mutex
-	seenSourceIDs      map[string]struct{}
-	renameClaimedIDs   map[string]struct{}
-	sidecarsMu         sync.Mutex
-	sidecarsByDir      map[string]*sidecarDirectoryState
-	catalogMu          sync.RWMutex
-	artworkMu          sync.Mutex
-	artworkByChecksum  map[string]*stagedArtwork
-	artistIDsByName    map[string]string
-	albumIDsByKey      map[string]string
-}
-
-type sidecarDirectoryState struct {
-	once   sync.Once
-	names  []string
-	byStem map[string][]string
-	err    error
+	rootPath              string
+	sourcesByPath         map[string]*localSourceRecord
+	renameCandidates      map[string][]*localSourceRecord
+	assetsByID            map[string]sourceScanAsset
+	mappingsBySource      map[string][]cueMapping
+	externalLyricsByID    map[string]struct{}
+	missingArtworkTracks  map[string]struct{}
+	missingArtworkSources map[string]struct{}
+	seenSourcesMu         sync.Mutex
+	seenSourceIDs         map[string]struct{}
+	renameClaimedIDs      map[string]struct{}
+	sidecarsMu            sync.Mutex
+	sidecarsByDir         map[string]*sidecarDirectoryState
+	catalogMu             sync.RWMutex
+	artworkMu             sync.Mutex
+	artworkByChecksum     map[string]*stagedArtwork
+	artistIDsByName       map[string]string
+	albumIDsByKey         map[string]string
 }
 
 type sourceScanAsset struct {
@@ -41,6 +36,12 @@ type sourceScanAsset struct {
 	sizeBytes   int64
 	checksum    *string
 	ready       bool
+}
+
+type sidecarDirectoryState struct {
+	once   sync.Once
+	byStem map[string][]string
+	err    error
 }
 
 type sourceScanSnapshotContextKey struct{}
@@ -54,7 +55,7 @@ func (synchronizer *ProductionSynchronizer) PrepareScan(
 	if err != nil {
 		return nil, nil, err
 	}
-	return context.WithValue(ctx, sourceScanSnapshotContextKey{}, snapshot), func() {}, nil
+	return context.WithValue(ctx, sourceScanSnapshotContextKey{}, snapshot), snapshot.release, nil
 }
 
 func (synchronizer *ProductionSynchronizer) loadSourceScanSnapshot(
@@ -66,24 +67,32 @@ func (synchronizer *ProductionSynchronizer) loadSourceScanSnapshot(
 		return nil, err
 	}
 	snapshot := &sourceScanSnapshot{
-		rootPath:           rootPath,
-		sourcesByPath:      make(map[string]localSourceRecord),
-		renameCandidates:   make(map[string][]localSourceRecord),
-		assetsByID:         make(map[string]sourceScanAsset),
-		mappingsBySource:   make(map[string][]cueMapping),
-		externalLyricsByID: make(map[string]bool),
-		seenSourceIDs:      make(map[string]struct{}),
-		renameClaimedIDs:   make(map[string]struct{}),
-		sidecarsByDir:      make(map[string]*sidecarDirectoryState),
-		artistIDsByName:    make(map[string]string),
-		albumIDsByKey:      make(map[string]string),
-		artworkByChecksum:  make(map[string]*stagedArtwork),
+		rootPath:              rootPath,
+		sourcesByPath:         make(map[string]*localSourceRecord),
+		renameCandidates:      make(map[string][]*localSourceRecord),
+		assetsByID:            make(map[string]sourceScanAsset),
+		mappingsBySource:      make(map[string][]cueMapping),
+		externalLyricsByID:    make(map[string]struct{}),
+		missingArtworkTracks:  make(map[string]struct{}),
+		missingArtworkSources: make(map[string]struct{}),
+		seenSourceIDs:         make(map[string]struct{}),
+		renameClaimedIDs:      make(map[string]struct{}),
+		sidecarsByDir:         make(map[string]*sidecarDirectoryState),
+		artistIDsByName:       make(map[string]string),
+		albumIDsByKey:         make(map[string]string),
+		artworkByChecksum:     make(map[string]*stagedArtwork),
 	}
 
 	sourceRows, err := synchronizer.database.Query(ctx, `
 		SELECT `+localSourceColumnsWithTrack+`
 		FROM local_music_sources source
-		LEFT JOIN local_music_source_tracks track_link ON track_link.source_id = source.id
+		LEFT JOIN LATERAL (
+			SELECT track_id
+			FROM local_music_source_tracks
+			WHERE source_id = source.id
+			ORDER BY cue_track_number NULLS FIRST, segment_index, track_id
+			LIMIT 1
+		) track_link ON true
 		WHERE source.root_id = $1`, rootID)
 	if err != nil {
 		return nil, fmt.Errorf("preload local library sources: %w", err)
@@ -94,8 +103,9 @@ func (synchronizer *ProductionSynchronizer) loadSourceScanSnapshot(
 			sourceRows.Close()
 			return nil, fmt.Errorf("read preloaded local library source: %w", scanErr)
 		}
-		snapshot.sourcesByPath[source.NormalizedPath] = source
-		snapshot.renameCandidates[source.Checksum] = append(snapshot.renameCandidates[source.Checksum], source)
+		sourceCopy := source
+		snapshot.sourcesByPath[source.NormalizedPath] = &sourceCopy
+		snapshot.renameCandidates[source.Checksum] = append(snapshot.renameCandidates[source.Checksum], &sourceCopy)
 	}
 	if err := sourceRows.Err(); err != nil {
 		sourceRows.Close()
@@ -109,6 +119,8 @@ func (synchronizer *ProductionSynchronizer) loadSourceScanSnapshot(
 		FROM local_music_source_tracks mapping
 		JOIN local_music_sources source ON source.id = mapping.source_id
 		WHERE source.root_id = $1
+		  AND (mapping.cue_path IS NOT NULL OR mapping.cue_track_number IS NOT NULL
+		       OR mapping.cue_start_time_ms IS NOT NULL OR mapping.cue_end_time_ms IS NOT NULL)
 		ORDER BY mapping.source_id, mapping.cue_track_number NULLS FIRST`, rootID)
 	if err != nil {
 		return nil, fmt.Errorf("preload local library CUE mappings: %w", err)
@@ -132,35 +144,85 @@ func (synchronizer *ProductionSynchronizer) loadSourceScanSnapshot(
 	mappingRows.Close()
 
 	lyricRows, err := synchronizer.database.Query(ctx, `
-		SELECT mapping.source_id, EXISTS(
-			SELECT 1 FROM lyrics lyric
-			WHERE lyric.track_id = mapping.track_id AND lyric.origin = 'EXTERNAL'
-		)
-		FROM local_music_source_tracks mapping
-		JOIN local_music_sources source ON source.id = mapping.source_id
+		SELECT source.id
+		FROM local_music_sources source
 		WHERE source.root_id = $1
-		GROUP BY mapping.source_id, mapping.track_id`, rootID)
+		  AND EXISTS (
+			SELECT 1
+			FROM local_music_source_tracks mapping
+			JOIN lyrics lyric ON lyric.track_id = mapping.track_id
+			WHERE mapping.source_id = source.id AND lyric.origin = 'EXTERNAL'
+		  )`, rootID)
 	if err != nil {
 		return nil, fmt.Errorf("preload local library external lyrics state: %w", err)
 	}
 	for lyricRows.Next() {
 		var sourceID string
-		var hasExternal bool
-		if scanErr := lyricRows.Scan(&sourceID, &hasExternal); scanErr != nil {
+		if scanErr := lyricRows.Scan(&sourceID); scanErr != nil {
 			lyricRows.Close()
 			return nil, fmt.Errorf("read preloaded local library external lyrics state: %w", scanErr)
 		}
-		if hasExternal {
-			snapshot.externalLyricsByID[sourceID] = true
-		}
+		snapshot.externalLyricsByID[sourceID] = struct{}{}
 	}
+
 	if err := lyricRows.Err(); err != nil {
 		lyricRows.Close()
 		return nil, fmt.Errorf("iterate preloaded local library external lyrics state: %w", err)
 	}
 	lyricRows.Close()
 
+	if synchronizer.artworkEnabled() {
+		artworkRows, err := synchronizer.database.Query(ctx, `
+			SELECT DISTINCT mapping.source_id, mapping.track_id
+			FROM local_music_source_tracks mapping
+			JOIN local_music_sources source ON source.id = mapping.source_id
+			JOIN tracks track ON track.id = mapping.track_id
+			JOIN track_metadata metadata ON metadata.track_id = track.id
+			JOIN albums album ON album.id = track.album_id
+			LEFT JOIN media_assets asset
+				ON asset.id = album.cover_asset_id AND asset.status = 'READY'
+			WHERE source.root_id = $1
+			  AND metadata.raw_tags->>'hasArtwork' = 'true'
+			  AND asset.id IS NULL`, rootID)
+		if err != nil {
+			return nil, fmt.Errorf("preload local library missing artwork state: %w", err)
+		}
+		for artworkRows.Next() {
+			var sourceID, trackID string
+			if scanErr := artworkRows.Scan(&sourceID, &trackID); scanErr != nil {
+				artworkRows.Close()
+				return nil, fmt.Errorf("read preloaded local library missing artwork state: %w", scanErr)
+			}
+			snapshot.missingArtworkTracks[trackID] = struct{}{}
+			snapshot.missingArtworkSources[sourceID] = struct{}{}
+		}
+		if err := artworkRows.Err(); err != nil {
+			artworkRows.Close()
+			return nil, fmt.Errorf("iterate preloaded local library missing artwork state: %w", err)
+		}
+		artworkRows.Close()
+	}
+
 	return snapshot, nil
+}
+
+func (snapshot *sourceScanSnapshot) release() {
+	if snapshot == nil {
+		return
+	}
+	snapshot.sourcesByPath = nil
+	snapshot.assetsByID = nil
+	snapshot.renameCandidates = nil
+	snapshot.mappingsBySource = nil
+	snapshot.externalLyricsByID = nil
+	snapshot.missingArtworkTracks = nil
+	snapshot.missingArtworkSources = nil
+	snapshot.seenSourceIDs = nil
+	snapshot.renameClaimedIDs = nil
+	snapshot.sidecarsByDir = nil
+	snapshot.artworkByChecksum = nil
+	snapshot.artistIDsByName = nil
+	snapshot.albumIDsByKey = nil
 }
 
 func sourceScanSnapshotFromContext(ctx context.Context) *sourceScanSnapshot {
@@ -172,12 +234,31 @@ func sourceScanSnapshotFromContext(ctx context.Context) *sourceScanSnapshot {
 	return snapshot
 }
 
+func (snapshot *sourceScanSnapshot) needsArtwork(trackID string) bool {
+	if snapshot == nil || trackID == "" {
+		return false
+	}
+	_, exists := snapshot.missingArtworkTracks[trackID]
+	return exists
+}
+
+func (snapshot *sourceScanSnapshot) needsArtworkForSource(sourceID string) bool {
+	if snapshot == nil || sourceID == "" {
+		return false
+	}
+	_, exists := snapshot.missingArtworkSources[sourceID]
+	return exists
+}
+
 func (snapshot *sourceScanSnapshot) findSource(normalizedPath string) (localSourceRecord, bool) {
 	if snapshot == nil {
 		return localSourceRecord{}, false
 	}
 	source, exists := snapshot.sourcesByPath[normalizedPath]
-	return source, exists
+	if !exists || source == nil {
+		return localSourceRecord{}, false
+	}
+	return *source, true
 }
 
 func (snapshot *sourceScanSnapshot) markSourceSeen(sourceID string) {
@@ -234,14 +315,12 @@ func (snapshot *sourceScanSnapshot) sidecarNamesForStem(directory string, stem s
 			state.err = err
 			return
 		}
-		names := make([]string, 0, len(entries))
 		byStem := make(map[string][]string)
 		for _, entry := range entries {
 			if entry.IsDir() {
 				continue
 			}
 			name := entry.Name()
-			names = append(names, name)
 			ext := strings.ToLower(filepath.Ext(name))
 			if ext == ".lrc" || ext == ".txt" {
 				fileStem := normalizePlatformPath(strings.TrimSuffix(name, filepath.Ext(name)))
@@ -254,7 +333,6 @@ func (snapshot *sourceScanSnapshot) sidecarNamesForStem(directory string, stem s
 				}
 			}
 		}
-		state.names = names
 		state.byStem = byStem
 	})
 

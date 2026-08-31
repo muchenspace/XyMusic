@@ -110,6 +110,7 @@ type Scraping struct {
 	RequestWorkers     int
 	ArtworkWorkers     int
 	ArtworkClaimWindow int
+	WritebackWorkers   int
 }
 
 type LocalLibrary struct {
@@ -235,7 +236,7 @@ func Parse(env map[string]string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	scanCommitBatchSize, err := integer(env, "LOCAL_MUSIC_SCAN_COMMIT_BATCH_SIZE", 8, 1, 64)
+	scanCommitBatchSize, err := integer(env, "LOCAL_MUSIC_SCAN_COMMIT_BATCH_SIZE", 32, 1, 64)
 	if err != nil {
 		return Config{}, err
 	}
@@ -271,8 +272,12 @@ func Parse(env map[string]string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	writebackWorkers, err := integer(env, "TAG_WRITEBACK_WORKERS", 2, 1, 32)
+	if err != nil {
+		return Config{}, err
+	}
 	databaseConnections, err := integer(env, "DATABASE_MAX_CONNECTIONS", defaultDatabaseConnections(
-		scanCommitWorkers, batchWorkers, artworkWorkers,
+		scanCommitWorkers, batchWorkers, artworkWorkers, writebackWorkers,
 	), 1, 100)
 	if err != nil {
 		return Config{}, err
@@ -418,6 +423,7 @@ func Parse(env map[string]string) (Config, error) {
 			RequestWorkers:     requestWorkers,
 			ArtworkWorkers:     artworkWorkers,
 			ArtworkClaimWindow: artworkClaimWindow,
+			WritebackWorkers:   writebackWorkers,
 		},
 		LocalLibrary: LocalLibrary{
 			Name:                value(env, "LOCAL_MUSIC_SOURCE_NAME", "Music"),
@@ -453,9 +459,9 @@ func defaultScrapingClaimWindow(workers int) int {
 	return min(64, max(1, workers*4))
 }
 
-func defaultDatabaseConnections(scanCommitWorkers, batchWorkers, artworkWorkers int) int {
-	activeWorkers := scanCommitWorkers + batchWorkers + artworkWorkers
-	return max(16, min(64, activeWorkers+4))
+func defaultDatabaseConnections(scanCommitWorkers, batchWorkers, artworkWorkers, writebackWorkers int) int {
+	activeWorkers := scanCommitWorkers + batchWorkers + artworkWorkers + writebackWorkers
+	return max(16, min(100, activeWorkers+4))
 }
 
 func ResolveRuntime(cfg Config, root string) (Config, error) {

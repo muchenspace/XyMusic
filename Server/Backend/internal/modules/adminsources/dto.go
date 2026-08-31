@@ -147,6 +147,7 @@ type BrowseDTO struct {
 	PageSize    int            `json:"pageSize"`
 	Total       int            `json:"total"`
 	TotalPages  int            `json:"totalPages"`
+	NextCursor  *string        `json:"nextCursor,omitempty"`
 }
 
 type ScanRunDTO struct {
@@ -193,6 +194,7 @@ type RootListDTO struct {
 	PageSize   int       `json:"pageSize"`
 	Total      int       `json:"total"`
 	TotalPages int       `json:"totalPages"`
+	NextCursor *string   `json:"nextCursor,omitempty"`
 }
 
 type TrackSummaryDTO struct {
@@ -219,6 +221,7 @@ type SourceFilePageDTO struct {
 	PageSize   int             `json:"pageSize"`
 	Total      int             `json:"total"`
 	TotalPages int             `json:"totalPages"`
+	NextCursor *string         `json:"nextCursor,omitempty"`
 }
 
 type ProcessingJobDTO struct {
@@ -251,6 +254,7 @@ type ScanRunPageDTO struct {
 	PageSize   int          `json:"pageSize"`
 	Total      int          `json:"total"`
 	TotalPages int          `json:"totalPages"`
+	NextCursor *string      `json:"nextCursor,omitempty"`
 }
 
 type DeletedDTO struct {

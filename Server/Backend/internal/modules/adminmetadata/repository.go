@@ -391,7 +391,7 @@ func (repository *Repository) ListWritebacks(
 	query WritebackListQuery,
 ) ([]WritebackJob, int, error) {
 	where := "where true"
-	arguments := []any{}
+	arguments := make([]any, 0, 6)
 	if query.Status != "" {
 		arguments = append(arguments, string(query.Status))
 		where += fmt.Sprintf(" and status = $%d::metadata_writeback_status", len(arguments))
@@ -400,11 +400,26 @@ func (repository *Repository) ListWritebacks(
 		arguments = append(arguments, query.TrackID)
 		where += fmt.Sprintf(" and track_id = $%d", len(arguments))
 	}
-	arguments = append(arguments, query.Limit, query.Offset)
-	rows, err := repository.pool.Query(ctx, `
-		select `+writebackColumns+` from metadata_writeback_jobs `+where+`
+	countWhere := where
+	countArguments := append([]any(nil), arguments...)
+	if query.CursorMode && query.After != nil {
+		createdAtPosition := len(arguments) + 1
+		idPosition := len(arguments) + 2
+		arguments = append(arguments, query.After.CreatedAt, query.After.ID)
+		where += fmt.Sprintf(" and (created_at < $%d::timestamptz or (created_at = $%d::timestamptz and id < $%d))", createdAtPosition, createdAtPosition, idPosition)
+	}
+	limitPosition := len(arguments) + 1
+	arguments = append(arguments, query.Limit)
+	statement := `
+		select ` + writebackColumns + ` from metadata_writeback_jobs ` + where + `
 		order by created_at desc, id desc
-		limit $`+fmt.Sprint(len(arguments)-1)+` offset $`+fmt.Sprint(len(arguments)), arguments...)
+		limit $` + fmt.Sprint(limitPosition)
+	if !query.CursorMode {
+		offsetPosition := len(arguments) + 1
+		arguments = append(arguments, query.Offset)
+		statement += ` offset $` + fmt.Sprint(offsetPosition)
+	}
+	rows, err := repository.pool.Query(ctx, statement, arguments...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list metadata writeback jobs: %w", err)
 	}
@@ -422,10 +437,14 @@ func (repository *Repository) ListWritebacks(
 		return nil, 0, fmt.Errorf("iterate metadata writeback jobs: %w", err)
 	}
 	rows.Close()
-	countArguments := arguments[:len(arguments)-2]
 	var total int
-	if err := repository.pool.QueryRow(ctx,
-		`select count(*)::int from metadata_writeback_jobs `+where,
+	if query.TotalHint != nil {
+		if *query.TotalHint < 0 {
+			return nil, 0, fmt.Errorf("pagination total hint is invalid")
+		}
+		total = *query.TotalHint
+	} else if err := repository.pool.QueryRow(ctx,
+		`select count(*)::int from metadata_writeback_jobs `+countWhere,
 		countArguments...,
 	).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count metadata writeback jobs: %w", err)

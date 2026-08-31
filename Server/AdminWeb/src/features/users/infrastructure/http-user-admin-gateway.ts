@@ -13,8 +13,8 @@ export class HttpUserAdminGateway implements UserAdminGateway {
     return adminApi.users(query, signal);
   }
 
-  detail(userId: string, page: number, pageSize: number, signal?: AbortSignal): Promise<UserDetail> {
-    return adminApi.user(userId, { page, pageSize }, signal);
+  detail(userId: string, query: Pick<UserListQuery, "page" | "pageSize" | "cursor" | "cursorMode">, signal?: AbortSignal): Promise<UserDetail> {
+    return adminApi.user(userId, query, signal);
   }
 
   create(input: CreateUserInput): Promise<UserDetail> {

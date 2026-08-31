@@ -9,6 +9,7 @@ import (
 
 	"xymusic/server/internal/modules/catalog"
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/pagination"
 )
 
 func TestListArtistsAppliesDefaultsAndPresentsArtwork(t *testing.T) {
@@ -165,6 +166,77 @@ func TestTrackRejectsStoredLyricsWithInconsistentTiming(t *testing.T) {
 	_, err := service.Track(context.Background(), "track-1", PageInput{})
 	if !apperror.IsCode(err, apperror.CodeInternalError) {
 		t.Fatalf("Track() error = %v", err)
+	}
+}
+
+func TestListTracksCursorModeUsesSeekAndReturnsNextCursor(t *testing.T) {
+	now := time.Date(2026, 7, 16, 1, 2, 3, 456000000, time.UTC)
+	records := []TrackRecord{
+		{ID: "track-1", Title: "One", NormalizedTitle: "one", AudioStatus: AudioStatusReady, CreatedAt: now, UpdatedAt: now},
+		{ID: "track-2", Title: "Two", NormalizedTitle: "two", AudioStatus: AudioStatusReady, CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)},
+		{ID: "track-3", Title: "Three", NormalizedTitle: "three", AudioStatus: AudioStatusReady, CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second)},
+	}
+	var query TrackQuery
+	store := &catalogStoreStub{listTracks: func(_ context.Context, input TrackQuery) ([]TrackRecord, int, error) {
+		query = input
+		return records, len(records), nil
+	}}
+	service, err := NewServiceWithOptions(store, catalogArtworkStub{}, pagination.NewCursorCodec("01234567890123456789012345678901"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.ListTracks(context.Background(), TrackListInput{
+		ListInput: ListInput{Page: 1, PageSize: 2, Sort: "title", Order: SortAscending, CursorMode: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !query.CursorMode || !query.HasNextProbe || query.After != nil || query.Limit != 3 || query.Offset != 0 {
+		t.Fatalf("cursor query = %#v", query)
+	}
+	if len(result.Items) != 2 || result.Total != 3 || result.TotalPages != 2 || result.NextCursor == nil {
+		t.Fatalf("cursor result = %#v", result)
+	}
+	decoded, err := decodeTrackCursor(service.cursors, trackCursorScope(TrackListInput{
+		ListInput: ListInput{Sort: "title", Order: SortAscending, CursorMode: true},
+	}), *result.NextCursor, "title")
+	if err != nil || decoded == nil || decoded.ID != "track-2" || decoded.Value != "two" {
+		t.Fatalf("decoded next cursor = %#v/%v", decoded, err)
+	}
+}
+
+func TestListAlbumsCursorModeSupportsNullableReleaseDate(t *testing.T) {
+	now := time.Date(2026, 7, 16, 1, 2, 3, 456000000, time.UTC)
+	records := []AlbumRecord{
+		{ID: "album-1", Title: "One", NormalizedTitle: "one", ReleaseDate: nil, CreatedAt: now, UpdatedAt: now},
+		{ID: "album-2", Title: "Two", NormalizedTitle: "two", ReleaseDate: nil, CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)},
+	}
+	var query AlbumQuery
+	store := &catalogStoreStub{listAlbums: func(_ context.Context, input AlbumQuery) ([]AlbumRecord, int, error) {
+		query = input
+		return records, len(records), nil
+	}}
+	service, err := NewServiceWithOptions(store, catalogArtworkStub{}, pagination.NewCursorCodec("01234567890123456789012345678901"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.ListAlbums(context.Background(), ListInput{
+		Page: 1, PageSize: 1, Sort: "releaseDate", Order: SortDescending, CursorMode: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !query.CursorMode || !query.HasNextProbe || query.After != nil || query.Limit != 2 || query.Offset != 0 {
+		t.Fatalf("album cursor query = %#v", query)
+	}
+	if len(result.Items) != 1 || result.TotalPages != 2 || result.NextCursor == nil {
+		t.Fatalf("album cursor result = %#v", result)
+	}
+	decoded, err := decodeCatalogCursor(service.cursors, albumCursorScope(ListInput{
+		Sort: "releaseDate", Order: SortDescending, CursorMode: true,
+	}), *result.NextCursor, "releaseDate", true)
+	if err != nil || decoded == nil || !decoded.Null || decoded.ID != "album-1" {
+		t.Fatalf("decoded album cursor = %#v/%v", decoded, err)
 	}
 }
 

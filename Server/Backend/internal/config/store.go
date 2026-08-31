@@ -139,7 +139,7 @@ func (s *Store) Save(cfg Config) error {
 		"LOCAL_MUSIC_SCAN_WORKERS", "LOCAL_MUSIC_SCAN_COMMIT_WORKERS",
 		"LOCAL_MUSIC_SCAN_COMMIT_BATCH_SIZE", "LOCAL_MUSIC_SCAN_PROBE_WORKERS",
 		"TAG_SCRAPING_WORKERS", "TAG_SCRAPING_REQUEST_WORKERS", "TAG_SCRAPING_CLAIM_WINDOW",
-		"TAG_SCRAPING_ARTWORK_WORKERS", "TAG_SCRAPING_ARTWORK_CLAIM_WINDOW",
+		"TAG_SCRAPING_ARTWORK_WORKERS", "TAG_SCRAPING_ARTWORK_CLAIM_WINDOW", "TAG_WRITEBACK_WORKERS",
 		"REGISTRATION_ENABLED",
 	}
 	var content strings.Builder
@@ -167,7 +167,7 @@ func ToEnvironment(cfg Config) map[string]string {
 	}
 	scanCommitBatchSize := cfg.LocalLibrary.ScanCommitBatchSize
 	if scanCommitBatchSize <= 0 {
-		scanCommitBatchSize = 8
+		scanCommitBatchSize = 32
 	}
 	scanProbeWorkers := cfg.LocalLibrary.ScanProbeWorkers
 	if scanProbeWorkers <= 0 {
@@ -193,6 +193,10 @@ func ToEnvironment(cfg Config) map[string]string {
 	if artworkWorkers <= 0 {
 		artworkWorkers = 2
 	}
+	writebackWorkers := cfg.Scraping.WritebackWorkers
+	if writebackWorkers <= 0 {
+		writebackWorkers = 2
+	}
 	artworkClaimWindow := cfg.Scraping.ArtworkClaimWindow
 	if artworkClaimWindow < artworkWorkers {
 		artworkClaimWindow = defaultScrapingClaimWindow(artworkWorkers)
@@ -200,7 +204,7 @@ func ToEnvironment(cfg Config) map[string]string {
 	databaseMaxConnections := int(cfg.Database.MaxConnections)
 	if databaseMaxConnections <= 0 {
 		databaseMaxConnections = defaultDatabaseConnections(
-			scanCommitWorkers, batchWorkers, artworkWorkers,
+			scanCommitWorkers, batchWorkers, artworkWorkers, writebackWorkers,
 		)
 	}
 	uploadTTL := cfg.MediaStorage.UploadTTLSeconds
@@ -281,6 +285,7 @@ func ToEnvironment(cfg Config) map[string]string {
 		"TAG_SCRAPING_REQUEST_WORKERS":       strconv.Itoa(requestWorkers),
 		"TAG_SCRAPING_ARTWORK_WORKERS":       strconv.Itoa(artworkWorkers),
 		"TAG_SCRAPING_ARTWORK_CLAIM_WINDOW":  strconv.Itoa(artworkClaimWindow),
+		"TAG_WRITEBACK_WORKERS":              strconv.Itoa(writebackWorkers),
 		"REGISTRATION_ENABLED":               strconv.FormatBool(cfg.Registration.Enabled),
 	}
 }

@@ -266,6 +266,34 @@ describe("playback session", () => {
     harness.session.dispose();
   });
 
+  it("recovers a resume request when the browser reports an expired URL after play was requested", async () => {
+    const harness = createHarness();
+    const started = harness.session.startQueue([track("one")], 0);
+    await started?.playback;
+
+    harness.audio.setPlaybackPosition(42);
+    await harness.session.toggle();
+    harness.grants.get.mockResolvedValueOnce({
+      streamUrl: "https://example.test/one-recovered-after-pause.mp3",
+      expiresAt: "",
+      selectedQuality: "STANDARD",
+    });
+    // The native play promise resolves before the browser emits its media
+    // error. No non-paused snapshot is delivered, so recovery must use the
+    // explicit resume intent rather than stateValue.isPlaying.
+    harness.audio.play.mockImplementationOnce(async () => undefined);
+
+    await harness.session.toggle();
+    harness.audio.emitError("expired media URL after pause");
+
+    await vi.waitFor(() => expect(harness.session.state()).toMatchObject({ currentTime: 42, isPlaying: true, loading: false }));
+    expect(harness.grants.invalidate).toHaveBeenCalledWith("one", "STANDARD");
+    expect(harness.audio.load).toHaveBeenNthCalledWith(2, "https://example.test/one-recovered-after-pause.mp3", expect.any(AbortSignal));
+    expect(harness.audio.play).toHaveBeenCalledTimes(3);
+
+    harness.session.dispose();
+  });
+
   it("owns immutable snapshots for seeded, started, and appended queues", async () => {
     const harness = createHarness();
     const seeded = [track("seed")];

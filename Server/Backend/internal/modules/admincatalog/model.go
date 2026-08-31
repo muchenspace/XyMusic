@@ -39,23 +39,29 @@ const (
 )
 
 type ListInput struct {
-	Page     int
-	PageSize int
-	Search   string
-	Sort     string
-	Order    SortOrder
+	Page       int
+	PageSize   int
+	Search     string
+	Sort       string
+	Order      SortOrder
+	Cursor     string
+	CursorMode bool
 }
 
 type PageInput struct {
-	Page     int
-	PageSize int
+	Page       int
+	PageSize   int
+	Cursor     string
+	CursorMode bool
 }
 
 type DuplicateAlbumInput struct {
 	PageInput
-	AlbumID       string
-	AlbumPage     int
-	AlbumPageSize int
+	AlbumID         string
+	AlbumPage       int
+	AlbumPageSize   int
+	AlbumCursor     string
+	AlbumCursorMode bool
 }
 
 type TrackListInput struct {
@@ -130,6 +136,7 @@ type TrackRecord struct {
 	AlbumTitle               *string
 	AlbumCoverAssetID        *string
 	Title                    string
+	NormalizedTitle          string
 	TrackNumber              *int
 	DiscNumber               *int
 	DurationMS               int64
@@ -150,21 +157,40 @@ type TrackRecord struct {
 }
 
 type ArtistQuery struct {
-	Search string
-	Sort   string
-	Order  SortOrder
-	Limit  int
-	Offset int
+	Search       string
+	Sort         string
+	Order        SortOrder
+	Limit        int
+	Offset       int
+	After        *ListCursor
+	CursorMode   bool
+	HasNextProbe bool
+	TotalHint    *int
 }
 
 type AlbumQuery = ArtistQuery
 
 type DuplicateAlbumQuery struct {
-	AlbumID     string
-	Limit       int
-	Offset      int
-	AlbumLimit  int
-	AlbumOffset int
+	AlbumID         string
+	Limit           int
+	Offset          int
+	After           *DuplicateGroupCursor
+	CursorMode      bool
+	TotalHint       *int
+	AlbumLimit      int
+	AlbumOffset     int
+	AlbumAfter      *DuplicateAlbumCursor
+	AlbumCursorMode bool
+}
+
+type DuplicateGroupCursor struct {
+	Key   string
+	Total *int
+}
+
+type DuplicateAlbumCursor struct {
+	ID    string
+	Total *int
 }
 
 type DuplicateAlbumGroupPage struct {
@@ -190,4 +216,33 @@ type TrackQuery struct {
 	SourceID       string
 	Limit          int
 	Offset         int
+	After          *ListCursor
+	CursorMode     bool
+	HasNextProbe   bool
+	TotalHint      *int
+}
+
+// ListCursor is the decoded seek position for one admin catalog ordering.
+// Value contains either a normalized text/status key or an RFC3339/date key;
+// Null is used for nullable release dates.
+type ListCursor struct {
+	Value string
+	ID    string
+	Null  bool
+	Total *int
+}
+
+type AlbumTrackCursor struct {
+	DiscNumber      *int
+	TrackNumber     *int
+	NormalizedTitle string
+	ID              string
+	Total           *int
+}
+
+type TrackLyricCursor struct {
+	IsDefault bool
+	Language  string
+	ID        string
+	Total     *int
 }

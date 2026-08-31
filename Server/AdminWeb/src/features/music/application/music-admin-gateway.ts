@@ -74,7 +74,7 @@ export interface MusicAdminGateway {
   writeTrackMetadata(trackId: string, expectedVersion: number, reason: string): Promise<void>;
   batchUpdateTrackMetadata(command: BatchUpdateTrackMetadataCommand): Promise<BatchUpdateTrackMetadataResult>;
   listAlbums(query: MusicListQuery, signal?: AbortSignal): Promise<MusicPage<AlbumSummary>>;
-  getAlbum(albumId: string, page: number, pageSize: number, signal?: AbortSignal): Promise<AlbumDetail>;
+  getAlbum(albumId: string, query: Pick<MusicListQuery, "page" | "pageSize" | "cursor" | "cursorMode">, signal?: AbortSignal): Promise<AlbumDetail>;
   getAlbumDuplicates(query: AlbumDuplicateQuery, signal?: AbortSignal): Promise<AlbumDuplicateSummary>;
   updateAlbum(albumId: string, command: UpdateAlbumCommand): Promise<void>;
   mergeAlbums(command: MergeAlbumsCommand): Promise<AlbumMergeResult>;

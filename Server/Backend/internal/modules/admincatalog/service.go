@@ -23,34 +23,89 @@ const defaultCatalogPageSize = 100
 type Service struct {
 	store    Store
 	artworks ArtworkPresenter
+	cursors  *pagination.CursorCodec
 }
 
 func NewService(store Store, artworks ArtworkPresenter) (*Service, error) {
+	return NewServiceWithOptions(store, artworks, nil)
+}
+
+// NewServiceWithOptions enables signed keyset cursors for the high-volume
+// admin catalog endpoints. NewService remains available for small/local
+// callers and keeps the legacy offset behavior when no codec is supplied.
+func NewServiceWithOptions(
+	store Store,
+	artworks ArtworkPresenter,
+	cursors *pagination.CursorCodec,
+) (*Service, error) {
 	if store == nil {
 		return nil, errors.New("admin catalog store is required")
 	}
 	if artworks == nil {
 		return nil, errors.New("admin catalog artwork presenter is required")
 	}
-	return &Service{store: store, artworks: artworks}, nil
+	return &Service{store: store, artworks: artworks, cursors: cursors}, nil
 }
 
 func (service *Service) ListArtists(ctx context.Context, input ListInput) (ArtistPageDTO, error) {
-	page, err := pagination.ParseOffset(input.Page, input.PageSize, defaultCatalogPageSize)
-	if err != nil {
-		return ArtistPageDTO{}, err
-	}
 	if input.Sort == "" {
 		input.Sort = "name"
 	}
 	if input.Order == "" {
 		input.Order = SortAscending
 	}
+	input.Search = strings.TrimSpace(input.Search)
 	if !oneOf(input.Sort, "name", "createdAt", "updatedAt") || !validOrder(input.Order) {
 		return ArtistPageDTO{}, apperror.Validation("Artist query is invalid")
 	}
+	if input.CursorMode {
+		page, err := pagination.ParseCursor(input.Page, input.PageSize, defaultCatalogPageSize)
+		if err != nil {
+			return ArtistPageDTO{}, err
+		}
+		if service.cursors == nil {
+			return ArtistPageDTO{}, errors.New("admin catalog cursor codec is required")
+		}
+		if page.Page > 1 && input.Cursor == "" {
+			return ArtistPageDTO{}, apperror.Validation("cursor is required for deep catalog pages")
+		}
+		scope := artistCursorScope(input)
+		after, err := decodeCatalogCursor(service.cursors, scope, input.Cursor, input.Sort, false)
+		if err != nil {
+			return ArtistPageDTO{}, err
+		}
+		records, total, err := service.store.ListArtists(ctx, ArtistQuery{
+			Search: input.Search, Sort: input.Sort, Order: input.Order,
+			Limit: pagination.CursorLimit(page.Page, page.PageSize), After: after, CursorMode: true, HasNextProbe: true, TotalHint: listCursorTotalHint(after),
+		})
+		if err != nil {
+			return ArtistPageDTO{}, err
+		}
+		hasNext := len(records) > page.PageSize
+		if len(records) > page.PageSize {
+			records = records[:page.PageSize]
+		}
+		items, err := service.presentArtists(ctx, records)
+		if err != nil {
+			return ArtistPageDTO{}, err
+		}
+		result := ArtistPageDTO{Items: items, Page: page.Page, PageSize: page.PageSize, Total: total, TotalPages: exactTotalPages(total, page.PageSize)}
+		if hasNext && len(records) > 0 {
+			encoded, err := encodeArtistCursor(service.cursors, scope, input.Sort, records[len(records)-1], total)
+			if err != nil {
+				return ArtistPageDTO{}, err
+			}
+			result.NextCursor = &encoded
+		}
+		return result, nil
+	}
+
+	page, err := pagination.ParseOffset(input.Page, input.PageSize, defaultCatalogPageSize)
+	if err != nil {
+		return ArtistPageDTO{}, err
+	}
 	records, total, err := service.store.ListArtists(ctx, ArtistQuery{
-		Search: strings.TrimSpace(input.Search), Sort: input.Sort, Order: input.Order,
+		Search: input.Search, Sort: input.Sort, Order: input.Order,
 		Limit: page.PageSize, Offset: page.Offset,
 	})
 	if err != nil {
@@ -60,10 +115,7 @@ func (service *Service) ListArtists(ctx context.Context, input ListInput) (Artis
 	if err != nil {
 		return ArtistPageDTO{}, err
 	}
-	return ArtistPageDTO{
-		Items: items, Page: page.Page, PageSize: page.PageSize, Total: total,
-		TotalPages: pagination.BoundedTotalPages(total, page.PageSize),
-	}, nil
+	return ArtistPageDTO{Items: items, Page: page.Page, PageSize: page.PageSize, Total: total, TotalPages: pagination.BoundedTotalPages(total, page.PageSize)}, nil
 }
 
 func (service *Service) Artist(ctx context.Context, id string) (ArtistDTO, error) {
@@ -79,21 +131,64 @@ func (service *Service) Artist(ctx context.Context, id string) (ArtistDTO, error
 }
 
 func (service *Service) ListAlbums(ctx context.Context, input ListInput) (AlbumPageDTO, error) {
-	page, err := pagination.ParseOffset(input.Page, input.PageSize, defaultCatalogPageSize)
-	if err != nil {
-		return AlbumPageDTO{}, err
-	}
 	if input.Sort == "" {
 		input.Sort = "updatedAt"
 	}
 	if input.Order == "" {
 		input.Order = SortDescending
 	}
+	input.Search = strings.TrimSpace(input.Search)
 	if !oneOf(input.Sort, "title", "createdAt", "updatedAt", "releaseDate") || !validOrder(input.Order) {
 		return AlbumPageDTO{}, apperror.Validation("Album query is invalid")
 	}
+	if input.CursorMode {
+		page, err := pagination.ParseCursor(input.Page, input.PageSize, defaultCatalogPageSize)
+		if err != nil {
+			return AlbumPageDTO{}, err
+		}
+		if service.cursors == nil {
+			return AlbumPageDTO{}, errors.New("admin catalog cursor codec is required")
+		}
+		if page.Page > 1 && input.Cursor == "" {
+			return AlbumPageDTO{}, apperror.Validation("cursor is required for deep catalog pages")
+		}
+		scope := albumCursorScope(input)
+		after, err := decodeCatalogCursor(service.cursors, scope, input.Cursor, input.Sort, input.Sort == "releaseDate")
+		if err != nil {
+			return AlbumPageDTO{}, err
+		}
+		records, total, err := service.store.ListAlbums(ctx, AlbumQuery{
+			Search: input.Search, Sort: input.Sort, Order: input.Order,
+			Limit: pagination.CursorLimit(page.Page, page.PageSize), After: after, CursorMode: true, HasNextProbe: true, TotalHint: listCursorTotalHint(after),
+		})
+		if err != nil {
+			return AlbumPageDTO{}, err
+		}
+		hasNext := len(records) > page.PageSize
+		if len(records) > page.PageSize {
+			records = records[:page.PageSize]
+		}
+		items, err := service.presentAlbums(ctx, records)
+		if err != nil {
+			return AlbumPageDTO{}, err
+		}
+		result := AlbumPageDTO{Items: items, Page: page.Page, PageSize: page.PageSize, Total: total, TotalPages: exactTotalPages(total, page.PageSize)}
+		if hasNext && len(records) > 0 {
+			encoded, err := encodeAlbumCursor(service.cursors, scope, input.Sort, records[len(records)-1], total)
+			if err != nil {
+				return AlbumPageDTO{}, err
+			}
+			result.NextCursor = &encoded
+		}
+		return result, nil
+	}
+
+	page, err := pagination.ParseOffset(input.Page, input.PageSize, defaultCatalogPageSize)
+	if err != nil {
+		return AlbumPageDTO{}, err
+	}
 	records, total, err := service.store.ListAlbums(ctx, AlbumQuery{
-		Search: strings.TrimSpace(input.Search), Sort: input.Sort, Order: input.Order,
+		Search: input.Search, Sort: input.Sort, Order: input.Order,
 		Limit: page.PageSize, Offset: page.Offset,
 	})
 	if err != nil {
@@ -103,13 +198,136 @@ func (service *Service) ListAlbums(ctx context.Context, input ListInput) (AlbumP
 	if err != nil {
 		return AlbumPageDTO{}, err
 	}
-	return AlbumPageDTO{
-		Items: items, Page: page.Page, PageSize: page.PageSize, Total: total,
-		TotalPages: pagination.BoundedTotalPages(total, page.PageSize),
-	}, nil
+	return AlbumPageDTO{Items: items, Page: page.Page, PageSize: page.PageSize, Total: total, TotalPages: pagination.BoundedTotalPages(total, page.PageSize)}, nil
 }
 
 func (service *Service) DuplicateAlbums(ctx context.Context, input DuplicateAlbumInput) (DuplicateAlbumsDTO, error) {
+	if input.CursorMode {
+		page, err := pagination.ParseCursor(input.Page, input.PageSize, defaultCatalogPageSize)
+		if err != nil {
+			return DuplicateAlbumsDTO{}, err
+		}
+		albumPage, err := pagination.ParseCursor(input.AlbumPage, input.AlbumPageSize, defaultCatalogPageSize)
+		if err != nil {
+			return DuplicateAlbumsDTO{}, err
+		}
+		if service.cursors == nil {
+			return DuplicateAlbumsDTO{}, errors.New("admin catalog cursor codec is required")
+		}
+		if page.Page > 1 && input.Cursor == "" {
+			return DuplicateAlbumsDTO{}, apperror.Validation("cursor is required for deep duplicate pages")
+		}
+		if input.AlbumID != "" && albumPage.Page > 1 && input.AlbumCursor == "" {
+			return DuplicateAlbumsDTO{}, apperror.Validation("album cursor is required for deep duplicate members")
+		}
+		if input.AlbumCursor != "" && input.AlbumID == "" {
+			return DuplicateAlbumsDTO{}, invalidCursor()
+		}
+		groupScope := duplicateGroupCursorScope(input)
+		groupAfter, err := decodeDuplicateGroupCursor(service.cursors, groupScope, input.Cursor)
+		if err != nil {
+			return DuplicateAlbumsDTO{}, err
+		}
+		albumScope := duplicateAlbumCursorScope(input)
+		albumAfter, err := decodeDuplicateAlbumCursor(service.cursors, albumScope, input.AlbumCursor)
+		if err != nil {
+			return DuplicateAlbumsDTO{}, err
+		}
+		stored, err := service.store.FindDuplicateAlbums(ctx, DuplicateAlbumQuery{
+			AlbumID: input.AlbumID, Limit: pagination.CursorLimit(page.Page, page.PageSize), After: groupAfter, CursorMode: true,
+			TotalHint:  duplicateGroupCursorTotalHint(groupAfter),
+			AlbumLimit: pagination.CursorLimit(albumPage.Page, albumPage.PageSize), AlbumAfter: albumAfter, AlbumCursorMode: true,
+		})
+		if err != nil {
+			return DuplicateAlbumsDTO{}, err
+		}
+		groupHasNext := len(stored.Groups) > page.PageSize
+		if len(stored.Groups) > page.PageSize {
+			stored.Groups = stored.Groups[:page.PageSize]
+		}
+		albumNext := make(map[string]*string, len(stored.Groups))
+		for index := range stored.Groups {
+			group := &stored.Groups[index]
+			if len(group.Albums) > albumPage.PageSize {
+				group.Albums = group.Albums[:albumPage.PageSize]
+				if input.AlbumID != "" {
+					next, err := encodeDuplicateAlbumCursor(service.cursors, albumScope, group.Albums[albumPage.PageSize-1], group.AlbumTotal)
+					if err != nil {
+						return DuplicateAlbumsDTO{}, err
+					}
+					albumNext[group.Key] = &next
+				}
+			}
+		}
+		records := make([]AlbumRecord, 0)
+		for _, group := range stored.Groups {
+			records = append(records, group.Albums...)
+		}
+		items, err := service.presentAlbums(ctx, records)
+		if err != nil {
+			return DuplicateAlbumsDTO{}, err
+		}
+		itemsByID := make(map[string]AlbumDTO, len(items))
+		for _, item := range items {
+			itemsByID[item.ID] = item
+		}
+		result := DuplicateAlbumsDTO{
+			Groups:     make([]DuplicateAlbumGroupDTO, 0, len(stored.Groups)),
+			GroupCount: stored.GroupCount, DuplicateAlbumCount: stored.DuplicateAlbumCount,
+			Page: page.Page, PageSize: page.PageSize, Total: stored.Total,
+			TotalPages: pagination.BoundedTotalPages(stored.Total, page.PageSize),
+		}
+		for _, group := range stored.Groups {
+			albums := make([]AlbumDTO, 0, len(group.Albums))
+			for _, record := range group.Albums {
+				if item, exists := itemsByID[record.ID]; exists {
+					albums = append(albums, item)
+				}
+			}
+			sort.SliceStable(albums, func(left, right int) bool {
+				if albums[left].TrackCount != albums[right].TrackCount {
+					return albums[left].TrackCount > albums[right].TrackCount
+				}
+				return albums[left].CreatedAt < albums[right].CreatedAt
+			})
+			primaryArtists := make([]catalog.ArtistReferenceDTO, 0)
+			seenArtists := make(map[string]struct{})
+			for _, album := range albums {
+				for _, credit := range album.ArtistCredits {
+					if credit.Role != "PRIMARY" {
+						continue
+					}
+					if _, exists := seenArtists[credit.Artist.ID]; exists {
+						continue
+					}
+					seenArtists[credit.Artist.ID] = struct{}{}
+					primaryArtists = append(primaryArtists, credit.Artist)
+				}
+			}
+			title := group.Title
+			if len(albums) > 0 {
+				title = albums[0].Title
+			}
+			resultGroup := DuplicateAlbumGroupDTO{
+				Key: group.Key, Title: title, PrimaryArtists: primaryArtists, Albums: albums,
+				AlbumPage: albumPage.Page, AlbumPageSize: albumPage.PageSize,
+				AlbumTotal: group.AlbumTotal, AlbumTotalPages: pagination.BoundedTotalPages(group.AlbumTotal, albumPage.PageSize),
+			}
+			if next := albumNext[group.Key]; next != nil {
+				resultGroup.AlbumNextCursor = next
+			}
+			result.Groups = append(result.Groups, resultGroup)
+		}
+		if groupHasNext && len(stored.Groups) > 0 {
+			next, err := encodeDuplicateGroupCursor(service.cursors, groupScope, stored.Groups[len(stored.Groups)-1], stored.Total)
+			if err != nil {
+				return DuplicateAlbumsDTO{}, err
+			}
+			result.NextCursor = &next
+		}
+		return result, nil
+	}
+
 	page, err := pagination.ParseOffset(input.Page, input.PageSize, defaultCatalogPageSize)
 	if err != nil {
 		return DuplicateAlbumsDTO{}, err
@@ -192,6 +410,55 @@ func (service *Service) DuplicateAlbums(ctx context.Context, input DuplicateAlbu
 }
 
 func (service *Service) Album(ctx context.Context, id string, input PageInput) (AlbumDetailDTO, error) {
+	if input.CursorMode {
+		page, err := pagination.ParseCursor(input.Page, input.PageSize, defaultCatalogPageSize)
+		if err != nil {
+			return AlbumDetailDTO{}, err
+		}
+		if service.cursors == nil {
+			return AlbumDetailDTO{}, errors.New("admin catalog cursor codec is required")
+		}
+		if page.Page > 1 && input.Cursor == "" {
+			return AlbumDetailDTO{}, apperror.Validation("cursor is required for deep album-track pages")
+		}
+		cursorStore, ok := service.store.(CursorStore)
+		if !ok {
+			return AlbumDetailDTO{}, errors.New("admin catalog cursor store is required")
+		}
+		scope := albumTrackCursorScope(id)
+		after, err := decodeAlbumTrackCursor(service.cursors, scope, input.Cursor)
+		if err != nil {
+			return AlbumDetailDTO{}, err
+		}
+		album, tracks, total, err := cursorStore.FindAlbumCursor(ctx, id, page.PageSize+1, after, albumTrackCursorTotalHint(after))
+		if err != nil {
+			return AlbumDetailDTO{}, err
+		}
+		hasNext := len(tracks) > page.PageSize
+		if len(tracks) > page.PageSize {
+			tracks = tracks[:page.PageSize]
+		}
+		albums, err := service.presentAlbums(ctx, []AlbumRecord{album})
+		if err != nil {
+			return AlbumDetailDTO{}, err
+		}
+		trackItems, err := service.presentTracks(ctx, tracks)
+		if err != nil {
+			return AlbumDetailDTO{}, err
+		}
+		result := AlbumDetailDTO{
+			AlbumDTO: albums[0], Tracks: trackItems, TrackPage: page.Page, TrackPageSize: page.PageSize,
+			TrackTotal: total, TrackTotalPages: pagination.BoundedTotalPages(total, page.PageSize),
+		}
+		if hasNext && len(tracks) > 0 {
+			next, err := encodeAlbumTrackCursor(service.cursors, scope, tracks[len(tracks)-1], total)
+			if err != nil {
+				return AlbumDetailDTO{}, err
+			}
+			result.NextCursor = &next
+		}
+		return result, nil
+	}
 	page, err := pagination.ParseOffset(input.Page, input.PageSize, defaultCatalogPageSize)
 	if err != nil {
 		return AlbumDetailDTO{}, err
@@ -215,22 +482,70 @@ func (service *Service) Album(ctx context.Context, id string, input PageInput) (
 }
 
 func (service *Service) ListTracks(ctx context.Context, input TrackListInput) (TrackPageDTO, error) {
-	page, err := pagination.ParseOffset(input.Page, input.PageSize, defaultCatalogPageSize)
-	if err != nil {
-		return TrackPageDTO{}, err
-	}
 	if input.Sort == "" {
 		input.Sort = "updatedAt"
 	}
 	if input.Order == "" {
 		input.Order = SortDescending
 	}
+	input.Search = strings.TrimSpace(input.Search)
 	if !oneOf(input.Sort, "title", "createdAt", "updatedAt", "status") || !validOrder(input.Order) ||
 		!validAudioStatusFilter(input.Status) || !validMetadataStatusFilter(input.MetadataStatus) {
 		return TrackPageDTO{}, apperror.Validation("Track query is invalid")
 	}
+
+	if input.CursorMode {
+		page, err := pagination.ParseCursor(input.Page, input.PageSize, defaultCatalogPageSize)
+		if err != nil {
+			return TrackPageDTO{}, err
+		}
+		if service.cursors == nil {
+			return TrackPageDTO{}, errors.New("admin catalog cursor codec is required")
+		}
+		if page.Page > 1 && input.Cursor == "" {
+			return TrackPageDTO{}, apperror.Validation("cursor is required for deep catalog pages")
+		}
+		scope := trackCursorScope(input)
+		after, err := decodeTrackCursor(service.cursors, scope, input.Cursor, input.Sort)
+		if err != nil {
+			return TrackPageDTO{}, err
+		}
+		records, total, err := service.store.ListTracks(ctx, TrackQuery{
+			Search: input.Search, Sort: input.Sort, Order: input.Order,
+			Status: input.Status, MetadataStatus: input.MetadataStatus, SourceID: input.SourceID,
+			Limit: pagination.CursorLimit(page.Page, page.PageSize), After: after, CursorMode: true, HasNextProbe: true, TotalHint: listCursorTotalHint(after),
+		})
+		if err != nil {
+			return TrackPageDTO{}, err
+		}
+		hasNext := len(records) > page.PageSize
+		if len(records) > page.PageSize {
+			records = records[:page.PageSize]
+		}
+		items, err := service.presentTracks(ctx, records)
+		if err != nil {
+			return TrackPageDTO{}, err
+		}
+		result := TrackPageDTO{
+			Items: items, Page: page.Page, PageSize: page.PageSize, Total: total,
+			TotalPages: exactTotalPages(total, page.PageSize),
+		}
+		if hasNext && len(records) > 0 {
+			encoded, err := encodeTrackCursor(service.cursors, scope, input.Sort, records[len(records)-1], total)
+			if err != nil {
+				return TrackPageDTO{}, err
+			}
+			result.NextCursor = &encoded
+		}
+		return result, nil
+	}
+
+	page, err := pagination.ParseOffset(input.Page, input.PageSize, defaultCatalogPageSize)
+	if err != nil {
+		return TrackPageDTO{}, err
+	}
 	records, total, err := service.store.ListTracks(ctx, TrackQuery{
-		Search: strings.TrimSpace(input.Search), Sort: input.Sort, Order: input.Order,
+		Search: input.Search, Sort: input.Sort, Order: input.Order,
 		Status: input.Status, MetadataStatus: input.MetadataStatus, SourceID: input.SourceID,
 		Limit: page.PageSize, Offset: page.Offset,
 	})
@@ -248,6 +563,68 @@ func (service *Service) ListTracks(ctx context.Context, input TrackListInput) (T
 }
 
 func (service *Service) Track(ctx context.Context, id string, input PageInput) (TrackDetailDTO, error) {
+	if input.CursorMode {
+		page, err := pagination.ParseCursor(input.Page, input.PageSize, 20)
+		if err != nil {
+			return TrackDetailDTO{}, err
+		}
+		if service.cursors == nil {
+			return TrackDetailDTO{}, errors.New("admin catalog cursor codec is required")
+		}
+		if page.Page > 1 && input.Cursor == "" {
+			return TrackDetailDTO{}, apperror.Validation("cursor is required for deep lyric pages")
+		}
+		cursorStore, ok := service.store.(CursorStore)
+		if !ok {
+			return TrackDetailDTO{}, errors.New("admin catalog cursor store is required")
+		}
+		scope := trackLyricCursorScope(id)
+		after, err := decodeTrackLyricCursor(service.cursors, scope, input.Cursor)
+		if err != nil {
+			return TrackDetailDTO{}, err
+		}
+		record, lyricTotal, err := cursorStore.FindTrackCursor(ctx, id, page.PageSize+1, after, trackLyricCursorTotalHint(after))
+		if err != nil {
+			return TrackDetailDTO{}, err
+		}
+		hasNext := len(record.Lyrics) > page.PageSize
+		if len(record.Lyrics) > page.PageSize {
+			record.Lyrics = record.Lyrics[:page.PageSize]
+		}
+		items, err := service.presentTracks(ctx, []TrackRecord{record})
+		if err != nil {
+			return TrackDetailDTO{}, err
+		}
+		lyrics := make([]LyricDTO, 0, len(record.Lyrics))
+		for _, lyric := range record.Lyrics {
+			content := ""
+			if lyric.Content != nil {
+				content = *lyric.Content
+			}
+			if !sharedlyrics.ValidTiming(lyric.Timing) {
+				return TrackDetailDTO{}, apperror.Internal("Stored lyrics timing is invalid", nil)
+			}
+			if err := sharedlyrics.ValidateDocument(lyric.Format, sharedlyrics.Timing(lyric.Timing), content); err != nil {
+				return TrackDetailDTO{}, apperror.Internal("Stored lyrics violate the timing contract", err)
+			}
+			lyrics = append(lyrics, LyricDTO{
+				ID: lyric.ID, Language: lyric.Language, Format: lyric.Format, Timing: lyric.Timing, Content: lyric.Content,
+				IsDefault: lyric.IsDefault, Version: lyric.Version, UpdatedAt: formatTimestamp(lyric.UpdatedAt),
+			})
+		}
+		result := TrackDetailDTO{
+			TrackDTO: items[0], Lyrics: lyrics, LyricPage: page.Page, LyricPageSize: page.PageSize,
+			LyricTotal: lyricTotal, LyricTotalPages: pagination.BoundedTotalPages(lyricTotal, page.PageSize),
+		}
+		if hasNext && len(record.Lyrics) > 0 {
+			next, err := encodeTrackLyricCursor(service.cursors, scope, record.Lyrics[len(record.Lyrics)-1], lyricTotal)
+			if err != nil {
+				return TrackDetailDTO{}, err
+			}
+			result.NextCursor = &next
+		}
+		return result, nil
+	}
 	page, err := pagination.ParseOffset(input.Page, input.PageSize, 20)
 	if err != nil {
 		return TrackDetailDTO{}, err
@@ -283,24 +660,16 @@ func (service *Service) Track(ctx context.Context, id string, input PageInput) (
 		LyricPage:       page.Page,
 		LyricPageSize:   page.PageSize,
 		LyricTotal:      lyricTotal,
-		LyricTotalPages: exactTotalPages(lyricTotal, page.PageSize),
+		LyricTotalPages: pagination.BoundedTotalPages(lyricTotal, page.PageSize),
 	}, nil
 }
 
 func exactTotalPages(total, pageSize int) int {
-	if total <= 0 || pageSize <= 0 {
-		return 0
-	}
-	return (total + pageSize - 1) / pageSize
+	return pagination.BoundedTotalPages(total, pageSize)
 }
 
 func (service *Service) presentArtists(ctx context.Context, records []ArtistRecord) ([]ArtistDTO, error) {
-	assetIDs := make([]string, 0, len(records))
-	for _, record := range records {
-		if record.ArtworkAssetID != nil {
-			assetIDs = append(assetIDs, *record.ArtworkAssetID)
-		}
-	}
+	assetIDs := uniqueAssetIDs(len(records), func(index int) *string { return records[index].ArtworkAssetID })
 	artworks, err := service.artworks.Artworks(ctx, assetIDs)
 	if err != nil {
 		return nil, err
@@ -318,12 +687,7 @@ func (service *Service) presentArtists(ctx context.Context, records []ArtistReco
 }
 
 func (service *Service) presentAlbums(ctx context.Context, records []AlbumRecord) ([]AlbumDTO, error) {
-	assetIDs := make([]string, 0, len(records))
-	for _, record := range records {
-		if record.CoverAssetID != nil {
-			assetIDs = append(assetIDs, *record.CoverAssetID)
-		}
-	}
+	assetIDs := uniqueAssetIDs(len(records), func(index int) *string { return records[index].CoverAssetID })
 	artworks, err := service.artworks.Artworks(ctx, assetIDs)
 	if err != nil {
 		return nil, err
@@ -341,12 +705,7 @@ func (service *Service) presentAlbums(ctx context.Context, records []AlbumRecord
 }
 
 func (service *Service) presentTracks(ctx context.Context, records []TrackRecord) ([]TrackDTO, error) {
-	assetIDs := make([]string, 0, len(records))
-	for _, record := range records {
-		if record.AlbumCoverAssetID != nil {
-			assetIDs = append(assetIDs, *record.AlbumCoverAssetID)
-		}
-	}
+	assetIDs := uniqueAssetIDs(len(records), func(index int) *string { return records[index].AlbumCoverAssetID })
 	artworks, err := service.artworks.Artworks(ctx, assetIDs)
 	if err != nil {
 		return nil, err
@@ -420,6 +779,23 @@ func presentCredits(records []CreditRecord) []CreditDTO {
 			Artist: catalog.ArtistReferenceDTO{ID: record.ArtistID, Name: record.ArtistName},
 			Role:   record.Role, SortOrder: record.SortOrder,
 		})
+	}
+	return result
+}
+
+func uniqueAssetIDs(capacity int, assetID func(index int) *string) []string {
+	result := make([]string, 0, capacity)
+	seen := make(map[string]struct{}, capacity)
+	for index := 0; index < capacity; index++ {
+		value := assetID(index)
+		if value == nil || *value == "" {
+			continue
+		}
+		if _, exists := seen[*value]; exists {
+			continue
+		}
+		seen[*value] = struct{}{}
+		result = append(result, *value)
 	}
 	return result
 }

@@ -82,32 +82,10 @@ func validateRootInput(rootDirectory string, input RootMutation) (RootMutation, 
 }
 
 func browseDirectory(rootDirectory, value string, page, pageSize, offset int) (BrowseDTO, error) {
-	path := strings.TrimSpace(value)
-	if path == "" {
-		path = rootDirectory
-	} else if !filepath.IsAbs(path) {
-		path = filepath.Join(rootDirectory, path)
-	}
-	absolute, err := filepath.Abs(path)
+	path, directories, err := readBrowseDirectories(rootDirectory, value)
 	if err != nil {
-		return BrowseDTO{}, apperror.Validation("Browse path is not a directory")
+		return BrowseDTO{}, err
 	}
-	path = filepath.Clean(absolute)
-	metadata, err := os.Stat(path)
-	if err != nil || !metadata.IsDir() {
-		return BrowseDTO{}, apperror.New(apperror.CodeValidationError, "Browse path is not a directory", apperror.WithCause(err))
-	}
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		return BrowseDTO{}, apperror.New(apperror.CodeValidationError, "Browse path is not a directory", apperror.WithCause(err))
-	}
-	directories := make([]DirectoryDTO, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			directories = append(directories, DirectoryDTO{Name: entry.Name(), Path: filepath.Join(path, entry.Name())})
-		}
-	}
-	sort.Slice(directories, func(i, j int) bool { return directories[i].Name < directories[j].Name })
 	total := len(directories)
 	start := min(offset, total)
 	end := min(start+pageSize, total)
@@ -116,6 +94,36 @@ func browseDirectory(rootDirectory, value string, page, pageSize, offset int) (B
 		Path: path, Directories: directories, Page: page, PageSize: pageSize,
 		Total: total, TotalPages: pagination.BoundedTotalPages(total, pageSize),
 	}, nil
+}
+
+func readBrowseDirectories(rootDirectory, value string) (string, []DirectoryDTO, error) {
+	path := strings.TrimSpace(value)
+	if path == "" {
+		path = rootDirectory
+	} else if !filepath.IsAbs(path) {
+		path = filepath.Join(rootDirectory, path)
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", nil, apperror.Validation("Browse path is not a directory")
+	}
+	path = filepath.Clean(absolute)
+	metadata, err := os.Stat(path)
+	if err != nil || !metadata.IsDir() {
+		return "", nil, apperror.New(apperror.CodeValidationError, "Browse path is not a directory", apperror.WithCause(err))
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return "", nil, apperror.New(apperror.CodeValidationError, "Browse path is not a directory", apperror.WithCause(err))
+	}
+	directories := make([]DirectoryDTO, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			directories = append(directories, DirectoryDTO{Name: entry.Name(), Path: filepath.Join(path, entry.Name())})
+		}
+	}
+	sort.Slice(directories, func(i, j int) bool { return directories[i].Name < directories[j].Name })
+	return path, directories, nil
 }
 
 func validatePatterns(patterns []string) ([]string, error) {

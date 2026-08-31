@@ -67,11 +67,6 @@ func (synchronizer *ProductionSynchronizer) syncCueFile(
 	if err != nil {
 		return err
 	}
-	if found {
-		if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
-			snapshot.markSourceSeen(existing.ID)
-		}
-	}
 	if found && existing.SizeBytes == audioInfo.Size() &&
 		existing.ModifiedAt.UnixMilli() == audioInfo.ModTime().UnixMilli() &&
 		existing.Status == SourceFileReady {
@@ -84,6 +79,9 @@ func (synchronizer *ProductionSynchronizer) syncCueFile(
 			return err
 		}
 		if cueMappingsMatch(mappings, tracks) && !needsArtwork {
+			if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
+				snapshot.markSourceSeen(existing.ID)
+			}
 			return nil
 		}
 	}

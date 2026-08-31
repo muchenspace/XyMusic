@@ -12,6 +12,19 @@ import (
 	"xymusic/server/internal/modules/identity"
 )
 
+func TestBindListAcceptsDeepCursorPages(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/tracks?page=100001&pageSize=100&cursor=signed-cursor&cursorMode=cursor", nil)
+	input, err := bindList(context, []string{"title", "createdAt", "updatedAt", "status"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if input.Page != 100001 || input.PageSize != 100 || input.Cursor != "signed-cursor" || !input.CursorMode {
+		t.Fatalf("deep cursor input = %#v", input)
+	}
+}
+
 func TestRoutesExposeSevenAdminCatalogQueries(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	api := &catalogAPIStub{calls: make(map[string]int)}
@@ -80,10 +93,10 @@ func TestRouteSchemaValidationPrecedesAdminAuthentication(t *testing.T) {
 		"/api/v1/admin/artists/not-a-uuid",
 		"/api/v1/admin/albums/duplicates?albumId=bad",
 		"/api/v1/admin/albums/duplicates?albumPage=0",
-		"/api/v1/admin/albums/duplicates?albumPageSize=1001",
+		"/api/v1/admin/albums/duplicates?albumPageSize=100001",
 		"/api/v1/admin/albums/00000000-0000-4000-8000-000000000001?page=0",
 		"/api/v1/admin/tracks/00000000-0000-4000-8000-000000000001?lyricPage=0",
-		"/api/v1/admin/tracks/00000000-0000-4000-8000-000000000001?lyricPageSize=1001",
+		"/api/v1/admin/tracks/00000000-0000-4000-8000-000000000001?lyricPageSize=100001",
 	}
 	for _, path := range paths {
 		response := httptest.NewRecorder()

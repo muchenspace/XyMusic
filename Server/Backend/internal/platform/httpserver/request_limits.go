@@ -19,6 +19,9 @@ const (
 	// MaxStructuredRequestBodyBytes limits JSON, forms, and other ordinary API
 	// request bodies to 2 MiB.
 	MaxStructuredRequestBodyBytes int64 = 2 * 1024 * 1024
+	// MaxTagScrapingBatchRequestBodyBytes allows large track selections while
+	// retaining a transport-level ceiling for the batch endpoint.
+	MaxTagScrapingBatchRequestBodyBytes int64 = 64 * 1024 * 1024
 	// MaxMediaUploadRequestBodyBytes is the hard server ceiling for the
 	// designated streaming media content endpoint.
 	MaxMediaUploadRequestBodyBytes int64 = 1024 * 1024 * 1024
@@ -37,21 +40,37 @@ var objectStorageProxyUploadPath = regexp.MustCompile(
 // into a 1 GiB request body merely by changing Content-Type.
 type MediaUploadMatcher func(*http.Request) bool
 
+// StructuredLimitMatcher can raise the structured request limit for a
+// specific endpoint. A non-positive result keeps the ordinary limit.
+type StructuredLimitMatcher func(*http.Request) int64
+
 // RequestLimits configures the body-size middleware. Zero byte limits use the
 // production defaults.
 type RequestLimits struct {
-	StructuredBytes    int64
-	MediaUploadBytes   int64
-	MediaUploadMatcher MediaUploadMatcher
+	StructuredBytes        int64
+	StructuredLimitMatcher StructuredLimitMatcher
+	MediaUploadBytes       int64
+	MediaUploadMatcher     MediaUploadMatcher
 }
 
 // DefaultRequestLimits returns the production server ceilings.
 func DefaultRequestLimits() RequestLimits {
 	return RequestLimits{
-		StructuredBytes:    MaxStructuredRequestBodyBytes,
-		MediaUploadBytes:   MaxMediaUploadRequestBodyBytes,
-		MediaUploadMatcher: IsMediaContentUpload,
+		StructuredBytes:        MaxStructuredRequestBodyBytes,
+		StructuredLimitMatcher: defaultStructuredLimitMatcher,
+		MediaUploadBytes:       MaxMediaUploadRequestBodyBytes,
+		MediaUploadMatcher:     IsMediaContentUpload,
 	}
+}
+
+func defaultStructuredLimitMatcher(request *http.Request) int64 {
+	if request == nil || request.Method != http.MethodPost || request.URL == nil {
+		return 0
+	}
+	if request.URL.Path == "/api/v1/admin/tag-scraping/batches" {
+		return MaxTagScrapingBatchRequestBodyBytes
+	}
+	return 0
 }
 
 // IsMediaContentUpload matches PUT requests that stream media either through
@@ -76,10 +95,14 @@ func RequestSizeLimiter(input RequestLimits) (gin.HandlerFunc, error) {
 			return
 		}
 
-		maximumBytes := limits.StructuredBytes
 		mediaUpload := limits.MediaUploadMatcher(c.Request)
+		maximumBytes := limits.StructuredBytes
 		if mediaUpload {
 			maximumBytes = limits.MediaUploadBytes
+		} else if limits.StructuredLimitMatcher != nil {
+			if matched := limits.StructuredLimitMatcher(c.Request); matched > 0 {
+				maximumBytes = matched
+			}
 		}
 		if err := enforceContentLength(c.Request, maximumBytes); err != nil {
 			if c.Request.Body != nil {
@@ -117,8 +140,12 @@ func DecodeJSON(c *gin.Context, destination any) error {
 
 func normalizeRequestLimits(input RequestLimits) (RequestLimits, error) {
 	defaults := DefaultRequestLimits()
+	customStructuredBytes := input.StructuredBytes != 0
 	if input.StructuredBytes == 0 {
 		input.StructuredBytes = defaults.StructuredBytes
+	}
+	if input.StructuredLimitMatcher == nil && !customStructuredBytes {
+		input.StructuredLimitMatcher = defaults.StructuredLimitMatcher
 	}
 	if input.MediaUploadBytes == 0 {
 		input.MediaUploadBytes = defaults.MediaUploadBytes
@@ -174,6 +201,8 @@ func bodyLimitDetail(maximumBytes int64) string {
 	switch maximumBytes {
 	case MaxStructuredRequestBodyBytes:
 		return "请求内容超过 2 MiB，请缩小后重试"
+	case MaxTagScrapingBatchRequestBodyBytes:
+		return "批量刮削请求内容超过 64 MiB，请缩小后重试"
 	case MaxMediaUploadRequestBodyBytes:
 		return "上传内容超过 1 GiB，请缩小后重试"
 	default:

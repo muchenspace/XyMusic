@@ -23,9 +23,14 @@ type Service struct {
 	store              Store
 	rootDirectory      string
 	workerAvailability WorkerAvailability
+	cursors            *pagination.CursorCodec
 }
 
 func NewService(dependencies ServiceDependencies) (*Service, error) {
+	return NewServiceWithOptions(dependencies, nil)
+}
+
+func NewServiceWithOptions(dependencies ServiceDependencies, cursors *pagination.CursorCodec) (*Service, error) {
 	if dependencies.Store == nil {
 		return nil, errors.New("administrator source store is required")
 	}
@@ -39,11 +44,58 @@ func NewService(dependencies ServiceDependencies) (*Service, error) {
 	}
 	return &Service{
 		store: dependencies.Store, rootDirectory: filepath.Clean(absolute),
-		workerAvailability: dependencies.WorkerAvailability,
+		workerAvailability: dependencies.WorkerAvailability, cursors: cursors,
 	}, nil
 }
 
 func (service *Service) Browse(_ context.Context, path string, query PageQuery) (BrowseDTO, error) {
+	if query.CursorMode {
+		page, err := pagination.ParseCursor(query.Page, query.PageSize, 100)
+		if err != nil {
+			return BrowseDTO{}, err
+		}
+		if service.cursors == nil {
+			return BrowseDTO{}, errors.New("administrator source cursor codec is required")
+		}
+		if page.Page > 1 && query.Cursor == "" {
+			return BrowseDTO{}, apperror.Validation("cursor is required for deep directory pages")
+		}
+		resolvedPath, directories, err := readBrowseDirectories(service.rootDirectory, path)
+		if err != nil {
+			return BrowseDTO{}, err
+		}
+		scope := directoryCursorScope(resolvedPath)
+		after, err := decodeDirectoryCursor(service.cursors, scope, query.Cursor)
+		if err != nil {
+			return BrowseDTO{}, err
+		}
+		total := len(directories)
+		if directoryCursorTotalHint(after) != nil {
+			total = *directoryCursorTotalHint(after)
+		}
+		if after != nil {
+			start := 0
+			for start < len(directories) && directories[start].Name <= after.Name {
+				start++
+			}
+			directories = directories[start:]
+		}
+		cursorLimit := pagination.CursorLimit(page.Page, page.PageSize)
+		pageLimit := min(page.PageSize, cursorLimit)
+		hasNext := cursorLimit > page.PageSize && len(directories) > page.PageSize
+		if len(directories) > pageLimit {
+			directories = directories[:pageLimit]
+		}
+		result := BrowseDTO{Path: resolvedPath, Directories: directories, Page: page.Page, PageSize: page.PageSize, Total: total, TotalPages: pagination.BoundedTotalPages(total, page.PageSize)}
+		if hasNext && len(directories) > 0 {
+			next, err := encodeDirectoryCursor(service.cursors, scope, directories[len(directories)-1], total)
+			if err != nil {
+				return BrowseDTO{}, err
+			}
+			result.NextCursor = &next
+		}
+		return result, nil
+	}
 	page, err := pagination.ParseOffset(query.Page, query.PageSize, 100)
 	if err != nil {
 		return BrowseDTO{}, err
@@ -52,6 +104,44 @@ func (service *Service) Browse(_ context.Context, path string, query PageQuery) 
 }
 
 func (service *Service) ListRoots(ctx context.Context, query PageQuery) (RootListDTO, error) {
+	if query.CursorMode {
+		page, err := pagination.ParseCursor(query.Page, query.PageSize, 25)
+		if err != nil {
+			return RootListDTO{}, err
+		}
+		if service.cursors == nil {
+			return RootListDTO{}, errors.New("administrator source cursor codec is required")
+		}
+		if page.Page > 1 && query.Cursor == "" {
+			return RootListDTO{}, apperror.Validation("cursor is required for deep source pages")
+		}
+		scope := rootCursorScope()
+		after, err := decodeRootCursor(service.cursors, scope, query.Cursor)
+		if err != nil {
+			return RootListDTO{}, err
+		}
+		views, total, err := service.store.ListRootViews(ctx, RootQuery{Limit: pagination.CursorLimit(page.Page, page.PageSize), After: after, CursorMode: true, TotalHint: rootCursorTotalHint(after)})
+		if err != nil {
+			return RootListDTO{}, err
+		}
+		hasNext := len(views) > page.PageSize
+		if len(views) > page.PageSize {
+			views = views[:page.PageSize]
+		}
+		items := make([]RootDTO, 0, len(views))
+		for _, view := range views {
+			items = append(items, presentRoot(view))
+		}
+		result := RootListDTO{Items: items, Page: page.Page, PageSize: page.PageSize, Total: total, TotalPages: pagination.BoundedTotalPages(total, page.PageSize)}
+		if hasNext && len(views) > 0 {
+			next, err := encodeRootCursor(service.cursors, scope, views[len(views)-1].Root, total)
+			if err != nil {
+				return RootListDTO{}, err
+			}
+			result.NextCursor = &next
+		}
+		return result, nil
+	}
 	page, err := pagination.ParseOffset(query.Page, query.PageSize, 25)
 	if err != nil {
 		return RootListDTO{}, err
@@ -64,10 +154,7 @@ func (service *Service) ListRoots(ctx context.Context, query PageQuery) (RootLis
 	for _, view := range views {
 		items = append(items, presentRoot(view))
 	}
-	return RootListDTO{
-		Items: items, Page: page.Page, PageSize: page.PageSize, Total: total,
-		TotalPages: pagination.BoundedTotalPages(total, page.PageSize),
-	}, nil
+	return RootListDTO{Items: items, Page: page.Page, PageSize: page.PageSize, Total: total, TotalPages: pagination.BoundedTotalPages(total, page.PageSize)}, nil
 }
 
 func (service *Service) Root(ctx context.Context, rootID string) (RootDTO, error) {
@@ -181,6 +268,45 @@ func (service *Service) DeleteRoot(
 }
 
 func (service *Service) ListFiles(ctx context.Context, rootID string, query FileQuery) (SourceFilePageDTO, error) {
+	query.Query = strings.TrimSpace(query.Query)
+	if query.CursorMode {
+		page, err := pagination.ParseCursor(query.Page, query.PageSize, 25)
+		if err != nil {
+			return SourceFilePageDTO{}, err
+		}
+		if service.cursors == nil {
+			return SourceFilePageDTO{}, errors.New("administrator source cursor codec is required")
+		}
+		if page.Page > 1 && query.Cursor == "" {
+			return SourceFilePageDTO{}, apperror.Validation("cursor is required for deep source-file pages")
+		}
+		query.Page, query.PageSize = page.Page, page.PageSize
+		scope := fileCursorScope(rootID, query)
+		after, err := decodeFileCursor(service.cursors, scope, query.Cursor)
+		if err != nil {
+			return SourceFilePageDTO{}, err
+		}
+		query.Limit = pagination.CursorLimit(page.Page, page.PageSize)
+		query.After, query.TotalHint = after, fileCursorTotalHint(after)
+		files, total, err := service.store.ListFiles(ctx, rootID, query)
+		if err != nil {
+			return SourceFilePageDTO{}, err
+		}
+		hasNext := len(files) > page.PageSize
+		if len(files) > page.PageSize {
+			files = files[:page.PageSize]
+		}
+		items := presentSourceFiles(files)
+		result := SourceFilePageDTO{Items: items, Page: page.Page, PageSize: page.PageSize, Total: total, TotalPages: pagination.BoundedTotalPages(total, page.PageSize)}
+		if hasNext && len(files) > 0 {
+			next, err := encodeFileCursor(service.cursors, scope, files[len(files)-1], total)
+			if err != nil {
+				return SourceFilePageDTO{}, err
+			}
+			result.NextCursor = &next
+		}
+		return result, nil
+	}
 	offset, err := pagination.ParseOffset(query.Page, query.PageSize, 25)
 	if err != nil {
 		return SourceFilePageDTO{}, err
@@ -190,6 +316,10 @@ func (service *Service) ListFiles(ctx context.Context, rootID string, query File
 	if err != nil {
 		return SourceFilePageDTO{}, err
 	}
+	return SourceFilePageDTO{Items: presentSourceFiles(files), Page: offset.Page, PageSize: offset.PageSize, Total: total, TotalPages: pagination.BoundedTotalPages(total, offset.PageSize)}, nil
+}
+
+func presentSourceFiles(files []SourceFile) []SourceFileDTO {
 	items := make([]SourceFileDTO, 0, len(files))
 	for _, file := range files {
 		items = append(items, SourceFileDTO{
@@ -200,10 +330,7 @@ func (service *Service) ListFiles(ctx context.Context, rootID string, query File
 			TrackCount: file.TrackCount, Cue: file.Cue,
 		})
 	}
-	return SourceFilePageDTO{
-		Items: items, Page: offset.Page, PageSize: offset.PageSize, Total: total,
-		TotalPages: pagination.BoundedTotalPages(total, offset.PageSize),
-	}, nil
+	return items
 }
 
 func (service *Service) ProcessingSummary(ctx context.Context, rootID string) (ProcessingSummaryDTO, error) {
@@ -230,6 +357,45 @@ func (service *Service) ProcessingSummary(ctx context.Context, rootID string) (P
 }
 
 func (service *Service) ListRuns(ctx context.Context, rootID string, query PageQuery) (ScanRunPageDTO, error) {
+	if query.CursorMode {
+		page, err := pagination.ParseCursor(query.Page, query.PageSize, 25)
+		if err != nil {
+			return ScanRunPageDTO{}, err
+		}
+		if service.cursors == nil {
+			return ScanRunPageDTO{}, errors.New("administrator source cursor codec is required")
+		}
+		if page.Page > 1 && query.Cursor == "" {
+			return ScanRunPageDTO{}, apperror.Validation("cursor is required for deep scan pages")
+		}
+		scope := runCursorScope(rootID)
+		after, err := decodeRunCursor(service.cursors, scope, query.Cursor)
+		if err != nil {
+			return ScanRunPageDTO{}, err
+		}
+		query.Page, query.PageSize, query.Limit, query.After, query.TotalHint = page.Page, page.PageSize, page.PageSize+1, after, runCursorTotalHint(after)
+		runs, total, err := service.store.ListRuns(ctx, rootID, query)
+		if err != nil {
+			return ScanRunPageDTO{}, err
+		}
+		hasNext := len(runs) > page.PageSize
+		if len(runs) > page.PageSize {
+			runs = runs[:page.PageSize]
+		}
+		items := make([]ScanRunDTO, 0, len(runs))
+		for _, run := range runs {
+			items = append(items, presentRun(run))
+		}
+		result := ScanRunPageDTO{Items: items, Page: page.Page, PageSize: page.PageSize, Total: total, TotalPages: pagination.BoundedTotalPages(total, page.PageSize)}
+		if hasNext && len(runs) > 0 {
+			next, err := encodeRunCursor(service.cursors, scope, runs[len(runs)-1], total)
+			if err != nil {
+				return ScanRunPageDTO{}, err
+			}
+			result.NextCursor = &next
+		}
+		return result, nil
+	}
 	offset, err := pagination.ParseOffset(query.Page, query.PageSize, 25)
 	if err != nil {
 		return ScanRunPageDTO{}, err
@@ -243,10 +409,7 @@ func (service *Service) ListRuns(ctx context.Context, rootID string, query PageQ
 	for _, run := range runs {
 		items = append(items, presentRun(run))
 	}
-	return ScanRunPageDTO{
-		Items: items, Page: offset.Page, PageSize: offset.PageSize, Total: total,
-		TotalPages: pagination.BoundedTotalPages(total, offset.PageSize),
-	}, nil
+	return ScanRunPageDTO{Items: items, Page: offset.Page, PageSize: offset.PageSize, Total: total, TotalPages: pagination.BoundedTotalPages(total, offset.PageSize)}, nil
 }
 
 func (service *Service) EnqueueScan(

@@ -307,9 +307,16 @@ func (repository *Repository) ListFiles(
 	if _, err := repository.FindRoot(ctx, rootID); err != nil {
 		return nil, 0, err
 	}
-	offset, err := pagination.ParseOffset(query.Page, query.PageSize, 25)
-	if err != nil {
-		return nil, 0, err
+	limit, offset := query.Limit, query.Offset
+	if !query.CursorMode {
+		page, err := pagination.ParseOffset(query.Page, query.PageSize, 25)
+		if err != nil {
+			return nil, 0, err
+		}
+		limit, offset = page.PageSize, page.Offset
+	}
+	if limit <= 0 {
+		limit = 25
 	}
 	conditions := []string{"source.root_id=$1"}
 	arguments := []any{rootID}
@@ -321,14 +328,28 @@ func (repository *Repository) ListFiles(
 		arguments = append(arguments, query.Status)
 		conditions = append(conditions, fmt.Sprintf("source.status=$%d", len(arguments)))
 	}
-	where := strings.Join(conditions, " AND ")
+	baseWhere := strings.Join(conditions, " AND ")
+	countArguments := append([]any(nil), arguments...)
+	where := baseWhere
+	if query.CursorMode && query.After != nil {
+		pathPosition := len(arguments) + 1
+		idPosition := len(arguments) + 2
+		arguments = append(arguments, query.After.Path, query.After.ID)
+		where += fmt.Sprintf(" AND (source.source_path > $%d OR (source.source_path = $%d AND source.id > $%d))", pathPosition, pathPosition, idPosition)
+	}
 	var total int
-	if err := repository.database.QueryRow(ctx,
-		`SELECT count(*)::int FROM local_music_sources source WHERE `+where, arguments...).Scan(&total); err != nil {
+	if query.TotalHint != nil {
+		if *query.TotalHint < 0 {
+			return nil, 0, fmt.Errorf("pagination total hint is invalid")
+		}
+		total = *query.TotalHint
+	} else if err := repository.database.QueryRow(ctx,
+		`SELECT count(*)::int FROM local_music_sources source WHERE `+baseWhere, countArguments...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count music source files: %w", err)
 	}
-	arguments = append(arguments, offset.PageSize, offset.Offset)
-	rows, err := repository.database.Query(ctx, `
+	limitPosition := len(arguments) + 1
+	arguments = append(arguments, limit)
+	statement := `
 		SELECT source.id,source.source_path,source.status,source.last_error,
 			source.size_bytes,source.modified_at,track.id,track.title,track.status::text,
 			(SELECT count(*)::int FROM local_music_source_tracks count_mapping
@@ -338,8 +359,14 @@ func (repository *Repository) ListFiles(
 		FROM local_music_sources source
 		JOIN local_music_source_tracks mapping ON mapping.source_id=source.id AND mapping.segment_index=0
 		JOIN tracks track ON track.id=mapping.track_id
-		WHERE `+where+`
-		ORDER BY source.source_path ASC LIMIT $`+fmt.Sprint(len(arguments)-1)+` OFFSET $`+fmt.Sprint(len(arguments)), arguments...)
+		WHERE ` + where + `
+		ORDER BY source.source_path ASC, source.id ASC LIMIT $` + fmt.Sprint(limitPosition)
+	if !query.CursorMode {
+		offsetPosition := len(arguments) + 1
+		arguments = append(arguments, offset)
+		statement += ` OFFSET $` + fmt.Sprint(offsetPosition)
+	}
+	rows, err := repository.database.Query(ctx, statement, arguments...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list music source files: %w", err)
 	}
@@ -376,18 +403,45 @@ func (repository *Repository) ListRuns(
 	if _, err := repository.FindRoot(ctx, rootID); err != nil {
 		return nil, 0, err
 	}
-	offset, err := pagination.ParseOffset(query.Page, query.PageSize, 25)
-	if err != nil {
-		return nil, 0, err
+	limit, offset := query.Limit, query.Offset
+	if !query.CursorMode {
+		page, err := pagination.ParseOffset(query.Page, query.PageSize, 25)
+		if err != nil {
+			return nil, 0, err
+		}
+		limit, offset = page.PageSize, page.Offset
+	}
+	if limit <= 0 {
+		limit = 25
 	}
 	var total int
-	if err := repository.database.QueryRow(ctx,
+	if query.TotalHint != nil {
+		if *query.TotalHint < 0 {
+			return nil, 0, fmt.Errorf("pagination total hint is invalid")
+		}
+		total = *query.TotalHint
+	} else if err := repository.database.QueryRow(ctx,
 		`SELECT count(*)::int FROM library_scan_runs WHERE root_id=$1`, rootID).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count music source scans: %w", err)
 	}
-	rows, err := repository.database.Query(ctx, `SELECT `+scanRunColumns+`
-		FROM library_scan_runs WHERE root_id=$1 ORDER BY created_at DESC,id DESC LIMIT $2 OFFSET $3`,
-		rootID, offset.PageSize, offset.Offset)
+	arguments := []any{rootID}
+	where := "root_id=$1"
+	if query.CursorMode && query.After != nil {
+		createdAtPosition := len(arguments) + 1
+		idPosition := len(arguments) + 2
+		arguments = append(arguments, query.After.CreatedAt, query.After.ID)
+		where += fmt.Sprintf(" AND (created_at < $%d::timestamptz OR (created_at = $%d::timestamptz AND id < $%d))", createdAtPosition, createdAtPosition, idPosition)
+	}
+	limitPosition := len(arguments) + 1
+	arguments = append(arguments, limit)
+	statement := `SELECT ` + scanRunColumns + `
+		FROM library_scan_runs WHERE ` + where + ` ORDER BY created_at DESC,id DESC LIMIT $` + fmt.Sprint(limitPosition)
+	if !query.CursorMode {
+		offsetPosition := len(arguments) + 1
+		arguments = append(arguments, offset)
+		statement += ` OFFSET $` + fmt.Sprint(offsetPosition)
+	}
+	rows, err := repository.database.Query(ctx, statement, arguments...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list music source scans: %w", err)
 	}
@@ -1016,8 +1070,27 @@ func reconcileRootScanState(
 	return nil
 }
 func listRoots(ctx context.Context, database repositoryDatabase, query RootQuery) ([]Root, int, error) {
-	rows, err := database.Query(ctx, `SELECT `+rootColumns+`
-		FROM library_roots ORDER BY name ASC,id ASC LIMIT $1 OFFSET $2`, query.Limit, query.Offset)
+	limit, offset := query.Limit, query.Offset
+	if limit <= 0 {
+		limit = 25
+	}
+	arguments := make([]any, 0, 4)
+	where := ""
+	if query.CursorMode && query.After != nil {
+		namePosition := len(arguments) + 1
+		idPosition := len(arguments) + 2
+		arguments = append(arguments, query.After.Name, query.After.ID)
+		where = fmt.Sprintf(" WHERE (name > $%d OR (name = $%d AND id > $%d))", namePosition, namePosition, idPosition)
+	}
+	limitPosition := len(arguments) + 1
+	arguments = append(arguments, limit)
+	statement := `SELECT ` + rootColumns + ` FROM library_roots` + where + ` ORDER BY name ASC,id ASC LIMIT $` + fmt.Sprint(limitPosition)
+	if !query.CursorMode {
+		offsetPosition := len(arguments) + 1
+		arguments = append(arguments, offset)
+		statement += ` OFFSET $` + fmt.Sprint(offsetPosition)
+	}
+	rows, err := database.Query(ctx, statement, arguments...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list music sources: %w", err)
 	}
@@ -1036,7 +1109,12 @@ func listRoots(ctx context.Context, database repositoryDatabase, query RootQuery
 	}
 	rows.Close()
 	var total int
-	if err := database.QueryRow(ctx, `SELECT count(*)::int FROM library_roots`).Scan(&total); err != nil {
+	if query.TotalHint != nil {
+		if *query.TotalHint < 0 {
+			return nil, 0, fmt.Errorf("pagination total hint is invalid")
+		}
+		total = *query.TotalHint
+	} else if err := database.QueryRow(ctx, `SELECT count(*)::int FROM library_roots`).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count music sources: %w", err)
 	}
 	return roots, total, nil

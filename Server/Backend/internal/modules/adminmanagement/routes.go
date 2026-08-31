@@ -130,7 +130,11 @@ func bindSessionPage(c *gin.Context) (SessionPageInput, error) {
 	if err != nil {
 		return SessionPageInput{}, err
 	}
-	return SessionPageInput{Page: page, PageSize: pageSize}, nil
+	cursor, cursorMode, err := bindCursor(c)
+	if err != nil {
+		return SessionPageInput{}, err
+	}
+	return SessionPageInput{Page: page, PageSize: pageSize, Cursor: cursor, CursorMode: cursorMode}, nil
 }
 
 func (routes *Routes) updateUser(c *gin.Context) error {
@@ -279,7 +283,27 @@ func bindUserList(c *gin.Context) (ListUsersInput, error) {
 	if statusPresent && !validStatus(status) {
 		return ListUsersInput{}, routeContractError()
 	}
-	return ListUsersInput{Page: page, PageSize: pageSize, Query: query, Role: role, Status: status}, nil
+	cursor, cursorMode, err := bindCursor(c)
+	if err != nil {
+		return ListUsersInput{}, err
+	}
+	return ListUsersInput{
+		Page: page, PageSize: pageSize, Query: query, Role: role, Status: status,
+		Cursor: cursor, CursorMode: cursorMode,
+	}, nil
+}
+
+func bindCursor(c *gin.Context) (string, bool, error) {
+	cursor, cursorPresent := httpserver.LastQueryValue(c, "cursor")
+	if cursorPresent && len(cursor) > 4096 {
+		return "", false, routeContractError()
+	}
+	mode, modePresent := httpserver.LastQueryValue(c, "cursorMode")
+	if modePresent && mode != "cursor" && mode != "offset" {
+		return "", false, routeContractError()
+	}
+	useCursor := mode == "cursor" || !modePresent
+	return cursor, useCursor, nil
 }
 
 func routeOptionalInteger(c *gin.Context, name string, minimum, maximum, fallback int) (int, error) {

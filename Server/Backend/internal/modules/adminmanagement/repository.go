@@ -91,8 +91,8 @@ func (repository *Repository) ListUsers(
 	ctx context.Context,
 	query ListUsersQuery,
 ) ([]UserRecord, int, error) {
-	arguments := make([]any, 0, 5)
-	conditions := make([]string, 0, 3)
+	arguments := make([]any, 0, 7)
+	conditions := make([]string, 0, 4)
 	if query.Search != "" {
 		position := appendAdminArgument(&arguments, "%"+escapeLike(query.Search)+"%")
 		conditions = append(conditions, fmt.Sprintf(
@@ -110,12 +110,25 @@ func (repository *Repository) ListUsers(
 	if len(conditions) > 0 {
 		where = " WHERE " + strings.Join(conditions, " AND ")
 	}
+	countWhere := where
 	countArguments := append([]any(nil), arguments...)
+	if query.CursorMode && query.After != nil {
+		createdAtPosition := appendAdminArgument(&arguments, query.After.CreatedAt)
+		idPosition := appendAdminArgument(&arguments, query.After.ID)
+		conditions = append(conditions, fmt.Sprintf(
+			`(u.created_at < $%d::timestamptz OR (u.created_at = $%d::timestamptz AND u.id < $%d))`,
+			createdAtPosition, createdAtPosition, idPosition,
+		))
+		where = " WHERE " + strings.Join(conditions, " AND ")
+	}
 	limitPosition := appendAdminArgument(&arguments, query.Limit)
-	offsetPosition := appendAdminArgument(&arguments, query.Offset)
 	statement := userProjectionSQL + where + fmt.Sprintf(
-		" ORDER BY u.created_at DESC, u.id DESC LIMIT $%d OFFSET $%d", limitPosition, offsetPosition,
+		" ORDER BY u.created_at DESC, u.id DESC LIMIT $%d", limitPosition,
 	)
+	if !query.CursorMode {
+		offsetPosition := appendAdminArgument(&arguments, query.Offset)
+		statement += fmt.Sprintf(" OFFSET $%d", offsetPosition)
+	}
 	rows, err := repository.pool.Query(ctx, statement, arguments...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query managed users: %w", err)
@@ -126,10 +139,15 @@ func (repository *Repository) ListUsers(
 		return nil, 0, err
 	}
 	var total int
-	if err := repository.pool.QueryRow(ctx, `
+	if query.TotalHint != nil {
+		if *query.TotalHint < 0 {
+			return nil, 0, fmt.Errorf("pagination total hint is invalid")
+		}
+		total = *query.TotalHint
+	} else if err := repository.pool.QueryRow(ctx, `
 		SELECT count(*)::int FROM users u
 		JOIN user_profiles p ON p.user_id = u.id
-	`+where, countArguments...).Scan(&total); err != nil {
+	`+countWhere, countArguments...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count managed users: %w", err)
 	}
 	return items, total, nil
@@ -152,14 +170,30 @@ func (repository *Repository) FindUser(
 	if len(users) == 0 {
 		return UserRecord{}, nil, 0, apperror.NotFound("User was not found")
 	}
-	sessionRows, err := repository.pool.Query(ctx, `
+	sessionArguments := []any{userID}
+	where := "WHERE user_id = $1"
+	if query.CursorMode && query.After != nil {
+		sessionArguments = append(sessionArguments, query.After.LastSeenAt, query.After.ID)
+		where += fmt.Sprintf(
+			` AND (last_seen_at < $%d::timestamptz OR (last_seen_at = $%d::timestamptz AND id < $%d))`,
+			len(sessionArguments)-1, len(sessionArguments)-1, len(sessionArguments),
+		)
+	}
+	limitPosition := len(sessionArguments) + 1
+	sessionArguments = append(sessionArguments, query.Limit)
+	sessionStatement := `
 		SELECT id, installation_id, device_name, platform, app_version,
 		       created_at, last_seen_at, revoked_at
 		FROM auth_sessions
-		WHERE user_id = $1
+		` + where + `
 		ORDER BY last_seen_at DESC, id DESC
-		LIMIT $2 OFFSET $3
-	`, userID, query.Limit, query.Offset)
+		LIMIT $` + fmt.Sprint(limitPosition)
+	if !query.CursorMode {
+		offsetPosition := len(sessionArguments) + 1
+		sessionArguments = append(sessionArguments, query.Offset)
+		sessionStatement += ` OFFSET $` + fmt.Sprint(offsetPosition)
+	}
+	sessionRows, err := repository.pool.Query(ctx, sessionStatement, sessionArguments...)
 	if err != nil {
 		return UserRecord{}, nil, 0, fmt.Errorf("query managed user sessions: %w", err)
 	}
@@ -181,7 +215,12 @@ func (repository *Repository) FindUser(
 	}
 	sessionRows.Close()
 	var total int
-	if err := repository.pool.QueryRow(ctx, `SELECT count(*)::int FROM auth_sessions WHERE user_id = $1`, userID).Scan(&total); err != nil {
+	if query.TotalHint != nil {
+		if *query.TotalHint < 0 {
+			return UserRecord{}, nil, 0, fmt.Errorf("pagination total hint is invalid")
+		}
+		total = *query.TotalHint
+	} else if err := repository.pool.QueryRow(ctx, `SELECT count(*)::int FROM auth_sessions WHERE user_id = $1`, userID).Scan(&total); err != nil {
 		return UserRecord{}, nil, 0, fmt.Errorf("count managed user sessions: %w", err)
 	}
 	return users[0], sessions, total, nil
