@@ -152,6 +152,33 @@ describe("desktop authentication API contract", () => {
       .toBe("https://music.example.com/api/v1/oss/c3RvcmFnZS5leGFtcGxl/avatar?X-Amz-Signature=image");
   });
 
+  it("authenticates a server-local avatar upload and accepts an empty response", async () => {
+    const credentials = new MemoryCredentialStore();
+    const api = new ApiClient({ credentialStore: credentials as SessionCredentialStore });
+    await api.setSession(storedSession());
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        id: "upload-local",
+        method: "PUT",
+        uploadUrl: "/api/v1/users/me/avatar/uploads/01234567-89ab-cdef-0123-456789abcdef",
+        requiredHeaders: { "Content-Type": "image/png" },
+      }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(jsonResponse(currentUser({ version: 2 })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(new HttpSessionRepository(api).uploadAvatar({
+      name: "avatar.png",
+      mediaType: "image/png",
+      bytes: new Uint8Array([1, 2, 3]),
+    })).resolves.toMatchObject({ user: { version: 2 } });
+
+    const [, upload, complete] = fetchMock.mock.calls.map(requestCall);
+    expect(upload.url).toBe("https://music.example.com/api/v1/users/me/avatar/uploads/01234567-89ab-cdef-0123-456789abcdef");
+    expect(new Headers(upload.init.headers).get("Authorization")).toBe("Bearer access-token");
+    expect(complete.url).toContain("/api/v1/users/me/avatar/uploads/upload-local/complete");
+  });
+
   it("rejects an unexpectedly large storage response before completing an avatar upload", async () => {
     const credentials = new MemoryCredentialStore();
     const api = new ApiClient({ credentialStore: credentials as SessionCredentialStore });

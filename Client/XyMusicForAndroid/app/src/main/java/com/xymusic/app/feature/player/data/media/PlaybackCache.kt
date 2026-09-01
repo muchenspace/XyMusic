@@ -15,12 +15,9 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import com.xymusic.app.core.common.IoDispatcher
 import com.xymusic.app.core.database.dao.OfflineTrackDao
 import com.xymusic.app.core.network.MediaHttpClient
-import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.SessionIdentityProvider
-import com.xymusic.app.core.session.SessionMutationCoordinator
 import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.feature.player.data.quality.AutomaticQualityTransferListener
-import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.TreeSet
 import javax.inject.Inject
@@ -247,12 +244,9 @@ internal class AdjustableLeastRecentlyUsedCacheEvictor : CacheEvictor {
 fun playbackDataSourceFactory(
     @MediaHttpClient mediaHttpClient: OkHttpClient,
     playbackCache: PlaybackCache,
-    grantRepository: PlaybackGrantRepository,
+    grantRegistry: PlaybackGrantRegistry,
     networkPolicy: PlaybackNetworkPolicy,
-    offlineMediaStore: OfflineMediaStore,
-    sessionProvider: AppSessionProvider,
     sessionIdentityProvider: SessionIdentityProvider,
-    sessionMutationCoordinator: SessionMutationCoordinator,
     automaticQualityTransferListener: AutomaticQualityTransferListener,
 ): DataSource.Factory {
     val networkFactory =
@@ -272,12 +266,10 @@ fun playbackDataSourceFactory(
         )
     return GrantResolvingDataSourceFactory(
         onlineFactory = onlineFactory,
+        networkFactory = networkFactory,
         offlineFactory = offlineFactory,
-        grantRepository = grantRepository,
-        offlineMediaStore = offlineMediaStore,
-        sessionProvider = sessionProvider,
+        grantRegistry = grantRegistry,
         sessionIdentityProvider = sessionIdentityProvider,
-        sessionMutationCoordinator = sessionMutationCoordinator,
     )
 }
 

@@ -6,6 +6,8 @@ import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaMetadata
 import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaUri
+import com.xymusic.app.feature.player.adapter.media3.globalPlaybackDurationMs
+import com.xymusic.app.feature.player.adapter.media3.globalPlaybackPositionMs
 import com.xymusic.app.feature.player.domain.PlaybackCheckpoint
 import com.xymusic.app.feature.player.domain.PlaybackEventSink
 import com.xymusic.app.feature.player.domain.PlaybackEventType
@@ -147,7 +149,7 @@ internal class PlaybackPersistenceController(
     private fun scheduleCurrentState() {
         val target = currentPersistenceTarget() ?: return
         val queueItemId = player.currentMediaItem?.mediaId ?: return
-        val positionMs = player.currentPosition.coerceAtLeast(0)
+        val positionMs = player.currentMediaItem?.globalPlaybackPositionMs(player.currentPosition) ?: 0
         launchPersistence {
             persistCurrentStateSafely(target, queueItemId, positionMs)
         }
@@ -233,7 +235,8 @@ internal class PlaybackPersistenceController(
     private suspend fun persistQueueLocked(target: PersistenceTarget, checkpoint: PlaybackCheckpoint?) {
         if (!isCurrentPersistenceTarget(target)) return
         val currentQueueItemId = player.currentMediaItem?.mediaId
-        val currentPosition = player.currentPosition.coerceAtLeast(0)
+        val currentPosition =
+            player.currentMediaItem?.globalPlaybackPositionMs(player.currentPosition) ?: 0
         val now = clock.millis()
         var items =
             buildList {
@@ -325,8 +328,11 @@ internal class PlaybackPersistenceController(
             playbackSessionId = sessionId,
             queueItemId = mediaItem.mediaId,
             trackId = trackId,
-            positionMs = player.currentPosition.coerceAtLeast(0),
-            durationMs = player.duration.takeUnless { it == C.TIME_UNSET }?.coerceAtLeast(0) ?: 0,
+            positionMs = mediaItem.globalPlaybackPositionMs(player.currentPosition),
+            durationMs =
+                mediaItem.globalPlaybackDurationMs(
+                    player.duration.takeUnless { it == C.TIME_UNSET }?.coerceAtLeast(0) ?: 0,
+                ),
             occurredAtEpochMillis = clock.millis(),
             event = event,
         ).also { lastCheckpoint = it }
@@ -386,7 +392,9 @@ internal class PlaybackPersistenceController(
                     }
                 lastCheckpoint
                     ?.copy(
-                        positionMs = oldPosition.positionMs.coerceAtLeast(0),
+                        positionMs =
+                            oldPosition.mediaItem?.globalPlaybackPositionMs(oldPosition.positionMs)
+                                ?: oldPosition.positionMs.coerceAtLeast(0),
                         occurredAtEpochMillis = clock.millis(),
                         event = transitionEvent,
                     )?.let { checkpoint ->

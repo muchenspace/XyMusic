@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -551,43 +552,50 @@ func TestExpiredPlaybackSessionDoesNotDeleteReusableTranscodeCache(t *testing.T)
 	}
 }
 
-func TestGrowingFileReaderReturnsBytesBeforeTranscodeCompletes(t *testing.T) {
+func TestOpenStreamAtReturnsOnlyFiniteProgressiveOutput(t *testing.T) {
 	tempDir := t.TempDir()
-	partialPath := filepath.Join(tempDir, "stream.partial.mp3")
-	job := &cacheJob{partialPath: partialPath, readyChan: make(chan struct{})}
-	reader := &growingFileReader{job: job, ctx: context.Background()}
-	defer reader.Close()
-
-	result := make(chan []byte, 1)
-	go func() {
-		buffer := make([]byte, 4)
-		n, err := reader.Read(buffer)
-		if err != nil {
-			result <- []byte("error:" + err.Error())
-			return
-		}
-		result <- buffer[:n]
-	}()
-	select {
-	case <-result:
-		t.Fatal("reader returned before output was available")
-	case <-time.After(40 * time.Millisecond):
-	}
-	if err := os.WriteFile(partialPath, []byte("ping"), 0o644); err != nil {
+	mediaStore, err := localmedia.NewStore(filepath.Join(tempDir, "assets"), filepath.Join(tempDir, "transcode"), 10*1024*1024)
+	if err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case bytes := <-result:
-		if string(bytes) != "ping" {
-			t.Fatalf("growing reader returned %q", bytes)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("growing reader did not return the first bytes")
+	manager, err := NewTranscodeSessionManager(mediaStore, "ffmpeg-that-must-not-run", 0, 1, time.Minute, time.Minute)
+	if err != nil {
+		t.Fatal(err)
 	}
-	job.mu.Lock()
-	job.completed = true
-	close(job.readyChan)
-	job.mu.Unlock()
+	defer manager.Close()
+	sourcePath := filepath.Join(tempDir, "source.mp3")
+	if err := os.WriteFile(sourcePath, []byte("finite-output"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionID := uuid.NewString()
+	manager.RegisterSession(TranscodeSessionParams{
+		SessionID: sessionID,
+		TrackID:   uuid.NewString(),
+		SourcePath: sourcePath,
+		Profile: OutputProfile{
+			Quality: QualityLossless, Codec: "mp3", Container: "mp3", MimeType: "audio/mpeg", Direct: true,
+		},
+		ExpiresAt: time.Now().Add(time.Minute),
+	})
+	handle, err := manager.OpenStreamAt(context.Background(), sessionID, 128)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handle.Release()
+	if !handle.Complete {
+		t.Fatal("progressive handle was not marked complete")
+	}
+	file, ok := handle.Reader.(*os.File)
+	if !ok {
+		t.Fatalf("reader type = %T, want *os.File", handle.Reader)
+	}
+	content, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "finite-output" {
+		t.Fatalf("finite output = %q", content)
+	}
 }
 
 func TestTranscodeCacheEvictsOldestFilesWhenLimitIsExceeded(t *testing.T) {

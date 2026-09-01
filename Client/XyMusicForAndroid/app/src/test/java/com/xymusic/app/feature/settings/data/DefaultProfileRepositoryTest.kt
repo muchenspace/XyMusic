@@ -14,8 +14,10 @@ import com.xymusic.app.feature.settings.data.remote.CompleteAvatarUploadRequestD
 import com.xymusic.app.feature.settings.data.remote.CreateAvatarUploadRequestDto
 import com.xymusic.app.feature.settings.data.remote.CurrentUserDto
 import com.xymusic.app.feature.settings.data.remote.ProfileApi
+import com.xymusic.app.domain.server.ServerConfigRepository
 import com.xymusic.app.feature.settings.domain.SettingsResult
 import com.xymusic.app.feature.settings.domain.model.AvatarUploadCommand
+import com.xymusic.app.support.InMemoryServerConfigRepository
 import java.util.concurrent.CancellationException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CompletableDeferred
@@ -61,6 +63,48 @@ class DefaultProfileRepositoryTest {
         assertThat(api.currentUserCalls).isEqualTo(1)
         assertThat(repository.ensureLoaded()).isInstanceOf(SettingsResult.Success::class.java)
         assertThat(api.currentUserCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun configuredServerLocalAvatarUploadUsesAuthenticatedApiClient() = runTest {
+        val server = MockWebServer()
+        val uploadPath = "/api/v1/users/me/avatar/uploads/22222222-2222-4222-8222-222222222222"
+        server.start()
+        server.enqueue(MockResponse().setResponseCode(200))
+        try {
+            val runtime = ServerRuntimeCoordinator()
+            val session = MutableSessionProvider(AppSessionState.SignedIn(USER_ID))
+            val api = FakeProfileApi(server).apply { avatarUploadPath = uploadPath }
+            val apiClient =
+                OkHttpClient
+                    .Builder()
+                    .addInterceptor { chain ->
+                        chain.proceed(
+                            chain.request()
+                                .newBuilder()
+                                .header("Authorization", "Bearer local-session")
+                                .build(),
+                        )
+                    }.build()
+            val mediaClient = OkHttpClient.Builder().build()
+            val result =
+                repository(
+                    api = api,
+                    session = session,
+                    runtime = runtime,
+                    serverConfigRepository = InMemoryServerConfigRepository.from(server.url("/")),
+                    mediaHttpClient = mediaClient,
+                    apiHttpClient = apiClient,
+                ).uploadAvatar(AVATAR)
+
+            assertThat(result).isInstanceOf(SettingsResult.Success::class.java)
+            val request = checkNotNull(server.takeRequest(5, TimeUnit.SECONDS))
+            assertThat(request.path).isEqualTo(uploadPath)
+            assertThat(request.getHeader("Authorization")).isEqualTo("Bearer local-session")
+            assertThat(api.completeCalls).isEqualTo(1)
+        } finally {
+            server.shutdown()
+        }
     }
 
     @Test
@@ -149,7 +193,26 @@ class DefaultProfileRepositoryTest {
         }
     }
 
-    private fun repository(api: ProfileApi, session: AppSessionProvider, runtime: ServerRuntimeCoordinator) =
+    private fun repository(
+        api: ProfileApi,
+        session: AppSessionProvider,
+        runtime: ServerRuntimeCoordinator,
+        serverConfigRepository: ServerConfigRepository = InMemoryServerConfigRepository(null),
+        mediaHttpClient: OkHttpClient =
+            OkHttpClient
+                .Builder()
+                .readTimeout(1, TimeUnit.DAYS)
+                .writeTimeout(1, TimeUnit.DAYS)
+                .callTimeout(0, TimeUnit.MILLISECONDS)
+                .build(),
+        apiHttpClient: OkHttpClient =
+            OkHttpClient
+                .Builder()
+                .readTimeout(1, TimeUnit.DAYS)
+                .writeTimeout(1, TimeUnit.DAYS)
+                .callTimeout(0, TimeUnit.MILLISECONDS)
+                .build(),
+    ) =
         DefaultProfileRepository(
             api = api,
             problemResponseParser = ProblemResponseParser(Json, ProblemMapper()),
@@ -159,13 +222,9 @@ class DefaultProfileRepositoryTest {
             sessionMutationCoordinator = SessionMutationCoordinator(),
             profileMemoryCache = ProfileMemoryCache(runtime),
             serverRuntimeCoordinator = runtime,
-            mediaHttpClient =
-            OkHttpClient
-                .Builder()
-                .readTimeout(1, TimeUnit.DAYS)
-                .writeTimeout(1, TimeUnit.DAYS)
-                .callTimeout(0, TimeUnit.MILLISECONDS)
-                .build(),
+            serverConfigRepository = serverConfigRepository,
+            mediaHttpClient = mediaHttpClient,
+            apiHttpClient = apiHttpClient,
             ioDispatcher = Dispatchers.IO,
         )
 
@@ -188,6 +247,7 @@ class DefaultProfileRepositoryTest {
         var completeCalls = 0
         var currentUserCalls = 0
         var currentUserResponse: suspend () -> Response<CurrentUserDto> = { Response.success(PROFILE) }
+        var avatarUploadPath = "/avatar"
 
         override suspend fun currentUser(): Response<CurrentUserDto> {
             currentUserCalls += 1
@@ -203,7 +263,7 @@ class DefaultProfileRepositoryTest {
         ): Response<AvatarUploadDto> = Response.success(
             AvatarUploadDto(
                 id = "upload-1",
-                uploadUrl = checkNotNull(server).url("/avatar").toString(),
+                uploadUrl = checkNotNull(server).url(avatarUploadPath).toString(),
                 requiredHeaders = emptyMap(),
             ),
         )

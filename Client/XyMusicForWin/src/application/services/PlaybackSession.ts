@@ -72,6 +72,9 @@ export class PlaybackSession implements PlaybackSessionPort {
   private lastNativePosition = -1;
   private pendingResumeTrackId = "";
   private pendingResumePosition = 0;
+  private pendingResumeWasExplicitSeek = false;
+  private pendingSeekTrackId = "";
+  private pendingSeekSeconds: number | null = null;
   private prefetchController: AbortController | null = null;
   private prefetchedIndex = -1;
   private transitioning = false;
@@ -94,6 +97,8 @@ export class PlaybackSession implements PlaybackSessionPort {
   private activeSelectedQuality: ConcretePlaybackQuality = "STANDARD";
   private prefetchedRequestQuality: ConcretePlaybackQuality | null = null;
   private prefetchedSelectedQuality: ConcretePlaybackQuality | null = null;
+  private prefetchedGrant: PlaybackGrant | null = null;
+  private activeGrant: PlaybackGrant | null = null;
   private qualitySwitchInProgress = false;
   private suppressBufferingUntil = 0;
 
@@ -200,6 +205,7 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.playbackPreferences.setQuality(restored.quality);
     this.pendingResumeTrackId = track.id;
     this.pendingResumePosition = restoredPosition;
+    this.pendingResumeWasExplicitSeek = false;
     this.updateState({
       queue,
       queueVersion: this.advanceQueueRevision(),
@@ -298,17 +304,31 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.resumeAttemptActive = true;
     this.updateState({ loading: true, error: "" });
     try {
-      const resolution = await this.playbackGrants.getForResume(
+      let resolution = await this.playbackGrants.getForResume(
         track.id,
         this.activeRequestQuality,
         controller.signal,
       );
+      const needsDirectedResume = resolution.refreshed
+        && this.activeGrant?.streamProtocol === "HLS"
+        && resumePosition > 0;
+      if (needsDirectedResume) {
+        resolution = await this.playbackGrants.getForResume(
+          track.id,
+          this.activeRequestQuality,
+          controller.signal,
+          Math.round(resumePosition * 1000),
+        );
+      }
       if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
       if (resolution.refreshed) {
         this.applyActiveGrant(resolution.grant, this.activeRequestQuality);
         await this.loadAudioGrant(resolution.grant, controller.signal);
         if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
-        this.restoreResumePosition(track, resumePosition);
+      }
+      const pendingPosition = this.takePendingSeekPosition(track.id);
+      if (resolution.refreshed || pendingPosition !== null) {
+        this.restoreResumePosition(track, pendingPosition ?? resumePosition, pendingPosition !== null);
       }
       await this.audio.play();
       if (request !== this.loadRequest || this.currentTrack !== track || this.playbackSessionId !== sessionId) return;
@@ -376,22 +396,37 @@ export class PlaybackSession implements PlaybackSessionPort {
   }
 
   seekTo(seconds: number): void {
-    if (this.disposed || !this.currentTrack || this.stateValue.loading || !Number.isFinite(seconds)) return;
+    if (this.disposed || !this.currentTrack || !Number.isFinite(seconds)) return;
     const cancelledTransition = this.transitioning;
     if (cancelledTransition) {
       this.loadRequest += 1;
       this.clearPrefetch();
     }
-    const normalized = Math.max(0, Math.min(this.stateValue.duration, seconds));
-    const seekingPendingResume = this.pendingResumeTrackId === this.currentTrack.id;
+    const duration = this.stateValue.duration || this.currentTrack.duration;
+    const normalized = Math.max(0, Math.min(duration > 0 ? duration : seconds, seconds));
+    const track = this.currentTrack;
+    const seekingPendingResume = this.pendingResumeTrackId === track.id;
+    const seekingWhileLoading = this.stateValue.loading;
     const previousPosition = seekingPendingResume
       ? this.stateValue.currentTime
       : this.audio.snapshot().currentTime;
     const positionChanged = playbackPositionMilliseconds(previousPosition)
       !== playbackPositionMilliseconds(normalized);
     this.suppressBufferingUntil = Date.now() + BUFFERING_AFTER_SEEK_SUPPRESSION_MS;
-    if (seekingPendingResume) this.pendingResumePosition = normalized;
-    else this.audio.seek(normalized);
+    if (seekingPendingResume) {
+      this.pendingResumePosition = normalized;
+      this.pendingResumeWasExplicitSeek = true;
+    } else if (seekingWhileLoading) {
+      this.pendingSeekTrackId = track.id;
+      this.pendingSeekSeconds = normalized;
+    } else if (this.activeGrant?.streamProtocol === "HLS"
+      && Math.abs(normalized - (this.activeGrant.startPositionMs ?? 0) / 1000) > HLS_SEEK_EPSILON_SECONDS) {
+      this.pendingSeekTrackId = track.id;
+      this.pendingSeekSeconds = normalized;
+      void this.commitHlsSeek(track, normalized, this.stateValue.isPlaying, previousPosition);
+    } else {
+      this.audio.seek(normalized);
+    }
     this.lastCheckpoint = normalized;
     this.lastNativePosition = normalized;
     this.lastNativeStatus = this.stateValue.isPlaying ? "playing" : "paused";
@@ -464,7 +499,10 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.clearPrefetch();
     this.pendingResumeTrackId = "";
     this.pendingResumePosition = 0;
+    this.pendingResumeWasExplicitSeek = false;
+    this.clearPendingSeek();
     this.audio.stop();
+    this.activeGrant = null;
     this.lastNativePosition = -1;
     this.lastNativeStatus = "stopped";
     this.updateState({
@@ -496,10 +534,13 @@ export class PlaybackSession implements PlaybackSessionPort {
     if (shouldExitMiniMode) void this.disableMiniModeAfterReset();
     this.pendingResumeTrackId = "";
     this.pendingResumePosition = 0;
+    this.pendingResumeWasExplicitSeek = false;
+    this.clearPendingSeek();
     this.lastNativeStatus = "";
     this.lastNativePosition = -1;
     this.playbackSessionStarted = false;
     this.playbackPersistence.detach();
+    this.activeGrant = null;
     this.updateState({
       queue: this.ownQueue([]),
       queueVersion: this.advanceQueueRevision(),
@@ -784,12 +825,16 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.suppressBufferingUntil = Date.now() + BUFFERING_AFTER_SWITCH_SUPPRESSION_MS;
     this.updateState({ loading: true, error: "" });
     try {
-      const grant = await this.playbackGrants.get(track.id, target, controller.signal, true);
+      const directedStart = target !== "LOSSLESS" && position > 0 ? position : 0;
+      const grant = directedStart > 0
+        ? await this.playbackGrants.get(track.id, target, controller.signal, true, directedStart * 1000)
+        : await this.playbackGrants.get(track.id, target, controller.signal, true);
       if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
       this.applyActiveGrant(grant, target);
       await this.loadAudioGrant(grant, controller.signal);
       if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
-      this.restoreResumePosition(track, position);
+      const pendingPosition = this.takePendingSeekPosition(track.id);
+      this.restoreResumePosition(track, pendingPosition ?? position, pendingPosition !== null);
       if (shouldResume) {
         await this.audio.play();
         if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
@@ -834,9 +879,11 @@ export class PlaybackSession implements PlaybackSessionPort {
     void recovery;
   }
 
-  private restoreResumePosition(track: ReadonlyTrack, position: number): void {
+  private restoreResumePosition(track: ReadonlyTrack, position: number, explicitSeek = false): void {
     const playableDuration = this.audio.snapshot().duration || this.stateValue.duration || track.duration;
-    const resumePosition = normalizeResumePosition(position, playableDuration);
+    const resumePosition = explicitSeek
+      ? clampPlaybackPosition(position, playableDuration)
+      : normalizeResumePosition(position, playableDuration);
     if (resumePosition > 0) this.audio.seek(resumePosition);
     this.updateState({
       currentTime: resumePosition,
@@ -845,9 +892,88 @@ export class PlaybackSession implements PlaybackSessionPort {
     });
   }
 
+  private takePendingSeekPosition(trackId: string): number | null {
+    if (this.pendingSeekTrackId !== trackId || this.pendingSeekSeconds === null) return null;
+    const position = this.pendingSeekSeconds;
+    this.clearPendingSeek();
+    return position;
+  }
+
+  private clearPendingSeek(): void {
+    this.pendingSeekTrackId = "";
+    this.pendingSeekSeconds = null;
+  }
+
+  private async commitHlsSeek(
+    track: ReadonlyTrack,
+    targetPosition: number,
+    shouldResume: boolean,
+    fallbackPosition: number,
+  ): Promise<void> {
+    const request = ++this.loadRequest;
+    this.loadController?.abort();
+    this.clearPrefetch();
+    const controller = new AbortController();
+    this.loadController = controller;
+    const requestedQuality = this.activeRequestQuality;
+    const sessionId = this.playbackSessionId;
+    this.updateState({ loading: true, error: "" });
+    try {
+      let desiredPosition = targetPosition;
+      await this.loadTrackWithRetry(
+        track,
+        controller,
+        request,
+        requestedQuality,
+        desiredPosition,
+      );
+      if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
+      const latestPendingPosition = this.takePendingSeekPosition(track.id);
+      if (latestPendingPosition !== null) desiredPosition = latestPendingPosition;
+      if (latestPendingPosition !== null
+        && Math.abs(desiredPosition - (this.activeGrant?.startPositionMs ?? 0) / 1000) > HLS_SEEK_EPSILON_SECONDS) {
+        await this.loadTrackWithRetry(
+          track,
+          controller,
+          request,
+          requestedQuality,
+          desiredPosition,
+        );
+      }
+      if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
+      this.restoreResumePosition(track, desiredPosition, true);
+      this.clearPendingSeek();
+      if (shouldResume) {
+        await this.audio.play();
+        if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
+        this.markPlaybackStarted(track, sessionId);
+      }
+    } catch (cause) {
+      if (request !== this.loadRequest || controller.signal.aborted || isAbortError(cause) || this.currentTrack !== track) return;
+      this.clearPendingSeek();
+      this.audio.stop();
+      this.activeGrant = null;
+      this.lastNativeStatus = shouldResume ? "stopped" : "paused";
+      this.updateState({
+        loading: false,
+        isPlaying: false,
+        currentTime: fallbackPosition,
+        progress: this.stateValue.duration > 0 ? fallbackPosition / this.stateValue.duration * 100 : 0,
+        error: errorMessage(cause, "跳转播放位置失败"),
+      });
+      this.diagnostics.warn("playback", `${track.title}: seek failed`);
+    } finally {
+      if (this.loadController === controller) {
+        this.loadController = null;
+        this.updateState({ loading: false });
+      }
+    }
+  }
+
   private applyActiveGrant(grant: PlaybackGrant, requestedQuality: ConcretePlaybackQuality): void {
     this.activeRequestQuality = requestedQuality;
     this.activeSelectedQuality = grant.selectedQuality;
+    this.activeGrant = grant;
     this.automaticQuality.applySelectedQuality(grant.selectedQuality);
   }
 
@@ -866,9 +992,13 @@ export class PlaybackSession implements PlaybackSessionPort {
     request: number,
   ): Promise<void> {
     this.playbackGrants.invalidate(track.id, this.activeRequestQuality);
-    await this.loadTrackWithRetry(track, controller, request, this.activeRequestQuality);
+    const directedStart = this.activeGrant?.streamProtocol === "HLS" && position > 0
+      ? position
+      : 0;
+    await this.loadTrackWithRetry(track, controller, request, this.activeRequestQuality, directedStart);
     if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
-    this.restoreResumePosition(track, position);
+    const pendingPosition = this.takePendingSeekPosition(track.id);
+    this.restoreResumePosition(track, pendingPosition ?? position, pendingPosition !== null);
     await this.audio.play();
     if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track || this.playbackSessionId !== sessionId) return;
     this.markPlaybackStarted(track, sessionId);
@@ -926,8 +1056,10 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.finishPlaybackSession(previousSession, terminalEvent);
     this.automaticQuality.finishTrack();
     this.audio.stop();
+    this.activeGrant = null;
     const selectedTrack = tracks[selectedIndex]!;
     const resumingPendingTrack = selectedTrack.id === this.pendingResumeTrackId;
+    const explicitResumePosition = resumingPendingTrack && this.pendingResumeWasExplicitSeek;
     if (!resumingPendingTrack) this.pendingResumePosition = 0;
     const initialPosition = resumingPendingTrack
       ? clampPlaybackPosition(this.pendingResumePosition, selectedTrack.duration)
@@ -956,19 +1088,23 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.activeSelectedQuality = requestedQuality;
     this.automaticQuality.beginTrack(requestedQuality, this.stateValue.quality === "AUTO");
     try {
-      await this.loadTrackWithRetry(selectedTrack, controller, request, requestedQuality);
+      const directedStart = requestedQuality !== "LOSSLESS" && initialPosition > 0
+        ? initialPosition
+        : 0;
+      await this.loadTrackWithRetry(selectedTrack, controller, request, requestedQuality, directedStart);
       if (request !== this.loadRequest || controller.signal.aborted) return false;
-      if (this.pendingResumePosition > 0 && selectedTrack.id === this.pendingResumeTrackId) {
-        const playableDuration = this.audio.snapshot().duration || selectedTrack.duration;
-        const resumePosition = clampPlaybackPosition(this.pendingResumePosition, playableDuration);
-        if (resumePosition > 0) this.audio.seek(resumePosition);
-        this.updateState({
-          currentTime: resumePosition,
-          progress: playableDuration > 0 ? resumePosition / playableDuration * 100 : 0,
-        });
+      const pendingSeekPosition = this.takePendingSeekPosition(selectedTrack.id);
+      const targetPosition = pendingSeekPosition ?? initialPosition;
+      if (targetPosition > 0) {
+        this.restoreResumePosition(
+          selectedTrack,
+          targetPosition,
+          pendingSeekPosition !== null || explicitResumePosition,
+        );
       }
       this.pendingResumeTrackId = "";
       this.pendingResumePosition = 0;
+      this.pendingResumeWasExplicitSeek = false;
       if (request !== this.loadRequest || controller.signal.aborted) return false;
       await this.audio.play();
       if (request !== this.loadRequest || controller.signal.aborted) return false;
@@ -1078,12 +1214,19 @@ export class PlaybackSession implements PlaybackSessionPort {
     controller: AbortController,
     request: number,
     requestedQuality: ConcretePlaybackQuality,
+    startPosition = 0,
   ): Promise<void> {
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       if (request !== this.loadRequest || controller.signal.aborted) throw abortReason(controller.signal);
       try {
-        const grant = await this.playbackGrants.get(track.id, requestedQuality, controller.signal, attempt > 0);
+        const grant = await this.playbackGrants.get(
+          track.id,
+          requestedQuality,
+          controller.signal,
+          attempt > 0,
+          startPosition * 1000,
+        );
         this.applyActiveGrant(grant, requestedQuality);
         await this.loadAudioGrant(grant, controller.signal);
         return;
@@ -1115,11 +1258,13 @@ export class PlaybackSession implements PlaybackSessionPort {
     const requestedQuality = this.automaticQuality.selectTrackQuality(this.stateValue.quality);
     try {
       const grant = await this.playbackGrants.get(track.id, requestedQuality, controller.signal);
+      if (grant.streamProtocol === "HLS") return;
       await this.preloadAudioGrant(grant, controller.signal);
       if (!controller.signal.aborted && this.prefetchController === controller) {
         this.prefetchedIndex = index;
         this.prefetchedRequestQuality = requestedQuality;
         this.prefetchedSelectedQuality = grant.selectedQuality;
+        this.prefetchedGrant = grant;
       }
     } catch {
       if (this.prefetchController === controller) this.prefetchedIndex = -1;
@@ -1135,6 +1280,7 @@ export class PlaybackSession implements PlaybackSessionPort {
     const index = this.prefetchedIndex;
     const requestQuality = this.prefetchedRequestQuality;
     const selectedQuality = this.prefetchedSelectedQuality;
+    const prefetchedGrant = this.prefetchedGrant;
     const track = this.stateValue.queue[index];
     if (!track) {
       this.clearPrefetch();
@@ -1148,6 +1294,7 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.prefetchedIndex = -1;
     this.prefetchedRequestQuality = null;
     this.prefetchedSelectedQuality = null;
+    this.prefetchedGrant = null;
     const commitActivation = () => {
       if (switched || request !== this.loadRequest) return;
       switched = true;
@@ -1159,6 +1306,7 @@ export class PlaybackSession implements PlaybackSessionPort {
       const effectiveSelectedQuality = selectedQuality ?? effectiveRequestQuality;
       this.activeRequestQuality = effectiveRequestQuality;
       this.activeSelectedQuality = effectiveSelectedQuality;
+      this.activeGrant = prefetchedGrant;
       this.automaticQuality.beginTrack(effectiveSelectedQuality, this.stateValue.quality === "AUTO");
       const duration = snapshot.duration || track.duration;
       this.playbackSessionId = nextSessionId;
@@ -1215,13 +1363,20 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.prefetchedIndex = -1;
     this.prefetchedRequestQuality = null;
     this.prefetchedSelectedQuality = null;
+    this.prefetchedGrant = null;
     this.audio.clearPreloaded?.();
   }
 
   private loadAudioGrant(grant: PlaybackGrant, signal: AbortSignal): Promise<void> {
     const bitrate = validBitrate(grant.bitrate);
-    return bitrate
-      ? this.audio.load(grant.streamUrl, signal, { bitrate })
+    const metadata = {
+      ...(bitrate ? { bitrate } : {}),
+      ...(validDuration(grant.durationMs) ? { duration: grant.durationMs! / 1000 } : {}),
+      ...(validStartPosition(grant.startPositionMs) ? { startOffset: grant.startPositionMs! / 1000 } : {}),
+      ...(grant.streamProtocol ? { streamProtocol: grant.streamProtocol } : {}),
+    };
+    return Object.keys(metadata).length
+      ? this.audio.load(grant.streamUrl, signal, metadata)
       : this.audio.load(grant.streamUrl, signal);
   }
 
@@ -1229,8 +1384,14 @@ export class PlaybackSession implements PlaybackSessionPort {
     const preload = this.audio.preload;
     if (!preload) return Promise.resolve();
     const bitrate = validBitrate(grant.bitrate);
-    return bitrate
-      ? preload.call(this.audio, grant.streamUrl, signal, { bitrate })
+    const metadata = {
+      ...(bitrate ? { bitrate } : {}),
+      ...(validDuration(grant.durationMs) ? { duration: grant.durationMs! / 1000 } : {}),
+      ...(validStartPosition(grant.startPositionMs) ? { startOffset: grant.startPositionMs! / 1000 } : {}),
+      ...(grant.streamProtocol ? { streamProtocol: grant.streamProtocol } : {}),
+    };
+    return Object.keys(metadata).length
+      ? preload.call(this.audio, grant.streamUrl, signal, metadata)
       : preload.call(this.audio, grant.streamUrl, signal);
   }
 
@@ -1371,6 +1532,14 @@ function validBitrate(value: number | undefined): number {
   return Number.isFinite(value) && Number(value) > 0 ? Number(value) : 0;
 }
 
+function validDuration(value: number | undefined): value is number {
+  return Number.isFinite(value) && Number(value) > 0;
+}
+
+function validStartPosition(value: number | undefined): value is number {
+  return Number.isFinite(value) && Number(value) > 0;
+}
+
 function playbackPositionMilliseconds(seconds: number): number {
   return Math.round((Number.isFinite(seconds) ? Math.max(0, seconds) : 0) * 1_000);
 }
@@ -1386,3 +1555,4 @@ const NATIVE_POSITION_INTERVAL_SECONDS = 3;
 const PERSIST_POSITION_INTERVAL_SECONDS = 15;
 const BUFFERING_AFTER_SEEK_SUPPRESSION_MS = 1_500;
 const BUFFERING_AFTER_SWITCH_SUPPRESSION_MS = 3_000;
+const HLS_SEEK_EPSILON_SECONDS = 0.25;

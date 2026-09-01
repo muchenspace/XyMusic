@@ -1,5 +1,6 @@
 export type PlaybackQuality = "AUTO" | "DATA_SAVER" | "STANDARD" | "HIGH" | "LOSSLESS";
 export type ConcretePlaybackQuality = Exclude<PlaybackQuality, "AUTO">;
+export type StreamProtocol = "PROGRESSIVE" | "HLS";
 
 export interface Artwork { url: string; cacheKey: string }
 export interface UserProfile { id: string; username: string; displayName: string; avatarUrl?: string }
@@ -67,6 +68,9 @@ export interface PlaybackGrant {
   streamUrl: string;
   expiresAt: string;
   selectedQuality: ConcretePlaybackQuality;
+  streamProtocol?: StreamProtocol;
+  durationMs?: number;
+  startPositionMs?: number;
   bitrate?: number;
   contentLength?: number;
 }

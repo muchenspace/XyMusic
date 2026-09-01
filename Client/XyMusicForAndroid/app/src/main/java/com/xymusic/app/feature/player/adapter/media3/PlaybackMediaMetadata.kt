@@ -5,4 +5,7 @@ object PlaybackMediaMetadata {
     const val EXTRA_ARTISTS = "com.xymusic.app.player.ARTISTS"
     const val EXTRA_ARTWORK_CACHE_KEY = "com.xymusic.app.player.ARTWORK_CACHE_KEY"
     const val EXTRA_DURATION_MS = "com.xymusic.app.player.DURATION_MS"
+    const val EXTRA_STREAM_PROTOCOL = "com.xymusic.app.player.STREAM_PROTOCOL"
+    const val EXTRA_SOURCE_OFFSET_MS = "com.xymusic.app.player.SOURCE_OFFSET_MS"
+    const val EXTRA_REQUESTED_START_POSITION_MS = "com.xymusic.app.player.REQUESTED_START_POSITION_MS"
 }

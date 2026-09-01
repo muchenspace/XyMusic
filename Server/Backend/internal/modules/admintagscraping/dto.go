@@ -30,6 +30,8 @@ type ApplyInput struct {
 	WriteBack         bool        `json:"writeBack"`
 	Reason            string      `json:"reason"`
 	cancellationCheck func(context.Context) error
+	// Batch workers use this to avoid replaying a partially applied version.
+	retryTransientOptional bool
 }
 
 type BatchItemInput struct {

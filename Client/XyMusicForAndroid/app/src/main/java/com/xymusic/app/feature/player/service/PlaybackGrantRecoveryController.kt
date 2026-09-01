@@ -6,6 +6,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
+import com.xymusic.app.feature.player.adapter.media3.globalPlaybackPositionMs
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
 
 /**
@@ -17,6 +18,7 @@ import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
 internal class PlaybackGrantRecoveryController(
     private val player: Player,
     private val grantRepository: PlaybackGrantRepository,
+    private val mediaReloadCoordinator: PlaybackMediaReloadCoordinator? = null,
 ) : Player.Listener {
     private var lastRecoveredMediaId: String? = null
     private var lastRecoveryAtElapsedRealtimeMs = 0L
@@ -40,10 +42,17 @@ internal class PlaybackGrantRecoveryController(
         val shouldPlay = player.playWhenReady || lastPlayWhenReady
         lastRecoveredMediaId = mediaId
         lastRecoveryAtElapsedRealtimeMs = now
-        grantRepository.invalidate(trackId)
-        player.seekTo(mediaItemIndex, player.currentPosition.coerceAtLeast(0))
-        player.prepare()
-        player.playWhenReady = shouldPlay
+        val positionMs = mediaItem.globalPlaybackPositionMs(player.currentPosition)
+        mediaReloadCoordinator?.reloadCurrent(
+            globalPositionMs = positionMs,
+            forceRefresh = true,
+            playWhenReady = shouldPlay,
+        ) ?: run {
+            grantRepository.invalidate(trackId)
+            player.seekTo(mediaItemIndex, player.currentPosition.coerceAtLeast(0))
+            player.prepare()
+            player.playWhenReady = shouldPlay
+        }
     }
 
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {

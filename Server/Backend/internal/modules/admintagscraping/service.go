@@ -151,7 +151,7 @@ func (service *Service) CandidateDetails(ctx context.Context, candidate Candidat
 	if err := validateVerbatimCandidate(candidate, verbatim); err != nil {
 		return CandidateDetailsDTO{}, err
 	}
-	result, err := service.lyrics(ctx, candidate, verbatim)
+	result, err := service.lyrics(ctx, candidate, verbatim, false)
 	if err != nil {
 		return CandidateDetailsDTO{}, err
 	}
@@ -355,13 +355,16 @@ func (service *Service) apply(
 		set("genres", genres, current.Effective.Genres, len(current.Effective.Genres) == 0)
 	}
 	if input.Fields.Lyrics && (input.Fields.Overwrite || current.Effective.Lyrics == nil) {
-		lyricResult, lyricErr := service.lyrics(ctx, candidate, input.Verbatim)
+		lyricResult, lyricErr := service.lyrics(ctx, candidate, input.Verbatim, input.retryTransientOptional)
 		var metadata *MetadataLyrics
 		if lyricErr == nil {
 			metadata, lyricErr = metadataLyrics(lyricResult)
 		}
 		switch {
 		case lyricErr != nil:
+			if input.retryTransientOptional && transientScrapingDependencyError(lyricErr) {
+				return ApplyResult{}, lyricErr
+			}
 			warnings = append(warnings, "Lyrics retrieval failed: "+messageOf(lyricErr))
 		case metadata == nil:
 			warnings = append(warnings, "No lyrics were returned")
@@ -369,6 +372,38 @@ func (service *Service) apply(
 			if !sameMetadataValue(*metadata, current.Effective.Lyrics) {
 				patch["lyrics"] = *metadata
 				appliedFields = append(appliedFields, "lyrics")
+			}
+		}
+	}
+
+	// Download artwork before changing metadata. A transient platform failure
+	// can then be retried by the batch queue without replaying a stale version.
+	var albumID *string
+	var artwork DownloadedArtwork
+	coverReady := false
+	if input.Fields.Cover && candidate.AlbumImg != "" {
+		if err := checkApplyCancellation(ctx, input); err != nil {
+			return ApplyResult{}, err
+		}
+		var lookupErr error
+		albumID, lookupErr = service.store.TrackAlbumID(ctx, trackID)
+		if lookupErr != nil {
+			warnings = append(warnings, "Cover application failed: "+messageOf(lookupErr))
+		} else if albumID == nil {
+			warnings = append(warnings, "The track has no album; cover artwork was skipped")
+		} else {
+			var artworkErr error
+			artwork, artworkErr = service.music.DownloadArtwork(ctx, candidate.AlbumImg)
+			if artworkErr != nil {
+				if err := checkApplyCancellation(ctx, input); err != nil {
+					return ApplyResult{}, err
+				}
+				if input.retryTransientOptional && transientScrapingDependencyError(artworkErr) {
+					return ApplyResult{}, artworkErr
+				}
+				warnings = append(warnings, "Cover application failed: "+messageOf(artworkErr))
+			} else {
+				coverReady = true
 			}
 		}
 	}
@@ -390,28 +425,15 @@ func (service *Service) apply(
 	}
 
 	coverApplied := false
-	if input.Fields.Cover && candidate.AlbumImg != "" {
+	if coverReady && albumID != nil {
 		if err := checkApplyCancellation(ctx, input); err != nil {
 			return ApplyResult{}, err
 		}
-		albumID, lookupErr := service.store.TrackAlbumID(ctx, trackID)
-		if lookupErr != nil {
-			warnings = append(warnings, "Cover application failed: "+messageOf(lookupErr))
-		} else if albumID == nil {
-			warnings = append(warnings, "The track has no album; cover artwork was skipped")
+		artworkErr := service.artwork.ApplyAlbumArtwork(ctx, actorID, *albumID, artwork)
+		if artworkErr != nil {
+			warnings = append(warnings, "Cover application failed: "+messageOf(artworkErr))
 		} else {
-			artwork, artworkErr := service.music.DownloadArtwork(ctx, candidate.AlbumImg)
-			if artworkErr == nil {
-				artworkErr = checkApplyCancellation(ctx, input)
-			}
-			if artworkErr == nil {
-				artworkErr = service.artwork.ApplyAlbumArtwork(ctx, actorID, *albumID, artwork)
-			}
-			if artworkErr != nil {
-				warnings = append(warnings, "Cover application failed: "+messageOf(artworkErr))
-			} else {
-				coverApplied = true
-			}
+			coverApplied = true
 		}
 	}
 	if len(appliedFields) == 0 && !coverApplied && len(warnings) == 0 {
@@ -445,7 +467,12 @@ func checkApplyCancellation(ctx context.Context, input ApplyInput) error {
 	return nil
 }
 
-func (service *Service) lyrics(ctx context.Context, candidate Candidate, verbatim bool) (LyricResult, error) {
+func (service *Service) lyrics(
+	ctx context.Context,
+	candidate Candidate,
+	verbatim bool,
+	propagateTransient bool,
+) (LyricResult, error) {
 	if candidate.Source == SourceAcoustID {
 		return LyricResult{}, nil
 	}
@@ -454,6 +481,9 @@ func (service *Service) lyrics(ctx context.Context, candidate Candidate, verbati
 		return result, nil
 	}
 	if candidate.Source == SourceQMusic && err != nil {
+		return LyricResult{}, err
+	}
+	if propagateTransient && err != nil && transientScrapingDependencyError(err) {
 		return LyricResult{}, err
 	}
 	if candidate.Source != SourceQMusic && candidate.Name != "" {
@@ -479,6 +509,24 @@ func (service *Service) lyrics(ctx context.Context, candidate Candidate, verbati
 		}
 	}
 	return LyricResult{}, nil
+}
+
+func transientScrapingDependencyError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	applicationError, ok := apperror.As(err)
+	if !ok {
+		return false
+	}
+	if retryable, exists := applicationError.Metadata["retryable"].(bool); exists && !retryable {
+		return false
+	}
+	return applicationError.Code == apperror.CodeDependencyUnavailable ||
+		applicationError.Code == apperror.CodeRateLimited
 }
 
 func metadataLyrics(result LyricResult) (*MetadataLyrics, error) {

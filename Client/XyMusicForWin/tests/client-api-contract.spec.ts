@@ -191,7 +191,7 @@ describe("desktop library and playback API contract", () => {
       "api/v1/library/history/track%2F1",
     ]);
     expect(api.calls[0]?.init.method).toBe("POST");
-    expect(parseBody(api.calls[0])).toEqual({ preferredQuality: "HIGH", acceptedCodecs: ["aac", "mp3", "flac", "opus", "wav"] });
+    expect(parseBody(api.calls[0])).toEqual({ preferredQuality: "HIGH", acceptedCodecs: ["aac"], streamProtocol: "HLS" });
     expect(api.calls[1]?.init.method).toBe("PUT");
     expect(new Headers(api.calls[1]?.init.headers).get("Idempotency-Key")).toBeTruthy();
     expect(parseBody(api.calls[1])).toMatchObject({ playbackSessionId: "session-1", positionMs: 1235, event: "PROGRESS" });

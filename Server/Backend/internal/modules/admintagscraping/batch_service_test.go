@@ -747,6 +747,49 @@ func TestBatchItemRequeuesTransientUpstreamFailureWithBackoff(t *testing.T) {
 	}
 }
 
+func TestBatchItemRequeuesTransientCoverFailureBeforeMetadataMutation(t *testing.T) {
+	now := time.Date(2026, 7, 16, 1, 2, 3, 0, time.UTC)
+	albumID := "album"
+	metadata := metadataFixture(1)
+	metadata.Effective.Title = "Song"
+	store := &batchRetryStoreStub{
+		storeStub: &storeStub{
+			metadata:        metadata,
+			updatedMetadata: metadataFixture(2),
+			albumID:         &albumID,
+		},
+		retryControl: BatchLeaseControl{Owned: true},
+	}
+	music := &musicStub{
+		searchResults: map[Source][]Candidate{
+			SourceQMusic: {{ID: "candidate", Name: "Song", Source: SourceQMusic, AlbumImg: "https://y.qq.com/cover.jpg"}},
+		},
+		artworkErr: apperror.DependencyUnavailable("artwork host unavailable"),
+	}
+	processor, err := NewService(ServiceDependencies{
+		Store: store, Music: music, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewBatchService(BatchServiceDependencies{
+		Store: store, Processor: processor, Clock: func() time.Time { return now },
+		RetryBase: 10 * time.Second, RetryMax: time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim := splitCancellationClaim()
+	claim.Job.Options.MatchMode = MatchSimple
+	claim.Job.Options.Fields = ApplyFields{Title: true, Cover: true}
+	claim.Item.Attempts = 1
+	claim.Item.MaxAttempts = 3
+	service.processItem(context.Background(), claim)
+	if store.retryCalls != 1 || store.completeCalls != 0 || store.storeStub.updateCalls != 0 {
+		t.Fatalf("retry/completion/update calls = %d/%d/%d", store.retryCalls, store.completeCalls, store.storeStub.updateCalls)
+	}
+}
+
 func TestBatchItemCompletesTransientFailureAfterRetryExhaustion(t *testing.T) {
 	store := &batchRetryStoreStub{storeStub: &storeStub{}}
 	processor := &batchProcessorStub{
@@ -993,6 +1036,7 @@ func TestSeparateBatchInstancesCancelActiveSearchDuringLeaseRenewal(t *testing.T
 }
 
 type batchProcessorStub struct {
+	mu               sync.Mutex
 	metadata         TrackMetadata
 	metadataErr      error
 	metadataByTrack  map[string]TrackMetadata
@@ -1376,11 +1420,16 @@ func (stub *batchProcessorStub) TrackMetadata(_ context.Context, trackID string)
 	return stub.metadata, stub.metadataErr
 }
 func (stub *batchProcessorStub) Search(_ context.Context, input SearchInput) ([]Candidate, error) {
+	stub.mu.Lock()
 	stub.searchCalls++
 	if stub.matchesBySource != nil {
-		return stub.matchesBySource[input.Source], stub.searchErr
+		matches, err := stub.matchesBySource[input.Source], stub.searchErr
+		stub.mu.Unlock()
+		return matches, err
 	}
-	return stub.matches, stub.searchErr
+	matches, err := stub.matches, stub.searchErr
+	stub.mu.Unlock()
+	return matches, err
 }
 func (stub *batchProcessorStub) Apply(_ context.Context, _, _ string, input ApplyInput) (ApplyResult, error) {
 	stub.applyCalls++

@@ -8,6 +8,8 @@ interface PlaybackGrantRepository {
         preferredQuality: PreferredQuality = PreferredQuality.STANDARD,
         acceptedCodecs: List<String> = emptyList(),
         forceRefresh: Boolean = false,
+        streamProtocol: PlaybackStreamProtocol? = null,
+        startPositionMs: Long = 0,
     ): PlayerResult<PlaybackGrant>
 
     fun invalidate(trackId: String)
@@ -17,6 +19,11 @@ interface PlaybackGrantRepository {
     fun isCompatibleCodecFallbackEnabled(trackId: String): Boolean = false
 
     fun clear()
+}
+
+enum class PlaybackStreamProtocol {
+    PROGRESSIVE,
+    HLS,
 }
 
 class PlaybackGrant(
@@ -33,6 +40,9 @@ class PlaybackGrant(
     val contentLength: Long?,
     val checksumSha256: String?,
     val cacheKey: String,
+    val streamProtocol: PlaybackStreamProtocol = PlaybackStreamProtocol.PROGRESSIVE,
+    val durationMs: Long? = null,
+    val startPositionMs: Long = 0,
 ) {
     override fun toString(): String = "PlaybackGrant(trackId=$trackId, sessionId=$sessionId, streamUrl=[REDACTED])"
 }

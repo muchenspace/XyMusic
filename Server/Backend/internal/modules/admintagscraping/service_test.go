@@ -357,6 +357,78 @@ func TestApplyPreservesExistingFieldsAndCoordinatesLyricsCoverAndWriteback(t *te
 	}
 }
 
+func TestApplyReturnsTransientLyricFailureBeforeMetadataMutation(t *testing.T) {
+	metadata := metadataFixture(1)
+	store := &storeStub{metadata: metadata, updatedMetadata: metadataFixture(2)}
+	music := &musicStub{lyricErr: apperror.DependencyUnavailable("music provider unavailable")}
+	service, err := NewService(ServiceDependencies{
+		Store: store, Music: music, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.Apply(context.Background(), "admin", "track", ApplyInput{
+		ExpectedVersion:        1,
+		Candidate:              Candidate{ID: "candidate", Name: "Song", Source: SourceQMusic},
+		Fields:                 ApplyFields{Title: true, Lyrics: true},
+		Reason:                 "transient lyric failure",
+		retryTransientOptional: true,
+	})
+	if !apperror.IsCode(err, apperror.CodeDependencyUnavailable) || store.updateCalls != 0 {
+		t.Fatalf("error/update calls = %v/%d", err, store.updateCalls)
+	}
+}
+
+func TestApplyDownloadsCoverBeforeMetadataMutationOnTransientFailure(t *testing.T) {
+	albumID := "album"
+	metadata := metadataFixture(1)
+	store := &storeStub{metadata: metadata, updatedMetadata: metadataFixture(2), albumID: &albumID}
+	music := &musicStub{artworkErr: apperror.DependencyUnavailable("artwork host unavailable")}
+	artwork := &artworkStub{}
+	service, err := NewService(ServiceDependencies{
+		Store: store, Music: music, Artwork: artwork, DefaultLibraryDirectory: "music",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.Apply(context.Background(), "admin", "track", ApplyInput{
+		ExpectedVersion: 1,
+		Candidate: Candidate{
+			ID: "candidate", Name: "Song", AlbumImg: "https://y.qq.com/cover.jpg", Source: SourceQMusic,
+		},
+		Fields:                 ApplyFields{Title: true, Cover: true},
+		Reason:                 "transient cover failure",
+		retryTransientOptional: true,
+	})
+	if !apperror.IsCode(err, apperror.CodeDependencyUnavailable) || store.updateCalls != 0 || artwork.calls != 0 {
+		t.Fatalf("error/update/artwork calls = %v/%d/%d", err, store.updateCalls, artwork.calls)
+	}
+}
+
+func TestApplyKeepsPartialMetadataSuccessForDirectTransientCoverFailure(t *testing.T) {
+	albumID := "album"
+	metadata := metadataFixture(1)
+	store := &storeStub{metadata: metadata, updatedMetadata: metadataFixture(2), albumID: &albumID}
+	music := &musicStub{artworkErr: apperror.DependencyUnavailable("artwork host unavailable")}
+	service, err := NewService(ServiceDependencies{
+		Store: store, Music: music, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Apply(context.Background(), "admin", "track", ApplyInput{
+		ExpectedVersion: 1,
+		Candidate: Candidate{
+			ID: "candidate", Name: "Song", AlbumImg: "https://y.qq.com/cover.jpg", Source: SourceQMusic,
+		},
+		Fields: ApplyFields{Title: true, Cover: true},
+		Reason: "direct transient cover failure",
+	})
+	if err != nil || store.updateCalls != 1 || len(result.Warnings) != 1 {
+		t.Fatalf("error/update/warnings = %v/%d/%#v", err, store.updateCalls, result.Warnings)
+	}
+}
+
 func TestApplyReturnsVersionConflictBeforeSideEffects(t *testing.T) {
 	metadata := metadataFixture(5)
 	store := &storeStub{metadata: metadata}

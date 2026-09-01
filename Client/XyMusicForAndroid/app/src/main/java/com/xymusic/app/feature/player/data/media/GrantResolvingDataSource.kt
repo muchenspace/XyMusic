@@ -1,59 +1,49 @@
 package com.xymusic.app.feature.player.data.media
 
 import android.net.Uri
-import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
-import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.TransferListener
 import com.xymusic.app.core.session.ActiveSessionIdentity
-import com.xymusic.app.core.session.AppSessionProvider
-import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.session.SessionIdentityProvider
-import com.xymusic.app.core.session.SessionMutationCoordinator
-import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaUri
-import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
-import com.xymusic.app.feature.player.domain.PlayerResult
 import java.io.IOException
-import kotlinx.coroutines.runBlocking
 
+/**
+ * Opens only resources that were resolved by GrantResolvingMediaSourceFactory.
+ * Grant/network resolution belongs to the suspending media-source preparation
+ * path; this adapter stays synchronous and only routes already authorized
+ * URLs to the right cache/network data source.
+ */
 @UnstableApi
 class GrantResolvingDataSourceFactory(
     private val onlineFactory: DataSource.Factory,
+    private val networkFactory: DataSource.Factory,
     private val offlineFactory: DataSource.Factory,
-    private val grantRepository: PlaybackGrantRepository,
-    private val offlineMediaStore: OfflineMediaStore,
-    private val sessionProvider: AppSessionProvider,
+    private val grantRegistry: PlaybackGrantRegistry,
     private val sessionIdentityProvider: SessionIdentityProvider,
-    private val sessionMutationCoordinator: SessionMutationCoordinator,
 ) : DataSource.Factory {
     override fun createDataSource(): DataSource = GrantResolvingDataSource(
         onlineFactory = onlineFactory,
+        networkFactory = networkFactory,
         offlineFactory = offlineFactory,
-        grantRepository = grantRepository,
-        offlineMediaStore = offlineMediaStore,
-        sessionProvider = sessionProvider,
+        grantRegistry = grantRegistry,
         sessionIdentityProvider = sessionIdentityProvider,
-        sessionMutationCoordinator = sessionMutationCoordinator,
     )
 }
 
 @UnstableApi
 private class GrantResolvingDataSource(
     private val onlineFactory: DataSource.Factory,
+    private val networkFactory: DataSource.Factory,
     private val offlineFactory: DataSource.Factory,
-    private val grantRepository: PlaybackGrantRepository,
-    private val offlineMediaStore: OfflineMediaStore,
-    private val sessionProvider: AppSessionProvider,
+    private val grantRegistry: PlaybackGrantRegistry,
     private val sessionIdentityProvider: SessionIdentityProvider,
-    private val sessionMutationCoordinator: SessionMutationCoordinator,
 ) : DataSource {
     private val transferListeners = mutableListOf<TransferListener>()
     private var upstream: DataSource? = null
     private var stableUri: Uri? = null
     private var boundIdentity: ActiveSessionIdentity? = null
-    private var openedAtEndOfInput = false
 
     override fun addTransferListener(transferListener: TransferListener) {
         transferListeners += transferListener
@@ -61,147 +51,79 @@ private class GrantResolvingDataSource(
     }
 
     override fun open(dataSpec: DataSpec): Long {
+        val identity = sessionIdentityProvider.activeIdentity()
+            ?: throw IOException("Playback session is unavailable")
+        closeUpstream()
         stableUri = dataSpec.uri
-        openedAtEndOfInput = false
-        val identity =
-            sessionIdentityProvider.activeIdentity()
-                ?: throw IOException("Playback session is unavailable")
         boundIdentity = identity
         return try {
-            openForIdentity(dataSpec, identity)
+            requireCurrentIdentity(identity)
+            val resource = grantRegistry.resolve(dataSpec.uri, identity)
+            val offlineCacheKey = PlaybackOfflineUri.cacheKey(dataSpec.uri)
+            when {
+                resource != null -> openManagedResource(dataSpec, identity, resource)
+                offlineCacheKey != null -> openOfflineResource(dataSpec, identity, offlineCacheKey)
+                grantRegistry.isPlaybackUri(dataSpec.uri) ->
+                    throw IOException("Playback URL authorization is unavailable")
+                else -> throw IOException("Unsupported playback media URI")
+            }
         } catch (failure: Exception) {
             closeUpstream()
+            stableUri = null
             boundIdentity = null
-            openedAtEndOfInput = false
             throw failure
         }
     }
 
-    private fun openForIdentity(dataSpec: DataSpec, identity: ActiveSessionIdentity): Long {
-        val trackId = playbackTrackId(dataSpec.uri)
-        val offlineResult =
-            if (grantRepository.isCompatibleCodecFallbackEnabled(trackId)) {
-                null
-            } else {
-                openOfflineTrack(dataSpec, identity, trackId)
-            }
-        if (offlineResult != null) return offlineResult
-
-        var lastFailure: IOException? = null
-        repeat(MAX_GRANT_ATTEMPTS) { attempt ->
-            requireCurrentIdentity(identity)
-            closeUpstream()
-            val grant = playbackGrant(trackId, forceRefresh = attempt > 0)
-            requireCurrentIdentity(identity)
-            val resolvedSpec =
-                dataSpec
-                    .buildUpon()
-                    .setUri(grant.streamUrl)
-                    .setKey(grant.cacheKey)
-                    .build()
-            try {
-                return openUpstreamForIdentity(resolvedSpec, identity, onlineFactory)
-            } catch (failure: IOException) {
-                lastFailure = failure
-                if (!failure.isExpiredGrantResponse() || attempt == MAX_GRANT_ATTEMPTS - 1) {
-                    throw failure
-                }
-                requireCurrentIdentity(identity)
-                grantRepository.invalidate(trackId)
-            }
+    private fun openManagedResource(
+        dataSpec: DataSpec,
+        identity: ActiveSessionIdentity,
+        resource: PlaybackResource,
+    ): Long {
+        val factory = when (resource.kind) {
+            PlaybackResourceKind.HLS_PLAYLIST -> networkFactory
+            PlaybackResourceKind.PROGRESSIVE,
+            PlaybackResourceKind.HLS_SEGMENT,
+            -> onlineFactory
         }
-        throw checkNotNull(lastFailure)
+        return openUpstreamForIdentity(
+            dataSpec.buildUpon().setKey(resource.cacheKey).build(),
+            identity,
+            factory,
+        )
     }
 
-    private fun playbackTrackId(uri: Uri): String = try {
-        PlaybackMediaUri.trackId(uri)
-    } catch (failure: Exception) {
-        throw IOException("Invalid playback media identifier", failure)
-    }
-
-    private fun openOfflineTrack(dataSpec: DataSpec, identity: ActiveSessionIdentity, trackId: String): Long? =
-        runBlocking {
-            sessionMutationCoordinator.mutate {
-                requireCurrentIdentity(identity)
-                val ownerUserId =
-                    (sessionProvider.sessionState.value as? AppSessionState.SignedIn)?.userId
-                        ?: throw IOException("Playback session is unavailable")
-                if (ownerUserId != identity.userId) {
-                    throw IOException("Playback session changed")
-                }
-                val offlineTrack =
-                    offlineMediaStore.playableTrack(ownerUserId, trackId)
-                        ?: return@mutate null
-                val remainingLength = offlineTrack.contentLength - dataSpec.position
-                if (remainingLength <= 0) {
-                    openedAtEndOfInput = true
-                    return@mutate 0L
-                }
-                val boundedLength =
-                    if (dataSpec.length == C.LENGTH_UNSET.toLong()) {
-                        remainingLength
-                    } else {
-                        minOf(dataSpec.length, remainingLength)
-                    }
-                if (boundedLength <= 0) {
-                    throw IOException("Offline playback length is invalid")
-                }
-                openUpstreamForIdentity(
-                    dataSpec
-                        .buildUpon()
-                        .setKey(offlineTrack.cacheKey)
-                        .setLength(boundedLength)
-                        .build(),
-                    identity,
-                    offlineFactory,
-                )
-            }
-        }
-
-    private fun playbackGrant(trackId: String, forceRefresh: Boolean) = when (
-        val result =
-            runBlocking {
-                grantRepository.get(
-                    trackId = trackId,
-                    acceptedCodecs = SUPPORTED_STREAM_CODECS,
-                    forceRefresh = forceRefresh,
-                )
-            }
-    ) {
-        is PlayerResult.Success -> result.value
-        is PlayerResult.Failure -> throw IOException("Playback grant is unavailable")
-    }
+    private fun openOfflineResource(
+        dataSpec: DataSpec,
+        identity: ActiveSessionIdentity,
+        cacheKey: String,
+    ): Long = openUpstreamForIdentity(
+        dataSpec.buildUpon().setKey(cacheKey).build(),
+        identity,
+        offlineFactory,
+    )
 
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-        requireCurrentIdentity(
-            boundIdentity ?: throw IOException("Playback data source is not open"),
-        )
+        requireCurrentIdentity(boundIdentity ?: throw IOException("Playback data source is not open"))
         if (length == 0) return 0
-        if (openedAtEndOfInput) return C.RESULT_END_OF_INPUT
         return requireNotNull(upstream).read(buffer, offset, length)
     }
 
     override fun getUri(): Uri? = stableUri
 
-    override fun getResponseHeaders(): Map<String, List<String>> = emptyMap()
+    override fun getResponseHeaders(): Map<String, List<String>> =
+        upstream?.responseHeaders ?: emptyMap()
 
     override fun close() {
         closeUpstream()
         stableUri = null
         boundIdentity = null
-        openedAtEndOfInput = false
-    }
-
-    private fun closeUpstream() {
-        runCatching { upstream?.close() }
-        upstream = null
     }
 
     private fun openUpstream(dataSpec: DataSpec, factory: DataSource.Factory): Long {
-        val candidate =
-            factory.createDataSource().also { source ->
-                transferListeners.forEach(source::addTransferListener)
-            }
+        val candidate = factory.createDataSource().also { source ->
+            transferListeners.forEach(source::addTransferListener)
+        }
         upstream = candidate
         return candidate.open(dataSpec)
     }
@@ -227,13 +149,8 @@ private class GrantResolvingDataSource(
         }
     }
 
-    private fun IOException.isExpiredGrantResponse(): Boolean = generateSequence<Throwable>(this) {
-        it.cause
-    }.filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
-        .any { it.responseCode == 401 || it.responseCode == 403 || it.responseCode == 404 || it.responseCode == 410 }
-
-    private companion object {
-        const val MAX_GRANT_ATTEMPTS = 3
-        val SUPPORTED_STREAM_CODECS = listOf("aac", "mp3", "opus", "flac", "wav")
+    private fun closeUpstream() {
+        runCatching { upstream?.close() }
+        upstream = null
     }
 }

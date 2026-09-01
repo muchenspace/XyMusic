@@ -987,12 +987,13 @@ func (service *BatchService) executeItem(
 		writebackWarning = batchWritebackSkippedMessage(metadata.Source)
 	}
 	applyInput := ApplyInput{
-		ExpectedVersion: claim.Item.ExpectedVersion,
-		Candidate:       *selected,
-		Verbatim:        claim.Job.Options.Verbatim,
-		Fields:          claim.Job.Options.Fields,
-		WriteBack:       writeBack,
-		Reason:          claim.Job.Options.Reason,
+		ExpectedVersion:        claim.Item.ExpectedVersion,
+		Candidate:              *selected,
+		Verbatim:               claim.Job.Options.Verbatim,
+		Fields:                 claim.Job.Options.Fields,
+		WriteBack:              writeBack,
+		Reason:                 claim.Job.Options.Reason,
+		retryTransientOptional: true,
 		cancellationCheck: func(checkContext context.Context) error {
 			// The fresh check immediately before Apply protects the read-to-write
 			// boundary. Apply's repository mutation fence checks the durable
@@ -1053,22 +1054,14 @@ func (service *BatchService) itemErrorStatus(
 }
 
 func transientBatchItemError(err error) (bool, time.Duration) {
-	if err == nil || errors.Is(err, context.Canceled) {
+	if !transientScrapingDependencyError(err) {
 		return false, 0
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true, 0
 	}
 	applicationError, ok := apperror.As(err)
 	if !ok {
-		return false, 0
+		return true, 0
 	}
-	switch applicationError.Code {
-	case apperror.CodeDependencyUnavailable, apperror.CodeRateLimited:
-		return true, retryAfterFromMetadata(applicationError.Metadata)
-	default:
-		return false, 0
-	}
+	return true, retryAfterFromMetadata(applicationError.Metadata)
 }
 
 func (service *BatchService) signal() {

@@ -998,7 +998,7 @@ func (repository *Repository) enrichTrackSources(
 			GROUP BY mapping.source_id
 		)
 		SELECT chosen.track_id, source.id, source.root_id, root.name, source.source_path,
-		       source.status, source.checksum_sha256, root.mode::text, root.enabled,
+		       source.status, source.last_error, source.checksum_sha256, root.mode::text, root.enabled,
 		       EXISTS (
 		         SELECT 1 FROM library_scan_runs active_scan
 		         WHERE active_scan.root_id = root.id
@@ -1018,7 +1018,7 @@ func (repository *Repository) enrichTrackSources(
 		var source SourceRecord
 		if err := sourceRows.Scan(
 			&trackID, &source.ID, &source.RootID, &source.RootName, &source.RelativePath,
-			&source.Status, &source.ChecksumSHA256, &source.Mode, &source.RootEnabled,
+			&source.Status, &source.LastError, &source.ChecksumSHA256, &source.Mode, &source.RootEnabled,
 			&source.ScanActive, &source.MappingCount, &source.Cue,
 		); err != nil {
 			sourceRows.Close()

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -49,6 +49,10 @@ func (routes *Routes) Register(router gin.IRouter) {
 	router.POST("/api/v1/tracks/:id/playback", httpserver.Handle(routes.createGrant))
 	router.GET("/api/v1/playback/streams/:sessionId", httpserver.Handle(routes.serveStream))
 	router.HEAD("/api/v1/playback/streams/:sessionId", httpserver.Handle(routes.serveStream))
+	router.GET("/api/v1/playback/streams/:sessionId/index.m3u8", httpserver.Handle(routes.servePlaylist))
+	router.HEAD("/api/v1/playback/streams/:sessionId/index.m3u8", httpserver.Handle(routes.servePlaylist))
+	router.GET("/api/v1/playback/streams/:sessionId/hls/:name", httpserver.Handle(routes.serveSegment))
+	router.HEAD("/api/v1/playback/streams/:sessionId/hls/:name", httpserver.Handle(routes.serveSegment))
 }
 
 func (routes *Routes) createGrant(c *gin.Context) error {
@@ -80,30 +84,12 @@ func (routes *Routes) createGrant(c *gin.Context) error {
 }
 
 func (routes *Routes) serveStream(c *gin.Context) error {
-	sessionID := c.Param("sessionId")
-	if _, err := uuid.Parse(sessionID); err != nil {
-		return apperror.NotFound("Playback session was not found")
-	}
-
-	ticket := c.Query("ticket")
-	if ticket == "" {
-		return ErrInvalidTicket
-	}
-
-	claims, err := routes.signer.Verify(ticket)
+	claims, err := routes.verifyStream(c)
 	if err != nil {
 		return err
 	}
 
-	if claims.SessionID != sessionID {
-		return ErrInvalidTicket
-	}
-	if err := routes.transcoder.ValidateSession(sessionID, claims.TrackID, claims.Quality, claims.Codec); err != nil {
-		return err
-	}
-
-	start := streamRangeStart(c.GetHeader("Range"))
-	handle, err := routes.transcoder.OpenStreamAt(c.Request.Context(), sessionID, start)
+	handle, err := routes.transcoder.OpenCompletedStream(c.Request.Context(), claims.SessionID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return apperror.NotFound("Playback stream was not found or expired")
@@ -117,72 +103,166 @@ func (routes *Routes) serveStream(c *gin.Context) error {
 	if mimeType != "" {
 		c.Header("Content-Type", mimeType)
 	}
-	c.Header("ETag", fmt.Sprintf(`"%s"`, sessionID))
-
-	if handle.Complete {
-		c.Header("Accept-Ranges", "bytes")
-		c.Header("Cache-Control", fmt.Sprintf("private, max-age=%d", max(1, int(routes.service.ttl/time.Second))))
-		file, ok := handle.Reader.(*os.File)
-		if !ok {
-			return fmt.Errorf("completed playback stream is not a file")
-		}
-		stat, err := file.Stat()
-		if err != nil {
-			return fmt.Errorf("stat playback file: %w", err)
-		}
-		http.ServeContent(c.Writer, c.Request, file.Name(), stat.ModTime(), file)
-		return nil
+	c.Header("Accept-Ranges", "bytes")
+	c.Header("Cache-Control", fmt.Sprintf("private, max-age=%d", max(1, int(routes.service.ttl/time.Second))))
+	c.Header("ETag", fmt.Sprintf(`"%s"`, claims.SessionID))
+	file, ok := handle.Reader.(*os.File)
+	if !ok || !handle.Complete {
+		return fmt.Errorf("completed playback stream is not a file")
 	}
+	stat, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("stat playback file: %w", err)
+	}
+	http.ServeContent(c.Writer, c.Request, file.Name(), stat.ModTime(), file)
+	return nil
+}
 
-	// A growing transcode has no final byte length yet. Do not advertise byte
-	// ranges for this response; once the cache is complete, subsequent opens
-	// use the regular ServeContent/range path above.
-	c.Header("Accept-Ranges", "none")
-	c.Header("Cache-Control", "private, no-store")
+func (routes *Routes) servePlaylist(c *gin.Context) error {
+	claims, err := routes.verifyStream(c)
+	if err != nil {
+		return err
+	}
+	handle, err := routes.transcoder.OpenHLS(c.Request.Context(), claims.SessionID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return apperror.NotFound("Playback playlist was not found or expired")
+		}
+		return err
+	}
+	defer handle.Release()
+	cacheKey, err := routes.transcoder.sessionCacheKey(claims.SessionID)
+	if err != nil {
+		return err
+	}
+	rewritten, err := rewriteHLSPlaylist(handle.Content, claims.SessionID, c.Query("ticket"), cacheKey)
+	if err != nil {
+		return err
+	}
+	c.Header("Content-Type", "application/vnd.apple.mpegurl")
+	c.Header("Cache-Control", "private, no-cache, no-store, must-revalidate")
+	c.Header("Pragma", "no-cache")
+	c.Header("ETag", fmt.Sprintf(`"%s-playlist"`, claims.SessionID))
+	c.Header("Content-Length", fmt.Sprintf("%d", len(rewritten)))
 	if c.Request.Method == http.MethodHead {
 		c.Status(http.StatusOK)
 		return nil
 	}
-	c.Status(http.StatusOK)
-	writer := io.Writer(c.Writer)
-	if flusher, ok := c.Writer.(http.Flusher); ok {
-		flusher.Flush()
-		writer = flushingWriter{Writer: c.Writer, Flusher: flusher}
-	}
-	_, copyErr := io.Copy(writer, handle.Reader)
-	if copyErr != nil && c.Request.Context().Err() == nil && !c.Writer.Written() {
-		return copyErr
-	}
+	c.Data(http.StatusOK, "application/vnd.apple.mpegurl", rewritten)
 	return nil
 }
 
-func streamRangeStart(value string) int64 {
-	value = strings.TrimSpace(value)
-	if !strings.HasPrefix(strings.ToLower(value), "bytes=") {
-		return 0
+func (routes *Routes) serveSegment(c *gin.Context) error {
+	claims, err := routes.verifyStream(c)
+	if err != nil {
+		return err
 	}
-	first := strings.TrimSpace(strings.Split(strings.TrimPrefix(strings.ToLower(value), "bytes="), ",")[0])
-	if first == "" || strings.HasPrefix(first, "-") {
-		return 0
+	expectedCacheKey, err := routes.transcoder.sessionCacheKey(claims.SessionID)
+	if err != nil {
+		return err
 	}
-	start, _, ok := strings.Cut(first, "-")
+	if c.Query("cacheKey") != expectedCacheKey {
+		return ErrInvalidTicket
+	}
+	name := c.Param("name")
+	handle, err := routes.transcoder.OpenHLSSegment(c.Request.Context(), claims.SessionID, name)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return apperror.NotFound("Playback segment was not found or expired")
+		}
+		return err
+	}
+	defer handle.Release()
+	contentType := "audio/mp4"
+	c.Header("Content-Type", contentType)
+	c.Header("Accept-Ranges", "bytes")
+	c.Header("Cache-Control", fmt.Sprintf("private, max-age=%d", max(1, int(routes.service.ttl/time.Second))))
+	c.Header("ETag", fmt.Sprintf(`"%s-%s"`, claims.SessionID, name))
+	file, ok := handle.Reader.(io.ReadSeeker)
 	if !ok {
-		return 0
+		return fmt.Errorf("HLS segment is not seekable")
 	}
-	parsed, err := strconv.ParseInt(strings.TrimSpace(start), 10, 64)
-	if err != nil || parsed < 0 {
-		return 0
-	}
-	return parsed
+	http.ServeContent(c.Writer, c.Request, name, time.Time{}, file)
+	return nil
 }
 
-type flushingWriter struct {
-	io.Writer
-	Flusher http.Flusher
+func (routes *Routes) verifyStream(c *gin.Context) (*TicketClaims, error) {
+	sessionID := c.Param("sessionId")
+	if _, err := uuid.Parse(sessionID); err != nil {
+		return nil, apperror.NotFound("Playback session was not found")
+	}
+	ticket := c.Query("ticket")
+	if ticket == "" {
+		return nil, ErrInvalidTicket
+	}
+	claims, err := routes.signer.Verify(ticket)
+	if err != nil {
+		return nil, err
+	}
+	if claims.SessionID != sessionID {
+		return nil, ErrInvalidTicket
+	}
+	if err := routes.transcoder.ValidateSession(sessionID, claims.UserID, claims.TrackID, claims.Quality, claims.Codec); err != nil {
+		return nil, err
+	}
+	return claims, nil
 }
 
-func (writer flushingWriter) Write(value []byte) (int, error) {
-	n, err := writer.Writer.Write(value)
-	writer.Flusher.Flush()
-	return n, err
+func rewriteHLSPlaylist(content []byte, sessionID, ticket, cacheKey string) ([]byte, error) {
+	if strings.TrimSpace(ticket) == "" || strings.TrimSpace(sessionID) == "" {
+		return nil, ErrInvalidTicket
+	}
+	query := "ticket=" + url.QueryEscape(ticket)
+	if cacheKey != "" {
+		query += "&cacheKey=" + url.QueryEscape(cacheKey)
+	}
+	segmentURL := func(name string) string {
+		return "hls/" + url.PathEscape(name) + "?" + query
+	}
+	lines := strings.SplitAfter(string(content), "\n")
+	for index, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#EXT-X-MAP:") {
+			lines[index] = rewriteHLSURIAttribute(line, segmentURL)
+			continue
+		}
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		lineEnd := ""
+		lineBody := line
+		if strings.HasSuffix(lineBody, "\n") {
+			lineBody = strings.TrimSuffix(lineBody, "\n")
+			lineEnd = "\n"
+		}
+		if strings.HasSuffix(lineBody, "\r") {
+			lineBody = strings.TrimSuffix(lineBody, "\r")
+			lineEnd = "\r" + lineEnd
+		}
+		name := strings.TrimSpace(lineBody)
+		if name == "" || strings.Contains(name, "://") || strings.ContainsAny(name, `/\\`) {
+			return nil, fmt.Errorf("invalid HLS playlist URI")
+		}
+		lines[index] = segmentURL(name) + lineEnd
+	}
+	return []byte(strings.Join(lines, "")), nil
+}
+
+func rewriteHLSURIAttribute(line string, segmentURL func(string) string) string {
+	const prefix = `URI="`
+	start := strings.Index(line, prefix)
+	if start < 0 {
+		return line
+	}
+	valueStart := start + len(prefix)
+	valueEnd := strings.Index(line[valueStart:], `"`)
+	if valueEnd < 0 {
+		return line
+	}
+	valueEnd += valueStart
+	name := line[valueStart:valueEnd]
+	if name == "" || strings.ContainsAny(name, `/\\`) || strings.Contains(name, "://") {
+		return line
+	}
+	return line[:valueStart] + segmentURL(name) + line[valueEnd:]
 }

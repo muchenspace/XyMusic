@@ -29,6 +29,7 @@ internal class PlaybackMediaSessionCallback(
     private val serviceScope: CoroutineScope,
     private val initialSessionReady: CompletableDeferred<Unit>,
     private val sleepTimerController: PlaybackSleepTimerController,
+    private val mediaReloadCoordinator: PlaybackMediaReloadCoordinator,
 ) : MediaSession.Callback {
     override fun onConnect(
         session: MediaSession,
@@ -41,6 +42,7 @@ internal class PlaybackMediaSessionCallback(
                     .add(PlaybackSessionCommands.SET_SLEEP_TIMER)
                     .add(PlaybackSessionCommands.GET_SLEEP_TIMER)
                     .add(PlaybackSessionCommands.CODEC_FALLBACK_APPLIED)
+                    .add(PlaybackSessionCommands.SEEK_TO_GLOBAL_POSITION)
                     .build(),
                 Player.Commands
                     .Builder()
@@ -86,9 +88,48 @@ internal class PlaybackMediaSessionCallback(
                 }
                 PlaybackSessionCommands.GET_SLEEP_TIMER.customAction ->
                     sleepTimerController.currentResult()
+                PlaybackSessionCommands.SEEK_TO_GLOBAL_POSITION.customAction ->
+                    return createSeekFuture(args)
                 else -> SessionResult(SessionError.ERROR_NOT_SUPPORTED)
             }
         return Futures.immediateFuture(result)
+    }
+
+    private fun createSeekFuture(args: Bundle): ListenableFuture<SessionResult> {
+        val queueItemId =
+            args
+                .getString(PlaybackSessionCommands.ARG_SEEK_QUEUE_ITEM_ID)
+                ?.takeIf(String::isNotBlank)
+        if (queueItemId == null || !args.containsKey(PlaybackSessionCommands.ARG_SEEK_POSITION_MS)) {
+            return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
+        }
+        val positionMs = args.getLong(PlaybackSessionCommands.ARG_SEEK_POSITION_MS)
+        if (positionMs < 0) return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
+
+        val future = SettableFuture.create<SessionResult>()
+        val job = serviceScope.launch {
+            try {
+                val success =
+                    withTimeoutOrNull(PLAYBACK_SEEK_TIMEOUT_MS) {
+                        mediaReloadCoordinator.seekTo(queueItemId, positionMs)
+                    } ?: false
+                future.set(
+                    SessionResult(
+                        if (success) SessionResult.RESULT_SUCCESS else SessionResult.RESULT_ERROR_INVALID_STATE,
+                    ),
+                )
+            } catch (failure: CancellationException) {
+                future.cancel(false)
+                throw failure
+            } catch (_: Exception) {
+                future.set(SessionResult(SessionError.ERROR_UNKNOWN))
+            }
+        }
+        future.addListener(
+            { if (future.isCancelled) job.cancel() },
+            DIRECT_EXECUTOR,
+        )
+        return future
     }
 
     override fun onAddMediaItems(
@@ -168,6 +209,7 @@ internal class PlaybackMediaSessionCallback(
 
     private companion object {
         const val PLAYBACK_RESUMPTION_TIMEOUT_MS = 5_000L
+        const val PLAYBACK_SEEK_TIMEOUT_MS = 12_000L
 
         val DIRECT_EXECUTOR: Executor = Executor(Runnable::run)
 

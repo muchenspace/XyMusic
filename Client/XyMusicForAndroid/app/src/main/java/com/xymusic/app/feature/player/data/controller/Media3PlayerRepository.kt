@@ -15,6 +15,9 @@ import com.xymusic.app.feature.player.adapter.media3.MAX_SLEEP_TIMER_DURATION_MS
 import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaMetadata
 import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaUri
 import com.xymusic.app.feature.player.adapter.media3.PlaybackSessionCommands
+import com.xymusic.app.feature.player.adapter.media3.globalPlaybackDurationMs
+import com.xymusic.app.feature.player.adapter.media3.globalPlaybackPositionMs
+import com.xymusic.app.feature.player.adapter.media3.playbackSourceOffsetMs
 import com.xymusic.app.feature.player.domain.PlayerEvent
 import com.xymusic.app.feature.player.domain.PlayerRepository
 import com.xymusic.app.feature.player.domain.PlayerResult
@@ -41,6 +44,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 
 @Singleton
@@ -240,24 +244,33 @@ constructor(
             if (expectedQueueItemId != null && currentQueueItemId != expectedQueueItemId) {
                 return@withController PlayerResult.Success(Unit)
             }
-            didChangePosition = controller.currentPosition.coerceAtLeast(0) != positionMs
-            controller.seekTo(positionMs)
+            didChangePosition = mutableState.value.positionMs != positionMs
+            val seekResult = sendGlobalSeek(controller, currentQueueItemId, positionMs)
+            if (seekResult is PlayerResult.Failure) return@withController seekResult
             publishedPositionMs = positionMs
+            PlayerResult.Success(Unit)
         }
     }
 
     override suspend fun seekToQueueItem(queueItemId: String, positionMs: Long): PlayerResult<Unit> {
         if (positionMs < 0) return invalidQueue()
         var didChangePosition = false
-        return withController(positionDiscontinuity = { didChangePosition }) { controller ->
+        var publishedPositionMs: Long? = null
+        return withController(
+            positionDiscontinuity = { didChangePosition },
+            publishedPositionMs = { publishedPositionMs },
+        ) { controller ->
             pendingRestoredMediaItemSeek.cancel()
             val index = indexOf(controller, queueItemId)
             if (index < 0) return@withController invalidQueue()
             didChangePosition =
                 index != controller.currentMediaItemIndex ||
-                controller.currentPosition.coerceAtLeast(0) != positionMs
-            controller.seekTo(index, positionMs)
-            PlayerResult.Success(Unit)
+                mutableState.value.positionMs != positionMs
+            sendGlobalSeek(controller, queueItemId, positionMs).also { result ->
+                if (result is PlayerResult.Success) {
+                    publishedPositionMs = positionMs
+                }
+            }
         }
     }
 
@@ -280,8 +293,15 @@ constructor(
                 didChangePosition = true
                 controller.seekToPreviousMediaItem()
             } else {
-                didChangePosition = controller.currentPosition.coerceAtLeast(0) != 0L
-                controller.seekTo(0)
+                val currentItem = controller.currentMediaItem
+                val queueItemId = currentItem?.mediaId
+                if (queueItemId == null) {
+                    didChangePosition = false
+                } else {
+                    didChangePosition = mutableState.value.positionMs != 0L
+                    val seekResult = sendGlobalSeek(controller, queueItemId, 0L)
+                    if (seekResult is PlayerResult.Failure) return@withController seekResult
+                }
             }
         }
     }
@@ -402,9 +422,9 @@ constructor(
 
     private fun updateProgress(player: Player) {
         val previous = mutableState.value
-        val positionMs = player.currentPosition.coerceAtLeast(0)
-        val bufferedPositionMs = player.bufferedPosition.coerceAtLeast(0)
-        val durationMs = player.duration.takeUnless { it == C.TIME_UNSET }?.coerceAtLeast(0) ?: 0
+        val positionMs = player.globalPlaybackPositionMs(player.currentPosition)
+        val bufferedPositionMs = player.globalPlaybackPositionMs(player.bufferedPosition)
+        val durationMs = player.resolvedDurationMs()
         mutableState.value =
             playerStateWithProgressSample(
                 previous = previous,
@@ -420,8 +440,10 @@ constructor(
             pendingRestoredMediaItemSeek.takeForRestoredItem(
                 queueItemId = player.currentMediaItem?.mediaId,
             ) ?: return null
-        if (player.currentPosition.coerceAtLeast(0) == positionMs) return null
-        player.seekTo(positionMs)
+        val mediaItem = player.currentMediaItem ?: return null
+        val localPositionMs = positionMs - mediaItem.playbackSourceOffsetMs()
+        if (player.currentPosition.coerceAtLeast(0) == localPositionMs) return null
+        player.seekTo(localPositionMs.coerceAtLeast(0))
         return positionMs
     }
 
@@ -451,10 +473,10 @@ constructor(
                     queue = previous.queue,
                     currentQueueItemId = player.currentMediaItem?.mediaId,
                     isPlaying = isPlaying,
-                    positionMs = player.currentPosition.coerceAtLeast(0),
+                    positionMs = player.globalPlaybackPositionMs(player.currentPosition),
                     positionAnchorElapsedRealtimeMs = sampledAtElapsedRealtimeMs,
-                    bufferedPositionMs = player.bufferedPosition.coerceAtLeast(0),
-                    durationMs = player.duration.takeUnless { it == C.TIME_UNSET }?.coerceAtLeast(0) ?: 0,
+                    bufferedPositionMs = player.globalPlaybackPositionMs(player.bufferedPosition),
+                    durationMs = player.resolvedDurationMs(),
                     repeatMode =
                     when (player.repeatMode) {
                         Player.REPEAT_MODE_ONE -> RepeatMode.ONE
@@ -471,6 +493,9 @@ constructor(
             )
         syncPositionUpdates(player)
     }
+
+    private fun Player.globalPlaybackPositionMs(localPositionMs: Long): Long =
+        currentMediaItem?.globalPlaybackPositionMs(localPositionMs) ?: localPositionMs.coerceAtLeast(0)
 
     private fun refreshSleepTimerState(controller: MediaController) {
         val generation = sleepTimerSyncGeneration
@@ -581,6 +606,35 @@ constructor(
             }
     }
 
+    private suspend fun sendGlobalSeek(
+        controller: MediaController,
+        queueItemId: String,
+        positionMs: Long,
+    ): PlayerResult<Unit> {
+        if (!controller.isSessionCommandAvailable(PlaybackSessionCommands.SEEK_TO_GLOBAL_POSITION)) {
+            return PlayerResult.Failure(PlayerFailure.Unexpected("Global seek command is unavailable"))
+        }
+        val result =
+            withTimeoutOrNull(SEEK_COMMAND_TIMEOUT_MS) {
+                controller
+                    .sendCustomCommand(
+                        PlaybackSessionCommands.SEEK_TO_GLOBAL_POSITION,
+                        Bundle().apply {
+                            putString(PlaybackSessionCommands.ARG_SEEK_QUEUE_ITEM_ID, queueItemId)
+                            putLong(PlaybackSessionCommands.ARG_SEEK_POSITION_MS, positionMs)
+                        },
+                    ).awaitFuture()
+            }
+        if (result == null) {
+            return PlayerResult.Failure(PlayerFailure.Unexpected("Global seek timed out"))
+        }
+        return if (result.resultCode == SessionResult.RESULT_SUCCESS) {
+            PlayerResult.Success(Unit)
+        } else {
+            PlayerResult.Failure(PlayerFailure.Unexpected("Global seek command failed: ${result.resultCode}"))
+        }
+    }
+
     private fun syncPositionUpdates(player: Player) {
         if (
             player !== attachedController ||
@@ -666,10 +720,16 @@ constructor(
         player.getMediaItemAt(it).mediaId == queueItemId
     } ?: -1
 
+    private fun Player.resolvedDurationMs(): Long {
+        val mediaDurationMs = duration.takeUnless { it == C.TIME_UNSET }?.coerceAtLeast(0) ?: 0
+        return currentMediaItem?.globalPlaybackDurationMs(mediaDurationMs) ?: mediaDurationMs
+    }
+
     private fun invalidQueue(): PlayerResult.Failure = PlayerResult.Failure(PlayerFailure.InvalidQueue)
 
     private companion object {
         const val POSITION_UPDATE_INTERVAL_MS = 1_000L
+        const val SEEK_COMMAND_TIMEOUT_MS = 12_000L
         const val SLEEP_TIMER_UPDATE_INTERVAL_MS = 1_000L
         const val MIN_PLAYBACK_SPEED = 0.5f
         const val MAX_PLAYBACK_SPEED = 2f

@@ -1,3 +1,5 @@
+import type { StreamProtocol } from "../../domain/music";
+
 export interface AudioSnapshot {
   currentTime: number;
   duration: number;
@@ -6,6 +8,9 @@ export interface AudioSnapshot {
 
 export interface AudioSourceMetadata {
   bitrate?: number;
+  duration?: number;
+  startOffset?: number;
+  streamProtocol?: StreamProtocol;
 }
 
 export interface AudioBandwidthSample {

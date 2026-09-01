@@ -190,6 +190,17 @@ func TestArtworkFailureOpensShortHostCircuit(t *testing.T) {
 	}
 }
 
+func TestNonRetryableUpstreamHTTPErrorIsClassifiedWithoutRetry(t *testing.T) {
+	err := normalizeUpstreamError(&upstreamHTTPError{status: http.StatusNotFound}, context.Background())
+	applicationError, ok := apperror.As(err)
+	if !ok || applicationError.Code != apperror.CodeDependencyUnavailable || applicationError.Metadata["retryable"] != false {
+		t.Fatalf("normalized error = %#v", err)
+	}
+	if retry, _ := transientBatchItemError(err); retry {
+		t.Fatalf("HTTP 404 was incorrectly classified as transient: %v", err)
+	}
+}
+
 func TestUpstreamHostThrottleUsesProviderKeysAndRetryAfter(t *testing.T) {
 	for _, test := range []struct {
 		rawURL string

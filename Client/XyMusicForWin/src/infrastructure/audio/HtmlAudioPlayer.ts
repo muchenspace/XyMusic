@@ -4,6 +4,7 @@ import type {
   AudioSnapshot,
   AudioSourceMetadata,
 } from "../../application/ports/AudioPlayer";
+import Hls from "hls.js";
 
 interface PendingLoad {
   id: number;
@@ -48,6 +49,11 @@ export class HtmlAudioPlayer implements AudioPlayer {
   private readonly bandwidthListeners = new Set<(sample: AudioBandwidthSample) => void>();
   private readonly bufferingListeners = new Set<() => void>();
   private readonly networkMeasurements = new WeakMap<HTMLAudioElement, NetworkMeasurement>();
+  private readonly hlsInstances = new WeakMap<HTMLAudioElement, Hls>();
+  private readonly knownDurations = new WeakMap<HTMLAudioElement, number>();
+  private readonly sourceOffsets = new WeakMap<HTMLAudioElement, number>();
+  private readonly sourceProtocols = new WeakMap<HTMLAudioElement, NonNullable<AudioSourceMetadata["streamProtocol"]>>();
+  private readonly pendingSeeks = new WeakMap<HTMLAudioElement, number>();
   private readonly emitSnapshot = (): boolean => {
     const snapshot = this.snapshot();
     if (this.lastEmittedSnapshot
@@ -82,7 +88,7 @@ export class HtmlAudioPlayer implements AudioPlayer {
     for (const listener of this.endedListeners) listener();
   };
   private readonly emitError = () => {
-    if (this.pendingLoad || !this.audio.hasAttribute("src")) return;
+    if (this.pendingLoad || (!this.audio.hasAttribute("src") && !this.hlsInstances.has(this.audio))) return;
     this.stopUpdateLoop();
     const message = this.audio.error?.message || "音频播放失败";
     for (const listener of this.errorListeners) listener(message);
@@ -115,7 +121,11 @@ export class HtmlAudioPlayer implements AudioPlayer {
 
     await new Promise<void>((resolve, reject) => {
       let timeout: number | undefined;
+      let removeHlsReady: () => void = () => undefined;
       const cleanup = () => {
+        removeHlsReady();
+        removeHlsReady = () => undefined;
+        this.audio.removeEventListener("loadedmetadata", ready);
         this.audio.removeEventListener("canplay", ready);
         this.audio.removeEventListener("error", failed);
         signal?.removeEventListener("abort", aborted);
@@ -128,7 +138,11 @@ export class HtmlAudioPlayer implements AudioPlayer {
         action();
       };
       const ready = () => {
-        if (id !== this.loadSequence || this.audio.readyState < HAVE_FUTURE_DATA) return;
+        if (id !== this.loadSequence || this.audio.readyState < HAVE_METADATA) return;
+        settle(resolve);
+      };
+      const hlsReady = () => {
+        if (id !== this.loadSequence) return;
         settle(resolve);
       };
       const failed = () => {
@@ -143,6 +157,7 @@ export class HtmlAudioPlayer implements AudioPlayer {
       };
 
       this.pendingLoad = { id, reject, cleanup };
+      this.audio.addEventListener("loadedmetadata", ready);
       this.audio.addEventListener("canplay", ready);
       this.audio.addEventListener("error", failed);
       signal?.addEventListener("abort", aborted, { once: true });
@@ -154,9 +169,8 @@ export class HtmlAudioPlayer implements AudioPlayer {
       }, AUDIO_LOAD_TIMEOUT_MS);
 
       try {
-        this.audio.src = url;
-        this.audio.load();
-        if (this.audio.readyState >= HAVE_FUTURE_DATA) ready();
+        removeHlsReady = this.setSource(this.audio, url, metadata, hlsReady);
+        if (this.audio.readyState >= HAVE_METADATA) ready();
       } catch (error) {
         settle(() => reject(error));
         this.clearSource();
@@ -180,10 +194,17 @@ export class HtmlAudioPlayer implements AudioPlayer {
     this.preloadController = controller;
     this.startNetworkMeasurement(this.preloadAudio, metadata?.bitrate);
     try {
-      await waitUntilPlayable(this.preloadAudio, url, controller.signal);
+      await waitUntilPlayable(
+        this.preloadAudio,
+        controller.signal,
+          () => this.setSource(this.preloadAudio, url, metadata),
+      );
       this.measureBufferedProgress(this.preloadAudio);
       if (this.preloadController !== controller || controller.signal.aborted) throw controller.signal.reason ?? abortError();
       this.preparedUrl = url;
+    } catch (cause) {
+      this.clearSource(this.preloadAudio);
+      throw cause;
     } finally {
       signal?.removeEventListener("abort", forwardAbort);
       if (this.preloadController === controller) this.preloadController = null;
@@ -212,15 +233,17 @@ export class HtmlAudioPlayer implements AudioPlayer {
       await nextAudio.play();
     } catch {
       nextAudio.pause();
-      clearSource(nextAudio);
+      this.clearSource(nextAudio);
       nextAudio.volume = this.configuredVolume;
       if (this.transitionGains === gains) this.transitionGains = null;
       if (this.transitionController === controller) this.transitionController = null;
       return false;
     }
-    if (controller.signal.aborted || this.transitionSequence !== transition || !nextAudio.hasAttribute("src")) {
+    if (controller.signal.aborted
+      || this.transitionSequence !== transition
+      || (!this.hlsInstances.has(nextAudio) && !nextAudio.hasAttribute("src"))) {
       nextAudio.pause();
-      clearSource(nextAudio);
+      this.clearSource(nextAudio);
       nextAudio.volume = this.configuredVolume;
       if (this.transitionGains === gains) this.transitionGains = null;
       return false;
@@ -246,7 +269,7 @@ export class HtmlAudioPlayer implements AudioPlayer {
     }
     if (!controller.signal.aborted && this.transitionSequence === transition) {
       previousAudio.pause();
-      clearSource(previousAudio);
+      this.clearSource(previousAudio);
       previousAudio.volume = this.configuredVolume;
       this.audio.volume = this.configuredVolume;
     }
@@ -261,7 +284,7 @@ export class HtmlAudioPlayer implements AudioPlayer {
     this.cancelTransition();
     this.preparedUrl = "";
     this.preloadAudio.pause();
-    clearSource(this.preloadAudio);
+    this.clearSource(this.preloadAudio);
     this.preloadAudio.volume = this.configuredVolume;
     this.audio.volume = this.configuredVolume;
   }
@@ -287,8 +310,14 @@ export class HtmlAudioPlayer implements AudioPlayer {
   seek(seconds: number): void {
     if (!Number.isFinite(seconds)) return;
     this.releaseTransitionAudio();
-    const duration = finiteValue(this.audio.duration);
-    this.audio.currentTime = Math.max(0, Math.min(seconds, duration > 0 ? duration : seconds));
+    const target = Math.max(0, seconds);
+    if (this.sourceProtocols.get(this.audio) === "HLS") {
+      this.pendingSeeks.set(this.audio, target);
+      this.applyPendingSeek(this.audio);
+    } else {
+      this.pendingSeeks.delete(this.audio);
+      this.audio.currentTime = Math.max(0, target - this.sourceOffset(this.audio));
+    }
     this.emitImmediateUpdate();
   }
 
@@ -303,9 +332,13 @@ export class HtmlAudioPlayer implements AudioPlayer {
   }
 
   snapshot(): AudioSnapshot {
+    const pendingSeek = this.pendingSeeks.get(this.audio);
+    const nativeDuration = finiteValue(this.audio.duration);
+    const knownDuration = finiteValue(this.knownDurations.get(this.audio) ?? 0);
+    const offset = this.sourceOffset(this.audio);
     return {
-      currentTime: finiteValue(this.audio.currentTime),
-      duration: finiteValue(this.audio.duration),
+      currentTime: pendingSeek ?? offset + finiteValue(this.audio.currentTime),
+      duration: knownDuration || (nativeDuration ? offset + nativeDuration : 0),
       paused: this.audio.paused,
     };
   }
@@ -359,23 +392,76 @@ export class HtmlAudioPlayer implements AudioPlayer {
     pending.reject(abortError());
   }
 
-  private clearSource(): void {
+  private setSource(
+    audio: HTMLAudioElement,
+    url: string,
+    metadata?: AudioSourceMetadata,
+    onHlsReady?: () => void,
+  ): () => void {
+    const protocol = metadata?.streamProtocol ?? "PROGRESSIVE";
+    this.clearHls(audio);
+    this.pendingSeeks.delete(audio);
+    this.sourceProtocols.set(audio, protocol);
+    const duration = finiteValue(metadata?.duration ?? 0);
+    const offset = finiteValue(metadata?.startOffset ?? 0);
+    this.sourceOffsets.set(audio, offset);
+    if (duration > 0) this.knownDurations.set(audio, duration);
+    else this.knownDurations.delete(audio);
+    if (protocol === "HLS" && Hls.isSupported()) {
+      const hls = new Hls({
+        backBufferLength: 90,
+        lowLatencyMode: false,
+      });
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) audio.dispatchEvent(new Event("error"));
+      });
+      hls.on(Hls.Events.LEVEL_UPDATED, () => {
+        this.applyPendingSeek(audio);
+        if (audio === this.audio) this.emitImmediateUpdate();
+      });
+      if (onHlsReady) hls.once(Hls.Events.MANIFEST_PARSED, onHlsReady);
+      this.hlsInstances.set(audio, hls);
+      hls.attachMedia(audio);
+      hls.loadSource(url);
+      return onHlsReady
+        ? () => hls.off(Hls.Events.MANIFEST_PARSED, onHlsReady)
+        : () => undefined;
+    }
+    audio.preload = "auto";
+    audio.src = url;
+    audio.load();
+    return () => undefined;
+  }
+
+  private clearSource(audio: HTMLAudioElement = this.audio): void {
+    this.clearHls(audio);
+    this.pendingSeeks.delete(audio);
+    this.knownDurations.delete(audio);
+    this.sourceOffsets.delete(audio);
+    this.sourceProtocols.delete(audio);
     try {
-      this.audio.currentTime = 0;
+      audio.currentTime = 0;
     } catch {
       // Some engines reject seeking while no media is attached.
     }
-    this.audio.removeAttribute("src");
+    audio.removeAttribute("src");
     try {
-      this.audio.load();
+      audio.load();
     } catch {
       // The source is already detached; a browser-specific load error is harmless here.
     }
   }
 
+  private clearHls(audio: HTMLAudioElement): void {
+    const hls = this.hlsInstances.get(audio);
+    if (!hls) return;
+    this.hlsInstances.delete(audio);
+    hls.destroy();
+  }
+
   private bindActiveAudio(audio: HTMLAudioElement): void {
     audio.addEventListener("timeupdate", this.emitProgressUpdate);
-    audio.addEventListener("durationchange", this.emitImmediateUpdate);
+    audio.addEventListener("durationchange", this.handleDurationChange);
     audio.addEventListener("play", this.handlePlay);
     audio.addEventListener("pause", this.handlePause);
     audio.addEventListener("ended", this.emitEnded);
@@ -385,12 +471,34 @@ export class HtmlAudioPlayer implements AudioPlayer {
 
   private unbindActiveAudio(audio: HTMLAudioElement): void {
     audio.removeEventListener("timeupdate", this.emitProgressUpdate);
-    audio.removeEventListener("durationchange", this.emitImmediateUpdate);
+    audio.removeEventListener("durationchange", this.handleDurationChange);
     audio.removeEventListener("play", this.handlePlay);
     audio.removeEventListener("pause", this.handlePause);
     audio.removeEventListener("ended", this.emitEnded);
     audio.removeEventListener("error", this.emitError);
     audio.removeEventListener("waiting", this.emitBuffering);
+  }
+
+  private readonly handleDurationChange = (event: Event): void => {
+    const audio = event.currentTarget as HTMLAudioElement;
+    this.applyPendingSeek(audio);
+    if (audio === this.audio) this.emitImmediateUpdate();
+  };
+
+  private applyPendingSeek(audio: HTMLAudioElement): void {
+    const target = this.pendingSeeks.get(audio);
+    if (target === undefined) return;
+    const localTarget = Math.max(0, target - this.sourceOffset(audio));
+    const nativeDuration = audio.duration;
+    if (localTarget > 0 && Number.isFinite(nativeDuration) && nativeDuration > 0 && localTarget > nativeDuration + HLS_SEEK_TOLERANCE_SECONDS) {
+      return;
+    }
+    try {
+      audio.currentTime = localTarget;
+      this.pendingSeeks.delete(audio);
+    } catch {
+      // The media element may not have attached its first HLS buffer yet.
+    }
   }
 
   private startNetworkMeasurement(audio: HTMLAudioElement, bitrate: number | undefined): void {
@@ -459,7 +567,7 @@ export class HtmlAudioPlayer implements AudioPlayer {
     if (!this.transitionController) return;
     this.cancelTransition();
     this.preloadAudio.pause();
-    clearSource(this.preloadAudio);
+    this.clearSource(this.preloadAudio);
     this.preloadAudio.volume = this.configuredVolume;
     this.audio.volume = this.configuredVolume;
   }
@@ -467,6 +575,10 @@ export class HtmlAudioPlayer implements AudioPlayer {
   private applyTransitionVolumes(gains: TransitionGains): void {
     gains.previousAudio.volume = normalizedAudioVolume(this.configuredVolume * gains.previous);
     gains.nextAudio.volume = normalizedAudioVolume(this.configuredVolume * gains.next);
+  }
+
+  private sourceOffset(audio: HTMLAudioElement): number {
+    return finiteValue(this.sourceOffsets.get(audio) ?? 0);
   }
 }
 
@@ -488,17 +600,24 @@ function abortError(): DOMException {
 }
 
 const HAVE_FUTURE_DATA = 3;
+const HAVE_METADATA = 1;
 const AUDIO_LOAD_TIMEOUT_MS = 30_000;
 const UPDATE_INTERVAL_MS = 1_000 / 15;
 const MIN_REBUFFER_POSITION_SECONDS = 3;
 const MIN_TRANSFER_SAMPLE_MS = 200;
 const MAX_ACTIVE_TRANSFER_GAP_MS = 5_000;
+const HLS_SEEK_TOLERANCE_SECONDS = 0.25;
 
-async function waitUntilPlayable(audio: HTMLAudioElement, url: string, signal?: AbortSignal): Promise<void> {
+async function waitUntilPlayable(
+  audio: HTMLAudioElement,
+  signal: AbortSignal | undefined,
+  startSource: () => void,
+): Promise<void> {
   if (signal?.aborted) throw signal.reason ?? abortError();
   await new Promise<void>((resolve, reject) => {
     let settled = false;
     const cleanup = () => {
+      audio.removeEventListener("loadedmetadata", ready);
       audio.removeEventListener("canplay", ready);
       audio.removeEventListener("error", failed);
       signal?.removeEventListener("abort", aborted);
@@ -512,31 +631,25 @@ async function waitUntilPlayable(audio: HTMLAudioElement, url: string, signal?: 
     };
     const rejectAndClear = (cause: unknown) => settle(() => {
       audio.pause();
-      clearSource(audio);
+      audio.removeAttribute("src");
       reject(cause);
     });
     const ready = () => settle(resolve);
     const failed = () => rejectAndClear(new Error(audio.error?.message || "下一首预加载失败"));
     const aborted = () => rejectAndClear(signal?.reason ?? abortError());
     const timer = window.setTimeout(() => rejectAndClear(new Error("下一首预加载超时，请重试")), AUDIO_LOAD_TIMEOUT_MS);
+    audio.addEventListener("loadedmetadata", ready, { once: true });
     audio.addEventListener("canplay", ready, { once: true });
     audio.addEventListener("error", failed, { once: true });
     signal?.addEventListener("abort", aborted, { once: true });
     try {
       audio.preload = "auto";
-      audio.src = url;
-      audio.load();
-      if (audio.readyState >= HAVE_FUTURE_DATA) ready();
+      startSource();
+      if (audio.readyState >= HAVE_METADATA) ready();
     } catch (cause) {
       rejectAndClear(cause);
     }
   });
-}
-
-function clearSource(audio: HTMLAudioElement): void {
-  try { audio.currentTime = 0; } catch { /* Some engines reject seeking without media. */ }
-  audio.removeAttribute("src");
-  try { audio.load(); } catch { /* Source is already detached. */ }
 }
 
 async function crossfadeVolume(

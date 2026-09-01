@@ -36,6 +36,7 @@ export interface TrackSummary {
     relativePath: string;
     format: string | null;
     status: string;
+    lastError?: string | null;
     checksumSha256: string | null;
     mode: "READ_ONLY" | "READ_WRITE" | null;
     canWriteBack: boolean;
