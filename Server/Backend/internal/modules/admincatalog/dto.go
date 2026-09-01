@@ -86,6 +86,7 @@ type SourceDTO struct {
 	RelativePath         string  `json:"relativePath"`
 	Format               *string `json:"format"`
 	Status               string  `json:"status"`
+	LastError            *string `json:"lastError,omitempty"`
 	ChecksumSHA256       string  `json:"checksumSha256"`
 	Mode                 *string `json:"mode"`
 	CanWriteBack         bool    `json:"canWriteBack"`

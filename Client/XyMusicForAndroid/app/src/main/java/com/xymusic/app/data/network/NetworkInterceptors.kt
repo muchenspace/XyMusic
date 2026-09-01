@@ -196,6 +196,7 @@ constructor() : Interceptor {
             "\"/api/v1/assets/",
             "\"/api/v1/oss/",
             "\"/api/v1/playback/streams/",
+            "\"/api/v1/users/me/avatar/uploads/",
         )
         const val HEADER_CONTENT_LENGTH = "Content-Length"
     }

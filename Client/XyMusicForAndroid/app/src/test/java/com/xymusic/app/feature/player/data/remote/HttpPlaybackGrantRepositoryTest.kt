@@ -10,8 +10,10 @@ import com.xymusic.app.data.network.ProblemResponseParser
 import com.xymusic.app.domain.settings.AppSettings
 import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.feature.player.data.media.InMemoryPlaybackGrantStore
+import com.xymusic.app.feature.player.data.media.PlaybackGrantRegistry
 import com.xymusic.app.feature.player.data.media.PlaybackGrantKey
 import com.xymusic.app.feature.player.data.quality.AutomaticPlaybackQualityController
+import com.xymusic.app.feature.player.domain.PlaybackStreamProtocol
 import com.xymusic.app.feature.player.domain.PlayerResult
 import com.xymusic.app.feature.player.domain.model.PreferredQuality
 import com.xymusic.app.support.InMemoryServerConfigRepository
@@ -125,6 +127,58 @@ class HttpPlaybackGrantRepositoryTest {
         assertThat(api.requests).hasSize(2)
         assertThat(api.requests.first().acceptedCodecs).containsExactly("aac", "mp3", "opus").inOrder()
         assertThat(api.requests.last().acceptedCodecs).isEmpty()
+    }
+
+    @Test
+    fun directedHlsGrantCarriesStartPositionAndIsNeverReusedAsAnUndirectedCacheEntry() = runTest {
+        val trackId = "00000000-0000-0000-0000-000000000001"
+        val api = RecordingPlaybackApi()
+        val repository = repository(api)
+
+        val first = repository.get(
+            trackId = trackId,
+            preferredQuality = PreferredQuality.STANDARD,
+            acceptedCodecs = listOf("aac"),
+            forceRefresh = false,
+            streamProtocol = PlaybackStreamProtocol.HLS,
+            startPositionMs = 42_000,
+        )
+        val second = repository.get(
+            trackId = trackId,
+            preferredQuality = PreferredQuality.STANDARD,
+            acceptedCodecs = listOf("aac"),
+            forceRefresh = false,
+            streamProtocol = PlaybackStreamProtocol.HLS,
+            startPositionMs = 84_000,
+        )
+
+        assertThat(first).isInstanceOf(PlayerResult.Success::class.java)
+        assertThat(second).isInstanceOf(PlayerResult.Success::class.java)
+        assertThat(api.requests).hasSize(2)
+        assertThat(api.requests[0].streamProtocol).isEqualTo(PlaybackStreamProtocol.HLS.name)
+        assertThat(api.requests[0].startPositionMs).isEqualTo(42_000)
+        assertThat(api.requests[1].startPositionMs).isEqualTo(84_000)
+        val firstGrant = (first as PlayerResult.Success).value
+        assertThat(firstGrant.streamProtocol)
+            .isEqualTo(PlaybackStreamProtocol.HLS)
+        assertThat(firstGrant.startPositionMs).isEqualTo(42_000)
+    }
+
+    @Test
+    fun directedStartPositionIsRejectedForProgressivePlayback() = runTest {
+        val api = RecordingPlaybackApi()
+
+        val result = repository(api).get(
+            trackId = "00000000-0000-0000-0000-000000000001",
+            preferredQuality = PreferredQuality.LOSSLESS,
+            acceptedCodecs = emptyList(),
+            forceRefresh = false,
+            streamProtocol = PlaybackStreamProtocol.PROGRESSIVE,
+            startPositionMs = 1_000,
+        )
+
+        assertThat(result).isInstanceOf(PlayerResult.Failure::class.java)
+        assertThat(api.requests).isEmpty()
     }
 
     @Test
@@ -359,6 +413,7 @@ class HttpPlaybackGrantRepositoryTest {
                 Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC),
             ),
         settingsRepository: AppSettingsRepository = FakeAppSettingsRepository(),
+        grantRegistry: PlaybackGrantRegistry = PlaybackGrantRegistry(),
     ) = HttpPlaybackGrantRepository(
         api = api,
         store = store,
@@ -371,6 +426,7 @@ class HttpPlaybackGrantRepositoryTest {
         sessionIdentityProvider = sessionIdentityProvider,
         clock = clock,
         automaticQualityController = AutomaticPlaybackQualityController(),
+        grantRegistry = grantRegistry,
     )
 
     private fun grantStripe(trackId: String): Int {
@@ -402,12 +458,18 @@ private class RecordingPlaybackApi : PlaybackApi {
     override suspend fun grant(trackId: String, request: PlaybackRequestDto): Response<PlaybackGrantDto> {
         lastRequest = request
         requests += request
+        val sessionId = "10000000-0000-0000-0000-000000000001"
+        val isHls = request.streamProtocol.equals("HLS", ignoreCase = true)
         return Response.success(
             PlaybackGrantDto(
                 trackId = trackId,
-                sessionId = "10000000-0000-0000-0000-000000000001",
+                sessionId = sessionId,
                 selectedQuality = request.preferredQuality,
-                streamUrl = "https://music.example/$trackId",
+                streamUrl = if (isHls) {
+                    "https://music.example/api/v1/playback/streams/$sessionId/index.m3u8?ticket=ticket"
+                } else {
+                    "https://music.example/api/v1/playback/streams/$sessionId?ticket=ticket"
+                },
                 expiresAt = "2026-01-01T00:10:00Z",
                 mimeType = "audio/mp4",
                 codec = "aac",
@@ -416,6 +478,9 @@ private class RecordingPlaybackApi : PlaybackApi {
                 sampleRate = 48_000,
                 contentLength = 1_024,
                 cacheKey = "track-$trackId",
+                streamProtocol = request.streamProtocol,
+                durationMs = 180_000,
+                startPositionMs = request.startPositionMs ?: 0,
             ),
         )
     }
@@ -444,17 +509,23 @@ private class BlockingPlaybackApi(
         startedTrackIds += trackId
         requests += request
         allowResponses.await()
+        val sessionId =
+            if (trackId.endsWith("1")) {
+                "10000000-0000-0000-0000-000000000001"
+            } else {
+                "10000000-0000-0000-0000-000000000002"
+            }
+        val isHls = request.streamProtocol.equals("HLS", ignoreCase = true)
         val body =
             PlaybackGrantDto(
                 trackId = trackId,
-                sessionId =
-                if (trackId.endsWith("1")) {
-                    "10000000-0000-0000-0000-000000000001"
-                } else {
-                    "10000000-0000-0000-0000-000000000002"
-                },
+                sessionId = sessionId,
                 selectedQuality = request.preferredQuality,
-                streamUrl = "$grantUrlScheme://music.example/$trackId",
+                streamUrl = if (isHls) {
+                    "$grantUrlScheme://music.example/api/v1/playback/streams/$sessionId/index.m3u8?ticket=ticket"
+                } else {
+                    "$grantUrlScheme://music.example/api/v1/playback/streams/$sessionId?ticket=ticket"
+                },
                 expiresAt = grantExpiresAt,
                 mimeType = "audio/mp4",
                 codec = "aac",
@@ -464,6 +535,9 @@ private class BlockingPlaybackApi(
                 contentLength = 1_024,
                 checksumSha256 = null,
                 cacheKey = "track-$trackId",
+                streamProtocol = request.streamProtocol,
+                durationMs = 180_000,
+                startPositionMs = request.startPositionMs ?: 0,
             )
         return if (serverDate == null) {
             Response.success(body)

@@ -68,6 +68,33 @@ describe("playback session", () => {
     harness.session.dispose();
   });
 
+  it("applies the latest seek made while the selected track is loading", async () => {
+    let resolveLoad!: () => void;
+    const pendingLoad = new Promise<void>((resolve) => { resolveLoad = resolve; });
+    const harness = createHarness();
+    harness.audio.setLoadResult(pendingLoad);
+    const started = harness.session.startQueue([track("slow")], 0);
+
+    await waitForLoad(harness.audio);
+    harness.session.seekTo(75);
+    harness.session.seekTo(179);
+
+    expect(harness.audio.seek).not.toHaveBeenCalled();
+    expect(harness.session.state()).toMatchObject({
+      loading: true,
+      currentTime: 179,
+      progress: 179 / 180 * 100,
+    });
+
+    resolveLoad();
+    await started?.playback;
+
+    expect(harness.audio.seek).toHaveBeenCalledOnce();
+    expect(harness.audio.seek).toHaveBeenCalledWith(179);
+    expect(harness.audio.play).toHaveBeenCalledOnce();
+    harness.session.dispose();
+  });
+
   it("refreshes an expired grant before resuming and preserves the playback position", async () => {
     const harness = createHarness();
     const started = harness.session.startQueue([track("one")], 0);
@@ -88,6 +115,43 @@ describe("playback session", () => {
     expect(harness.audio.play).toHaveBeenCalledTimes(2);
     expect(harness.session.state()).toMatchObject({ currentTime: 42, isPlaying: true, loading: false });
 
+    harness.session.dispose();
+  });
+
+  it("requests a directed HLS grant when a refreshed HLS source resumes from the current position", async () => {
+    const harness = createHarness();
+    harness.grants.get.mockImplementation(async (trackId: string, quality: ConcretePlaybackQuality) => ({
+      streamUrl: `https://example.test/${trackId}.m3u8`,
+      expiresAt: "",
+      selectedQuality: quality,
+      streamProtocol: "HLS",
+      durationMs: 180_000,
+      startPositionMs: 0,
+      bitrate: 128_000,
+    } as PlaybackGrant));
+    await harness.session.startQueue([track("one")], 0)?.playback;
+
+    harness.audio.setPlaybackPosition(42);
+    await harness.session.toggle();
+    harness.grants.getForResume.mockImplementation(async (trackId: string) => ({
+      grant: {
+        streamUrl: `https://example.test/${trackId}.m3u8`,
+        expiresAt: "",
+        selectedQuality: "STANDARD",
+        streamProtocol: "HLS",
+        durationMs: 180_000,
+        startPositionMs: 42_000,
+        bitrate: 128_000,
+      } as PlaybackGrant,
+      refreshed: true,
+    }));
+
+    await harness.session.toggle();
+
+    expect(harness.grants.getForResume).toHaveBeenCalledTimes(2);
+    expect(harness.grants.getForResume).toHaveBeenNthCalledWith(1, "one", "STANDARD", expect.any(AbortSignal));
+    expect(harness.grants.getForResume).toHaveBeenNthCalledWith(2, "one", "STANDARD", expect.any(AbortSignal), 42_000);
+    expect(harness.audio.seek).toHaveBeenLastCalledWith(42);
     harness.session.dispose();
   });
 
@@ -125,13 +189,19 @@ describe("playback session", () => {
     await harness.session.startQueue([track("one")], 0)?.playback;
 
     expect(harness.session.state().quality).toBe("AUTO");
-    expect(harness.grants.get).toHaveBeenNthCalledWith(1, "one", "STANDARD", expect.any(AbortSignal), false);
+    expect(harness.grants.get).toHaveBeenNthCalledWith(1, "one", "STANDARD", expect.any(AbortSignal), false, 0);
 
     harness.audio.setPlaybackPosition(30);
     harness.audio.emitBuffering();
 
     await vi.waitFor(() => {
-      expect(harness.grants.get).toHaveBeenCalledWith("one", "DATA_SAVER", expect.any(AbortSignal), true);
+      expect(harness.grants.get).toHaveBeenCalledWith(
+        "one",
+        "DATA_SAVER",
+        expect.any(Object),
+        true,
+        30_000,
+      );
     });
     expect(harness.session.state().quality).toBe("AUTO");
     harness.session.dispose();
@@ -167,8 +237,9 @@ describe("playback session", () => {
         expect(harness.grants.get).toHaveBeenCalledWith(
           "two",
           "DATA_SAVER",
-          expect.any(AbortSignal),
+          expect.any(Object),
           true,
+          30_000,
         );
       });
     } finally {
@@ -196,6 +267,7 @@ describe("playback session", () => {
       "HIGH",
       expect.any(AbortSignal),
       false,
+      0,
     );
 
     harness.audio.emitNetworkChange();
@@ -207,6 +279,7 @@ describe("playback session", () => {
       "STANDARD",
       expect.any(AbortSignal),
       false,
+      0,
     );
     harness.session.dispose();
   });
@@ -225,6 +298,7 @@ describe("playback session", () => {
       "HIGH",
       expect.any(AbortSignal),
       false,
+      0,
     );
 
     harness.session.reset();
@@ -236,6 +310,7 @@ describe("playback session", () => {
       "STANDARD",
       expect.any(AbortSignal),
       false,
+      0,
     );
     harness.session.dispose();
   });

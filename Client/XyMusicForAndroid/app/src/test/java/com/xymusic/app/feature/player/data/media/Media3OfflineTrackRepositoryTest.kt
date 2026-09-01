@@ -218,6 +218,8 @@ class Media3OfflineTrackRepositoryTest {
             preferredQuality: PreferredQuality,
             acceptedCodecs: List<String>,
             forceRefresh: Boolean,
+            streamProtocol: com.xymusic.app.feature.player.domain.PlaybackStreamProtocol?,
+            startPositionMs: Long,
         ): PlayerResult<PlaybackGrant> {
             requestStarted.complete(Unit)
             release.await()
@@ -235,6 +237,8 @@ class Media3OfflineTrackRepositoryTest {
             preferredQuality: PreferredQuality,
             acceptedCodecs: List<String>,
             forceRefresh: Boolean,
+            streamProtocol: com.xymusic.app.feature.player.domain.PlaybackStreamProtocol?,
+            startPositionMs: Long,
         ): PlayerResult<PlaybackGrant> = PlayerResult.Success(grant(trackId))
 
         override fun invalidate(trackId: String) = Unit

@@ -9,6 +9,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlaybackException
 import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaMetadata
 import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaUri
+import com.xymusic.app.feature.player.adapter.media3.globalPlaybackPositionMs
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
 import java.util.UUID
 
@@ -17,6 +18,7 @@ internal class PlaybackCodecFallbackController(
     private val player: Player,
     private val grantRepository: PlaybackGrantRepository,
     private val onFallbackApplied: () -> Unit,
+    private val mediaReloadCoordinator: PlaybackMediaReloadCoordinator? = null,
 ) : Player.Listener {
     private val attemptedQueueItemIds = mutableSetOf<String>()
     private var fallbackNotificationSent = false
@@ -29,9 +31,15 @@ internal class PlaybackCodecFallbackController(
                 grantRepository.isCompatibleCodecFallbackEnabled(target.trackId)
         if (!fallbackAvailable) return
 
-        player.seekTo(target.mediaItemIndex, target.positionMs)
-        player.prepare()
-        player.playWhenReady = target.playWhenReady
+        mediaReloadCoordinator?.reloadCurrent(
+            globalPositionMs = target.positionMs,
+            forceRefresh = true,
+            playWhenReady = target.playWhenReady,
+        ) ?: run {
+            player.seekTo(target.mediaItemIndex, target.positionMs)
+            player.prepare()
+            player.playWhenReady = target.playWhenReady
+        }
         if (!fallbackNotificationSent) {
             fallbackNotificationSent = true
             onFallbackApplied()
@@ -59,7 +67,7 @@ internal class PlaybackCodecFallbackController(
             queueItemId = queueItemId,
             trackId = trackId,
             mediaItemIndex = mediaItemIndex,
-            positionMs = player.currentPosition.coerceAtLeast(0),
+            positionMs = mediaItem.globalPlaybackPositionMs(player.currentPosition),
             playWhenReady = player.playWhenReady,
         )
     }

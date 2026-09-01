@@ -170,18 +170,35 @@ func TestMediaUploadMatcherIsStrict(t *testing.T) {
 		t.Fatal("expected object storage proxy upload path to match")
 	}
 
+	avatar := request(t, http.MethodPut, "/api/v1/users/me/avatar/uploads/01234567-89AB-CDEF-0123-456789ABCDEF", nil)
+	if !IsAvatarContentUpload(avatar) {
+		t.Fatal("expected UUID avatar upload path to match")
+	}
+	if IsAvatarContentUpload(request(t, http.MethodPost, avatar.URL.Path, nil)) {
+		t.Fatal("avatar upload matcher accepted a non-PUT request")
+	}
+
 	invalidRequests := []*http.Request{
 		request(t, http.MethodPost, valid.URL.Path, nil),
 		request(t, http.MethodPost, objectProxy.URL.Path, nil),
 		request(t, http.MethodPut, "/api/v1/admin/media/uploads/not-a-uuid/content", nil),
 		request(t, http.MethodPut, valid.URL.Path+"/extra", nil),
 		request(t, http.MethodPut, "/api/v1/admin/media/uploads/01234567-89ab-cdef-0123-456789abcdef", nil),
-		request(t, http.MethodPut, "/api/v1/oss/not+base64/music/song.flac", nil),
-		request(t, http.MethodPut, "/api/v1/oss/b2JqZWN0cy5leGFtcGxlLnRlc3Q", nil),
+		request(t, http.MethodPut, "/api/v1/users/me/avatar/uploads/not-a-uuid", nil),
+		request(t, http.MethodPut, "/api/v1/users/me/avatar/uploads/01234567-89ab-cdef-0123-456789abcdef/extra", nil),
 	}
 	for _, invalid := range invalidRequests {
 		if IsMediaContentUpload(invalid) {
 			t.Fatalf("unexpected media upload match: %s %s", invalid.Method, invalid.URL.Path)
+		}
+	}
+	for _, invalid := range []*http.Request{
+		request(t, http.MethodPut, "/api/v1/users/me/avatar/uploads/not-a-uuid", nil),
+		request(t, http.MethodPut, "/api/v1/users/me/avatar/uploads/01234567-89ab-cdef-0123-456789abcdef/extra", nil),
+		request(t, http.MethodPost, avatar.URL.Path, nil),
+	} {
+		if IsAvatarContentUpload(invalid) {
+			t.Fatalf("unexpected avatar upload match: %s %s", invalid.Method, invalid.URL.Path)
 		}
 	}
 }

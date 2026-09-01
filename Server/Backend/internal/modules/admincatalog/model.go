@@ -111,6 +111,7 @@ type SourceRecord struct {
 	RootName       *string
 	RelativePath   string
 	Status         string
+	LastError      *string
 	ChecksumSHA256 string
 	Mode           *string
 	RootEnabled    *bool

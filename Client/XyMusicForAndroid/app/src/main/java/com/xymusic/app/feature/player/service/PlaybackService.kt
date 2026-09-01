@@ -7,9 +7,8 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DataSource
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -18,7 +17,7 @@ import com.xymusic.app.R
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.domain.server.ServerConfigRepository
-import com.xymusic.app.feature.player.adapter.media3.PlaybackDataSourceFactory
+import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaSourceFactory
 import com.xymusic.app.feature.player.adapter.media3.PlaybackSessionCommands
 import com.xymusic.app.feature.player.domain.AutomaticPlaybackQualityPolicy
 import com.xymusic.app.feature.player.domain.PlaybackEventSink
@@ -40,8 +39,8 @@ import kotlinx.coroutines.launch
 @UnstableApi
 class PlaybackService : MediaSessionService() {
     @Inject
-    @PlaybackDataSourceFactory
-    lateinit var playbackDataSourceFactory: DataSource.Factory
+    @PlaybackMediaSourceFactory
+    lateinit var playbackMediaSourceFactory: MediaSource.Factory
 
     @Inject
     lateinit var queueStore: PlaybackQueueStore
@@ -72,6 +71,7 @@ class PlaybackService : MediaSessionService() {
 
     private lateinit var player: ExoPlayer
     private lateinit var mediaSession: MediaSession
+    private lateinit var mediaReloadCoordinator: PlaybackMediaReloadCoordinator
     private lateinit var persistenceController: PlaybackPersistenceController
     private lateinit var sleepTimerController: PlaybackSleepTimerController
     private lateinit var codecFallbackController: PlaybackCodecFallbackController
@@ -82,6 +82,13 @@ class PlaybackService : MediaSessionService() {
         super.onCreate()
 
         player = createPlayer()
+        mediaReloadCoordinator =
+            PlaybackMediaReloadCoordinator(
+                player = player,
+                grantRepository = grantRepository,
+                scope = serviceScope,
+            )
+        player.addListener(mediaReloadCoordinator)
         sleepTimerController =
             PlaybackSleepTimerController(
                 serviceScope = serviceScope,
@@ -107,6 +114,7 @@ class PlaybackService : MediaSessionService() {
                     serviceScope = serviceScope,
                     initialSessionReady = initialSessionReady,
                     sleepTimerController = sleepTimerController,
+                    mediaReloadCoordinator = mediaReloadCoordinator,
                 ),
             )
         codecFallbackController =
@@ -125,6 +133,7 @@ class PlaybackService : MediaSessionService() {
             PlaybackGrantRecoveryController(
                 player = player,
                 grantRepository = grantRepository,
+                mediaReloadCoordinator = mediaReloadCoordinator,
             )
         player.addListener(grantRecoveryController)
         automaticQualityPlaybackController =
@@ -132,6 +141,7 @@ class PlaybackService : MediaSessionService() {
                 player = player,
                 grantRepository = grantRepository,
                 qualityController = automaticQualityController,
+                mediaReloadCoordinator = mediaReloadCoordinator,
             )
         player.addListener(automaticQualityPlaybackController)
 
@@ -175,6 +185,9 @@ class PlaybackService : MediaSessionService() {
         if (::grantRecoveryController.isInitialized && ::player.isInitialized) {
             player.removeListener(grantRecoveryController)
         }
+        if (::mediaReloadCoordinator.isInitialized && ::player.isInitialized) {
+            player.removeListener(mediaReloadCoordinator)
+        }
         if (::codecFallbackController.isInitialized && ::player.isInitialized) {
             player.removeListener(codecFallbackController)
         }
@@ -196,7 +209,7 @@ class PlaybackService : MediaSessionService() {
         return ExoPlayer
             .Builder(
                 this,
-                DefaultMediaSourceFactory(this).setDataSourceFactory(playbackDataSourceFactory),
+                playbackMediaSourceFactory,
             ).setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)

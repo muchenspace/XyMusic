@@ -748,7 +748,7 @@ func (service *Service) presentTracks(ctx context.Context, records []TrackRecord
 			source = &SourceDTO{
 				ID: record.Source.ID, RootID: record.Source.RootID, RootName: record.Source.RootName,
 				RelativePath: record.Source.RelativePath, Format: format, Status: record.Source.Status,
-				ChecksumSHA256: record.Source.ChecksumSHA256, Mode: record.Source.Mode,
+				LastError: record.Source.LastError, ChecksumSHA256: record.Source.ChecksumSHA256, Mode: record.Source.Mode,
 				CanWriteBack: eligibility.CanWriteBack, WritebackBlockReason: eligibility.MessagePointer(),
 			}
 		}

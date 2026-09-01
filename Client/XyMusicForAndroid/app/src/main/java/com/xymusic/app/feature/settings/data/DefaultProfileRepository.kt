@@ -3,9 +3,11 @@ package com.xymusic.app.feature.settings.data
 import com.xymusic.app.core.common.IoDispatcher
 import com.xymusic.app.core.data.media.remote.ArtworkDto
 import com.xymusic.app.core.model.media.Artwork
+import com.xymusic.app.core.network.ApiHttpClient
 import com.xymusic.app.core.network.MediaHttpClient
 import com.xymusic.app.core.network.ServerGeneration
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
+import com.xymusic.app.core.network.baseUrl
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.session.SessionInvalidator
@@ -14,6 +16,7 @@ import com.xymusic.app.data.network.ProblemResponseParser
 import com.xymusic.app.data.network.auth.IdempotencyKeyGenerator
 import com.xymusic.app.domain.error.DomainError
 import com.xymusic.app.domain.error.DomainErrorReason
+import com.xymusic.app.domain.server.ServerConfigRepository
 import com.xymusic.app.feature.settings.data.remote.CreateAvatarUploadRequestDto
 import com.xymusic.app.feature.settings.data.remote.CurrentUserDto
 import com.xymusic.app.feature.settings.data.remote.ProfileApi
@@ -71,7 +74,9 @@ constructor(
     private val sessionMutationCoordinator: SessionMutationCoordinator,
     private val profileMemoryCache: ProfileMemoryCache,
     private val serverRuntimeCoordinator: ServerRuntimeCoordinator,
+    private val serverConfigRepository: ServerConfigRepository,
     @MediaHttpClient private val mediaHttpClient: OkHttpClient,
+    @ApiHttpClient private val apiHttpClient: OkHttpClient,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ProfileRepository {
     private val profileLoadMutex = Mutex()
@@ -167,7 +172,16 @@ constructor(
                         .forEach(::header)
                 }.build()
         requireUploadContext(generation, expectedOwner)
-        executeAvatarUpload(request, generation, expectedOwner).use { response ->
+        val uploadClient =
+            if (isLocalAvatarUpload(upload.uploadUrl)) {
+                // The server-local fallback endpoint is authenticated. Use the
+                // API client for this URL so its bearer/session interceptors are
+                // applied; presigned OSS uploads must remain unsigned.
+                apiHttpClient
+            } else {
+                mediaHttpClient
+            }
+        executeAvatarUpload(request, generation, expectedOwner, uploadClient).use { response ->
             if (!response.isSuccessful) throw IOException("Avatar upload failed with HTTP ${response.code}")
         }
         requireUploadContext(generation, expectedOwner)
@@ -181,12 +195,25 @@ constructor(
         SettingsResult.Success(profile)
     }
 
+    private fun isLocalAvatarUpload(uploadUrl: String): Boolean {
+        val endpoint = serverConfigRepository.currentEndpoint() ?: return false
+        val target = endpoint.baseUrl.resolve(uploadUrl) ?: return false
+        val path = target.pathSegments
+        return target.scheme.equals(endpoint.protocol.scheme, ignoreCase = true) &&
+            target.host.equals(endpoint.host, ignoreCase = true) &&
+            target.port == endpoint.port &&
+            path.size == AVATAR_UPLOAD_PATH_SEGMENTS.size + 1 &&
+            path.dropLast(1) == AVATAR_UPLOAD_PATH_SEGMENTS &&
+            AVATAR_UPLOAD_ID_PATTERN.matches(path.last())
+    }
+
     private suspend fun executeAvatarUpload(
         request: Request,
         generation: ServerGeneration,
         expectedOwner: String,
+        client: OkHttpClient,
     ): OkHttpResponse = coroutineScope {
-        val call = mediaHttpClient.newCall(request)
+        val call = client.newCall(request)
         val serverWatcher =
             launch(start = CoroutineStart.UNDISPATCHED) {
                 serverRuntimeCoordinator.state.first {
@@ -340,6 +367,11 @@ constructor(
         const val RETRY_AFTER_HEADER = "Retry-After"
     }
 }
+
+private val AVATAR_UPLOAD_ID_PATTERN = Regex(
+    "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+)
+private val AVATAR_UPLOAD_PATH_SEGMENTS = listOf("api", "v1", "users", "me", "avatar", "uploads")
 
 private suspend fun Call.awaitResponse(): OkHttpResponse = suspendCancellableCoroutine { continuation ->
     continuation.invokeOnCancellation { cancel() }

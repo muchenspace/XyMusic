@@ -1132,8 +1132,24 @@ func normalizeUpstreamError(err error, ctx context.Context) error {
 		return apperror.PayloadTooLarge("The music platform response exceeds the permitted size")
 	}
 	var httpError *upstreamHTTPError
-	if errors.As(err, &httpError) && httpError.status == http.StatusTooManyRequests {
-		return apperror.RateLimited(retryAfterSeconds(httpError.retryAfter))
+	if errors.As(err, &httpError) {
+		if httpError.status == http.StatusTooManyRequests {
+			return apperror.RateLimited(retryAfterSeconds(httpError.retryAfter))
+		}
+		if retryableStatus(httpError.status) {
+			return dependencyUnavailable(
+				fmt.Sprintf("The music platform is temporarily unavailable (HTTP %d)", httpError.status),
+				retryAfterSeconds(httpError.retryAfter),
+			)
+		}
+		return apperror.New(
+			apperror.CodeDependencyUnavailable,
+			fmt.Sprintf("The music platform returned HTTP %d", httpError.status),
+			apperror.WithMetadata(map[string]any{
+				"retryable":  false,
+				"statusCode": httpError.status,
+			}),
+		)
 	}
 	var queueFull *upstreamQueueFullError
 	if errors.As(err, &queueFull) {
@@ -1147,7 +1163,9 @@ func normalizeUpstreamError(err error, ctx context.Context) error {
 }
 
 func dependencyUnavailable(detail string, retryAfter int) error {
-	return apperror.New(apperror.CodeDependencyUnavailable, detail, apperror.WithMetadata(map[string]any{"retryAfterSeconds": max(1, retryAfter)}))
+	return apperror.New(apperror.CodeDependencyUnavailable, detail, apperror.WithMetadata(map[string]any{
+		"retryAfterSeconds": max(1, retryAfter), "retryable": true,
+	}))
 }
 
 func transientUpstreamFailure(err error) bool {

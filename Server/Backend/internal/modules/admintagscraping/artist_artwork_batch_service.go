@@ -909,6 +909,9 @@ func transientArtistArtworkBatchError(err error) (bool, time.Duration) {
 	if !ok {
 		return true, 0
 	}
+	if retryable, exists := applicationError.Metadata["retryable"].(bool); exists && !retryable {
+		return false, 0
+	}
 	if applicationError.Code != apperror.CodeDependencyUnavailable && applicationError.Code != apperror.CodeRateLimited {
 		return false, 0
 	}

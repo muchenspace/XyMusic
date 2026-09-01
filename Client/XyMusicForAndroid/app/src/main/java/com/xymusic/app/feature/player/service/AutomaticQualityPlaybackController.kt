@@ -5,12 +5,14 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import com.xymusic.app.feature.player.domain.AutomaticPlaybackQualityPolicy
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
+import com.xymusic.app.feature.player.adapter.media3.globalPlaybackPositionMs
 
 internal class AutomaticQualityPlaybackController(
     private val player: Player,
     private val grantRepository: PlaybackGrantRepository,
     private val qualityController: AutomaticPlaybackQualityPolicy,
     private val elapsedRealtime: () -> Long = SystemClock::elapsedRealtime,
+    private val mediaReloadCoordinator: PlaybackMediaReloadCoordinator? = null,
 ) : Player.Listener {
     private var hasPlayedCurrentItem = false
     private var qualityReloadInProgress = false
@@ -77,15 +79,21 @@ internal class AutomaticQualityPlaybackController(
         val mediaItemIndex = player.currentMediaItemIndex.takeIf { it in 0 until player.mediaItemCount } ?: return
         val trackId = player.getMediaItemAt(mediaItemIndex).playbackTrackId() ?: return
         if (qualityController.onRebuffer(trackId, elapsedRealtime()) == null) return
-        val positionMs = player.currentPosition.coerceAtLeast(0)
+        val positionMs = player.currentMediaItem?.globalPlaybackPositionMs(player.currentPosition) ?: return
         val resumePlayback = player.playWhenReady
         qualityReloadInProgress = true
         suppressRebufferUntilMs = elapsedRealtime() + QUALITY_SWITCH_REBUFFER_SUPPRESSION_MS
-        grantRepository.invalidate(trackId)
-        player.stop()
-        player.seekTo(mediaItemIndex, positionMs)
-        player.prepare()
-        player.playWhenReady = resumePlayback
+        mediaReloadCoordinator?.reloadCurrent(
+            globalPositionMs = positionMs,
+            forceRefresh = true,
+            playWhenReady = resumePlayback,
+        ) ?: run {
+            grantRepository.invalidate(trackId)
+            player.stop()
+            player.seekTo(mediaItemIndex, positionMs)
+            player.prepare()
+            player.playWhenReady = resumePlayback
+        }
     }
 
     private fun currentTrackId(): String? = player.currentMediaItem?.playbackTrackId()

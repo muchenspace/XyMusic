@@ -820,6 +820,9 @@ FILE "disc.wav" WAVE
 		t.Fatalf("failed source=%s error=%q lastSeen=%s want=%s",
 			failedSourceStatus, failedSourceError, failedLastSeenAt, failureSeenAt)
 	}
+	if !strings.Contains(failedSourceError, "renamed.flac") {
+		t.Fatalf("failed source error does not identify the source file: %q", failedSourceError)
+	}
 	if failedTrackStatus != "ERROR" {
 		t.Fatalf("historically archived track status=%s", failedTrackStatus)
 	}
@@ -884,6 +887,129 @@ FILE "disc.wav" WAVE
 	}
 	if failedTrackStatus != "ARCHIVED" {
 		t.Fatalf("timestamp-mismatched archived track status=%s", failedTrackStatus)
+	}
+}
+
+func TestProductionSynchronizerScannerPersistsDiscoveryAndPreparedFailurePaths(t *testing.T) {
+	environmentPath := os.Getenv("XYMUSIC_INTEGRATION_ENV")
+	if environmentPath == "" {
+		t.Skip("set XYMUSIC_INTEGRATION_ENV to run production scanner failure checks")
+	}
+	testsupport.RequireWriteIntegration(t)
+	absolutePath, err := filepath.Abs(environmentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.NewStore(absolutePath).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = config.ResolveRuntime(cfg, filepath.Dir(absolutePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	pool, err := database.Open(ctx, cfg.Database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	transaction, err := pool.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer transaction.Rollback(context.WithoutCancel(ctx))
+
+	suffix := uuid.NewString()
+	directory := t.TempDir()
+	repository := &Repository{database: transaction}
+	mutation, err := validateRootInput(directory, RootMutation{
+		Name: "Scanner failure " + suffix[:8], Path: directory,
+		Mode: RootModeReadOnly, Enabled: true,
+		IncludePatterns: []string{}, ExcludePatterns: []string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootView, err := repository.CreateRoot(ctx, mutation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootID := rootView.Root.ID
+
+	analysisPath := filepath.Join(directory, "analysis-fails.flac")
+	if err := os.WriteFile(analysisPath, []byte("audio"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const analysisRelativePath = "analysis-fails.flac"
+	var trackID, sourceID string
+	if err := transaction.QueryRow(ctx, `INSERT INTO tracks(
+		title,normalized_title,duration_ms,status
+	) VALUES($1,$2,1000,'READY') RETURNING id`, "Failure Track "+suffix[:8], "failure track "+suffix[:8]).Scan(&trackID); err != nil {
+		t.Fatal(err)
+	}
+	if err := transaction.QueryRow(ctx, `INSERT INTO local_music_sources(
+		root_id,source_path,normalized_source_path,checksum_sha256,size_bytes,modified_at,status
+	) VALUES($1,$2,$2,$3,0,now(),'READY') RETURNING id`,
+		rootID, analysisRelativePath, strings.Repeat("b", 64)).Scan(&sourceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := transaction.Exec(ctx, `INSERT INTO local_music_source_tracks(
+		source_id,track_id,segment_index,start_ms
+	) VALUES($1,$2,0,0)`, sourceID, trackID); err != nil {
+		t.Fatal(err)
+	}
+
+	const discoveryRelativePath = "discovery-fails.cue"
+	if err := os.WriteFile(
+		filepath.Join(directory, discoveryRelativePath),
+		[]byte(`TITLE "missing FILE directive"`), 0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	probeFailure := errors.New("metadata probe failed")
+	synchronizer := &ProductionSynchronizer{
+		database: transaction,
+		probe:    metadataProbeFailureStub{err: probeFailure},
+		now:      func() time.Time { return time.Now().UTC() },
+	}
+	scanner, err := NewFilesystemScannerWithOptions(FilesystemScannerOptions{
+		Synchronizer: synchronizer, Workers: 1, CommitWorkers: 1, CommitBatchSize: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := scanner.Scan(ctx, ScanInput{
+		ScanRunID: uuid.NewString(), RootID: rootID, Directory: directory,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.DiscoveredFiles != 2 || result.ProcessedFiles != 2 || result.FailedFiles != 2 {
+		t.Fatalf("scanner result=%+v", result)
+	}
+
+	files, total, err := repository.ListFiles(ctx, rootID, FileQuery{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(files) != 1 || files[0].Path != analysisRelativePath ||
+		files[0].Status != SourceFileFailed || files[0].LastError == nil ||
+		!strings.Contains(*files[0].LastError, analysisRelativePath) {
+		t.Fatalf("rendered source file=%+v total=%d", files, total)
+	}
+	var discoveryStatus string
+	var discoveryError *string
+	if err := transaction.QueryRow(ctx, `SELECT status,last_error FROM local_music_sources
+		WHERE root_id=$1 AND normalized_source_path=$2`, rootID, discoveryRelativePath).Scan(
+		&discoveryStatus, &discoveryError,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if discoveryStatus != string(SourceFileFailed) || discoveryError == nil ||
+		!strings.Contains(*discoveryError, discoveryRelativePath) {
+		t.Fatalf("discovery failure status=%s error=%v", discoveryStatus, discoveryError)
 	}
 }
 

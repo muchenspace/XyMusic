@@ -7,11 +7,13 @@ import com.xymusic.app.data.network.ProblemResponseParser
 import com.xymusic.app.domain.server.ServerConfigRepository
 import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.feature.player.data.media.PlaybackGrantKey
+import com.xymusic.app.feature.player.data.media.PlaybackGrantRegistry
 import com.xymusic.app.feature.player.data.media.PlaybackGrantStore
 import com.xymusic.app.feature.player.domain.AutomaticPlaybackQualityPolicy
 import com.xymusic.app.feature.player.domain.PlaybackGrant
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
 import com.xymusic.app.feature.player.domain.PlayerResult
+import com.xymusic.app.feature.player.domain.PlaybackStreamProtocol
 import com.xymusic.app.feature.player.domain.model.PlayerFailure
 import com.xymusic.app.feature.player.domain.model.PreferredQuality
 import java.net.URI
@@ -38,6 +40,7 @@ constructor(
     private val sessionIdentityProvider: SessionIdentityProvider,
     private val clock: ServerSynchronizedClock,
     private val automaticQualityController: AutomaticPlaybackQualityPolicy,
+    private val grantRegistry: PlaybackGrantRegistry,
 ) : PlaybackGrantRepository {
     private val grantMutexes = Array(GRANT_MUTEX_COUNT) { Mutex() }
     private val storeLock = Any()
@@ -50,11 +53,21 @@ constructor(
         preferredQuality: PreferredQuality,
         acceptedCodecs: List<String>,
         forceRefresh: Boolean,
+        streamProtocol: PlaybackStreamProtocol?,
+        startPositionMs: Long,
     ): PlayerResult<PlaybackGrant> {
         val identity =
             sessionIdentityProvider.activeIdentity()
                 ?: return PlayerResult.Failure(PlayerFailure.PlaybackUnavailable)
-        return getForIdentity(identity, trackId, preferredQuality, acceptedCodecs, forceRefresh)
+        return getForIdentity(
+            identity,
+            trackId,
+            preferredQuality,
+            acceptedCodecs,
+            forceRefresh,
+            streamProtocol,
+            startPositionMs,
+        )
     }
 
     private suspend fun getForIdentity(
@@ -63,23 +76,29 @@ constructor(
         preferredQuality: PreferredQuality,
         acceptedCodecs: List<String>,
         forceRefresh: Boolean,
+        requestedStreamProtocol: PlaybackStreamProtocol?,
+        startPositionMs: Long,
     ): PlayerResult<PlaybackGrant> {
+        if (startPositionMs < 0 || (startPositionMs > 0 && requestedStreamProtocol != PlaybackStreamProtocol.HLS)) {
+            return PlayerResult.Failure(PlayerFailure.PlaybackUnavailable)
+        }
         var resolved: PlayerResult<PlaybackGrant>? = null
         var effectiveQuality: PreferredQuality? = null
         while (resolved == null && isCurrentIdentity(identity) && prepareStoreFor(identity)) {
             val quality = effectiveQuality ?: resolveEffectiveQuality(trackId, preferredQuality).also {
                 effectiveQuality = it
             }
-            val policy = requestPolicy(trackId, acceptedCodecs)
+            val protocol = requestedStreamProtocol ?: protocolForQuality(quality)
+            val policy = requestPolicy(trackId, acceptedCodecs, protocol)
             val key =
                 runCatching {
-                    requestKey(identity, trackId, quality, policy.acceptedCodecs)
+                    requestKey(identity, trackId, quality, policy.acceptedCodecs, protocol)
                 }.getOrNull()
             if (key == null) {
                 resolved = PlayerResult.Failure(PlayerFailure.PlaybackUnavailable)
             } else {
                 val cached =
-                    if (forceRefresh) {
+                    if (forceRefresh || startPositionMs > 0) {
                         null
                     } else {
                         cachedGrantForRequest(key, clock.millis(), identity, policy.generation)
@@ -94,6 +113,7 @@ constructor(
                                 key = key,
                                 expectedGeneration = policy.generation,
                                 forceRefresh = forceRefresh,
+                                startPositionMs = startPositionMs,
                             )
                         }
             }
@@ -122,14 +142,15 @@ constructor(
         key: PlaybackGrantKey,
         expectedGeneration: Long,
         forceRefresh: Boolean,
+        startPositionMs: Long,
     ): PlayerResult<PlaybackGrant>? {
         val lockedNow = clock.millis()
-        if (!forceRefresh) {
+        if (!forceRefresh && startPositionMs == 0L) {
             cachedGrantForRequest(key, lockedNow, identity, expectedGeneration)
                 ?.let { return PlayerResult.Success(it) }
         }
         if (!isRequestCurrent(identity, expectedGeneration)) return null
-        return requestGrant(identity, trackId, effectiveQuality, key, expectedGeneration)
+        return requestGrant(identity, trackId, effectiveQuality, key, expectedGeneration, startPositionMs)
     }
 
     private suspend fun requestGrant(
@@ -138,12 +159,20 @@ constructor(
         effectiveQuality: PreferredQuality,
         key: PlaybackGrantKey,
         requestGeneration: Long,
+        startPositionMs: Long,
     ): PlayerResult<PlaybackGrant> {
         return try {
             val response =
                 api.grant(
                     trackId,
-                    PlaybackRequestDto(effectiveQuality.name, key.acceptedCodecs),
+                    PlaybackRequestDto(
+                        preferredQuality = effectiveQuality.name,
+                        acceptedCodecs = key.acceptedCodecs,
+                        streamProtocol = key.streamProtocol.name,
+                        startPositionMs = startPositionMs.takeIf {
+                            key.streamProtocol == PlaybackStreamProtocol.HLS && it > 0
+                        },
+                    ),
                 )
             if (!response.isSuccessful) {
                 val error =
@@ -169,9 +198,16 @@ constructor(
                     now = now,
                     endpoint = serverConfigRepository.currentEndpoint()
                         ?: return PlayerResult.Failure(PlayerFailure.PlaybackUnavailable),
+                    requestedStartPositionMs = startPositionMs,
                 )
             automaticQualityController.recordSelectedQuality(trackId, grant.selectedQuality)
-            if (storeGrant(identity, key, grant, requestGeneration)) {
+            if (startPositionMs > 0) {
+                if (isRequestCurrent(identity, requestGeneration)) {
+                    PlayerResult.Success(grant)
+                } else {
+                    PlayerResult.Failure(PlayerFailure.PlaybackUnavailable)
+                }
+            } else if (storeGrant(identity, key, grant, requestGeneration)) {
                 PlayerResult.Success(grant)
             } else {
                 PlayerResult.Failure(PlayerFailure.PlaybackUnavailable)
@@ -225,6 +261,7 @@ constructor(
             compatibleCodecFallbackTrackIds.clear()
             store.clear()
         }
+        grantRegistry.clear()
         automaticQualityController.resetSession()
     }
 
@@ -241,11 +278,18 @@ constructor(
             resetAutomaticQuality = true
             true
         }
-        if (resetAutomaticQuality) automaticQualityController.resetSession()
+        if (resetAutomaticQuality) {
+            grantRegistry.clear()
+            automaticQualityController.resetSession()
+        }
         return prepared
     }
 
-    private fun requestPolicy(trackId: String, requestedCodecs: List<String>): PlaybackGrantRequestPolicy =
+    private fun requestPolicy(
+        trackId: String,
+        requestedCodecs: List<String>,
+        streamProtocol: PlaybackStreamProtocol,
+    ): PlaybackGrantRequestPolicy =
         synchronized(storeLock) {
             PlaybackGrantRequestPolicy(
                 acceptedCodecs =
@@ -254,6 +298,7 @@ constructor(
                 } else {
                     requestedCodecs
                 },
+                streamProtocol = streamProtocol,
                 generation = storeGeneration,
             )
         }
@@ -283,6 +328,7 @@ constructor(
         trackId: String,
         preferredQuality: PreferredQuality,
         acceptedCodecs: List<String>,
+        streamProtocol: PlaybackStreamProtocol,
     ): PlaybackGrantKey {
         UUID.fromString(trackId)
         require(acceptedCodecs.size <= 10)
@@ -295,6 +341,7 @@ constructor(
             trackId = trackId,
             preferredQuality = preferredQuality,
             acceptedCodecs = acceptedCodecs.sorted(),
+            streamProtocol = streamProtocol,
         )
     }
 
@@ -308,6 +355,7 @@ constructor(
         expectedTrackId: String,
         now: Long,
         endpoint: com.xymusic.app.domain.server.ServerEndpoint,
+        requestedStartPositionMs: Long,
     ): PlaybackGrant {
         require(trackId == expectedTrackId)
         UUID.fromString(trackId)
@@ -328,6 +376,14 @@ constructor(
         require(contentLength == null || contentLength > 0)
         require(cacheKey.isNotBlank() && !cacheKey.contains("?"))
         require(checksumSha256 == null || CHECKSUM_REGEX.matches(checksumSha256))
+        val resolvedProtocol = streamProtocol.toPlaybackStreamProtocol(resolvedUri)
+        require(startPositionMs >= 0)
+        if (requestedStartPositionMs > 0) {
+            require(resolvedProtocol == PlaybackStreamProtocol.HLS)
+            require(startPositionMs == 0L || startPositionMs == requestedStartPositionMs)
+        }
+        val effectiveStartPositionMs =
+            if (requestedStartPositionMs > 0) requestedStartPositionMs else startPositionMs
         return PlaybackGrant(
             trackId = trackId,
             sessionId = sessionId,
@@ -342,6 +398,9 @@ constructor(
             contentLength = contentLength,
             checksumSha256 = checksumSha256,
             cacheKey = cacheKey,
+            streamProtocol = resolvedProtocol,
+            durationMs = durationMs?.also { require(it > 0) },
+            startPositionMs = effectiveStartPositionMs,
         )
     }
 
@@ -364,4 +423,25 @@ constructor(
     }
 }
 
-private data class PlaybackGrantRequestPolicy(val acceptedCodecs: List<String>, val generation: Long)
+private fun protocolForQuality(quality: PreferredQuality): PlaybackStreamProtocol =
+    PlaybackStreamProtocol.HLS
+
+private fun String?.toPlaybackStreamProtocol(uri: URI): PlaybackStreamProtocol {
+    val value = this?.trim()?.uppercase()
+    if (!value.isNullOrEmpty()) {
+        return runCatching { PlaybackStreamProtocol.valueOf(value) }.getOrElse {
+            throw IllegalArgumentException("Invalid playback stream protocol")
+        }
+    }
+    return if (uri.rawPath?.trimEnd('/')?.endsWith("/index.m3u8", ignoreCase = true) == true) {
+        PlaybackStreamProtocol.HLS
+    } else {
+        PlaybackStreamProtocol.PROGRESSIVE
+    }
+}
+
+private data class PlaybackGrantRequestPolicy(
+    val acceptedCodecs: List<String>,
+    val streamProtocol: PlaybackStreamProtocol,
+    val generation: Long,
+)

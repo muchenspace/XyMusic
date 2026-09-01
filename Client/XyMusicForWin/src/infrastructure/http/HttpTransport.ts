@@ -55,7 +55,7 @@ export class HttpTransport {
   async parse<T>(response: BufferedHttpResponse): Promise<T> {
     const text = response.body.byteLength ? new TextDecoder().decode(response.body).replace(/^\uFEFF/, "") : "";
     if (response.ok) {
-      if (response.status === 204 || response.status === 205) return undefined as T;
+      if (response.status === 204 || response.status === 205 || !text.trim()) return undefined as T;
       try {
         return JSON.parse(text) as T;
       } catch (error) {

@@ -397,7 +397,7 @@ func (scanner *FilesystemScanner) runFileStream(
 				processErr := scanner.synchronizer.ProcessFile(
 					scanContext, input.RootID, input.ScanRunID, file, startedAt,
 				)
-				if file.ScanError != nil {
+				if file.ScanError != nil && !errors.Is(processErr, file.ScanError) {
 					processErr = errors.Join(file.ScanError, processErr)
 				}
 				if errors.Is(processErr, ErrScanCancelled) || errors.Is(processErr, context.Canceled) {

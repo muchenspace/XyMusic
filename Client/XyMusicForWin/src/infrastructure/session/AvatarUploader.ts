@@ -23,16 +23,32 @@ export class AvatarUploader {
       body: JSON.stringify({ fileName: avatar.name, contentType: avatar.mediaType, sizeBytes: avatar.bytes.byteLength, checksumSha256 }),
     });
     const uploadHeaders = new Headers(upload.requiredHeaders);
-    const uploaded = await uploadFile(
-      upload.uploadUrl,
-      { method: upload.method, headers: uploadHeaders, body: avatar.bytes },
-      sessionSignal,
-    );
-    if (!uploaded.ok) throw new Error(`头像上传失败 (${uploaded.status})`);
-    throwIfAborted(sessionSignal);
-    const observedEtag = uploaded.headers.get("ETag") ?? undefined;
-    await consumeUploadResponse(uploaded);
-    throwIfAborted(sessionSignal);
+    let observedEtag: string | undefined;
+    if (isLocalAvatarUpload(upload.uploadUrl, this.api.storedSession?.serverUrl)) {
+      // The local fallback upload endpoint is protected by the same bearer
+      // session as the reservation/completion endpoints. Going through
+      // ApiClient also preserves its refresh/retry and session-change rules.
+      await this.api.request<void>(upload.uploadUrl, {
+        method: upload.method,
+        headers: uploadHeaders,
+        body: avatar.bytes,
+        signal: sessionSignal,
+        timeoutMs: AVATAR_UPLOAD_TIMEOUT_MS,
+      });
+    } else {
+      // Presigned object-storage URLs must not receive the server bearer
+      // token. Keep the unsigned upload path for OSS/S3-compatible storage.
+      const uploaded = await uploadFile(
+        upload.uploadUrl,
+        { method: upload.method, headers: uploadHeaders, body: avatar.bytes },
+        sessionSignal,
+      );
+      if (!uploaded.ok) throw new Error(`头像上传失败 (${uploaded.status})`);
+      throwIfAborted(sessionSignal);
+      observedEtag = uploaded.headers.get("ETag") ?? undefined;
+      await consumeUploadResponse(uploaded);
+      throwIfAborted(sessionSignal);
+    }
     return this.api.request<CurrentUserResponse>(`api/v1/users/me/avatar/uploads/${encodeURIComponent(upload.id)}/complete`, {
       method: "POST",
       headers: { "Idempotency-Key": crypto.randomUUID() },
@@ -65,6 +81,18 @@ async function consumeUploadResponse(response: Response): Promise<void> {
 
 function uploadResponseError(): ApiError {
   return new ApiError("头像存储服务返回了异常响应", 0, "UPLOAD_RESPONSE_TOO_LARGE");
+}
+
+function isLocalAvatarUpload(uploadUrl: string, serverUrl: string | undefined): boolean {
+  if (!serverUrl) return false;
+  try {
+    const server = new URL(serverUrl);
+    const target = new URL(uploadUrl, `${server.toString().replace(/\/+$/, "")}/`);
+    return target.origin === server.origin
+      && target.pathname.startsWith("/api/v1/users/me/avatar/uploads/");
+  } catch {
+    return false;
+  }
 }
 
 function validateAvatar(avatar: AvatarUploadInput): void {

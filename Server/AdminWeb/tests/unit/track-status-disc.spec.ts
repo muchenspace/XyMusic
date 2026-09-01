@@ -37,7 +37,8 @@ describe("TrackStatusDisc", () => {
     expect(document.body.textContent).toContain("源文件分析");
     expect(document.body.textContent).toContain("源文件分析完成");
     expect(document.body.textContent).toContain("播放时动态转码");
-    expect(document.body.textContent).toContain("不会预先生成转码变体");
+    expect(document.body.textContent).toContain("首次播放时服务端才按客户端能力生成音频");
+    expect(document.body.textContent).toContain("后续相同请求可复用");
     expect(document.body.textContent).toContain("正常");
     expect(document.body.textContent).not.toContain("READY");
     wrapper.unmount();
@@ -79,6 +80,20 @@ describe("TrackStatusDisc", () => {
     expect(document.body.textContent).toContain("源文件处理失败");
     expect(document.body.textContent).toContain("源文件缺失");
     expect(document.body.textContent).not.toContain("曲目已归档");
+    wrapper.unmount();
+  });
+
+  it("shows a failed source path and sanitized analysis detail", async () => {
+    const source = { ...track().source!, status: "FAILED", lastError: "源文件 \"Artist/Unreadable.flac\" 分析失败：媒体格式无效" };
+    const wrapper = mount(TrackStatusDisc, {
+      props: { track: track({ status: "ERROR", audioStatus: "ERROR", source }) },
+      attachTo: document.body,
+    });
+
+    await wrapper.find(".inline-flex").trigger("mouseenter");
+    expect(document.body.textContent).toContain("Artist/Unreadable.flac");
+    expect(document.body.textContent).toContain("媒体格式无效");
+    expect(document.body.textContent).toContain("源文件分析：");
     wrapper.unmount();
   });
 

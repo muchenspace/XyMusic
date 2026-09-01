@@ -22,7 +22,12 @@ interface PlaybackApi {
 }
 
 @Serializable
-data class PlaybackRequestDto(val preferredQuality: String, val acceptedCodecs: List<String> = emptyList())
+data class PlaybackRequestDto(
+    val preferredQuality: String,
+    val acceptedCodecs: List<String> = emptyList(),
+    val streamProtocol: String? = null,
+    val startPositionMs: Long? = null,
+)
 
 @Serializable
 data class PlaybackGrantDto(
@@ -39,6 +44,9 @@ data class PlaybackGrantDto(
     val contentLength: Long? = null,
     val checksumSha256: String? = null,
     val cacheKey: String,
+    val streamProtocol: String? = null,
+    val durationMs: Long? = null,
+    val startPositionMs: Long = 0,
 )
 
 @Serializable

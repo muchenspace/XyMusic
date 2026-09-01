@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -429,7 +430,7 @@ func (synchronizer *ProductionSynchronizer) finishPreparedFileError(
 	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, ErrScanCancelled) {
 		return err
 	}
-	_ = synchronizer.markSourceFailed(ctx, rootID, normalizePlatformPath(file.RelativePath), err, seenAt)
+	_ = synchronizer.markSourceFailed(ctx, rootID, sourceFailurePath(file), err, seenAt)
 	return err
 }
 
@@ -688,7 +689,14 @@ func (synchronizer *ProductionSynchronizer) ProcessFile(
 	seenAt time.Time,
 ) error {
 	if file.ScanError != nil {
-		return synchronizer.markSourceFailed(ctx, rootID, normalizePlatformPath(file.RelativePath), file.ScanError, seenAt)
+		recordErr := synchronizer.markSourceFailed(ctx, rootID, sourceFailurePath(file), file.ScanError, seenAt)
+		if recordErr != nil {
+			return errors.Join(file.ScanError, recordErr)
+		}
+		// The database write is only bookkeeping; callers must still observe the
+		// per-file analysis failure so scans and direct callers count it as a
+		// failure rather than silently treating it as processed.
+		return file.ScanError
 	}
 	var err error
 	if file.CuePath != "" {
@@ -697,7 +705,7 @@ func (synchronizer *ProductionSynchronizer) ProcessFile(
 		_, err = synchronizer.syncStandardFile(ctx, rootID, scanRunID, file, seenAt, false)
 	}
 	if err != nil {
-		_ = synchronizer.markSourceFailed(ctx, rootID, normalizePlatformPath(file.RelativePath), err, seenAt)
+		_ = synchronizer.markSourceFailed(ctx, rootID, sourceFailurePath(file), err, seenAt)
 		return err
 	}
 	return nil
@@ -1053,6 +1061,14 @@ func (synchronizer *ProductionSynchronizer) sourceHasExternalLyrics(
 	return hasExternal, nil
 }
 
+func sourceFailurePath(file DiscoveredFile) string {
+	path := strings.TrimSpace(file.RelativePath)
+	if path == "" {
+		path = filepath.Base(strings.TrimSpace(file.AudioPath))
+	}
+	return normalizePlatformPath(path)
+}
+
 func (synchronizer *ProductionSynchronizer) markSourceFailed(
 	ctx context.Context,
 	rootID string,
@@ -1067,6 +1083,14 @@ func (synchronizer *ProductionSynchronizer) markSourceFailed(
 	errorMessage := "source synchronization failed"
 	if failure != nil {
 		errorMessage = failure.Error()
+	}
+	// Keep the failing source path in the persisted error. Per-file scan
+	// failures are intentionally isolated so the overall scan can continue,
+	// which means the generic scan error alone is otherwise not actionable in
+	// the admin UI.
+	displayPath := strings.TrimSpace(strings.ReplaceAll(normalizedPath, "\\", "/"))
+	if displayPath != "" && !strings.Contains(errorMessage, displayPath) {
+		errorMessage = fmt.Sprintf("源文件 %q 分析失败：%s", displayPath, errorMessage)
 	}
 	transaction, err := synchronizer.database.Begin(ctx)
 	if err != nil {

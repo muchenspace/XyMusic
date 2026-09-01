@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HtmlAudioPlayer, normalizedAudioVolume } from "../src/infrastructure/audio/HtmlAudioPlayer";
 
+vi.mock("hls.js", () => ({
+  default: {
+    isSupported: () => false,
+  },
+}));
+
 describe("HTML audio volume normalization", () => {
   it.each([
     [-0.000288, 0],
@@ -90,6 +96,26 @@ describe("HTML audio progress updates", () => {
 
     expect(updates).toBe(2);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("maps an HLS seek to the local position after the offset", async () => {
+    const audioElements = stubAudio();
+    const player = new HtmlAudioPlayer();
+    const audio = audioElements[0]!;
+    audio.readyState = 1;
+    audio.duration = 30;
+    const loadPromise = player.load("https://example.test/index.m3u8", undefined, {
+      streamProtocol: "HLS",
+      startOffset: 90,
+      duration: 120,
+    });
+    audio.dispatchEvent(new Event("loadedmetadata"));
+    await loadPromise;
+
+    player.seek(95);
+    expect(audio.currentTime).toBe(5);
+    expect(player.snapshot()).toMatchObject({ currentTime: 95, duration: 120 });
+    player.stop();
   });
 });
 

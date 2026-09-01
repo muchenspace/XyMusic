@@ -1,6 +1,7 @@
 package com.xymusic.app.feature.player.data.media
 
 import com.xymusic.app.feature.player.domain.PlaybackGrant
+import com.xymusic.app.feature.player.domain.PlaybackStreamProtocol
 import com.xymusic.app.feature.player.domain.model.PreferredQuality
 import java.util.LinkedHashMap
 import javax.inject.Inject
@@ -13,6 +14,7 @@ data class PlaybackGrantKey(
     val trackId: String,
     val preferredQuality: PreferredQuality,
     val acceptedCodecs: List<String>,
+    val streamProtocol: PlaybackStreamProtocol = PlaybackStreamProtocol.HLS,
 )
 
 interface PlaybackGrantStore {

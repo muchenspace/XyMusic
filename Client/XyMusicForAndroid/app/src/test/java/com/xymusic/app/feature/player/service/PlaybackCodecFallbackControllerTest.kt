@@ -185,6 +185,8 @@ class PlaybackCodecFallbackControllerTest {
             preferredQuality: PreferredQuality,
             acceptedCodecs: List<String>,
             forceRefresh: Boolean,
+            streamProtocol: com.xymusic.app.feature.player.domain.PlaybackStreamProtocol?,
+            startPositionMs: Long,
         ): PlayerResult<PlaybackGrant> = error("Not used")
 
         override fun invalidate(trackId: String) = Unit

@@ -33,6 +33,7 @@ const (
 	cacheFilePrefix                     = "xymusic-cache-"
 	cachePartialMarker                  = ".partial."
 	cachePollInterval                   = 25 * time.Millisecond
+	hlsDirectedKeyPrefix                = "hls-directed:"
 )
 
 type TranscodeMetrics struct {
@@ -47,14 +48,18 @@ type TranscodeMetrics struct {
 }
 
 type TranscodeSessionParams struct {
-	SessionID  string
-	TrackID    string
-	SourcePath string
-	CacheKey   string
-	CueStartMs *int64
-	CueEndMs   *int64
-	Profile    OutputProfile
-	ExpiresAt  time.Time
+	SessionID       string
+	UserID          string
+	TrackID         string
+	SourcePath      string
+	CacheKey        string
+	Delivery        StreamProtocol
+	DurationMs      int64
+	CueStartMs      *int64
+	CueEndMs        *int64
+	StartPositionMs int64
+	Profile         OutputProfile
+	ExpiresAt       time.Time
 }
 
 type sessionState struct {
@@ -72,25 +77,30 @@ type sessionState struct {
 }
 
 // cacheJob is shared by all playback sessions requesting the same source
-// version and output profile. The partial file is deliberately kept readable
-// while FFmpeg is running, so a client can start playback before transcoding
-// has finished. The final file is only used after FFmpeg exits successfully.
+// version and output profile. Progressive output is private until FFmpeg
+// exits successfully; HLS publishes individual init/segment files while the
+// job is running.
 type cacheJob struct {
-	key           string
-	params        TranscodeSessionParams
-	finalPath     string
-	partialPath   string
-	cacheable     bool
-	started       bool
-	completed     bool
-	finalized     bool
-	err           error
-	cancel        context.CancelFunc
-	lastAccess    time.Time
-	activeReaders int
-	sessionRefs   int
-	readyChan     chan struct{}
-	mu            sync.RWMutex
+	key              string
+	params           TranscodeSessionParams
+	finalPath        string
+	partialPath      string
+	finalDir         string
+	partialDir       string
+	cacheable        bool
+	started          bool
+	completed        bool
+	finalized        bool
+	firstReady       bool
+	firstReadyClosed bool
+	err              error
+	cancel           context.CancelFunc
+	lastAccess       time.Time
+	activeReaders    int
+	sessionRefs      int
+	readyChan        chan struct{}
+	firstReadyChan   chan struct{}
+	mu               sync.RWMutex
 }
 
 type cacheRecord struct {
@@ -100,15 +110,24 @@ type cacheRecord struct {
 	lastAccess time.Time
 }
 
-// StreamHandle owns one reader lease. Complete streams can be passed to
-// http.ServeContent; incomplete streams use a growingFileReader that follows
-// the FFmpeg output until the shared job reaches EOF.
+// StreamHandle owns one reader lease. Progressive handles always point at a
+// finite file; HLS handles are individual immutable segment files.
 type StreamHandle struct {
 	Reader   io.ReadCloser
 	Path     string
 	Complete bool
 	Size     int64
 	ModTime  time.Time
+	Release  func()
+}
+
+// PlaylistHandle owns a short lease while a current HLS playlist snapshot is
+// read. Segment files are opened only after they have been atomically
+// published by FFmpeg.
+type PlaylistHandle struct {
+	Path     string
+	Content  []byte
+	Complete bool
 	Release  func()
 }
 
@@ -128,10 +147,32 @@ type TranscodeSessionManager struct {
 	cacheFiles       map[string]cacheRecord
 	cacheBytes       int64
 	metrics          TranscodeMetrics
+	ttfbTotalMs      int64
+	ttfbSamples      int64
+	durationTotalMs  int64
+	durationSamples  int64
 	stopCleanup      chan struct{}
 	now              func() time.Time
 	closeOnce        sync.Once
 	closed           atomic.Bool
+}
+
+func (manager *TranscodeSessionManager) recordTranscodeDuration(duration time.Duration) {
+	if duration < 0 {
+		return
+	}
+	total := atomic.AddInt64(&manager.durationTotalMs, duration.Milliseconds())
+	samples := atomic.AddInt64(&manager.durationSamples, 1)
+	atomic.StoreInt64(&manager.metrics.AverageDurationMs, total/samples)
+}
+
+func (manager *TranscodeSessionManager) recordTTFB(duration time.Duration) {
+	if duration < 0 {
+		return
+	}
+	total := atomic.AddInt64(&manager.ttfbTotalMs, duration.Milliseconds())
+	samples := atomic.AddInt64(&manager.ttfbSamples, 1)
+	atomic.StoreInt64(&manager.metrics.AverageTTFBMs, total/samples)
 }
 
 // The variadic cache limit keeps the old constructor source-compatible for
@@ -229,13 +270,13 @@ func (manager *TranscodeSessionManager) Close() {
 		for _, job := range jobs {
 			job.mu.Lock()
 			if !job.cacheable {
-				_ = os.Remove(job.partialPath)
+				_ = removePath(jobPartialPathLocked(job))
 			}
 			if !job.completed {
 				if job.cancel != nil {
 					job.cancel()
 				}
-				_ = os.Remove(job.partialPath)
+				_ = removePath(jobPartialPathLocked(job))
 				if finishJobLocked(job, context.Canceled) {
 					atomic.AddInt64(&manager.metrics.TotalCanceled, 1)
 				}
@@ -262,17 +303,37 @@ func finishJobLocked(job *cacheJob, err error) bool {
 	}
 	job.completed = true
 	job.err = err
-	close(job.readyChan)
+	if job.readyChan != nil {
+		close(job.readyChan)
+	}
+	if job.firstReadyChan != nil && !job.firstReadyClosed {
+		job.firstReadyClosed = true
+		close(job.firstReadyChan)
+	}
 	return true
+}
+
+func signalFirstReadyLocked(job *cacheJob) {
+	if job == nil || job.firstReadyClosed {
+		return
+	}
+	job.firstReady = true
+	job.firstReadyClosed = true
+	if job.firstReadyChan != nil {
+		close(job.firstReadyChan)
+	}
 }
 
 func (manager *TranscodeSessionManager) RegisterSession(params TranscodeSessionParams) {
 	if manager == nil || manager.closed.Load() {
 		return
 	}
+	if params.Delivery == "" {
+		params.Delivery = StreamProtocolProgressive
+	}
 	manager.sessionsMu.Lock()
-	defer manager.sessionsMu.Unlock()
 	if manager.closed.Load() {
+		manager.sessionsMu.Unlock()
 		return
 	}
 	if previous, exists := manager.sessions[params.SessionID]; exists {
@@ -310,6 +371,7 @@ func (manager *TranscodeSessionManager) RegisterSession(params TranscodeSessionP
 		params:     params,
 		tempPath:   tempPath,
 		job:        job,
+		started:    false,
 		completed:  completed,
 		err:        sessionErr,
 		lastAccess: manager.now().UTC(),
@@ -320,10 +382,11 @@ func (manager *TranscodeSessionManager) RegisterSession(params TranscodeSessionP
 	}
 	manager.sessions[params.SessionID] = session
 	atomic.AddInt64(&manager.metrics.ActiveSessions, 1)
+	manager.sessionsMu.Unlock()
 }
 
-// AcquireTranscode preserves the old completed-file API. HTTP playback uses
-// OpenStreamAt instead, which does not wait for the whole song to finish.
+// AcquireTranscode exposes the completed progressive representation used by
+// HTTP Range responses and offline downloads.
 func (manager *TranscodeSessionManager) AcquireTranscode(
 	ctx context.Context, sessionID string,
 ) (string, func(), error) {
@@ -341,7 +404,7 @@ func (manager *TranscodeSessionManager) AcquireTranscode(
 }
 
 func (manager *TranscodeSessionManager) ValidateSession(
-	sessionID, trackID, quality, codec string,
+	sessionID, userID, trackID, quality, codec string,
 ) error {
 	if manager == nil || manager.closed.Load() {
 		return ErrInvalidTicket
@@ -356,6 +419,9 @@ func (manager *TranscodeSessionManager) ValidateSession(
 	defer session.mu.RUnlock()
 	if session.params.TrackID != trackID || string(session.params.Profile.Quality) != quality ||
 		!strings.EqualFold(session.params.Profile.Codec, codec) {
+		return ErrInvalidTicket
+	}
+	if session.params.UserID != "" && session.params.UserID != userID {
 		return ErrInvalidTicket
 	}
 	if !session.params.ExpiresAt.IsZero() && !manager.now().Before(session.params.ExpiresAt) {
@@ -380,6 +446,10 @@ func (manager *TranscodeSessionManager) GetOrStartTranscode(ctx context.Context,
 
 	session.mu.Lock()
 	session.lastAccess = manager.now().UTC()
+	if session.params.Delivery == StreamProtocolHLS {
+		session.mu.Unlock()
+		return "", apperror.Validation("HLS sessions must be opened through the playlist endpoint")
+	}
 	if session.params.Profile.Direct || session.job == nil || (session.completed && !session.job.completed) {
 		path, err := session.tempPath, session.err
 		session.mu.Unlock()
@@ -429,113 +499,49 @@ func (manager *TranscodeSessionManager) GetOrStartTranscode(ctx context.Context,
 	}
 }
 
-// OpenStreamAt starts (or joins) a shared transcode and returns immediately.
-// The returned growing reader blocks only when it has caught up with FFmpeg's
-// current output, allowing HTTP playback to begin with the first encoded
-// packets instead of waiting for the entire song.
-func (manager *TranscodeSessionManager) OpenStreamAt(ctx context.Context, sessionID string, start int64) (*StreamHandle, error) {
-	if manager == nil || manager.closed.Load() {
-		return nil, context.Canceled
+// OpenCompletedStream returns a finite progressive file. A transcoded file is
+// intentionally not exposed until FFmpeg has completed, because a growing
+// response cannot provide a truthful Content-Length or byte Range contract.
+func (manager *TranscodeSessionManager) OpenCompletedStream(ctx context.Context, sessionID string) (*StreamHandle, error) {
+	path, release, err := manager.AcquireTranscode(ctx, sessionID)
+	if err != nil {
+		return nil, err
 	}
+	file, err := os.Open(path)
+	if err != nil {
+		release()
+		return nil, err
+	}
+	var releaseOnce sync.Once
+	releaseHandle := func() {
+		releaseOnce.Do(func() {
+			_ = file.Close()
+			release()
+		})
+	}
+	stat, err := file.Stat()
+	if err != nil {
+		releaseHandle()
+		return nil, err
+	}
+	return &StreamHandle{
+		Reader:   file,
+		Path:     path,
+		Complete: true,
+		Size:     stat.Size(),
+		ModTime:  stat.ModTime(),
+		Release:  releaseHandle,
+	}, nil
+}
+
+// OpenStreamAt is retained for internal callers that used the old API. The
+// start offset is no longer used: HTTP Range handling belongs to
+// http.ServeContent, which needs the complete finite file before it responds.
+func (manager *TranscodeSessionManager) OpenStreamAt(ctx context.Context, sessionID string, start int64) (*StreamHandle, error) {
 	if start < 0 {
 		return nil, apperror.Validation("stream start must not be negative")
 	}
-	manager.sessionsMu.RLock()
-	session, exists := manager.sessions[sessionID]
-	manager.sessionsMu.RUnlock()
-	if !exists {
-		return nil, apperror.NotFound("Playback session was not found or expired")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	session.mu.Lock()
-	session.lastAccess = manager.now().UTC()
-	job := session.job
-	path := session.tempPath
-	if session.completed && (job == nil || !job.completed) {
-		job = nil
-	}
-	if session.err != nil {
-		err := session.err
-		session.mu.Unlock()
-		return nil, err
-	}
-	session.activeReaders++
-	session.mu.Unlock()
-
-	if job == nil {
-		file, err := os.Open(path)
-		if err != nil {
-			manager.releaseSessionReader(session, nil)
-			return nil, err
-		}
-		stat, statErr := file.Stat()
-		if statErr != nil {
-			_ = file.Close()
-			manager.releaseSessionReader(session, nil)
-			return nil, statErr
-		}
-		return &StreamHandle{
-			Reader:   file,
-			Path:     path,
-			Complete: true,
-			Size:     stat.Size(),
-			ModTime:  stat.ModTime(),
-			Release:  manager.releaseSessionReaderFunc(session, nil, file),
-		}, nil
-	}
-
-	if ctx.Err() != nil {
-		manager.releaseSessionReader(session, job)
-		return nil, ctx.Err()
-	}
-	manager.ensureJobStarted(job)
-	manager.tryFinalizeJob(job)
-
-	job.mu.Lock()
-	if job.completed && job.err != nil {
-		err := job.err
-		job.mu.Unlock()
-		manager.releaseSessionReader(session, job)
-		return nil, err
-	}
-	job.activeReaders++
-	job.lastAccess = manager.now().UTC()
-	complete := job.completed
-	path = manager.jobPathLocked(job)
-	var size int64
-	var modTime time.Time
-	if complete {
-		if stat, statErr := os.Stat(path); statErr == nil {
-			size, modTime = stat.Size(), stat.ModTime()
-		}
-	}
-	job.mu.Unlock()
-	manager.touchCacheJob(job)
-
-	if complete {
-		file, err := os.Open(path)
-		if err != nil {
-			manager.releaseSessionReader(session, job)
-			return nil, err
-		}
-		return &StreamHandle{
-			Reader:   file,
-			Path:     path,
-			Complete: true,
-			Size:     size,
-			ModTime:  modTime,
-			Release:  manager.releaseSessionReaderFunc(session, job, file),
-		}, nil
-	}
-	return &StreamHandle{
-		Reader:   &growingFileReader{job: job, offset: start, ctx: ctx},
-		Path:     path,
-		Complete: false,
-		Release:  manager.releaseSessionReaderFunc(session, job, nil),
-	}, nil
+	return manager.OpenCompletedStream(ctx, sessionID)
 }
 
 func (manager *TranscodeSessionManager) OpenStream(ctx context.Context, sessionID string) (*StreamHandle, error) {
@@ -623,14 +629,15 @@ func (manager *TranscodeSessionManager) ensureJobStarted(job *cacheJob) {
 }
 
 func (manager *TranscodeSessionManager) runJob(job *cacheJob, ctx context.Context) {
+	if job.params.Delivery == StreamProtocolHLS {
+		manager.runHLSJob(job, ctx)
+		return
+	}
 
 	select {
 	case manager.semaphore <- struct{}{}:
 	case <-ctx.Done():
 		manager.failJobFromContext(job, ctx)
-		return
-	case <-time.After(5 * time.Second):
-		manager.failJob(job, ErrMaxTranscodeLimit, false)
 		return
 	}
 	defer func() { <-manager.semaphore }()
@@ -651,7 +658,7 @@ func (manager *TranscodeSessionManager) runJob(job *cacheJob, ctx context.Contex
 	command := exec.CommandContext(ctx, manager.ffmpegPath, args...)
 	startTime := manager.now()
 	runErr := command.Run()
-	_ = manager.now().Sub(startTime).Milliseconds()
+	manager.recordTranscodeDuration(manager.now().Sub(startTime))
 	if runErr != nil {
 		manager.failJobFromContext(job, ctx)
 		return
@@ -705,9 +712,7 @@ func (manager *TranscodeSessionManager) failJob(job *cacheJob, err error, cancel
 	if cancel != nil {
 		cancel()
 	}
-	if job.partialPath != "" {
-		_ = os.Remove(job.partialPath)
-	}
+	_ = removePath(manager.jobPartialPath(job))
 	if canceled {
 		atomic.AddInt64(&manager.metrics.TotalCanceled, 1)
 	} else {
@@ -731,8 +736,8 @@ func (manager *TranscodeSessionManager) buildFFmpegArgs(params TranscodeSessionP
 		args = append(args, "-ss", fmt.Sprintf("%.3f", float64(startMs)/1000.0))
 	}
 	args = append(args, "-i", params.SourcePath, "-map", "0:a:0", "-vn")
-	if params.CueEndMs != nil && *params.CueEndMs > startMs {
-		args = append(args, "-t", fmt.Sprintf("%.3f", float64(*params.CueEndMs-startMs)/1000.0))
+	if endMs := sourceEndMs(params); endMs > startMs {
+		args = append(args, "-t", fmt.Sprintf("%.3f", float64(endMs-startMs)/1000.0))
 	}
 	if manager.ffmpegThreads > 0 {
 		args = append(args, "-threads", strconv.Itoa(manager.ffmpegThreads))
@@ -757,6 +762,20 @@ func (manager *TranscodeSessionManager) buildFFmpegArgs(params TranscodeSessionP
 		args = append(args, "-ar", strconv.Itoa(*params.Profile.SampleRate))
 	}
 	return append(args, outputPath)
+}
+
+func sourceEndMs(params TranscodeSessionParams) int64 {
+	if params.CueEndMs != nil && *params.CueEndMs > 0 {
+		return *params.CueEndMs
+	}
+	startMs := int64(0)
+	if params.CueStartMs != nil && *params.CueStartMs > 0 {
+		startMs = *params.CueStartMs
+	}
+	if params.DurationMs > 0 {
+		return startMs + params.DurationMs
+	}
+	return 0
 }
 
 func (manager *TranscodeSessionManager) runPeriodicCleanup() {
@@ -788,10 +807,22 @@ func (manager *TranscodeSessionManager) cleanupExpiredSessionsAt(now time.Time) 
 		readers := session.activeReaders
 		job := session.job
 		completedCacheable := false
-		if job != nil && job.cacheable {
+		jobCompleted := false
+		var jobErr error
+		if job != nil {
 			job.mu.RLock()
-			completedCacheable = job.completed
+			jobCompleted = job.completed
+			jobErr = job.err
+			completedCacheable = job.cacheable && jobCompleted
 			job.mu.RUnlock()
+		}
+		if jobCompleted && !session.completed {
+			// HLS requests do not wait on the session ready channel. Mark their
+			// session complete when the shared job settles so directed, non-cached
+			// jobs can be reclaimed after the normal idle window.
+			session.completed = true
+			session.err = jobErr
+			close(session.readyChan)
 		}
 		ticketExpired := !session.params.ExpiresAt.IsZero() && !now.Before(session.params.ExpiresAt)
 		idleExpired := !active && now.Sub(session.lastAccess) > manager.idleTimeout
@@ -840,7 +871,7 @@ func (manager *TranscodeSessionManager) cleanupJobs(now time.Time) {
 		// Their files live until enforceCacheLimit removes the oldest eligible
 		// entry because the configured byte limit is exceeded.
 		if completed && !job.cacheable && readers == 0 && refs == 0 && now.Sub(lastAccess) > manager.idleTimeout {
-			_ = os.Remove(job.partialPath)
+			_ = removePath(manager.jobPartialPath(job))
 			manager.cacheMu.Lock()
 			if current, exists := manager.cacheJobs[job.key]; exists && current == job {
 				delete(manager.cacheJobs, job.key)
@@ -866,36 +897,78 @@ func (manager *TranscodeSessionManager) getOrCreateJob(params TranscodeSessionPa
 	if key == "" {
 		key = "session:" + params.SessionID
 	}
+	if params.Delivery == "" {
+		params.Delivery = StreamProtocolProgressive
+	}
 	manager.cacheMu.Lock()
 	defer manager.cacheMu.Unlock()
 	if job, exists := manager.cacheJobs[key]; exists {
 		return job
 	}
 	job := &cacheJob{
-		key:        key,
-		params:     params,
-		cacheable:  strings.TrimSpace(params.CacheKey) != "",
-		readyChan:  make(chan struct{}),
-		lastAccess: manager.now().UTC(),
+		key:            key,
+		params:         params,
+		cacheable:      strings.TrimSpace(params.CacheKey) != "" && !strings.HasPrefix(params.CacheKey, hlsDirectedKeyPrefix),
+		readyChan:      make(chan struct{}),
+		firstReadyChan: make(chan struct{}),
+		lastAccess:     manager.now().UTC(),
 	}
 	if job.cacheable {
-		job.finalPath, job.partialPath = manager.cachePaths(params.CacheKey, params.Profile.Container)
-		if stat, err := os.Stat(job.finalPath); err == nil && stat.Mode().IsRegular() && stat.Size() > 0 {
-			job.completed = true
-			job.finalized = true
-			close(job.readyChan)
-			if existing, exists := manager.cacheFiles[job.finalPath]; exists {
-				existing.jobKey = key
-				manager.cacheFiles[job.finalPath] = existing
-			} else {
-				manager.cacheFiles[job.finalPath] = cacheRecord{
-					path: job.finalPath, jobKey: key, size: stat.Size(), lastAccess: stat.ModTime(),
+		if params.Delivery == StreamProtocolHLS {
+			job.finalDir, job.partialDir = manager.hlsCachePaths(params.CacheKey)
+			job.finalPath = job.finalDir
+			if hlsOutputReady(job.finalDir) {
+				job.completed = true
+				job.finalized = true
+				job.firstReady = true
+				job.firstReadyClosed = true
+				close(job.readyChan)
+				close(job.firstReadyChan)
+				if size, sizeErr := directorySize(job.finalDir); sizeErr == nil && size > 0 {
+					if existing, exists := manager.cacheFiles[job.finalDir]; exists {
+						manager.cacheBytes += size - existing.size
+						existing.jobKey = key
+						existing.size = size
+						manager.cacheFiles[job.finalDir] = existing
+					} else {
+						info, infoErr := os.Stat(job.finalDir)
+						if infoErr == nil {
+							manager.cacheFiles[job.finalDir] = cacheRecord{
+								path: job.finalDir, jobKey: key, size: size, lastAccess: info.ModTime(),
+							}
+							manager.cacheBytes += size
+						}
+					}
 				}
-				manager.cacheBytes += stat.Size()
+			}
+		} else {
+			job.finalPath, job.partialPath = manager.cachePaths(params.CacheKey, params.Profile.Container)
+		}
+		if params.Delivery != StreamProtocolHLS {
+			if stat, err := os.Stat(job.finalPath); err == nil && stat.Mode().IsRegular() && stat.Size() > 0 {
+				job.completed = true
+				job.finalized = true
+				close(job.readyChan)
+				job.firstReady = true
+				job.firstReadyClosed = true
+				close(job.firstReadyChan)
+				if existing, exists := manager.cacheFiles[job.finalPath]; exists {
+					existing.jobKey = key
+					manager.cacheFiles[job.finalPath] = existing
+				} else {
+					manager.cacheFiles[job.finalPath] = cacheRecord{
+						path: job.finalPath, jobKey: key, size: stat.Size(), lastAccess: stat.ModTime(),
+					}
+					manager.cacheBytes += stat.Size()
+				}
 			}
 		}
 	} else {
-		job.partialPath = filepath.Join(manager.localMedia.TranscodeDirectory(), fmt.Sprintf("%s_%s.%s", params.SessionID, uuid.NewString()[:8], params.Profile.Container))
+		if params.Delivery == StreamProtocolHLS {
+			job.partialDir = filepath.Join(manager.localMedia.TranscodeDirectory(), fmt.Sprintf("%s_%s.hls", params.SessionID, uuid.NewString()[:8]))
+		} else {
+			job.partialPath = filepath.Join(manager.localMedia.TranscodeDirectory(), fmt.Sprintf("%s_%s.%s", params.SessionID, uuid.NewString()[:8], params.Profile.Container))
+		}
 	}
 	manager.cacheJobs[key] = job
 	return job
@@ -913,6 +986,13 @@ func (manager *TranscodeSessionManager) cachePaths(key, container string) (strin
 	return finalPath, partialPath
 }
 
+func (manager *TranscodeSessionManager) hlsCachePaths(key string) (string, string) {
+	digest := sha256.Sum256([]byte(key))
+	base := cacheFilePrefix + hex.EncodeToString(digest[:])
+	return filepath.Join(manager.localMedia.TranscodeDirectory(), base+".hls"),
+		filepath.Join(manager.localMedia.TranscodeDirectory(), base+cachePartialMarker+"hls")
+}
+
 func (manager *TranscodeSessionManager) jobPath(job *cacheJob) string {
 	job.mu.RLock()
 	defer job.mu.RUnlock()
@@ -920,10 +1000,53 @@ func (manager *TranscodeSessionManager) jobPath(job *cacheJob) string {
 }
 
 func (manager *TranscodeSessionManager) jobPathLocked(job *cacheJob) string {
+	if job.params.Delivery == StreamProtocolHLS {
+		if job.finalized && job.finalDir != "" {
+			return job.finalDir
+		}
+		return job.partialDir
+	}
 	if job.finalized && job.finalPath != "" {
 		return job.finalPath
 	}
 	return job.partialPath
+}
+
+func (manager *TranscodeSessionManager) jobPartialPath(job *cacheJob) string {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	return jobPartialPathLocked(job)
+}
+
+func jobPartialPathLocked(job *cacheJob) string {
+	if job.params.Delivery == StreamProtocolHLS {
+		return job.partialDir
+	}
+	return job.partialPath
+}
+
+func jobFinalPathLocked(job *cacheJob) string {
+	if job.params.Delivery == StreamProtocolHLS {
+		return job.finalDir
+	}
+	return job.finalPath
+}
+
+func removePath(path string) error {
+	if path == "" {
+		return nil
+	}
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return os.RemoveAll(path)
+	}
+	return os.Remove(path)
 }
 
 func (manager *TranscodeSessionManager) tryFinalizeJob(job *cacheJob) {
@@ -931,22 +1054,65 @@ func (manager *TranscodeSessionManager) tryFinalizeJob(job *cacheJob) {
 		return
 	}
 	job.mu.Lock()
-	if !job.completed || job.finalized || job.partialPath == "" {
+	if !job.completed || job.finalized || job.activeReaders > 0 {
+		job.mu.Unlock()
+		return
+	}
+	if job.params.Delivery == StreamProtocolHLS {
+		partialDir, finalDir, key := job.partialDir, job.finalDir, job.key
+		if partialDir == "" || finalDir == "" || !hlsOutputReady(partialDir) {
+			job.mu.Unlock()
+			return
+		}
+		if err := os.Rename(partialDir, finalDir); err != nil {
+			if hlsOutputReady(finalDir) {
+				if removeErr := os.RemoveAll(partialDir); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+					job.mu.Unlock()
+					return
+				}
+			} else {
+				job.mu.Unlock()
+				return
+			}
+		}
+		size, err := directorySize(finalDir)
+		if err != nil || size <= 0 {
+			job.mu.Unlock()
+			return
+		}
+		now := manager.now().UTC()
+		_ = os.Chtimes(finalDir, now, now)
+		job.finalized = true
+		job.lastAccess = now
+		job.mu.Unlock()
+		manager.cacheMu.Lock()
+		if old, exists := manager.cacheFiles[finalDir]; exists {
+			manager.cacheBytes -= old.size
+		}
+		manager.cacheFiles[finalDir] = cacheRecord{path: finalDir, jobKey: key, size: size, lastAccess: now}
+		manager.cacheBytes += size
+		manager.cacheMu.Unlock()
+		return
+	}
+	if job.partialPath == "" {
 		job.mu.Unlock()
 		return
 	}
 	partialPath, finalPath, key := job.partialPath, job.finalPath, job.key
-	job.mu.Unlock()
-
 	if err := os.Rename(partialPath, finalPath); err != nil {
 		if stat, statErr := os.Stat(finalPath); statErr == nil && stat.Size() > 0 {
-			_ = os.Remove(partialPath)
+			if removeErr := os.Remove(partialPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				job.mu.Unlock()
+				return
+			}
 		} else {
+			job.mu.Unlock()
 			return
 		}
 	}
 	stat, err := os.Stat(finalPath)
 	if err != nil || stat.Size() == 0 {
+		job.mu.Unlock()
 		return
 	}
 	now := manager.now().UTC()
@@ -954,7 +1120,6 @@ func (manager *TranscodeSessionManager) tryFinalizeJob(job *cacheJob) {
 	// is rebuilt after a restart, so relying only on cacheRecord.lastAccess
 	// would otherwise make old files look recently used again.
 	_ = os.Chtimes(finalPath, now, now)
-	job.mu.Lock()
 	job.finalized = true
 	job.lastAccess = now
 	job.mu.Unlock()
@@ -974,24 +1139,49 @@ func (manager *TranscodeSessionManager) loadCacheIndex() {
 	if err != nil {
 		return
 	}
+	// A process can stop between writing a partial output and publishing its
+	// final name. Partial files are never reusable after restart; removing them
+	// here also prevents an abandoned HLS directory from blocking a later job.
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), cacheFilePrefix) {
+			continue
+		}
+		path := filepath.Join(manager.localMedia.TranscodeDirectory(), entry.Name())
+		if strings.Contains(entry.Name(), cachePartialMarker) {
+			_ = removePath(path)
+			continue
+		}
+		if entry.IsDir() && strings.HasSuffix(entry.Name(), ".hls") {
+			if !hlsOutputReady(path) {
+				_ = removePath(path)
+			}
+		}
+	}
 	manager.cacheMu.Lock()
 	defer manager.cacheMu.Unlock()
 	indexed := make(map[string]cacheRecord, len(entries))
 	var total int64
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasPrefix(entry.Name(), cacheFilePrefix) || strings.Contains(entry.Name(), cachePartialMarker) {
+		if !strings.HasPrefix(entry.Name(), cacheFilePrefix) || strings.Contains(entry.Name(), cachePartialMarker) {
 			continue
 		}
 		info, err := entry.Info()
-		if err != nil || info.Size() <= 0 {
+		if err != nil {
 			continue
 		}
 		path := filepath.Join(manager.localMedia.TranscodeDirectory(), entry.Name())
+		size := info.Size()
+		if info.IsDir() {
+			size, err = directorySize(path)
+		}
+		if err != nil || size <= 0 {
+			continue
+		}
 		previous := manager.cacheFiles[path]
 		indexed[path] = cacheRecord{
-			path: path, jobKey: previous.jobKey, size: info.Size(), lastAccess: info.ModTime(),
+			path: path, jobKey: previous.jobKey, size: size, lastAccess: info.ModTime(),
 		}
-		total += info.Size()
+		total += size
 	}
 	// Rebuild rather than incrementing the old counters. This makes startup
 	// indexing idempotent and also lets a running test/admin refresh reconcile
@@ -1073,7 +1263,7 @@ func (manager *TranscodeSessionManager) enforceCacheLimit() {
 			manager.cacheBytes -= current.size
 			manager.cacheMu.Unlock()
 
-			if err := os.Remove(current.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			if err := removePath(current.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 				manager.cacheMu.Lock()
 				if _, stillPresent := manager.cacheFiles[current.path]; !stillPresent {
 					manager.cacheFiles[current.path] = current
@@ -1086,7 +1276,7 @@ func (manager *TranscodeSessionManager) enforceCacheLimit() {
 			if candidate.job != nil {
 				candidate.job.mu.Lock()
 				canDropJob := candidate.job.completed && candidate.job.finalized &&
-					candidate.job.finalPath == current.path && candidate.job.sessionRefs == 0 &&
+					jobFinalPathLocked(candidate.job) == current.path && candidate.job.sessionRefs == 0 &&
 					candidate.job.activeReaders == 0
 				candidate.job.mu.Unlock()
 				if canDropJob {
@@ -1117,103 +1307,4 @@ func cacheJobProtected(job *cacheJob) bool {
 	job.mu.RLock()
 	defer job.mu.RUnlock()
 	return !job.completed || job.activeReaders > 0 || job.sessionRefs > 0
-}
-
-type growingFileReader struct {
-	job      *cacheJob
-	offset   int64
-	ctx      context.Context
-	file     *os.File
-	filePath string
-	closed   atomic.Bool
-	mu       sync.Mutex
-}
-
-func (reader *growingFileReader) Read(buffer []byte) (int, error) {
-	if len(buffer) == 0 {
-		return 0, nil
-	}
-	for {
-		if reader.closed.Load() {
-			return 0, io.ErrClosedPipe
-		}
-		if err := reader.ctx.Err(); err != nil {
-			return 0, err
-		}
-		reader.job.mu.RLock()
-		path := reader.jobPathLocked()
-		completed := reader.job.completed
-		jobErr := reader.job.err
-		readyChan := reader.job.readyChan
-		reader.job.mu.RUnlock()
-		if jobErr != nil {
-			return 0, jobErr
-		}
-		reader.mu.Lock()
-		if path != "" && (reader.file == nil || reader.filePath != path) {
-			if reader.file != nil {
-				_ = reader.file.Close()
-			}
-			file, err := os.Open(path)
-			if err == nil {
-				reader.file, reader.filePath = file, path
-			}
-		}
-		var n int
-		var readErr error
-		if reader.file != nil {
-			n, readErr = reader.file.ReadAt(buffer, reader.offset)
-		}
-		reader.mu.Unlock()
-		if n > 0 {
-			reader.offset += int64(n)
-			reader.job.mu.Lock()
-			reader.job.lastAccess = time.Now().UTC()
-			reader.job.mu.Unlock()
-			return n, nil
-		}
-		if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, os.ErrClosed) {
-			return 0, readErr
-		}
-		if completed {
-			return 0, io.EOF
-		}
-		timer := time.NewTimer(cachePollInterval)
-		select {
-		case <-reader.ctx.Done():
-			if !timer.Stop() {
-				<-timer.C
-			}
-			return 0, reader.ctx.Err()
-		case <-readyChan:
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-		case <-timer.C:
-		}
-	}
-}
-
-func (reader *growingFileReader) jobPathLocked() string {
-	if reader.job.finalized && reader.job.finalPath != "" {
-		return reader.job.finalPath
-	}
-	return reader.job.partialPath
-}
-
-func (reader *growingFileReader) Close() error {
-	if reader.closed.Swap(true) {
-		return nil
-	}
-	reader.mu.Lock()
-	defer reader.mu.Unlock()
-	if reader.file != nil {
-		err := reader.file.Close()
-		reader.file = nil
-		return err
-	}
-	return nil
 }

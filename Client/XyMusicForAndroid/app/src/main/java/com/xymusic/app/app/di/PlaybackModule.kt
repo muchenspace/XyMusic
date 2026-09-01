@@ -2,6 +2,7 @@ package com.xymusic.app.app.di
 
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
+import androidx.media3.exoplayer.source.MediaSource
 import com.xymusic.app.app.integration.CatalogLyricsSource
 import com.xymusic.app.app.integration.LibraryPlaybackEventSink
 import com.xymusic.app.core.database.OfflineAccountDataCleaner
@@ -10,6 +11,7 @@ import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.SessionIdentityProvider
 import com.xymusic.app.core.session.SessionMutationCoordinator
 import com.xymusic.app.feature.player.adapter.media3.PlaybackDataSourceFactory
+import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaSourceFactory
 import com.xymusic.app.feature.player.data.controller.Media3PlayerRepository
 import com.xymusic.app.feature.player.data.local.DataStorePlaybackModeStore
 import com.xymusic.app.feature.player.data.local.RoomPlaybackQueueStore
@@ -20,6 +22,8 @@ import com.xymusic.app.feature.player.data.media.OfflineMediaCache
 import com.xymusic.app.feature.player.data.media.OfflineMediaDownloader
 import com.xymusic.app.feature.player.data.media.OfflineMediaStore
 import com.xymusic.app.feature.player.data.media.PlaybackCache
+import com.xymusic.app.feature.player.data.media.PlaybackGrantRegistry
+import com.xymusic.app.feature.player.data.media.GrantResolvingMediaSourceFactory
 import com.xymusic.app.feature.player.data.media.PlaybackGrantStore
 import com.xymusic.app.feature.player.data.media.PlaybackNetworkPolicy
 import com.xymusic.app.feature.player.data.media.playbackDataSourceFactory
@@ -109,22 +113,38 @@ object PlaybackProviderModule {
     fun providePlaybackDataSourceFactory(
         @MediaHttpClient mediaHttpClient: OkHttpClient,
         playbackCache: PlaybackCache,
-        grantRepository: PlaybackGrantRepository,
+        grantRegistry: PlaybackGrantRegistry,
         networkPolicy: PlaybackNetworkPolicy,
-        offlineMediaStore: OfflineMediaStore,
-        sessionProvider: AppSessionProvider,
         sessionIdentityProvider: SessionIdentityProvider,
-        sessionMutationCoordinator: SessionMutationCoordinator,
         automaticQualityTransferListener: AutomaticQualityTransferListener,
     ): DataSource.Factory = playbackDataSourceFactory(
         mediaHttpClient,
         playbackCache,
-        grantRepository,
+        grantRegistry,
         networkPolicy,
-        offlineMediaStore,
-        sessionProvider,
         sessionIdentityProvider,
-        sessionMutationCoordinator,
         automaticQualityTransferListener,
+    )
+
+    @Provides
+    @Singleton
+    @PlaybackMediaSourceFactory
+    @UnstableApi
+    fun providePlaybackMediaSourceFactory(
+        @PlaybackDataSourceFactory dataSourceFactory: DataSource.Factory,
+        grantRepository: PlaybackGrantRepository,
+        grantRegistry: PlaybackGrantRegistry,
+        offlineMediaStore: OfflineMediaStore,
+        sessionProvider: AppSessionProvider,
+        sessionIdentityProvider: SessionIdentityProvider,
+        sessionMutationCoordinator: SessionMutationCoordinator,
+    ): MediaSource.Factory = GrantResolvingMediaSourceFactory(
+        dataSourceFactory = dataSourceFactory,
+        grantRepository = grantRepository,
+        grantRegistry = grantRegistry,
+        offlineMediaStore = offlineMediaStore,
+        sessionProvider = sessionProvider,
+        sessionIdentityProvider = sessionIdentityProvider,
+        sessionMutationCoordinator = sessionMutationCoordinator,
     )
 }

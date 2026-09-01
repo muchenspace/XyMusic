@@ -31,16 +31,19 @@ internal fun StoredPlaybackQueueItem.toPlaybackMediaItem(): MediaItem = MediaIte
     .Builder()
     .setMediaId(queueItemId)
     .setUri(PlaybackMediaUri.forTrack(trackId))
-    .setMediaMetadata(toMediaMetadata())
+    .setMediaMetadata(toMediaMetadata(requestedStartPositionMs = resumePositionMs.coerceAtLeast(0)))
     .build()
 
-private fun StoredPlaybackQueueItem.toMediaMetadata(): MediaMetadata {
+private fun StoredPlaybackQueueItem.toMediaMetadata(requestedStartPositionMs: Long): MediaMetadata {
     val extras =
         Bundle().apply {
             putString(PlaybackMediaMetadata.EXTRA_TRACK_ID, trackId)
             putStringArrayList(PlaybackMediaMetadata.EXTRA_ARTISTS, ArrayList(artistNames))
             putString(PlaybackMediaMetadata.EXTRA_ARTWORK_CACHE_KEY, artworkCacheKey)
             putLong(PlaybackMediaMetadata.EXTRA_DURATION_MS, durationMs)
+            if (isCurrent && requestedStartPositionMs > 0) {
+                putLong(PlaybackMediaMetadata.EXTRA_REQUESTED_START_POSITION_MS, requestedStartPositionMs)
+            }
         }
     return MediaMetadata
         .Builder()

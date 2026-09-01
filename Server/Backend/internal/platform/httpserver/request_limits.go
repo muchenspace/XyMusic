@@ -22,6 +22,10 @@ const (
 	// MaxTagScrapingBatchRequestBodyBytes allows large track selections while
 	// retaining a transport-level ceiling for the batch endpoint.
 	MaxTagScrapingBatchRequestBodyBytes int64 = 64 * 1024 * 1024
+	// MaxAvatarUploadRequestBodyBytes is the transport ceiling for the
+	// authenticated local avatar upload endpoint. The reservation service still
+	// validates the exact reserved size and checksum.
+	MaxAvatarUploadRequestBodyBytes int64 = 5 * 1024 * 1024
 	// MaxMediaUploadRequestBodyBytes is the hard server ceiling for the
 	// designated streaming media content endpoint.
 	MaxMediaUploadRequestBodyBytes int64 = 1024 * 1024 * 1024
@@ -29,6 +33,10 @@ const (
 
 var mediaContentUploadPath = regexp.MustCompile(
 	`(?i)^/api/v1/admin/media/uploads/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/content$`,
+)
+
+var avatarContentUploadPath = regexp.MustCompile(
+	`(?i)^/api/v1/users/me/avatar/uploads/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$`,
 )
 
 var objectStorageProxyUploadPath = regexp.MustCompile(
@@ -49,6 +57,8 @@ type StructuredLimitMatcher func(*http.Request) int64
 type RequestLimits struct {
 	StructuredBytes        int64
 	StructuredLimitMatcher StructuredLimitMatcher
+	AvatarUploadBytes      int64
+	AvatarUploadMatcher    MediaUploadMatcher
 	MediaUploadBytes       int64
 	MediaUploadMatcher     MediaUploadMatcher
 }
@@ -58,6 +68,8 @@ func DefaultRequestLimits() RequestLimits {
 	return RequestLimits{
 		StructuredBytes:        MaxStructuredRequestBodyBytes,
 		StructuredLimitMatcher: defaultStructuredLimitMatcher,
+		AvatarUploadBytes:      MaxAvatarUploadRequestBodyBytes,
+		AvatarUploadMatcher:    IsAvatarContentUpload,
 		MediaUploadBytes:       MaxMediaUploadRequestBodyBytes,
 		MediaUploadMatcher:     IsMediaContentUpload,
 	}
@@ -71,6 +83,16 @@ func defaultStructuredLimitMatcher(request *http.Request) int64 {
 		return MaxTagScrapingBatchRequestBodyBytes
 	}
 	return 0
+}
+
+// IsAvatarContentUpload matches the authenticated local avatar content route.
+// It is kept separate from IsMediaContentUpload because avatars have a much
+// smaller transport ceiling than audio/artwork uploads.
+func IsAvatarContentUpload(request *http.Request) bool {
+	if request == nil || request.Method != http.MethodPut || request.URL == nil {
+		return false
+	}
+	return avatarContentUploadPath.MatchString(request.URL.Path)
 }
 
 // IsMediaContentUpload matches PUT requests that stream media either through
@@ -96,8 +118,11 @@ func RequestSizeLimiter(input RequestLimits) (gin.HandlerFunc, error) {
 		}
 
 		mediaUpload := limits.MediaUploadMatcher(c.Request)
+		avatarUpload := limits.AvatarUploadMatcher(c.Request)
 		maximumBytes := limits.StructuredBytes
-		if mediaUpload {
+		if avatarUpload {
+			maximumBytes = limits.AvatarUploadBytes
+		} else if mediaUpload {
 			maximumBytes = limits.MediaUploadBytes
 		} else if limits.StructuredLimitMatcher != nil {
 			if matched := limits.StructuredLimitMatcher(c.Request); matched > 0 {
@@ -147,6 +172,12 @@ func normalizeRequestLimits(input RequestLimits) (RequestLimits, error) {
 	if input.StructuredLimitMatcher == nil && !customStructuredBytes {
 		input.StructuredLimitMatcher = defaults.StructuredLimitMatcher
 	}
+	if input.AvatarUploadBytes == 0 {
+		input.AvatarUploadBytes = defaults.AvatarUploadBytes
+	}
+	if input.AvatarUploadMatcher == nil {
+		input.AvatarUploadMatcher = defaults.AvatarUploadMatcher
+	}
 	if input.MediaUploadBytes == 0 {
 		input.MediaUploadBytes = defaults.MediaUploadBytes
 	}
@@ -155,6 +186,9 @@ func normalizeRequestLimits(input RequestLimits) (RequestLimits, error) {
 	}
 	if input.StructuredBytes < 1 {
 		return RequestLimits{}, fmt.Errorf("structured request limit must be positive")
+	}
+	if input.AvatarUploadBytes < 1 {
+		return RequestLimits{}, fmt.Errorf("avatar upload limit must be positive")
 	}
 	if input.MediaUploadBytes < input.StructuredBytes {
 		return RequestLimits{}, fmt.Errorf("media upload limit cannot be smaller than structured request limit")
@@ -203,6 +237,8 @@ func bodyLimitDetail(maximumBytes int64) string {
 		return "请求内容超过 2 MiB，请缩小后重试"
 	case MaxTagScrapingBatchRequestBodyBytes:
 		return "批量刮削请求内容超过 64 MiB，请缩小后重试"
+	case MaxAvatarUploadRequestBodyBytes:
+		return "头像上传内容超过 5 MiB，请缩小后重试"
 	case MaxMediaUploadRequestBodyBytes:
 		return "上传内容超过 1 GiB，请缩小后重试"
 	default:

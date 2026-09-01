@@ -24,6 +24,7 @@ import com.xymusic.app.feature.player.domain.OfflineTrackRepository
 import com.xymusic.app.feature.player.domain.OfflineTrackResult
 import com.xymusic.app.feature.player.domain.PlaybackGrant
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
+import com.xymusic.app.feature.player.domain.PlaybackStreamProtocol
 import com.xymusic.app.feature.player.domain.PlayerResult
 import java.time.Clock
 import javax.inject.Inject
@@ -62,7 +63,9 @@ constructor(
     private val playbackNetworkPolicy: PlaybackNetworkPolicy,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : OfflineMediaDownloader {
-    override suspend fun download(grant: PlaybackGrant): Long? = runInterruptible(ioDispatcher) {
+    override suspend fun download(grant: PlaybackGrant): Long? {
+        if (grant.streamProtocol != PlaybackStreamProtocol.PROGRESSIVE) return null
+        return runInterruptible(ioDispatcher) {
         val builder = DataSpec.Builder()
             .setUri(grant.streamUrl)
             .setKey(grant.cacheKey)
@@ -74,6 +77,7 @@ constructor(
             null,
         ).cache()
         playbackCache.cachedContentLength(grant.cacheKey)
+        }
     }
 
     private fun downloadDataSource(): CacheDataSource {
@@ -183,11 +187,16 @@ constructor(
         val metadata = catalogDao.tracks(listOf(trackId)).singleOrNull() ?: return null
         if (!isCurrent(downloadIdentity)) return null
         val grant =
-            when (val result = playbackGrantRepository.get(trackId)) {
+            when (val result = playbackGrantRepository.get(
+                trackId = trackId,
+                acceptedCodecs = OFFLINE_SUPPORTED_STREAM_CODECS,
+                streamProtocol = PlaybackStreamProtocol.PROGRESSIVE,
+            )) {
                 is PlayerResult.Success -> result.value
                 is PlayerResult.Failure -> return null
             }
         if (grant.cacheKey.isBlank()) return null
+        if (grant.streamProtocol != PlaybackStreamProtocol.PROGRESSIVE) return null
         if (!isCurrent(downloadIdentity)) return null
         return PreparedDownload(metadata, grant)
     }
@@ -311,6 +320,8 @@ constructor(
         downloadedAtEpochMillis = entity.downloadedAtEpochMs,
     )
 }
+
+private val OFFLINE_SUPPORTED_STREAM_CODECS = listOf("aac", "mp3", "opus", "flac", "wav")
 
 private fun TrackSummaryReadModel.toEntity(
     ownerUserId: String,

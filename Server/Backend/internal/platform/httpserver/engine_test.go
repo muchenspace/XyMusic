@@ -273,6 +273,7 @@ func TestHostGuardRejectsInvalidConfiguration(t *testing.T) {
 
 func TestDeclaredRequestBodyLimits(t *testing.T) {
 	var mediaHandlerCalls int
+	var avatarHandlerCalls int
 	var batchHandlerCalls int
 	engine := mustEngine(t, Options{
 		RegisterRoutes: func(engine *gin.Engine) {
@@ -283,6 +284,10 @@ func TestDeclaredRequestBodyLimits(t *testing.T) {
 			})
 			engine.PUT("/api/v1/admin/media/uploads/:uploadID/content", func(c *gin.Context) {
 				mediaHandlerCalls++
+				c.Status(http.StatusNoContent)
+			})
+			engine.PUT("/api/v1/users/me/avatar/uploads/:uploadID", func(c *gin.Context) {
+				avatarHandlerCalls++
 				c.Status(http.StatusNoContent)
 			})
 		},
@@ -325,6 +330,30 @@ func TestDeclaredRequestBodyLimits(t *testing.T) {
 	assertProblem(t, oversizeResponse, http.StatusRequestEntityTooLarge, string(apperror.CodePayloadTooLarge))
 	if mediaHandlerCalls != 1 {
 		t.Fatalf("oversize request reached media handler; calls = %d", mediaHandlerCalls)
+	}
+
+	avatarPath := "/api/v1/users/me/avatar/uploads/01234567-89ab-cdef-0123-456789abcdef"
+	allowedAvatar := request(t, http.MethodPut, avatarPath, nil)
+	allowedAvatar.ContentLength = MaxAvatarUploadRequestBodyBytes
+	allowedAvatarResponse := execute(engine, allowedAvatar)
+	if allowedAvatarResponse.Code != http.StatusNoContent || avatarHandlerCalls != 1 {
+		t.Fatalf("avatar request within 5 MiB status/calls = %d/%d", allowedAvatarResponse.Code, avatarHandlerCalls)
+	}
+
+	oversizeAvatar := request(t, http.MethodPut, avatarPath, nil)
+	oversizeAvatar.ContentLength = MaxAvatarUploadRequestBodyBytes + 1
+	oversizeAvatarResponse := execute(engine, oversizeAvatar)
+	assertProblem(t, oversizeAvatarResponse, http.StatusRequestEntityTooLarge, string(apperror.CodePayloadTooLarge))
+	if avatarHandlerCalls != 1 {
+		t.Fatalf("oversize avatar reached handler; calls = %d", avatarHandlerCalls)
+	}
+
+	lookalikeAvatar := request(t, http.MethodPut, "/api/v1/users/me/avatar/uploads/not-a-uuid", nil)
+	lookalikeAvatar.ContentLength = MaxAvatarUploadRequestBodyBytes + 1
+	lookalikeAvatarResponse := execute(engine, lookalikeAvatar)
+	assertProblem(t, lookalikeAvatarResponse, http.StatusRequestEntityTooLarge, string(apperror.CodePayloadTooLarge))
+	if avatarHandlerCalls != 1 {
+		t.Fatalf("lookalike avatar reached handler; calls = %d", avatarHandlerCalls)
 	}
 
 	lookalike := request(t, http.MethodPut, "/api/v1/admin/media/uploads/not-a-uuid/content", nil)
