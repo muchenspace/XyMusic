@@ -557,6 +557,127 @@ func TestApplyCancellationGuardFencesMetadataAndWritebackSideEffects(t *testing.
 	})
 }
 
+func TestApplyAppliesCoverToLatestAlbumWhenAlbumChanges(t *testing.T) {
+	oldAlbumID := "00000000-0000-0000-0000-000000000001"
+	newAlbumID := "00000000-0000-0000-0000-000000000002"
+	metadata := metadataFixture(1)
+	metadata.Effective.Album = &[]string{"Old Album"}[0]
+	updated := metadata
+	updated.Version = 2
+	updated.Effective.Album = &[]string{"New Album"}[0]
+
+	store := &storeStub{
+		metadata:        metadata,
+		updatedMetadata: updated,
+		albumID:         &oldAlbumID,
+	}
+	store.onUpdateMetadata = func(patch MetadataPatch) {
+		// Simulates metadata projection moving the track to the new album and deleting the empty old album
+		store.albumID = &newAlbumID
+	}
+
+	music := &musicStub{
+		artwork: DownloadedArtwork{Bytes: []byte{0xff, 0xd8, 0xff, 0x00}, ContentType: "image/jpeg", Extension: "jpg"},
+	}
+	artwork := &artworkStub{}
+	service, err := NewService(ServiceDependencies{
+		Store: store, Music: music, Artwork: artwork, DefaultLibraryDirectory: "music",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := service.Apply(context.Background(), "admin", "track", ApplyInput{
+		ExpectedVersion: 1,
+		Candidate: Candidate{
+			ID: "candidate", Name: "Song", Album: "New Album", AlbumImg: "https://example.com/cover.jpg", Source: SourceQMusic,
+		},
+		Fields: ApplyFields{Title: true, Album: true, Cover: true, Overwrite: true},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if artwork.calls != 1 || artwork.albumID != newAlbumID || !result.CoverApplied {
+		t.Fatalf("expected artwork applied to new album %s, got calls=%d albumID=%s coverApplied=%v", newAlbumID, artwork.calls, artwork.albumID, result.CoverApplied)
+	}
+	if !result.Metadata.Effective.HasArtwork {
+		t.Fatal("expected result.Metadata.Effective.HasArtwork to be true")
+	}
+}
+
+func TestApplyAttachesCoverWhenTrackInitiallyHasNoAlbum(t *testing.T) {
+	createdAlbumID := "00000000-0000-0000-0000-000000000003"
+	metadata := metadataFixture(1)
+	metadata.Effective.Album = nil
+	updated := metadata
+	updated.Version = 2
+	updated.Effective.Album = &[]string{"Created Album"}[0]
+
+	store := &storeStub{
+		metadata:        metadata,
+		updatedMetadata: updated,
+		albumID:         nil, // Track has no album before metadata update
+	}
+	store.onUpdateMetadata = func(patch MetadataPatch) {
+		// Simulates metadata projection creating the album for the track
+		store.albumID = &createdAlbumID
+	}
+
+	music := &musicStub{
+		artwork: DownloadedArtwork{Bytes: []byte{0xff, 0xd8, 0xff, 0x00}, ContentType: "image/jpeg", Extension: "jpg"},
+	}
+	artwork := &artworkStub{}
+	service, err := NewService(ServiceDependencies{
+		Store: store, Music: music, Artwork: artwork, DefaultLibraryDirectory: "music",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := service.Apply(context.Background(), "admin", "track", ApplyInput{
+		ExpectedVersion: 1,
+		Candidate: Candidate{
+			ID: "candidate", Name: "Song", Album: "Created Album", AlbumImg: "https://example.com/cover.jpg", Source: SourceQMusic,
+		},
+		Fields: ApplyFields{Title: true, Album: true, Cover: true, Overwrite: true},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if artwork.calls != 1 || artwork.albumID != createdAlbumID || !result.CoverApplied {
+		t.Fatalf("expected artwork applied to created album %s, got calls=%d albumID=%s coverApplied=%v", createdAlbumID, artwork.calls, artwork.albumID, result.CoverApplied)
+	}
+	if len(result.Warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", result.Warnings)
+	}
+}
+
+func TestApplyAcceptsEmptyReason(t *testing.T) {
+	metadata := metadataFixture(1)
+	updated := metadata
+	updated.Version = 2
+	store := &storeStub{metadata: metadata, updatedMetadata: updated}
+	service, err := NewService(ServiceDependencies{
+		Store: store, Music: &musicStub{}, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := service.Apply(context.Background(), "admin", "track", ApplyInput{
+		ExpectedVersion: 1,
+		Candidate:       Candidate{ID: "id", Name: "New Name", Source: SourceNetease},
+		Fields:          ApplyFields{Title: true, Overwrite: true},
+		Reason:          "", // Empty reason must be accepted
+	})
+	if err != nil {
+		t.Fatalf("unexpected error with empty reason: %v", err)
+	}
+	if store.updateCalls != 1 || len(result.AppliedFields) == 0 {
+		t.Fatalf("expected update to succeed, got calls=%d appliedFields=%v", store.updateCalls, result.AppliedFields)
+	}
+}
+
 func metadataFixture(version int) TrackMetadata {
 	return TrackMetadata{
 		TrackID: "track", Version: version,
@@ -708,6 +829,7 @@ type storeStub struct {
 	claim                       ClaimResult
 	claimErr                    error
 	cancelled                   bool
+	onUpdateMetadata            func(MetadataPatch)
 }
 
 func (stub *storeStub) FingerprintSource(context.Context, string) (FingerprintSource, error) {
@@ -720,6 +842,9 @@ func (stub *storeStub) Metadata(context.Context, string) (TrackMetadata, error) 
 func (stub *storeStub) UpdateMetadata(_ context.Context, _, _ string, _ int, patch MetadataPatch, _ string) (TrackMetadata, error) {
 	stub.updateCalls++
 	stub.patch = patch
+	if stub.onUpdateMetadata != nil {
+		stub.onUpdateMetadata(patch)
+	}
 	return stub.updatedMetadata, nil
 }
 func (stub *storeStub) TrackAlbumID(context.Context, string) (*string, error) {

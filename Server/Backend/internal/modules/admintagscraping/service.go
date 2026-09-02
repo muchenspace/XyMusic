@@ -268,8 +268,8 @@ func (service *Service) apply(
 		return ApplyResult{}, err
 	}
 	reason := normalizeText(input.Reason)
-	if reason == "" || javascriptLength(reason) > 500 || input.ExpectedVersion < 1 {
-		return ApplyResult{}, apperror.Validation("A valid expectedVersion and reason are required")
+	if (reason != "" && javascriptLength(reason) > 500) || input.ExpectedVersion < 1 {
+		return ApplyResult{}, apperror.Validation("A valid expectedVersion is required")
 	}
 	if err := checkApplyCancellation(ctx, input); err != nil {
 		return ApplyResult{}, err
@@ -378,33 +378,24 @@ func (service *Service) apply(
 
 	// Download artwork before changing metadata. A transient platform failure
 	// can then be retried by the batch queue without replaying a stale version.
-	var albumID *string
 	var artwork DownloadedArtwork
 	coverReady := false
 	if input.Fields.Cover && candidate.AlbumImg != "" {
 		if err := checkApplyCancellation(ctx, input); err != nil {
 			return ApplyResult{}, err
 		}
-		var lookupErr error
-		albumID, lookupErr = service.store.TrackAlbumID(ctx, trackID)
-		if lookupErr != nil {
-			warnings = append(warnings, "Cover application failed: "+messageOf(lookupErr))
-		} else if albumID == nil {
-			warnings = append(warnings, "The track has no album; cover artwork was skipped")
-		} else {
-			var artworkErr error
-			artwork, artworkErr = service.music.DownloadArtwork(ctx, candidate.AlbumImg)
-			if artworkErr != nil {
-				if err := checkApplyCancellation(ctx, input); err != nil {
-					return ApplyResult{}, err
-				}
-				if input.retryTransientOptional && transientScrapingDependencyError(artworkErr) {
-					return ApplyResult{}, artworkErr
-				}
-				warnings = append(warnings, "Cover application failed: "+messageOf(artworkErr))
-			} else {
-				coverReady = true
+		var artworkErr error
+		artwork, artworkErr = service.music.DownloadArtwork(ctx, candidate.AlbumImg)
+		if artworkErr != nil {
+			if err := checkApplyCancellation(ctx, input); err != nil {
+				return ApplyResult{}, err
 			}
+			if input.retryTransientOptional && transientScrapingDependencyError(artworkErr) {
+				return ApplyResult{}, artworkErr
+			}
+			warnings = append(warnings, "Cover application failed: "+messageOf(artworkErr))
+		} else {
+			coverReady = true
 		}
 	}
 
@@ -425,16 +416,26 @@ func (service *Service) apply(
 	}
 
 	coverApplied := false
-	if coverReady && albumID != nil {
+	if coverReady {
 		if err := checkApplyCancellation(ctx, input); err != nil {
 			return ApplyResult{}, err
 		}
-		artworkErr := service.artwork.ApplyAlbumArtwork(ctx, actorID, *albumID, artwork)
-		if artworkErr != nil {
-			warnings = append(warnings, "Cover application failed: "+messageOf(artworkErr))
+		albumID, lookupErr := service.store.TrackAlbumID(ctx, trackID)
+		if lookupErr != nil {
+			warnings = append(warnings, "Cover application failed: "+messageOf(lookupErr))
+		} else if albumID == nil {
+			warnings = append(warnings, "The track has no album; cover artwork was skipped")
 		} else {
-			coverApplied = true
+			artworkErr := service.artwork.ApplyAlbumArtwork(ctx, actorID, *albumID, artwork)
+			if artworkErr != nil {
+				warnings = append(warnings, "Cover application failed: "+messageOf(artworkErr))
+			} else {
+				coverApplied = true
+			}
 		}
+	}
+	if coverApplied {
+		metadata.Effective.HasArtwork = true
 	}
 	if len(appliedFields) == 0 && !coverApplied && len(warnings) == 0 {
 		warnings = append(warnings, "Existing metadata already has the selected values")
