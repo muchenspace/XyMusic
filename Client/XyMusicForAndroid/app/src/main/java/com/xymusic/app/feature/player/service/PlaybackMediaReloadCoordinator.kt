@@ -170,7 +170,14 @@ internal class PlaybackMediaReloadCoordinator(
         val requestItem = when (protocol) {
             PlaybackStreamProtocol.HLS -> canonicalItem.withPlaybackResolution(
                 protocol = PlaybackStreamProtocol.HLS,
-                sourceOffsetMs = 0,
+                // The source offset is part of the request contract, not a
+                // resolution side effect: the server transcode starts at
+                // targetPositionMs and the local timeline therefore begins at
+                // zero. Publishing the offset immediately keeps every position
+                // consumer (lyrics clock, progress, persistence checkpoints,
+                // ABR downgrade targeting) at the requested global position
+                // during the resolve window instead of reading a transient 0.
+                sourceOffsetMs = targetPositionMs,
                 requestedStartPositionMs = targetPositionMs.takeIf { it > 0 },
             )
             PlaybackStreamProtocol.PROGRESSIVE -> canonicalItem.withPlaybackResolution(

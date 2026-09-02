@@ -165,7 +165,9 @@ function nextHigher(quality: ConcretePlaybackQuality): ConcretePlaybackQuality {
 const BOOTSTRAP_QUALITY: ConcretePlaybackQuality = "STANDARD";
 const REQUIRED_SAMPLE_COUNT = 2;
 const STABLE_TRACKS_FOR_UPGRADE = 2;
-const MIN_SAMPLE_DURATION_MS = 200;
+// Fast networks emit merged short-transfer samples whose window can span as
+// little as 30ms (see HtmlAudioPlayer.measureBufferedProgress).
+const MIN_SAMPLE_DURATION_MS = 30;
 const MIN_SAMPLE_BPS = 16_000;
 const MAX_SAMPLE_BPS = 100_000_000;
 const FAST_SAMPLE_WEIGHT = 0.5;

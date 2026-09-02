@@ -43,6 +43,13 @@ private fun StoredPlaybackQueueItem.toMediaMetadata(requestedStartPositionMs: Lo
             putLong(PlaybackMediaMetadata.EXTRA_DURATION_MS, durationMs)
             if (isCurrent && requestedStartPositionMs > 0) {
                 putLong(PlaybackMediaMetadata.EXTRA_REQUESTED_START_POSITION_MS, requestedStartPositionMs)
+                // The source offset is declared with the request, not with the
+                // resolution result. The served HLS transcode begins at the
+                // resume position, so the local timeline starts at zero while
+                // the global position is the resume position from the first
+                // sample. Readers (lyrics clock, persistence, progress) never
+                // observe a transient 0 while the media source resolves.
+                putLong(PlaybackMediaMetadata.EXTRA_SOURCE_OFFSET_MS, requestedStartPositionMs)
             }
         }
     return MediaMetadata
