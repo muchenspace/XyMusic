@@ -5,6 +5,15 @@ export function usePlaybackShortcuts(): void {
   const player = usePlayerStore();
 
   function handleShortcut(event: KeyboardEvent): void {
+    if (event.isComposing) return;
+
+    if (event.code === "Space" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
+      if (!player.currentTrack || event.repeat) return;
+      event.preventDefault();
+      void player.toggle();
+      return;
+    }
+
     if (isInteractiveTarget(event.target)) return;
 
     if (event.key === "MediaPlayPause") {
@@ -20,12 +29,6 @@ export function usePlaybackShortcuts(): void {
     if (event.key === "MediaTrackPrevious") {
       event.preventDefault();
       void player.previous();
-      return;
-    }
-    if (event.code === "Space" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
-      if (!player.currentTrack) return;
-      event.preventDefault();
-      void player.toggle();
       return;
     }
     if (!event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
@@ -44,8 +47,8 @@ export function usePlaybackShortcuts(): void {
     }
   }
 
-  onMounted(() => window.addEventListener("keydown", handleShortcut));
-  onUnmounted(() => window.removeEventListener("keydown", handleShortcut));
+  onMounted(() => window.addEventListener("keydown", handleShortcut, true));
+  onUnmounted(() => window.removeEventListener("keydown", handleShortcut, true));
 }
 
 function isInteractiveTarget(target: EventTarget | null): boolean {
