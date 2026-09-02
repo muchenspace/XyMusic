@@ -2,6 +2,9 @@ package com.xymusic.app.feature.player.service
 
 import com.google.common.truth.Truth.assertThat
 import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaMetadata
+import com.xymusic.app.feature.player.adapter.media3.globalPlaybackPositionMs
+import com.xymusic.app.feature.player.adapter.media3.playbackRequestedStartPositionMs
+import com.xymusic.app.feature.player.adapter.media3.playbackSourceOffsetMs
 import com.xymusic.app.feature.player.domain.StoredPlaybackQueueItem
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -131,6 +134,44 @@ class PlaybackServiceQueueRestoreTest {
                 PlaybackMediaMetadata.EXTRA_ARTWORK_CACHE_KEY,
             ),
         ).isEqualTo(stored.artworkCacheKey)
+    }
+
+    @Test
+    fun currentResumeItemDeclaresTheSourceOffsetWithTheRequest() {
+        val stored =
+            queueItem(
+                queueItemId = "current",
+                position = 0,
+                trackId = "00000000-0000-0000-0000-000000000001",
+                isCurrent = true,
+                resumePositionMs = 45_000,
+            )
+
+        val mediaItem = stored.toPlaybackMediaItem()
+
+        // The offset is part of the request contract: during media source
+        // resolution the global position must read as the resume position
+        // instead of a transient 0 (lyric clock, persistence, progress).
+        assertThat(mediaItem.playbackSourceOffsetMs()).isEqualTo(45_000)
+        assertThat(mediaItem.globalPlaybackPositionMs(0)).isEqualTo(45_000)
+        assertThat(mediaItem.playbackRequestedStartPositionMs()).isEqualTo(45_000)
+    }
+
+    @Test
+    fun nonCurrentItemsAndZeroResumeDoNotDeclareAnOffset() {
+        val stored =
+            queueItem(
+                queueItemId = "queued",
+                position = 1,
+                trackId = "00000000-0000-0000-0000-000000000002",
+                isCurrent = false,
+                resumePositionMs = 30_000,
+            )
+
+        val mediaItem = stored.toPlaybackMediaItem()
+
+        assertThat(mediaItem.playbackSourceOffsetMs()).isEqualTo(0)
+        assertThat(mediaItem.playbackRequestedStartPositionMs()).isNull()
     }
 
     private fun queueItem(

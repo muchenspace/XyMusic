@@ -23,6 +23,8 @@ interface NetworkMeasurement {
   bitrate: number;
   lastBufferedEnd: number;
   lastMeasuredAt: number;
+  pendingBufferedSeconds: number;
+  pendingDurationMs: number;
 }
 
 interface NavigatorWithConnection extends Navigator {
@@ -510,6 +512,8 @@ export class HtmlAudioPlayer implements AudioPlayer {
       bitrate: Number(bitrate),
       lastBufferedEnd: 0,
       lastMeasuredAt: performance.now(),
+      pendingBufferedSeconds: 0,
+      pendingDurationMs: 0,
     });
   }
 
@@ -519,19 +523,37 @@ export class HtmlAudioPlayer implements AudioPlayer {
     const bufferedEnd = furthestBufferedEnd(audio);
     if (bufferedEnd <= measurement.lastBufferedEnd) return;
     const now = performance.now();
-    const durationMs = now - measurement.lastMeasuredAt;
-    if (durationMs > MAX_ACTIVE_TRANSFER_GAP_MS) {
+    const elapsedMs = now - measurement.lastMeasuredAt;
+    if (elapsedMs > MAX_ACTIVE_TRANSFER_GAP_MS) {
+      // A long idle gap means the pending window belongs to an earlier burst
+      // (paused playback or a network switch). Start fresh so stale bytes
+      // cannot skew the new estimate.
+      measurement.pendingBufferedSeconds = 0;
+      measurement.pendingDurationMs = 0;
       measurement.lastBufferedEnd = bufferedEnd;
       measurement.lastMeasuredAt = now;
       return;
     }
-    if (durationMs < MIN_TRANSFER_SAMPLE_MS) return;
     const bufferedSeconds = bufferedEnd - measurement.lastBufferedEnd;
     measurement.lastBufferedEnd = bufferedEnd;
     measurement.lastMeasuredAt = now;
-    const bitsPerSecond = bufferedSeconds * measurement.bitrate / (durationMs / 1_000);
+    // Short windows are accumulated instead of discarded: on a fast link the
+    // initial fill completes in a few tens of milliseconds, and dropping those
+    // bytes used to starve the estimator until the network slowed down.
+    measurement.pendingBufferedSeconds += bufferedSeconds;
+    measurement.pendingDurationMs += elapsedMs;
+    if (measurement.pendingDurationMs < MIN_TRANSFER_SAMPLE_MS) return;
+    if (measurement.pendingBufferedSeconds <= 0 || measurement.pendingDurationMs <= 0) return;
+    const durationMs = measurement.pendingDurationMs;
+    const mergedBufferedSeconds = measurement.pendingBufferedSeconds;
+    measurement.pendingBufferedSeconds = 0;
+    measurement.pendingDurationMs = 0;
+    const bitsPerSecond = mergedBufferedSeconds * measurement.bitrate / (durationMs / 1_000);
     if (!Number.isFinite(bitsPerSecond) || bitsPerSecond <= 0) return;
-    const sample = { bitsPerSecond, durationMs };
+    // LAN/local-deployment bursts can instant-fill the initial buffer; those
+    // readings are equivalent for quality selection (the top tier needs well
+    // under 10% of this) and stay below the estimator's 100Mbps sanity filter.
+    const sample = { bitsPerSecond: Math.min(bitsPerSecond, MAX_MEANINGFUL_BPS), durationMs };
     for (const listener of this.bandwidthListeners) listener(sample);
   }
 
@@ -604,8 +626,9 @@ const HAVE_METADATA = 1;
 const AUDIO_LOAD_TIMEOUT_MS = 30_000;
 const UPDATE_INTERVAL_MS = 1_000 / 15;
 const MIN_REBUFFER_POSITION_SECONDS = 3;
-const MIN_TRANSFER_SAMPLE_MS = 200;
+const MIN_TRANSFER_SAMPLE_MS = 30;
 const MAX_ACTIVE_TRANSFER_GAP_MS = 5_000;
+const MAX_MEANINGFUL_BPS = 50_000_000;
 const HLS_SEEK_TOLERANCE_SECONDS = 0.25;
 
 async function waitUntilPlayable(

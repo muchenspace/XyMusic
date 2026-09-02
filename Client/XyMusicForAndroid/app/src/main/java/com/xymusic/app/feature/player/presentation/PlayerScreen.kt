@@ -2,7 +2,6 @@
 
 package com.xymusic.app.feature.player.presentation
 
-import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -35,9 +34,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import com.xymusic.app.R
 import com.xymusic.app.core.ui.component.ArtworkAmbientPalette
 import com.xymusic.app.core.ui.component.rememberArtworkAmbientPalette
@@ -105,7 +101,10 @@ fun PlayerScreen(
             onBack()
         }
         val isLandscape = maxWidth > maxHeight
-        LandscapeStatusBarEffect(hidden = isLandscape && immersiveLandscape)
+        // Landscape immersion (status bar hidden) is applied app-wide by
+        // AppLandscapeSystemBarsEffect at the root. Keeping it here too would
+        // fight the root effect on dispose (it re-shows the bar while the root
+        // hides it again), so the player relies on the app-wide behavior.
         LandscapeKeepScreenOnEffect(enabled = isLandscape)
         if (!isLandscape && showSpeedDialog) {
             PlayerChoiceDialog(
@@ -305,31 +304,6 @@ fun PlayerScreen(
 private enum class LandscapePlayerPage {
     NowPlaying,
     Queue,
-}
-
-@Composable
-private fun LandscapeStatusBarEffect(hidden: Boolean) {
-    val view = LocalView.current
-    DisposableEffect(hidden, view) {
-        val window = (view.context as? Activity)?.window
-        val controller = window?.let { WindowCompat.getInsetsController(it, view) }
-        val previousBehavior = controller?.systemBarsBehavior
-        if (hidden) {
-            controller?.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            controller?.hide(WindowInsetsCompat.Type.statusBars())
-        } else {
-            controller?.show(WindowInsetsCompat.Type.statusBars())
-        }
-        onDispose {
-            if (hidden) {
-                controller?.show(WindowInsetsCompat.Type.statusBars())
-                if (previousBehavior != null) {
-                    controller?.systemBarsBehavior = previousBehavior
-                }
-            }
-        }
-    }
 }
 
 @Composable

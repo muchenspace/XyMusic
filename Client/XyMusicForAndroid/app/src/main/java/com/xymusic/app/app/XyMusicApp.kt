@@ -1,5 +1,6 @@
 package com.xymusic.app.app
 
+import android.view.ViewTreeObserver
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -7,12 +8,19 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.tooling.preview.Preview
@@ -88,6 +96,10 @@ fun XyMusicApp(
                     )
             }
         }
+        // Hide the status bar in every landscape orientation across the app,
+        // mirroring the player's landscape experience. Vertical layouts keep
+        // the bar. Swipe-down still reveals it temporarily (transient bars).
+        AppLandscapeSystemBarsEffect()
         if (uiState.serverEndpoint == null) {
             SnackbarHost(
                 hostState = snackbarHostState,
@@ -101,6 +113,50 @@ fun XyMusicApp(
 @Composable
 private fun ServerSetupContent(onSave: (ServerEndpoint) -> Unit) {
     ServerSetupScreen(onSave = onSave)
+}
+
+/**
+ * Applies the player-style immersive landscape behavior at the app root so every
+ * landscape screen (playlist, album/artist detail, player, etc.) shows without
+ * the status bar. Bars can still be revealed temporarily by swiping down; the
+ * effect restores the previous visibility when the layout returns to portrait
+ * or the app leaves composition.
+ */
+@Composable
+private fun AppLandscapeSystemBarsEffect() {
+    val view = LocalView.current
+    val activity = LocalContext.current as? androidx.activity.ComponentActivity
+    DisposableEffect(view, activity) {
+        val window = activity?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+        val previousBehavior = controller?.systemBarsBehavior
+        val makeController = controller
+        fun applyForCurrentLayout() {
+            // Landscape = width greater than height. Ignore the configuration
+            // value; window size is the source of truth for layout orientation.
+            if (view.width > view.height) {
+                makeController?.systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                makeController?.hide(WindowInsetsCompat.Type.statusBars())
+            } else {
+                makeController?.show(WindowInsetsCompat.Type.statusBars())
+            }
+        }
+        applyForCurrentLayout()
+        val listener = object : ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                applyForCurrentLayout()
+            }
+        }
+        view.viewTreeObserver.addOnGlobalLayoutListener(listener)
+        onDispose {
+            view.viewTreeObserver.removeOnGlobalLayoutListener(listener)
+            makeController?.show(WindowInsetsCompat.Type.statusBars())
+            if (previousBehavior != null) {
+                makeController?.systemBarsBehavior = previousBehavior
+            }
+        }
+    }
 }
 
 @Composable

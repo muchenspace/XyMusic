@@ -244,7 +244,9 @@ constructor() : AutomaticPlaybackQualityPolicy {
         val BOOTSTRAP_QUALITY = PreferredQuality.STANDARD
         const val REQUIRED_SAMPLE_COUNT = 2
         const val STABLE_TRACKS_FOR_UPGRADE = 2
-        const val MIN_SAMPLE_DURATION_MS = 200L
+        // Fast networks emit merged short-transfer samples whose window can
+        // span as little as 30ms (see AutomaticQualityTransferListener).
+        const val MIN_SAMPLE_DURATION_MS = 30L
         const val MIN_SAMPLE_BPS = 16_000.0
         const val MAX_SAMPLE_BPS = 100_000_000.0
         const val FAST_SAMPLE_WEIGHT = 0.5
