@@ -343,6 +343,25 @@ func hlsOutputReady(outputDir string) bool {
 	return true
 }
 
+// hlsOutputComplete is the criterion for treating an HLS directory as a
+// reusable completed cache entry. hlsOutputReady only proves that playback can
+// begin; the playlist must carry #EXT-X-ENDLIST before the directory can mean
+// "the whole track is transcoded". An interrupted transcode publishes
+// init.mp4 plus the first segments, which would otherwise be adopted as a
+// complete VOD track and served truncated (or, without the end tag, live
+// forever) to every later grant for the same source.
+func hlsOutputComplete(outputDir string) bool {
+	if !hlsOutputReady(outputDir) {
+		return false
+	}
+	content, err := readFileWithRetry(filepath.Join(outputDir, hlsPlaylistName), hlsPlaylistReadTimeout)
+	return err == nil && hlsPlaylistComplete(content)
+}
+
+func hlsPlaylistComplete(content []byte) bool {
+	return hlsPlaylistReady(content) && strings.Contains(string(content), "#EXT-X-ENDLIST")
+}
+
 func directorySize(path string) (int64, error) {
 	var total int64
 	err := filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {

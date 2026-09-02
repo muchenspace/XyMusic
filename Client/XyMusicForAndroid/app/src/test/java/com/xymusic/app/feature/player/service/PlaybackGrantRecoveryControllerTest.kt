@@ -1,4 +1,4 @@
-﻿@file:Suppress("DEPRECATION")
+@file:Suppress("DEPRECATION")
 
 package com.xymusic.app.feature.player.service
 
@@ -8,6 +8,8 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.HttpDataSource
 import com.google.common.truth.Truth.assertThat
 import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaMetadata
 import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaUri
@@ -77,12 +79,38 @@ class PlaybackGrantRecoveryControllerTest {
         assertThat(repository.invalidatedTrackIds).isEmpty()
     }
 
-    private fun expiredGrantError() =
-        PlaybackException(
-            "playback grant expired",
-            null,
-            PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+    @Test
+    fun serverTranscodeFailuresAreNotTreatedAsExpiredGrants() {
+        val player = RecordingPlayer()
+        val repository = RecordingGrantRepository()
+        val controller = PlaybackGrantRecoveryController(player.delegate, repository)
+
+        controller.onPlayerError(
+            PlaybackException(
+                "transcode failed",
+                httpStatusError(500, "Internal Server Error"),
+                PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+            ),
         )
+
+        assertThat(player.prepareCount).isEqualTo(0)
+        assertThat(repository.invalidatedTrackIds).isEmpty()
+    }
+
+    private fun expiredGrantError() = PlaybackException(
+        "playback grant expired",
+        httpStatusError(404, "Playback stream was not found or expired"),
+        PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+    )
+
+    private fun httpStatusError(code: Int, message: String) = HttpDataSource.InvalidResponseCodeException(
+        code,
+        message,
+        null,
+        emptyMap<String, List<String>>(),
+        DataSpec.Builder().setUri("https://example.com/streams/session/index.m3u8").build(),
+        ByteArray(0),
+    )
 
     private class RecordingGrantRepository : PlaybackGrantRepository {
         val invalidatedTrackIds = mutableListOf<String>()

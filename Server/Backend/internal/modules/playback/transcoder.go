@@ -917,7 +917,7 @@ func (manager *TranscodeSessionManager) getOrCreateJob(params TranscodeSessionPa
 		if params.Delivery == StreamProtocolHLS {
 			job.finalDir, job.partialDir = manager.hlsCachePaths(params.CacheKey)
 			job.finalPath = job.finalDir
-			if hlsOutputReady(job.finalDir) {
+			if hlsOutputComplete(job.finalDir) {
 				job.completed = true
 				job.finalized = true
 				job.firstReady = true
@@ -1060,12 +1060,12 @@ func (manager *TranscodeSessionManager) tryFinalizeJob(job *cacheJob) {
 	}
 	if job.params.Delivery == StreamProtocolHLS {
 		partialDir, finalDir, key := job.partialDir, job.finalDir, job.key
-		if partialDir == "" || finalDir == "" || !hlsOutputReady(partialDir) {
+		if partialDir == "" || finalDir == "" || !hlsOutputComplete(partialDir) {
 			job.mu.Unlock()
 			return
 		}
 		if err := os.Rename(partialDir, finalDir); err != nil {
-			if hlsOutputReady(finalDir) {
+			if hlsOutputComplete(finalDir) {
 				if removeErr := os.RemoveAll(partialDir); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
 					job.mu.Unlock()
 					return
@@ -1152,7 +1152,7 @@ func (manager *TranscodeSessionManager) loadCacheIndex() {
 			continue
 		}
 		if entry.IsDir() && strings.HasSuffix(entry.Name(), ".hls") {
-			if !hlsOutputReady(path) {
+			if !hlsOutputComplete(path) {
 				_ = removePath(path)
 			}
 		}

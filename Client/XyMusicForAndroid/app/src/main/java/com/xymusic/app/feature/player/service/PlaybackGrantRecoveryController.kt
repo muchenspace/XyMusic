@@ -88,7 +88,10 @@ internal class PlaybackGrantRecoveryController(
 
 @UnstableApi
 internal fun isExpiredPlaybackGrantError(error: PlaybackException): Boolean {
-    if (error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS) return true
+    // Only explicit authorization/resolution responses signal an expired (or
+    // invalidated) grant. A generic HTTP status failure must NOT be treated as
+    // expiry: a 5xx from a server transcode failure would then force a grant
+    // reload loop instead of surfacing the real playback error.
     return generateSequence<Throwable>(error) { it.cause }
         .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
         .any { it.responseCode == 401 || it.responseCode == 403 || it.responseCode == 404 || it.responseCode == 410 }

@@ -22,6 +22,90 @@ import (
 	"xymusic/server/internal/platform/localmedia"
 )
 
+func TestHLSCacheAdoptionRequiresEndTag(t *testing.T) {
+	tempDir := t.TempDir()
+	outputDir := filepath.Join(tempDir, "cache.hls")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeHLSFixture(t, outputDir, false)
+
+	// A partially published (event, no end tag) directory is playable but is
+	// NOT a complete cache entry ...
+	if !hlsOutputReady(outputDir) {
+		t.Fatal("partial HLS output is not playable")
+	}
+	if hlsOutputComplete(outputDir) {
+		t.Fatal("partial HLS output was treated as a complete cache entry")
+	}
+
+	// ... until the transcode completes and writes the end tag.
+	writeHLSFixture(t, outputDir, true)
+	if !hlsOutputComplete(outputDir) {
+		t.Fatal("completed HLS output was not recognized as complete")
+	}
+}
+
+func TestGetOrCreateJobDoesNotAdoptAnEndTagLessCacheDirectory(t *testing.T) {
+	tempDir := t.TempDir()
+	mediaStore, err := localmedia.NewStore(
+		filepath.Join(tempDir, "assets"),
+		filepath.Join(tempDir, "transcode"),
+		10*1024*1024,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewTranscodeSessionManager(mediaStore, "ffmpeg-that-must-not-run", 1, 1, time.Minute, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(manager.Close)
+	cacheKey := "track:fake:checksum:STANDARD:aac:m4a:HLS:-1:-1:1000"
+	finalDir, _ := manager.hlsCachePaths(cacheKey)
+	if err := os.MkdirAll(finalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeHLSFixture(t, finalDir, false)
+	manager.RegisterSession(TranscodeSessionParams{
+		SessionID: uuid.NewString(), TrackID: uuid.NewString(),
+		SourcePath: "unused.wav", CacheKey: cacheKey, Delivery: StreamProtocolHLS, DurationMs: 1_000,
+		Profile: OutputProfile{
+			Quality: QualityStandard, Codec: "aac", Container: "m4a", MimeType: "audio/mp4", Bitrate: 128000,
+		},
+		ExpiresAt: time.Now().Add(time.Minute),
+	})
+	manager.cacheMu.Lock()
+	job := manager.cacheJobs[cacheKey]
+	manager.cacheMu.Unlock()
+	if job == nil {
+		t.Fatal("cache job was not created")
+	}
+	job.mu.RLock()
+	completed, finalized := job.completed, job.finalized
+	job.mu.RUnlock()
+	if completed || finalized {
+		t.Fatal("end-tag-less cache directory was adopted as a completed job")
+	}
+}
+
+func writeHLSFixture(t *testing.T, outputDir string, complete bool) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(outputDir, hlsInitName), []byte("ftyp....moov...."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "segment_000000.m4s"), []byte("moof....mdat...."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	playlist := "#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:0.500,\nsegment_000000.m4s\n"
+	if complete {
+		playlist += "#EXT-X-ENDLIST\n"
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, hlsPlaylistName), []byte(playlist), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCompletedHLSVariantIsPersistedAndReusedByNewManager(t *testing.T) {
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {
