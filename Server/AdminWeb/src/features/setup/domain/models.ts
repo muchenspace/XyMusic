@@ -53,8 +53,6 @@ export interface SetupMediaConfig {
   directory: string;
   ffmpegPath: string;
   ffprobePath: string;
-  fpcalcPath: string;
-  acoustIdClient: string;
 }
 
 export interface SetupSourceInput {
@@ -79,10 +77,7 @@ export interface SetupValidationResult {
   serverTimeMs?: number;
   ffmpeg?: string;
   ffprobe?: string;
-  fpcalc?: string;
-  paths?: { ffmpegPath: string; ffprobePath: string; fpcalcPath?: string };
-  fpcalcDescription?: string;
-  fingerprintConfigured?: boolean;
+  paths?: { ffmpegPath: string; ffprobePath: string };
   directory?: string;
   resolvedPaths?: Record<string, string>;
   databaseInspection?: {

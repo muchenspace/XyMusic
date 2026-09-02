@@ -1,4 +1,4 @@
-﻿import { test, expect, type Page, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "@playwright/test";
 
 const runMockSuite = !process.env.ADMIN_E2E_CREDENTIALS_FILE;
 
@@ -942,7 +942,7 @@ function settings() {
     version: 1, environment: "test", configurationSource: "managed", actualListener: { ipv4: { host: "127.0.0.1", port: 3000 }, ipv6: { host: "::1", port: 3000 } }, restartRequiredFields: [],
     database: { host: "db", port: 5432, database: "xymusic", username: "admin", sslMode: "prefer", maximumConnections: 10, passwordConfigured: true, lockedFields: [] },
     storage: { assetDirectory: "assets", transcodeDirectory: "transcode", uploadTtlSeconds: 3600, streamTtlSeconds: 900, streamMaxConcurrent: 4, streamIdleTimeoutSeconds: 30, transcodeTimeoutSeconds: 30, maxUploadBytes: 1024, lockedFields: [] },
-    mediaTools: { directory: "tools", ffmpegPath: "", ffprobePath: "", lockedFields: [] }, scraping: { fpcalcPath: "", acoustIdClient: "", lockedFields: [] },
+    mediaTools: { directory: "tools", ffmpegPath: "", ffprobePath: "", lockedFields: [] },
     localLibrary: { name: "Music", directory: "music", mode: "READ_ONLY", enabled: true, syncOnStartup: true, scanIntervalMinutes: null, includePatterns: [], excludePatterns: [], lockedFields: [] },
     registration: { enabled: false, lockedFields: [] }, security: { accessTokenTtlSeconds: 900, refreshTokenTtlSeconds: 86400, lockedFields: [] },
     http: { ipv4Host: "127.0.0.1", ipv4Port: 3000, ipv6Host: "::1", ipv6Port: 3000, trustedProxyAddresses: [], lockedFields: [] },

@@ -77,7 +77,7 @@
     ]
   },
   "countingRules": {
-    "expectedAPIEndpoints": 135,
+    "expectedAPIEndpoints": 134,
     "includes": [
       "Two health endpoints exposed by both control and configured runtime modes, counted once by method and path.",
       "Setup endpoints exposed by the control application while setup is required.",
@@ -773,14 +773,6 @@
       "auth": "admin-session",
       "idempotency": "required",
       "bodyKind": "json"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/admin/tag-scraping/tracks/:id/fingerprint",
-      "scope": "admin-tag-scraping",
-      "auth": "admin-session",
-      "idempotency": "none",
-      "bodyKind": "none"
     },
     {
       "method": "POST",

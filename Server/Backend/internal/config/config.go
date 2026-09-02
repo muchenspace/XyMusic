@@ -103,8 +103,6 @@ type Media struct {
 }
 
 type Scraping struct {
-	FPcalcPath         string
-	AcoustIDClient     string
 	BatchWorkers       int
 	BatchClaimWindow   int
 	RequestWorkers     int
@@ -158,15 +156,6 @@ func Parse(env map[string]string) (Config, error) {
 		if err := validatePath(candidate, name); err != nil {
 			return Config{}, err
 		}
-	}
-
-	fpcalcPath := strings.TrimSpace(env["FPCALC_PATH"])
-	if err := validateOptionalPath(fpcalcPath, "FPCALC_PATH"); err != nil {
-		return Config{}, err
-	}
-	acoustIDClient := strings.TrimSpace(env["ACOUSTID_CLIENT"])
-	if (fpcalcPath != "") != (acoustIDClient != "") {
-		return Config{}, errors.New("FPCALC_PATH and ACOUSTID_CLIENT must be configured together")
 	}
 
 	databaseURL := strings.TrimSpace(env["DATABASE_URL"])
@@ -416,8 +405,6 @@ func Parse(env map[string]string) (Config, error) {
 			FFmpegThreads: mediaFFmpegThreads,
 		},
 		Scraping: Scraping{
-			FPcalcPath:         fpcalcPath,
-			AcoustIDClient:     acoustIDClient,
 			BatchWorkers:       batchWorkers,
 			BatchClaimWindow:   batchClaimWindow,
 			RequestWorkers:     requestWorkers,
@@ -515,11 +502,6 @@ func ResolveRuntime(cfg Config, root string) (Config, error) {
 	}
 	if cfg.Media.FFprobePath, err = resolveExecutable(cfg.Media.FFprobePath, "FFPROBE_PATH"); err != nil {
 		return Config{}, err
-	}
-	if cfg.Scraping.FPcalcPath != "" {
-		if cfg.Scraping.FPcalcPath, err = resolve(cfg.Scraping.FPcalcPath, "FPCALC_PATH"); err != nil {
-			return Config{}, err
-		}
 	}
 	cfg.LocalLibrary.Directory = cfg.Paths.LocalMusicDirectory
 	cfg.MediaStorage.AssetDirectory = cfg.Paths.MediaAssetDirectory

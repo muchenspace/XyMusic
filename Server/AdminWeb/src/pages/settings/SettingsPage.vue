@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AlertTriangle, CheckCircle2, Database, HardDrive, Info, Library, LockKeyhole, RefreshCw, Save, ServerCog, ShieldCheck, Wrench } from "lucide-vue-next";
+import { AlertTriangle, CheckCircle2, Database, HardDrive, Info, Library, LockKeyhole, RefreshCw, Save, ShieldCheck, Wrench } from "lucide-vue-next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { onBeforeRouteLeave } from "vue-router";
@@ -32,7 +32,6 @@ const form = reactive({
   database: { host: "", port: 0, database: "", username: "", sslMode: "prefer" as "disable" | "prefer" | "require" | "verify-full", maximumConnections: 0 },
   storage: { assetDirectory: "", transcodeDirectory: "", uploadTtlSeconds: 3600, streamTtlSeconds: 900, streamMaxConcurrent: 4, streamIdleTimeoutSeconds: 30, transcodeTimeoutSeconds: 30, transcodeCacheMaxBytes: 10_737_418_240, maxUploadBytes: 1_073_741_824 },
   mediaTools: { directory: "", ffmpegPath: "", ffprobePath: "" },
-  scraping: { fpcalcPath: "", acoustIdClient: "" },
   localLibrary: { name: "", directory: "", mode: "READ_ONLY" as "READ_ONLY" | "READ_WRITE", enabled: false, syncOnStartup: false, scanIntervalMinutes: null as number | null },
   registration: { enabled: false },
   security: { accessTokenTtlSeconds: 0, refreshTokenTtlSeconds: 0 },
@@ -41,14 +40,13 @@ const form = reactive({
 const settingsQuery = useQuery({ queryKey: ["admin", "settings"], queryFn: ({ signal }) => settingsAdmin.settings(signal) });
 const systemQuery = useQuery({ queryKey: ["admin", "system"], queryFn: ({ signal }) => settingsAdmin.systemInformation(signal), enabled: computed(() => tab.value === "system"), refetchInterval: computed(() => tab.value === "system" ? 5_000 : false) });
 
-function editableState(): object { return { database: form.database, storage: form.storage, autoDetectMedia: autoDetectMedia.value, mediaTools: form.mediaTools, scraping: form.scraping, localLibrary: form.localLibrary, registration: form.registration, security: form.security, http: form.http, proxies: proxies.value, includePatterns: includePatterns.value, excludePatterns: excludePatterns.value, databasePassword: databasePassword.value }; }
+function editableState(): object { return { database: form.database, storage: form.storage, autoDetectMedia: autoDetectMedia.value, mediaTools: form.mediaTools, localLibrary: form.localLibrary, registration: form.registration, security: form.security, http: form.http, proxies: proxies.value, includePatterns: includePatterns.value, excludePatterns: excludePatterns.value, databasePassword: databasePassword.value }; }
 function applySettings(settings: RuntimeSettings): void {
   form.version = settings.version;
   Object.assign(form.database, { host: settings.database.host ?? "", port: settings.database.port ?? 5432, database: settings.database.database ?? "", username: settings.database.username ?? "", sslMode: settings.database.sslMode ?? "prefer", maximumConnections: settings.database.maximumConnections ?? 10 });
   Object.assign(form.storage, { assetDirectory: settings.storage.assetDirectory ?? "", transcodeDirectory: settings.storage.transcodeDirectory ?? "", uploadTtlSeconds: settings.storage.uploadTtlSeconds ?? 3600, streamTtlSeconds: settings.storage.streamTtlSeconds ?? 900, streamMaxConcurrent: settings.storage.streamMaxConcurrent ?? 4, streamIdleTimeoutSeconds: settings.storage.streamIdleTimeoutSeconds ?? 30, transcodeTimeoutSeconds: settings.storage.transcodeTimeoutSeconds ?? 30, transcodeCacheMaxBytes: settings.storage.transcodeCacheMaxBytes ?? 10_737_418_240, maxUploadBytes: settings.storage.maxUploadBytes ?? 1_073_741_824 });
   autoDetectMedia.value = Boolean(settings.mediaTools.directory);
   Object.assign(form.mediaTools, { directory: settings.mediaTools.directory ?? "", ffmpegPath: settings.mediaTools.ffmpegPath, ffprobePath: settings.mediaTools.ffprobePath });
-  Object.assign(form.scraping, { fpcalcPath: settings.scraping.fpcalcPath, acoustIdClient: settings.scraping.acoustIdClient });
   Object.assign(form.localLibrary, { name: settings.localLibrary.name, directory: settings.localLibrary.directory, mode: settings.localLibrary.mode, enabled: settings.localLibrary.enabled, syncOnStartup: settings.localLibrary.syncOnStartup, scanIntervalMinutes: settings.localLibrary.scanIntervalMinutes });
   Object.assign(form.registration, { enabled: settings.registration.enabled });
   Object.assign(form.security, { accessTokenTtlSeconds: settings.security.accessTokenTtlSeconds, refreshTokenTtlSeconds: settings.security.refreshTokenTtlSeconds });
@@ -85,7 +83,7 @@ const tabs = [
   { key: "database", label: "数据库", icon: Database }, { key: "storage", label: "资产与转码", icon: HardDrive }, { key: "media", label: "媒体工具", icon: Wrench },
   { key: "library", label: "本地资料库", icon: Library }, { key: "access", label: "注册与安全", icon: ShieldCheck }, { key: "system", label: "系统信息", icon: Info },
 ] as const;
-function locked(section: "database" | "storage" | "mediaTools" | "scraping" | "localLibrary" | "registration" | "security" | "http", field: string): boolean { return settingsQuery.data.value?.[section].lockedFields.includes(field) ?? false; }
+function locked(section: "database" | "storage" | "mediaTools" | "localLibrary" | "registration" | "security" | "http", field: string): boolean { return settingsQuery.data.value?.[section].lockedFields.includes(field) ?? false; }
 function resetMessages(): void { actionError.value = ""; testMessage.value = ""; }
 function detailedApiError(error: unknown, fallback: string): string {
   if (!(error instanceof ApiError)) return fallback;
@@ -113,22 +111,18 @@ function mediaToolsPayload() {
 const testMedia = useMutation({ mutationFn: () => settingsAdmin.testMediaTools(mediaToolsPayload()), onSuccess: (result) => { testMessage.value = [result.message, ...(result.details ?? [])].join(" · "); }, onError: (error) => { actionError.value = detailedApiError(error, "FFmpeg 测试失败"); } });
 const testLibrary = useMutation({ mutationFn: () => settingsAdmin.testLocalLibrary(form.localLibrary.directory), onSuccess: (result) => { testMessage.value = `${result.message}${result.normalizedPath ? ` · ${result.normalizedPath}` : ""}`; }, onError: (error) => { actionError.value = detailedApiError(error, "资料库目录测试失败"); } });
 const testing = computed(() => testDatabase.isPending.value || testStorage.isPending.value || testMedia.isPending.value || testLibrary.isPending.value);
-function testCurrent(): void { resetMessages(); if (tab.value === "database") testDatabase.mutate(); else if (tab.value === "storage") testStorage.mutate(); else if (tab.value === "media") testMedia.mutate(); else if (tab.value === "library") testLibrary.mutate(); }
-
-function baselineState(): Record<string, unknown> | undefined {
-  if (!baseline.value) return undefined;
-  try {
-    const parsed: unknown = JSON.parse(baseline.value);
-    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : undefined;
-  } catch {
-    return undefined;
-  }
+async function testCurrent(): Promise<void> {
+  resetMessages();
+  if (tab.value === "database") await testDatabase.mutateAsync();
+  else if (tab.value === "storage") await testStorage.mutateAsync();
+  else if (tab.value === "media") await testMedia.mutateAsync();
+  else if (tab.value === "library") await testLibrary.mutateAsync();
 }
-function sectionChanged(section: string): boolean {
-  const initial = baselineState();
-  if (!initial) return true;
+
+function sectionChanged(section: "database" | "storage" | "mediaTools" | "localLibrary" | "registration" | "security" | "http" | "proxies" | "includePatterns" | "excludePatterns" | "autoDetectMedia"): boolean {
   const current = editableState() as Record<string, unknown>;
-  return JSON.stringify(current[section]) !== JSON.stringify(initial[section]);
+  const saved = JSON.parse(baseline.value || "{}") as Record<string, unknown>;
+  return JSON.stringify(current[section]) !== JSON.stringify(saved[section]);
 }
 function payload(): RuntimeSettingsUpdate {
   const result: RuntimeSettingsUpdate = { expectedVersion: form.version };
@@ -141,12 +135,6 @@ function payload(): RuntimeSettingsUpdate {
   }
   if (sectionChanged("mediaTools") || sectionChanged("autoDetectMedia")) {
     result.mediaTools = mediaToolsPayload();
-  }
-  if (sectionChanged("scraping")) {
-    result.scraping = {
-      fpcalcPath: form.scraping.fpcalcPath.trim(),
-      acoustIdClient: form.scraping.acoustIdClient.trim(),
-    };
   }
   if (sectionChanged("localLibrary") || sectionChanged("includePatterns") || sectionChanged("excludePatterns")) {
     result.localLibrary = {
@@ -167,15 +155,6 @@ const saveMutation = useMutation({ mutationFn: () => settingsAdmin.update(payloa
 function save(): void {
   resetMessages();
   if (saveMutation.isPending.value) return;
-  const hasFpcalc = Boolean(form.scraping.fpcalcPath.trim());
-  const hasClientId = Boolean(form.scraping.acoustIdClient.trim());
-  if (hasFpcalc !== hasClientId) {
-    tab.value = "media";
-    actionError.value = hasFpcalc
-      ? "启用音频指纹时还需要填写 AcoustID Client ID"
-      : "启用音频指纹时还需要填写 fpcalc 路径";
-    return;
-  }
   saveMutation.mutate();
 }
 
@@ -208,16 +187,6 @@ const SystemItem = defineComponent({ props: { label: { type: String, required: t
             <div v-else class="grid gap-5 sm:grid-cols-2">
               <SettingField label="FFmpeg 路径" :locked="locked('mediaTools','ffmpegPath')" :hint="`支持绝对路径或相对路径；留空则从系统 PATH 查找。${executableRelativePathHint}`"><input v-model="form.mediaTools.ffmpegPath" class="ui-input font-mono" :disabled="locked('mediaTools','ffmpegPath')" placeholder="留空使用 PATH" /></SettingField>
               <SettingField label="FFprobe 路径" :locked="locked('mediaTools','ffprobePath')" :hint="`支持绝对路径或相对路径；留空则从系统 PATH 查找。${executableRelativePathHint}`"><input v-model="form.mediaTools.ffprobePath" class="ui-input font-mono" :disabled="locked('mediaTools','ffprobePath')" placeholder="留空使用 PATH" /></SettingField>
-            </div>
-            <div class="rounded-xl border border-violet-500/20 bg-violet-500/8 p-4">
-              <div class="mb-4 flex gap-3">
-                <ServerCog :size="18" class="mt-0.5 shrink-0 text-violet-500" />
-                <div><h3 class="text-sm font-bold">音频指纹识别（可选）</h3><p class="mt-1 text-xs leading-5 text-[var(--muted)]">fpcalc 来自 Chromaprint，不属于 FFmpeg。它计算音频指纹并交给 AcoustID 识曲；两项都留空即禁用，不影响扫描或转码。</p></div>
-              </div>
-              <div class="grid gap-5 sm:grid-cols-2">
-                <SettingField label="fpcalc 路径" :locked="locked('scraping','fpcalcPath')" :hint="executableRelativePathHint"><input v-model="form.scraping.fpcalcPath" class="ui-input font-mono" :disabled="locked('scraping','fpcalcPath')" placeholder="tools\\fpcalc.exe" /></SettingField>
-                <SettingField label="AcoustID Client ID" :locked="locked('scraping','acoustIdClient')" hint="仅启用音频指纹识别时填写。"><input v-model="form.scraping.acoustIdClient" class="ui-input font-mono" :disabled="locked('scraping','acoustIdClient')" /></SettingField>
-              </div>
             </div>
           </div>
           <div v-else-if="tab === 'library'" key="library" class="space-y-5"><div class="grid gap-5 sm:grid-cols-2"><SettingField label="默认音源名称" :locked="locked('localLibrary','name')"><input v-model="form.localLibrary.name" class="ui-input" :disabled="locked('localLibrary','name')" /></SettingField><SettingField label="默认访问模式" :locked="locked('localLibrary','mode')"><select v-model="form.localLibrary.mode" class="ui-select" :disabled="locked('localLibrary','mode')"><option value="READ_ONLY">只读</option><option value="READ_WRITE">读写（Tag 修改或刮削时可选择写回）</option></select></SettingField><SettingField class="sm:col-span-2" label="默认本地音乐目录" :locked="locked('localLibrary','directory')" :hint="executableRelativePathHint"><input v-model="form.localLibrary.directory" class="ui-input font-mono" :disabled="locked('localLibrary','directory')" placeholder="music" /></SettingField><SettingField label="定时扫描间隔（分钟，可留空）" :locked="locked('localLibrary','scanIntervalMinutes')"><input v-model.number="form.localLibrary.scanIntervalMinutes" class="ui-input" type="number" min="5" max="10080" :disabled="locked('localLibrary','scanIntervalMinutes')" /></SettingField></div><p class="rounded-xl bg-[var(--surface-muted)] p-4 text-xs leading-5 text-[var(--muted)]">只读模式不会修改音源；读写模式允许在 Tag 修改或刮削操作中按次选择写回。</p><ToggleSetting v-model="form.localLibrary.enabled" label="启用默认音源" detail="仅用于数据库尚无音源时的初始化默认值" :disabled="locked('localLibrary','enabled')" /><ToggleSetting v-model="form.localLibrary.syncOnStartup" label="启动时同步默认目录" detail="多音源的扫描策略请在音源页面管理" :disabled="locked('localLibrary','syncOnStartup')" /><div class="grid gap-5 sm:grid-cols-2"><SettingField label="默认包含规则" :locked="locked('localLibrary','includePatterns')" hint="每行一个 glob。"><textarea v-model="includePatterns" class="ui-textarea font-mono" :disabled="locked('localLibrary','includePatterns')" /></SettingField><SettingField label="默认排除规则" :locked="locked('localLibrary','excludePatterns')" hint="每行一个 glob。"><textarea v-model="excludePatterns" class="ui-textarea font-mono" :disabled="locked('localLibrary','excludePatterns')" /></SettingField></div></div>

@@ -19,7 +19,7 @@ import (
 	"xymusic/server/internal/shared/apperror"
 )
 
-func TestRoutesExposeAllFifteenTagScrapingAPIs(t *testing.T) {
+func TestRoutesExposeAllFourteenTagScrapingAPIs(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	scraping := &scrapingAPIStub{}
 	batches := &batchAPIStub{}
@@ -50,7 +50,6 @@ func TestRoutesExposeAllFifteenTagScrapingAPIs(t *testing.T) {
 		{http.MethodGet, "/api/v1/admin/tag-scraping/artists/batches/" + id + "?updatedAfter=2026-07-16T01%3A02%3A03Z", "", http.StatusOK, false},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/artists/batches/" + id + "/cancel", "", http.StatusAccepted, true},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/artists/batches/" + id + "/retry", "", http.StatusAccepted, true},
-		{http.MethodPost, "/api/v1/admin/tag-scraping/tracks/" + id + "/fingerprint", "", http.StatusOK, false},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/tracks/" + id + "/apply", `{"expectedVersion":1,"candidate":` + candidate + `,"verbatim":true,"fields":` + fields + `,"writeBack":false,"reason":"operator apply"}`, http.StatusOK, true},
 		{http.MethodGet, "/api/v1/admin/tag-scraping/artwork?url=https%3A%2F%2Fy.qq.com%2Fcover.jpg", "", http.StatusOK, false},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/batches", `{"items":[{"trackId":"` + id + `","expectedVersion":1}],"options":{"sources":["qmusic"],"verbatim":true,"matchMode":"strict","missingFields":["lyrics"],"fields":` + fields + `,"writeBack":false,"reason":"batch apply"}}`, http.StatusAccepted, true},
@@ -86,10 +85,10 @@ func TestRoutesExposeAllFifteenTagScrapingAPIs(t *testing.T) {
 			}
 		}
 	}
-	if scraping.searchCalls != 1 || scraping.candidateDetailsCalls != 1 || scraping.artistSearchCalls != 1 || scraping.fingerprintCalls != 1 ||
+	if scraping.searchCalls != 1 || scraping.candidateDetailsCalls != 1 || scraping.artistSearchCalls != 1 ||
 		scraping.applyCalls != 1 || scraping.artistApplyCalls != 1 || scraping.artworkCalls != 1 {
-		t.Fatalf("scraping calls=%d/%d/%d/%d/%d/%d/%d", scraping.searchCalls, scraping.candidateDetailsCalls,
-			scraping.artistSearchCalls, scraping.fingerprintCalls, scraping.applyCalls, scraping.artistApplyCalls, scraping.artworkCalls)
+		t.Fatalf("scraping calls=%d/%d/%d/%d/%d/%d", scraping.searchCalls, scraping.candidateDetailsCalls,
+			scraping.artistSearchCalls, scraping.applyCalls, scraping.artistApplyCalls, scraping.artworkCalls)
 	}
 	if !scraping.candidateDetailsVerbatim || !scraping.applyVerbatim || !batches.createVerbatim {
 		t.Fatalf("verbatim parameters were not forwarded: details=%t apply=%t batch=%t", scraping.candidateDetailsVerbatim, scraping.applyVerbatim, batches.createVerbatim)
@@ -115,7 +114,7 @@ func TestRoutesExposeAllFifteenTagScrapingAPIs(t *testing.T) {
 	if !reflect.DeepEqual(idempotency.scopes, expectedScopes) {
 		t.Fatalf("idempotency scopes=%#v", idempotency.scopes)
 	}
-	if identityService.calls != 15 {
+	if identityService.calls != 14 {
 		t.Fatalf("authentication calls=%d", identityService.calls)
 	}
 	if response := scraping.artworkResponse; string(response.Bytes) != "JPEG" {
@@ -190,7 +189,6 @@ func TestRouteContractsRejectMalformedBodiesBeforeAuthentication(t *testing.T) {
 		{http.MethodPost, "/api/v1/admin/tag-scraping/candidates/details", `{"candidate":{}}`},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/artists/search", `{"source":"kugou","query":"Artist"}`},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/artists/" + id + "/apply", `{"expectedVersion":1,"candidate":{},"overwrite":false,"reason":"ok"}`},
-		{http.MethodPost, "/api/v1/admin/tag-scraping/tracks/not-a-uuid/fingerprint", ""},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/tracks/" + id + "/apply", `{"expectedVersion":1,"candidate":{},"fields":{},"reason":"ok"}`},
 		{http.MethodGet, "/api/v1/admin/tag-scraping/artwork?url=short", ""},
 		{http.MethodPost, "/api/v1/admin/tag-scraping/batches", `{"items":[],"options":{}}`},
@@ -382,11 +380,11 @@ func TestUnknownJSONFieldsAreStrippedFromIdempotentPayloads(t *testing.T) {
 }
 
 type scrapingAPIStub struct {
-	searchCalls, candidateDetailsCalls, artistSearchCalls, fingerprintCalls int
-	applyCalls, artistApplyCalls, artworkCalls                              int
-	candidateDetailsVerbatim, applyVerbatim                                 bool
-	artworkResponse                                                         DownloadedArtwork
-	artworkURL                                                              string
+	searchCalls, candidateDetailsCalls, artistSearchCalls int
+	applyCalls, artistApplyCalls, artworkCalls            int
+	candidateDetailsVerbatim, applyVerbatim               bool
+	artworkResponse                                       DownloadedArtwork
+	artworkURL                                            string
 }
 
 func (stub *scrapingAPIStub) Search(context.Context, SearchInput) ([]Candidate, error) {
@@ -404,10 +402,6 @@ func (stub *scrapingAPIStub) CandidateDetails(_ context.Context, candidate Candi
 func (stub *scrapingAPIStub) SearchArtists(context.Context, ArtistSearchInput) ([]ArtistCandidate, error) {
 	stub.artistSearchCalls++
 	return []ArtistCandidate{}, nil
-}
-func (stub *scrapingAPIStub) Fingerprint(context.Context, string) ([]Candidate, error) {
-	stub.fingerprintCalls++
-	return []Candidate{}, nil
 }
 func (stub *scrapingAPIStub) Apply(_ context.Context, _ string, _ string, input ApplyInput) (ApplyResult, error) {
 	stub.applyCalls++

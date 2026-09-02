@@ -14,7 +14,7 @@ func TestProductionMusicPlatformSearchesLiveSources(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	platform := NewMusicPlatformClient(&http.Client{}, "")
+	platform := NewMusicPlatformClient(&http.Client{})
 	query := "\u5468\u6770\u4f26"
 	results := make(map[Source][]Candidate)
 	for _, source := range searchableSources {

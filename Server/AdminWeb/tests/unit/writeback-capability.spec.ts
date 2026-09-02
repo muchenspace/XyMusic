@@ -12,7 +12,6 @@ import {
 
 const scraping = vi.hoisted(() => ({
   search: vi.fn(),
-  fingerprint: vi.fn(),
   apply: vi.fn(),
   createBatch: vi.fn(),
   batch: vi.fn(),
@@ -135,10 +134,8 @@ describe("writeback controls", () => {
 
     const buttons = wrapper.findAll("button");
     expect(buttons.find((button) => button.text() === "搜索")?.element.disabled).toBe(true);
-    expect(buttons.find((button) => button.text() === "音频指纹")?.element.disabled).toBe(true);
     expect(buttons.find((button) => button.text() === "应用候选")?.element.disabled).toBe(true);
     expect(scraping.search).not.toHaveBeenCalled();
-    expect(scraping.fingerprint).not.toHaveBeenCalled();
     expect(scraping.apply).not.toHaveBeenCalled();
   });
 

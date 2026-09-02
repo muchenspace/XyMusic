@@ -39,22 +39,13 @@ export function normalizeMediaConfig(input: SetupMediaConfig): {
   directory?: string;
   ffmpegPath?: string;
   ffprobePath?: string;
-  fpcalcPath?: string;
-  acoustIdClient?: string;
 } {
-  const fpcalcPath = input.fpcalcPath.trim();
-  const acoustIdClient = input.acoustIdClient.trim();
-  const media = input.mode === "DIRECTORY"
+  return input.mode === "DIRECTORY"
     ? { directory: input.directory.trim() }
     : {
         ffmpegPath: input.ffmpegPath.trim(),
         ffprobePath: input.ffprobePath.trim(),
       };
-  return {
-    ...media,
-    ...(fpcalcPath ? { fpcalcPath } : {}),
-    ...(acoustIdClient ? { acoustIdClient } : {}),
-  };
 }
 
 export class HttpSetupGateway implements SetupGateway {

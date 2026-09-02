@@ -65,11 +65,9 @@ type StorageInput struct {
 }
 
 type MediaInput struct {
-	Directory      *string `json:"directory,omitempty"`
-	FFmpegPath     *string `json:"ffmpegPath,omitempty"`
-	FFprobePath    *string `json:"ffprobePath,omitempty"`
-	FPcalcPath     *string `json:"fpcalcPath,omitempty"`
-	AcoustIDClient *string `json:"acoustIdClient,omitempty"`
+	Directory   *string `json:"directory,omitempty"`
+	FFmpegPath  *string `json:"ffmpegPath,omitempty"`
+	FFprobePath *string `json:"ffprobePath,omitempty"`
 }
 
 type SourceInput struct {
@@ -152,13 +150,10 @@ type StorageInspection struct {
 }
 
 type MediaTestResponse struct {
-	OK                    bool               `json:"ok"`
-	FFmpeg                string             `json:"ffmpeg"`
-	FFprobe               string             `json:"ffprobe"`
-	FPcalc                *string            `json:"fpcalc,omitempty"`
-	Paths                 ResolvedMediaPaths `json:"paths"`
-	FPcalcDescription     string             `json:"fpcalcDescription"`
-	FingerprintConfigured bool               `json:"fingerprintConfigured"`
+	OK      bool               `json:"ok"`
+	FFmpeg  string             `json:"ffmpeg"`
+	FFprobe string             `json:"ffprobe"`
+	Paths   ResolvedMediaPaths `json:"paths"`
 }
 
 type ResolvedMediaPaths struct {

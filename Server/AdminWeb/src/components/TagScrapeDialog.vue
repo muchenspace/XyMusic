@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Check, Eye, Fingerprint, Search, Sparkles } from "lucide-vue-next";
+import { Check, Eye, Search, Sparkles } from "lucide-vue-next";
 import { computed, onUnmounted, reactive, ref, watch } from "vue";
 import AppButton from "@/components/AppButton.vue";
 import BaseDialog from "@/components/BaseDialog.vue";
@@ -120,29 +120,6 @@ async function search(): Promise<void> {
   }
 }
 
-async function fingerprint(): Promise<void> {
-  const track = scrapableTrack();
-  if (!track) return;
-  resetCandidateDetail();
-  cancelLookup();
-  const generation = lookupGeneration;
-  const controller = new AbortController();
-  lookupController = controller;
-  loading.value = true; error.value = "";
-  try {
-    const result = await scraping.fingerprint(track.id, controller.signal);
-    if (generation !== lookupGeneration || !open.value) return;
-    candidates.value = result;
-    selected.value = candidates.value[0];
-  } catch (cause) {
-    if (controller.signal.aborted || generation !== lookupGeneration || !open.value) return;
-    error.value = cause instanceof Error ? cause.message : "指纹识别失败";
-  } finally {
-    if (generation === lookupGeneration) loading.value = false;
-    if (lookupController === controller) lookupController = undefined;
-  }
-}
-
 async function apply(): Promise<void> {
   const track = scrapableTrack();
   if (!track || !selected.value || !props.expectedVersion) return;
@@ -175,7 +152,7 @@ async function apply(): Promise<void> {
       <div><label class="ui-label">搜索来源</label><select v-model="source" class="ui-select" :disabled="archived"><option v-for="item in sourceOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></div>
       <div><label class="ui-label">搜索关键词</label><input v-model="query" class="ui-input" :disabled="archived" placeholder="歌曲、艺术家或专辑" @keyup.enter="search" /></div>
       <div><label class="ui-label">歌词类型</label><select v-model="verbatim" data-testid="tag-verbatim" class="ui-select" :disabled="archived"><option :value="false">普通歌词</option><option :value="true">逐字歌词</option></select></div>
-      <div class="grid grid-cols-2 gap-2 lg:flex"><AppButton :loading="loading" :disabled="archived" @click="search"><template #icon><Search :size="15" /></template>搜索</AppButton><AppButton :loading="loading" :disabled="archived" @click="fingerprint"><template #icon><Fingerprint :size="15" /></template>音频指纹</AppButton></div>
+      <div class="flex"><AppButton :loading="loading" :disabled="archived" @click="search"><template #icon><Search :size="15" /></template>搜索</AppButton></div>
     </div>
     <div class="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.65fr)_minmax(300px,0.75fr)]">
       <section class="overflow-hidden rounded-2xl border border-[var(--border)]">

@@ -10,11 +10,10 @@ import (
 type Source string
 
 const (
-	SourceSmart    Source = "smart"
-	SourceNetease  Source = "netease"
-	SourceQMusic   Source = "qmusic"
-	SourceKugou    Source = "kugou"
-	SourceAcoustID Source = "acoustid"
+	SourceSmart   Source = "smart"
+	SourceNetease Source = "netease"
+	SourceQMusic  Source = "qmusic"
+	SourceKugou   Source = "kugou"
 )
 
 var searchableSources = []Source{SourceNetease, SourceQMusic, SourceKugou}
@@ -161,18 +160,6 @@ type WritebackJob struct {
 	CompletedAt          *string `json:"completedAt"`
 	CreatedAt            string  `json:"createdAt"`
 	UpdatedAt            string  `json:"updatedAt"`
-}
-
-type FingerprintSource struct {
-	SourcePath string
-	RootPath   string
-	StartMS    int
-	EndMS      *int
-}
-
-type FingerprintResult struct {
-	DurationSeconds float64
-	Fingerprint     string
 }
 
 type DownloadedArtwork struct {

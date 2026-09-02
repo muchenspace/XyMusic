@@ -19,7 +19,6 @@ import type {
 export interface TagScrapingGateway {
   search(input: TagSearchInput, signal?: AbortSignal): Promise<TagCandidate[]>;
   candidateDetail(input: TagCandidateDetailInput, signal?: AbortSignal): Promise<TagCandidateDetail>;
-  fingerprint(trackId: string, signal?: AbortSignal): Promise<TagCandidate[]>;
   apply(trackId: string, input: ApplyTagInput): Promise<ApplyTagResult>;
   createBatch(input: CreateBatchInput): Promise<TagScrapingBatch>;
   batch(id: string, updatedAfter?: string, signal?: AbortSignal): Promise<TagScrapingBatch>;

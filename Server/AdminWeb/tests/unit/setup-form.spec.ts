@@ -75,8 +75,6 @@ describe("setup administrator form", () => {
       directory: "tools",
       ffmpegPath: "",
       ffprobePath: "",
-      fpcalcPath: "",
-      acoustIdClient: "",
     }).directory).toBe("tools");
   });
 
@@ -86,46 +84,21 @@ describe("setup administrator form", () => {
       directory: "",
       ffmpegPath: "tools\\ffmpeg.exe",
       ffprobePath: "D:\\XyMusic\\tools\\ffprobe.exe",
-      fpcalcPath: "",
-      acoustIdClient: "",
     })).toMatchObject({
       ffmpegPath: "tools\\ffmpeg.exe",
       ffprobePath: "D:\\XyMusic\\tools\\ffprobe.exe",
-      fpcalcPath: "",
-      acoustIdClient: "",
     });
     expect(setupStepSchemas.media.safeParse({
       mode: "ADVANCED",
       directory: "",
       ffmpegPath: "",
       ffprobePath: "",
-      fpcalcPath: "",
-      acoustIdClient: "",
     }).success).toBe(true);
     expect(setupStepSchemas.media.safeParse({
       mode: "DIRECTORY",
       directory: "",
       ffmpegPath: "",
       ffprobePath: "",
-      fpcalcPath: "",
-      acoustIdClient: "",
-    }).success).toBe(true);
-  });
-
-  it("keeps audio fingerprinting optional but requires both values when enabled", () => {
-    const base = {
-      mode: "DIRECTORY" as const,
-      directory: "tools",
-      ffmpegPath: "",
-      ffprobePath: "",
-    };
-    expect(setupStepSchemas.media.safeParse({ ...base, fpcalcPath: "", acoustIdClient: "" }).success).toBe(true);
-    expect(setupStepSchemas.media.safeParse({ ...base, fpcalcPath: "tools\\fpcalc.exe", acoustIdClient: "" }).success).toBe(false);
-    expect(setupStepSchemas.media.safeParse({ ...base, fpcalcPath: "", acoustIdClient: "xymusic" }).success).toBe(false);
-    expect(setupStepSchemas.media.safeParse({
-      ...base,
-      fpcalcPath: "tools\\fpcalc.exe",
-      acoustIdClient: "xymusic",
     }).success).toBe(true);
   });
 
@@ -173,8 +146,6 @@ function completeSetupInput(): SetupCompleteInput {
       directory: "tools",
       ffmpegPath: "",
       ffprobePath: "",
-      fpcalcPath: "",
-      acoustIdClient: "",
     },
     source: {
       name: "Music",
