@@ -22,7 +22,6 @@ const ROOT = "/api/v1/admin/tag-scraping";
 export class HttpTagScrapingGateway implements TagScrapingGateway {
   search(input: TagSearchInput, signal?: AbortSignal) { return apiRequest<TagCandidate[]>(`${ROOT}/search`, { method: "POST", body: input, signal }); }
   candidateDetail(input: TagCandidateDetailInput, signal?: AbortSignal) { return apiRequest<TagCandidateDetail>(`${ROOT}/candidates/details`, { method: "POST", body: input, signal }); }
-  fingerprint(trackId: string, signal?: AbortSignal) { return apiRequest<TagCandidate[]>(`${ROOT}/tracks/${trackId}/fingerprint`, { method: "POST", signal }); }
   apply(trackId: string, input: ApplyTagInput) { return apiRequest<ApplyTagResult>(`${ROOT}/tracks/${trackId}/apply`, { method: "POST", body: input }); }
   createBatch(input: CreateBatchInput) { return apiRequest<TagScrapingBatch>(`${ROOT}/batches`, { method: "POST", body: input }); }
   batch(id: string, updatedAfter?: string, signal?: AbortSignal) {

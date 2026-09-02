@@ -77,18 +77,6 @@ func TestRepositoryReadsConfiguredProductionScrapingState(t *testing.T) {
 		t.Fatalf("select track metadata: %v", err)
 	}
 
-	err = pool.Pool.QueryRow(ctx, `
-		SELECT mapping.track_id FROM local_music_source_tracks mapping
-		JOIN local_music_sources source ON source.id = mapping.source_id
-		ORDER BY source.updated_at DESC LIMIT 1`).Scan(&trackID)
-	if err == nil {
-		if _, lookupErr := repository.FingerprintSource(ctx, trackID); lookupErr != nil {
-			t.Fatalf("FingerprintSource: %v", lookupErr)
-		}
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		t.Fatalf("select local source mapping: %v", err)
-	}
-
 	var jobID string
 	err = pool.Pool.QueryRow(ctx, "SELECT id FROM tag_scraping_jobs ORDER BY created_at DESC LIMIT 1").Scan(&jobID)
 	if err == nil {
@@ -498,9 +486,6 @@ func TestProductionArchivedTrackScrapingGuards(t *testing.T) {
 	metadata, err := repository.Metadata(ctx, trackID)
 	if err != nil || metadata.TrackStatus != archivedTrackStatus {
 		t.Fatalf("metadata=%+v error=%v", metadata, err)
-	}
-	if _, err := repository.FingerprintSource(ctx, trackID); !apperror.IsCode(err, apperror.CodeInvalidStateTransition) || !isArchivedTrackError(err) {
-		t.Fatalf("fingerprint error = %#v", err)
 	}
 	if _, err := repository.UpdateMetadata(
 		ctx, actorID, trackID, 1,

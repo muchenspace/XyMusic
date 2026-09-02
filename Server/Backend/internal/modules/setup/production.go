@@ -476,7 +476,7 @@ func (CommandMediaTool) Version(ctx context.Context, executable, label string) (
 	}
 	identity := strings.ToLower(line)
 	expected := strings.ToLower(strings.TrimSpace(label))
-	if (expected == "ffmpeg" || expected == "ffprobe" || expected == "fpcalc") &&
+	if (expected == "ffmpeg" || expected == "ffprobe") &&
 		identity != expected && !strings.HasPrefix(identity, expected+" ") {
 		return "", dependencyFailure(
 			label+" executable identity check failed",

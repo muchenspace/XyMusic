@@ -24,7 +24,6 @@ type ScrapingAPI interface {
 	Search(context.Context, SearchInput) ([]Candidate, error)
 	CandidateDetails(context.Context, Candidate, bool) (CandidateDetailsDTO, error)
 	SearchArtists(context.Context, ArtistSearchInput) ([]ArtistCandidate, error)
-	Fingerprint(context.Context, string) ([]Candidate, error)
 	Apply(context.Context, string, string, ApplyInput) (ApplyResult, error)
 	ApplyArtistArtwork(context.Context, string, string, ArtistArtworkApplyInput) (ArtistArtworkApplyResult, error)
 	Artwork(context.Context, string) (DownloadedArtwork, error)
@@ -90,7 +89,6 @@ func (routes *Routes) Register(router gin.IRouter) {
 	group.POST("/artists/batches/:id/cancel", httpserver.Handle(routes.cancelArtistArtworkBatch))
 	group.POST("/artists/batches/:id/retry", httpserver.Handle(routes.retryArtistArtworkBatch))
 	group.POST("/artists/:id/apply", httpserver.Handle(routes.applyArtistArtwork))
-	group.POST("/tracks/:id/fingerprint", httpserver.Handle(routes.fingerprint))
 	group.POST("/tracks/:id/apply", httpserver.Handle(routes.apply))
 	group.GET("/artwork", httpserver.Handle(routes.artwork))
 	group.POST("/batches", httpserver.Handle(routes.createBatch))
@@ -132,22 +130,6 @@ func (routes *Routes) candidateDetails(c *gin.Context) error {
 		return err
 	}
 	result, err := routes.scraping.CandidateDetails(c.Request.Context(), input.Candidate, input.Verbatim)
-	if err != nil {
-		return err
-	}
-	c.JSON(http.StatusOK, result)
-	return nil
-}
-
-func (routes *Routes) fingerprint(c *gin.Context) error {
-	trackID, err := contractUUID(c.Param("id"))
-	if err != nil {
-		return err
-	}
-	if _, err := adminauth.RequireAdmin(c, routes.identity, true); err != nil {
-		return err
-	}
-	result, err := routes.scraping.Fingerprint(c.Request.Context(), trackID)
 	if err != nil {
 		return err
 	}
@@ -385,7 +367,7 @@ func validateCandidateDetailsInput(input CandidateDetailsInput, shape map[string
 		hasExplicitNull(shape, "verbatim") {
 		return contractError()
 	}
-	if input.Verbatim && input.Candidate.Source != SourceQMusic && input.Candidate.Source != SourceAcoustID {
+	if input.Verbatim && input.Candidate.Source != SourceQMusic {
 		return contractError()
 	}
 	return validateCandidateContract(input.Candidate)
@@ -410,7 +392,7 @@ func validateApplyInput(input ApplyInput, shape map[string]json.RawMessage) erro
 		hasExplicitNull(candidateShape, "titleScore", "artistScore", "albumScore", "score", "lyricId", "durationMs") {
 		return contractError()
 	}
-	if input.Verbatim && input.Candidate.Source != SourceQMusic && input.Candidate.Source != SourceAcoustID {
+	if input.Verbatim && input.Candidate.Source != SourceQMusic {
 		return contractError()
 	}
 	return validateCandidateContract(input.Candidate)
@@ -483,7 +465,7 @@ func validateCandidateContract(candidate Candidate) error {
 			return contractError()
 		}
 	}
-	if !isSearchableSource(candidate.Source) && candidate.Source != SourceAcoustID {
+	if !isSearchableSource(candidate.Source) {
 		return contractError()
 	}
 	if candidate.DurationMS < 0 || candidate.DurationMS > 24*60*60*1_000 {

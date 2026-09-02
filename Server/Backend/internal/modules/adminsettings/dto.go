@@ -74,11 +74,6 @@ type MediaToolsInput struct {
 	FFprobePath *string `json:"ffprobePath,omitempty"`
 }
 
-type ScrapingInput struct {
-	FPcalcPath     *string `json:"fpcalcPath,omitempty"`
-	AcoustIDClient *string `json:"acoustIdClient,omitempty"`
-}
-
 type LocalLibraryInput struct {
 	Name                *string             `json:"name,omitempty"`
 	Directory           *string             `json:"directory,omitempty"`
@@ -114,7 +109,6 @@ type UpdateInput struct {
 	Database        *DatabaseInput     `json:"database,omitempty"`
 	Storage         *StorageInput      `json:"storage,omitempty"`
 	MediaTools      *MediaToolsInput   `json:"mediaTools,omitempty"`
-	Scraping        *ScrapingInput     `json:"scraping,omitempty"`
 	LocalLibrary    *LocalLibraryInput `json:"localLibrary,omitempty"`
 	Registration    *RegistrationInput `json:"registration,omitempty"`
 	Security        *SecurityInput     `json:"security,omitempty"`
@@ -152,7 +146,6 @@ type SettingsDTO struct {
 	Database              DatabaseDTO     `json:"database"`
 	Storage               StorageDTO      `json:"storage"`
 	MediaTools            MediaToolsDTO   `json:"mediaTools"`
-	Scraping              ScrapingDTO     `json:"scraping"`
 	LocalLibrary          LocalLibraryDTO `json:"localLibrary"`
 	Registration          RegistrationDTO `json:"registration"`
 	Security              SecurityDTO     `json:"security"`
@@ -199,12 +192,6 @@ type MediaToolsDTO struct {
 	FFmpegPath   string   `json:"ffmpegPath"`
 	FFprobePath  string   `json:"ffprobePath"`
 	LockedFields []string `json:"lockedFields"`
-}
-
-type ScrapingDTO struct {
-	FPcalcPath     string   `json:"fpcalcPath"`
-	AcoustIDClient string   `json:"acoustIdClient"`
-	LockedFields   []string `json:"lockedFields"`
 }
 
 type LocalLibraryDTO struct {

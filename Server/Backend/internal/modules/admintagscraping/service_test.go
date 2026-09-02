@@ -282,30 +282,6 @@ func TestApplyWithClaimedMetadataSkipsMetadataReload(t *testing.T) {
 	}
 }
 
-func TestFingerprintConfigurationFailsBeforeDatabaseAccess(t *testing.T) {
-	store := &storeStub{}
-	service, _ := NewService(ServiceDependencies{
-		Store: store, Music: &musicStub{}, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
-	})
-	_, err := service.Fingerprint(context.Background(), "00000000-0000-0000-0000-000000000001")
-	if !apperror.IsCode(err, apperror.CodeDependencyUnavailable) || store.fingerprintCalls != 0 {
-		t.Fatalf("error/calls = %v/%d", err, store.fingerprintCalls)
-	}
-}
-
-func TestFingerprintRejectsSourceOutsideLibrary(t *testing.T) {
-	store := &storeStub{fingerprintSource: FingerprintSource{RootPath: t.TempDir(), SourcePath: "..\\outside.flac"}}
-	fingerprinter := &fingerprinterStub{}
-	service, _ := NewService(ServiceDependencies{
-		Store: store, Music: &musicStub{}, Fingerprinter: fingerprinter,
-		Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
-	})
-	_, err := service.Fingerprint(context.Background(), "00000000-0000-0000-0000-000000000001")
-	if !apperror.IsCode(err, apperror.CodeForbidden) || fingerprinter.calls != 0 {
-		t.Fatalf("error/calls = %v/%d", err, fingerprinter.calls)
-	}
-}
-
 func TestApplyPreservesExistingFieldsAndCoordinatesLyricsCoverAndWriteback(t *testing.T) {
 	albumID := "00000000-0000-0000-0000-000000000010"
 	version := 3
@@ -735,10 +711,6 @@ func (stub *musicStub) Lyric(_ context.Context, source Source, candidate Candida
 	return LyricResult{Content: stub.lyrics, Timing: stub.lyricTiming}, stub.lyricErr
 }
 
-func (stub *musicStub) AcoustID(context.Context, float64, string) ([]Candidate, error) {
-	return []Candidate{{ID: "fingerprint", Name: "match", Source: SourceAcoustID}}, nil
-}
-
 func (stub *musicStub) DownloadArtwork(_ context.Context, rawURL string) (DownloadedArtwork, error) {
 	stub.artworkURL = rawURL
 	return stub.artwork, stub.artworkErr
@@ -754,13 +726,6 @@ func (stub *musicStub) searchCallQueries() []string {
 	stub.mu.Lock()
 	defer stub.mu.Unlock()
 	return append([]string(nil), stub.searchQueries...)
-}
-
-type fingerprinterStub struct{ calls int }
-
-func (stub *fingerprinterStub) Fingerprint(context.Context, string, int, *int) (FingerprintResult, error) {
-	stub.calls++
-	return FingerprintResult{DurationSeconds: 120, Fingerprint: "value"}, nil
 }
 
 type artworkStub struct {
@@ -797,9 +762,6 @@ func (stub *artworkStub) ApplyArtistArtwork(
 }
 
 type storeStub struct {
-	fingerprintCalls         int
-	fingerprintSource        FingerprintSource
-	fingerprintErr           error
 	metadata                 TrackMetadata
 	metadataErr              error
 	updatedMetadata          TrackMetadata
@@ -832,10 +794,6 @@ type storeStub struct {
 	onUpdateMetadata            func(MetadataPatch)
 }
 
-func (stub *storeStub) FingerprintSource(context.Context, string) (FingerprintSource, error) {
-	stub.fingerprintCalls++
-	return stub.fingerprintSource, stub.fingerprintErr
-}
 func (stub *storeStub) Metadata(context.Context, string) (TrackMetadata, error) {
 	return stub.metadata, stub.metadataErr
 }

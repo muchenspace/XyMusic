@@ -83,7 +83,6 @@ function sourceLabel(source: TagCandidate["source"]): string {
     netease: "网易云",
     qmusic: "QQ 音乐",
     kugou: "酷狗",
-    acoustid: "AcoustID",
   } satisfies Record<TagCandidate["source"], string>)[source];
 }
 

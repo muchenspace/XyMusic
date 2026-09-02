@@ -45,26 +45,24 @@ const (
 var allowedArtworkHosts = []string{"music.126.net", "y.qq.com", "kugou.com"}
 
 type ProductionMusicPlatform struct {
-	client         *http.Client
-	acoustIDClient string
-	gate           *requestGate
-	artworkGate    *requestGate
-	searchMu       sync.Mutex
-	searchCalls    map[string]*trackSearchCall
-	artistCalls    map[string]*artistSearchCall
-	artworkMu      sync.Mutex
-	artworkCalls   map[string]*artworkCall
-	artworkCache   map[string]artworkCacheEntry
-	artworkBytes   int64
-	circuitMu      sync.Mutex
-	circuitOpen    map[string]time.Time
-	hostMu         sync.Mutex
-	hostStates     map[string]*upstreamHostState
+	client       *http.Client
+	gate         *requestGate
+	artworkGate  *requestGate
+	searchMu     sync.Mutex
+	searchCalls  map[string]*trackSearchCall
+	artistCalls  map[string]*artistSearchCall
+	artworkMu    sync.Mutex
+	artworkCalls map[string]*artworkCall
+	artworkCache map[string]artworkCacheEntry
+	artworkBytes int64
+	circuitMu    sync.Mutex
+	circuitOpen  map[string]time.Time
+	hostMu       sync.Mutex
+	hostStates   map[string]*upstreamHostState
 }
 
 type MusicPlatformOptions struct {
 	Client         *http.Client
-	AcoustIDClient string
 	RequestWorkers int
 	ArtworkWorkers int
 }
@@ -103,9 +101,9 @@ type upstreamHostState struct {
 	consecutiveFailures int
 }
 
-func NewMusicPlatformClient(client *http.Client, acoustIDClient string) *ProductionMusicPlatform {
+func NewMusicPlatformClient(client *http.Client) *ProductionMusicPlatform {
 	return NewMusicPlatformClientWithOptions(MusicPlatformOptions{
-		Client: client, AcoustIDClient: acoustIDClient,
+		Client: client,
 	})
 }
 
@@ -123,7 +121,7 @@ func NewMusicPlatformClientWithOptions(options MusicPlatformOptions) *Production
 	options.RequestWorkers = min(64, options.RequestWorkers)
 	options.ArtworkWorkers = min(32, options.ArtworkWorkers)
 	return &ProductionMusicPlatform{
-		client: tuneMusicHTTPClient(client, options.RequestWorkers), acoustIDClient: strings.TrimSpace(options.AcoustIDClient),
+		client:      tuneMusicHTTPClient(client, options.RequestWorkers),
 		gate:        newRequestGate(options.RequestWorkers, options.RequestWorkers*32),
 		artworkGate: newRequestGate(options.ArtworkWorkers, options.ArtworkWorkers*16),
 		searchCalls: make(map[string]*trackSearchCall), artistCalls: make(map[string]*artistSearchCall),
@@ -355,48 +353,6 @@ func (platform *ProductionMusicPlatform) Lyric(ctx context.Context, source Sourc
 	}
 	timing := lyrics.DetectTiming("LRC", result)
 	return LyricResult{Content: result, Timing: timing}, nil
-}
-
-func (platform *ProductionMusicPlatform) AcoustID(
-	ctx context.Context,
-	duration float64,
-	fingerprint string,
-) ([]Candidate, error) {
-	if platform == nil || strings.TrimSpace(platform.acoustIDClient) == "" {
-		return nil, apperror.DependencyUnavailable("Audio fingerprinting is not configured: set the AcoustID Client ID")
-	}
-	parameters := url.Values{
-		"format":      {"json"},
-		"client":      {platform.acoustIDClient},
-		"duration":    {strconv.FormatInt(int64(math.Floor(duration)), 10)},
-		"fingerprint": {fingerprint},
-		"meta":        {"recordings releasegroups"},
-	}
-	data, err := platform.requestJSON(ctx, "https://api.acoustid.org/v2/lookup?"+parameters.Encode(), requestOptions{Timeout: 20 * time.Second})
-	if err != nil {
-		return nil, normalizeUpstreamError(err, ctx)
-	}
-	result := make([]Candidate, 0)
-	for _, match := range sliceValue(data["results"]) {
-		for _, recordingValue := range sliceValue(mapValue(match)["recordings"]) {
-			recording := mapValue(recordingValue)
-			group := map[string]any{}
-			if groups := sliceValue(recording["releasegroups"]); len(groups) > 0 {
-				group = mapValue(groups[0])
-			}
-			artists := strings.Builder{}
-			for _, artistValue := range sliceValue(recording["artists"]) {
-				artist := mapValue(artistValue)
-				artists.WriteString(stringValue(artist["name"]))
-				artists.WriteString(stringValue(artist["joinphrase"]))
-			}
-			result = append(result, normalizeCandidate(map[string]any{
-				"id": recording["id"], "name": recording["title"], "artist": artists.String(),
-				"album": group["title"], "albumId": group["id"],
-			}, SourceAcoustID))
-		}
-	}
-	return result, nil
 }
 
 func (platform *ProductionMusicPlatform) DownloadArtwork(ctx context.Context, rawURL string) (DownloadedArtwork, error) {
@@ -1014,8 +970,6 @@ func upstreamHostKey(rawURL string) string {
 		return "kugou.com"
 	case host == "music.126.net" || strings.HasSuffix(host, ".music.126.net"):
 		return "music.126.net"
-	case host == "api.acoustid.org" || strings.HasSuffix(host, ".api.acoustid.org"):
-		return "api.acoustid.org"
 	default:
 		return host
 	}
@@ -1023,8 +977,6 @@ func upstreamHostKey(rawURL string) string {
 
 func upstreamHostInterval(host string) time.Duration {
 	switch host {
-	case "api.acoustid.org":
-		return 250 * time.Millisecond
 	case "y.qq.com", "kugou.com", "music.126.net":
 		return 100 * time.Millisecond
 	case "music.163.com":

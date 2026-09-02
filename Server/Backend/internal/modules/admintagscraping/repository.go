@@ -36,45 +36,6 @@ var _ BatchCompleteStore = (*Repository)(nil)
 
 func NewRepository(pool *pgxpool.Pool) *Repository { return &Repository{pool: pool} }
 
-func (repository *Repository) FingerprintSource(ctx context.Context, trackID string) (FingerprintSource, error) {
-	var trackStatus string
-	var sourcePath, rootPath *string
-	var startMS, endMS *int
-	err := repository.pool.QueryRow(ctx, `
-		SELECT track.status::text, source.source_path, source.root_path, source.start_ms, source.end_ms
-		FROM tracks track
-		LEFT JOIN LATERAL (
-			SELECT local_source.source_path, COALESCE(root.path, '') AS root_path,
-			       mapping.start_ms, mapping.end_ms
-			FROM local_music_source_tracks mapping
-			JOIN local_music_sources local_source ON local_source.id = mapping.source_id
-			LEFT JOIN library_roots root ON root.id = local_source.root_id
-			WHERE mapping.track_id = track.id
-			ORDER BY CASE local_source.status WHEN 'READY' THEN 0 WHEN 'PROCESSING' THEN 1 ELSE 2 END,
-			         local_source.updated_at DESC, local_source.id
-			LIMIT 1
-		) source ON true
-		WHERE track.id = $1`, trackID).Scan(&trackStatus, &sourcePath, &rootPath, &startMS, &endMS)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return FingerprintSource{}, apperror.NotFound("Track was not found")
-	}
-	if err != nil {
-		return FingerprintSource{}, fmt.Errorf("find fingerprint source: %w", err)
-	}
-	if trackIsArchived(trackStatus) {
-		return FingerprintSource{}, archivedTrackError(trackID)
-	}
-	if sourcePath == nil || startMS == nil {
-		return FingerprintSource{}, apperror.NotFound("The track has no local source available for fingerprinting")
-	}
-	return FingerprintSource{
-		SourcePath: *sourcePath,
-		RootPath:   pointerValue(rootPath),
-		StartMS:    *startMS,
-		EndMS:      endMS,
-	}, nil
-}
-
 func (repository *Repository) Metadata(ctx context.Context, trackID string) (TrackMetadata, error) {
 	fence := batchMutationFenceFromContext(ctx)
 	if fence == nil {

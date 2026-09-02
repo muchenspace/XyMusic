@@ -169,7 +169,7 @@ func (routes *Routes) systemInformation(c *gin.Context) error {
 
 func (input UpdateInput) hasUpdate() bool {
 	return input.Database != nil || input.Storage != nil || input.MediaTools != nil ||
-		input.Scraping != nil || input.LocalLibrary != nil || input.Registration != nil ||
+		input.LocalLibrary != nil || input.Registration != nil ||
 		input.Security != nil || input.HTTP != nil
 }
 

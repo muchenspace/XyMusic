@@ -66,7 +66,7 @@ describe("administrator HTTP API contract", () => {
     expect(publicMethods(HttpTagScrapingGateway)).toEqual([
       "apply", "applyArtistArtwork", "artistArtworkBatch", "artworkUrl", "batch",
       "cancelArtistArtworkBatch", "cancelBatch", "candidateDetail", "createArtistArtworkBatch", "createBatch",
-      "fingerprint", "retryArtistArtworkBatch", "retryBatch", "search", "searchArtists",
+      "retryArtistArtworkBatch", "retryBatch", "search", "searchArtists",
     ]);
     expect(publicMethods(HttpMediaUploadGateway)).toEqual(["complete", "reserve", "upload"]);
   });
@@ -190,7 +190,6 @@ describe("administrator HTTP API contract", () => {
     const batch: CreateBatchInput = { items: [{ trackId: "track-1", expectedVersion: 2 }], options: { sources: ["qmusic"], verbatim: true, matchMode: "strict", missingFields: [], fields, writeBack: false, reason: "batch" } };
     await expectRequest(() => scraping.search(search, signal), "/api/v1/admin/tag-scraping/search", { method: "POST", body: search, signal });
     await expectRequest(() => scraping.candidateDetail(candidateDetail, signal), "/api/v1/admin/tag-scraping/candidates/details", { method: "POST", body: candidateDetail, signal });
-    await expectRequest(() => scraping.fingerprint("track-1", signal), "/api/v1/admin/tag-scraping/tracks/track-1/fingerprint", { method: "POST", signal });
     await expectRequest(() => scraping.apply("track-1", apply), "/api/v1/admin/tag-scraping/tracks/track-1/apply", { method: "POST", body: apply });
     await expectRequest(() => scraping.createBatch(batch), "/api/v1/admin/tag-scraping/batches", { method: "POST", body: batch });
     await expectRequest(() => scraping.batch("batch-1", "2026-01-01T00:00:00Z", signal), "/api/v1/admin/tag-scraping/batches/batch-1", { query: { updatedAfter: "2026-01-01T00:00:00Z" }, signal });
@@ -229,7 +228,7 @@ function setupInput(): SetupCompleteInput {
     paths: { migrationsDirectory: "migrations", adminWebDirectory: "admin" },
     database: { host: "db", port: 5432, database: "xymusic", username: "admin", password: "secret", sslMode: "prefer", maxConnections: 10 },
     storage: { assetDirectory: "assets", transcodeDirectory: "transcode", maxUploadBytes: 1024 },
-    media: { mode: "ADVANCED", directory: "", ffmpegPath: "ffmpeg", ffprobePath: "ffprobe", fpcalcPath: "", acoustIdClient: "" },
+    media: { mode: "ADVANCED", directory: "", ffmpegPath: "ffmpeg", ffprobePath: "ffprobe" },
     source: { name: "Music", directory: "music", mode: "READ_ONLY", enabled: true, syncOnStartup: true, scanIntervalMinutes: null, includePatterns: [], excludePatterns: [] },
     registration: { enabled: false },
     administrator: { username: "admin", displayName: "Admin", password: "secret1" },

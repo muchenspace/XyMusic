@@ -40,7 +40,7 @@ func TestArtworkDownloadsAreCoalescedAndContentValidated(t *testing.T) {
 		<-release
 		return responseFor(request, http.StatusOK, "image/jpeg", []byte{0xff, 0xd8, 0xff, 0x00}), nil
 	})}
-	platform := NewMusicPlatformClient(client, "")
+	platform := NewMusicPlatformClient(client)
 	type result struct {
 		artwork DownloadedArtwork
 		err     error
@@ -72,7 +72,7 @@ func TestArtworkDownloadsReuseRecentSuccessfulCache(t *testing.T) {
 		calls.Add(1)
 		return responseFor(request, http.StatusOK, "image/png", []byte{0x89, 0x50, 0x4e, 0x47}), nil
 	})}
-	platform := NewMusicPlatformClient(client, "")
+	platform := NewMusicPlatformClient(client)
 	first, firstErr := platform.DownloadArtwork(context.Background(), "https://y.qq.com/cover/cached.png")
 	second, secondErr := platform.DownloadArtwork(context.Background(), "https://y.qq.com/cover/cached.png")
 	if firstErr != nil || secondErr != nil || calls.Load() != 1 ||
@@ -92,7 +92,7 @@ func TestArtworkCacheHitBypassesHostCircuit(t *testing.T) {
 		calls.Add(1)
 		return responseFor(request, http.StatusOK, "image/jpeg", []byte{0xff, 0xd8, 0xff}), nil
 	})}
-	platform := NewMusicPlatformClient(client, "")
+	platform := NewMusicPlatformClient(client)
 	url := "https://y.qq.com/cover/circuit-cache.jpg"
 	if _, err := platform.DownloadArtwork(context.Background(), url); err != nil {
 		t.Fatal(err)
@@ -119,7 +119,7 @@ func TestSongSearchesAreCoalescedAndCached(t *testing.T) {
 			`{"data":{"song":{"list":[{"songmid":"song","songname":"Song"}]}}}`,
 		)), nil
 	})}
-	platform := NewMusicPlatformClient(client, "")
+	platform := NewMusicPlatformClient(client)
 	results := make(chan error, 4)
 	for index := 0; index < 4; index++ {
 		go func() {
@@ -178,7 +178,7 @@ func TestArtworkFailureOpensShortHostCircuit(t *testing.T) {
 		calls.Add(1)
 		return responseFor(request, http.StatusServiceUnavailable, "text/plain", nil), nil
 	})}
-	platform := NewMusicPlatformClient(client, "")
+	platform := NewMusicPlatformClient(client)
 	_, firstErr := platform.DownloadArtwork(context.Background(), "https://y.qq.com/cover/one.jpg")
 	firstCalls := calls.Load()
 	_, secondErr := platform.DownloadArtwork(context.Background(), "https://y.qq.com/cover/two.jpg")
@@ -215,7 +215,7 @@ func TestUpstreamHostThrottleUsesProviderKeysAndRetryAfter(t *testing.T) {
 			t.Fatalf("upstreamHostKey(%q) = %q, want %q", test.rawURL, got, test.want)
 		}
 	}
-	platform := NewMusicPlatformClient(nil, "")
+	platform := NewMusicPlatformClient(nil)
 	platform.recordHostFailure("y.qq.com", &upstreamHTTPError{
 		status: http.StatusTooManyRequests, retryAfter: "2",
 	})
@@ -237,21 +237,9 @@ func TestArtworkRejectsUntrustedHostsWithoutNetworkAccess(t *testing.T) {
 	platform := NewMusicPlatformClient(&http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		calls.Add(1)
 		return responseFor(request, http.StatusOK, "image/jpeg", []byte{0xff, 0xd8, 0xff}), nil
-	})}, "")
+	})})
 	_, err := platform.DownloadArtwork(context.Background(), "https://example.com/private.jpg")
 	if !apperror.IsCode(err, apperror.CodeValidationError) || calls.Load() != 0 {
-		t.Fatalf("error/calls = %v/%d", err, calls.Load())
-	}
-}
-
-func TestMissingAcoustIDConfigurationDoesNotMakeARequest(t *testing.T) {
-	var calls atomic.Int32
-	platform := NewMusicPlatformClient(&http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		calls.Add(1)
-		return nil, io.EOF
-	})}, "")
-	_, err := platform.AcoustID(context.Background(), 120, "fingerprint")
-	if !apperror.IsCode(err, apperror.CodeDependencyUnavailable) || calls.Load() != 0 || !strings.Contains(err.Error(), "AcoustID") {
 		t.Fatalf("error/calls = %v/%d", err, calls.Load())
 	}
 }
@@ -265,7 +253,7 @@ func TestSearchArtistsParsesQQSmartboxCandidates(t *testing.T) {
 		body := []byte(`{"data":{"singer":{"itemlist":[{"mid":"qq-mid","name":"Artist"},{"mid":"qq-mid","name":"Artist"}]}}}`)
 		return responseFor(request, http.StatusOK, "application/json", body), nil
 	})}
-	platform := NewMusicPlatformClient(client, "")
+	platform := NewMusicPlatformClient(client)
 	result, err := platform.SearchArtists(context.Background(), SourceQMusic, "Artist")
 	if err != nil {
 		t.Fatal(err)
@@ -285,7 +273,7 @@ func TestSearchArtistsRejectsRemovedNeteaseProvider(t *testing.T) {
 		body := []byte(`{"result":{"artists":[{"id":123,"name":"Artist","picUrl":"http://p1.music.126.net/artist.jpg","alias":["Alias"],"transNames":["Alias","Translated"]}]}}`)
 		return responseFor(request, http.StatusOK, "application/json", body), nil
 	})}
-	platform := NewMusicPlatformClient(client, "")
+	platform := NewMusicPlatformClient(client)
 	result, err := platform.SearchArtists(context.Background(), Source("netease"), "Artist")
 	if !apperror.IsCode(err, apperror.CodeValidationError) || result != nil {
 		t.Fatalf("result/error = %#v / %v", result, err)
@@ -300,7 +288,7 @@ func TestSearchQQKeepsSongmidAndNumericSongIDForLyrics(t *testing.T) {
 		body := []byte(`{"data":{"song":{"list":[{"songmid":"qq-mid","songid":12345,"songname":"Song","singer":[{"mid":"artist","name":"Artist"}],"albummid":"album","albumname":"Album","pubtime":0,"interval":183}]}}}`)
 		return responseFor(request, http.StatusOK, "application/json", body), nil
 	})}
-	platform := NewMusicPlatformClient(client, "")
+	platform := NewMusicPlatformClient(client)
 	result, err := platform.Search(context.Background(), SourceQMusic, "Song")
 	if err != nil {
 		t.Fatal(err)
@@ -318,7 +306,7 @@ func TestSearchKugouUsesResultIDForLyricLookup(t *testing.T) {
 		body := []byte(`{"data":{"lists":[{"ID":123,"Audioid":456,"FileHash":"hash","SongName":"Song","SingerName":"Artist","SingerId":"artist","AlbumName":"Album","AlbumID":"album","Duration":183}]}}`)
 		return responseFor(request, http.StatusOK, "application/json", body), nil
 	})}
-	platform := NewMusicPlatformClient(client, "")
+	platform := NewMusicPlatformClient(client)
 	result, err := platform.Search(context.Background(), SourceKugou, "Song")
 	if err != nil {
 		t.Fatal(err)
@@ -340,7 +328,7 @@ func TestOrdinaryLyricProvidersReturnLineTiming(t *testing.T) {
 			return nil, nil
 		}
 	})}
-	platform := NewMusicPlatformClient(client, "")
+	platform := NewMusicPlatformClient(client)
 	for _, test := range []struct {
 		name      string
 		source    Source
@@ -365,7 +353,7 @@ func TestNeteaseEnhancedLyricReturnsWordTimingWithoutVerbatim(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return responseFor(request, http.StatusOK, "application/json", []byte(`{"lrc":{"lyric":"[00:01.00]<00:01.00>word"}}`)), nil
 	})}
-	platform := NewMusicPlatformClient(client, "")
+	platform := NewMusicPlatformClient(client)
 	result, err := platform.Lyric(context.Background(), SourceNetease, Candidate{ID: "163", Name: "Song"}, false)
 	if err != nil {
 		t.Fatal(err)
@@ -391,7 +379,7 @@ func TestQQVerbatimLyricWithoutWordMarkersStaysLineTiming(t *testing.T) {
 		})
 		return responseFor(request, http.StatusOK, "application/json", body), nil
 	})}
-	platform := NewMusicPlatformClient(client, "")
+	platform := NewMusicPlatformClient(client)
 	result, err := platform.Lyric(context.Background(), SourceQMusic, Candidate{
 		ID: "123", Name: "Song", Artist: "Artist", Album: "Album", DurationMS: 1_000,
 	}, true)
@@ -436,7 +424,7 @@ func TestQQVerbatimLyricUsesMusicUAndDecryptsQRC(t *testing.T) {
 		})
 		return responseFor(request, http.StatusOK, "application/json", body), nil
 	})}
-	platform := NewMusicPlatformClient(client, "")
+	platform := NewMusicPlatformClient(client)
 	result, err := platform.Lyric(context.Background(), SourceQMusic, Candidate{
 		ID: "123", Name: "歌曲", Artist: "歌手", Album: "专辑", DurationMS: 1_000,
 	}, true)

@@ -164,13 +164,6 @@ func TestUploadLimitIsCapped(t *testing.T) {
 	}
 }
 
-func TestFingerprintConfigurationMustBeComplete(t *testing.T) {
-	_, err := Parse(map[string]string{"FPCALC_PATH": "tools/fpcalc"})
-	if err == nil || !strings.Contains(err.Error(), "ACOUSTID_CLIENT") {
-		t.Fatalf("expected paired configuration error, got %v", err)
-	}
-}
-
 func TestRelativePathsAreResolvedAtRuntime(t *testing.T) {
 	cfg, err := Parse(map[string]string{"LOCAL_MUSIC_DIRECTORY": "library"})
 	if err != nil {

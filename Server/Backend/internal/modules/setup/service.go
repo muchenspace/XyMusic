@@ -25,8 +25,6 @@ import (
 	"xymusic/server/internal/shared/apperror"
 )
 
-const fpcalcDescription = "fpcalc 鐢?Chromaprint 鎻愪緵锛岀敤浜庣敓鎴?AcoustID 闊抽鎸囩汗锛涘畠涓嶅睘浜?FFmpeg锛屾湭閰嶇疆鏃跺彧浼氱鐢ㄩ煶棰戞寚绾硅瘑鍒€?"
-
 const (
 	databaseActionReusePartial = "reuse_partial"
 	databaseActionMigrate      = "migrate"
@@ -380,26 +378,11 @@ func (s *Service) testMedia(ctx context.Context, input MediaInput) (MediaTestRes
 	if err != nil {
 		return MediaTestResponse{}, err
 	}
-	var fpcalc *string
-	fpcalcPath, err := s.resolveOptionalMediaPath(input.FPcalcPath, "media.fpcalcPath")
-	if err != nil {
-		return MediaTestResponse{}, err
-	}
-	if fpcalcPath != "" {
-		version, err := s.mediaTool.Version(ctx, fpcalcPath, "fpcalc")
-		if err != nil {
-			return MediaTestResponse{}, err
-		}
-		fpcalc = &version
-	}
 	return MediaTestResponse{
-		OK:                    true,
-		FFmpeg:                ffmpeg,
-		FFprobe:               ffprobe,
-		FPcalc:                fpcalc,
-		Paths:                 paths,
-		FPcalcDescription:     fpcalcDescription,
-		FingerprintConfigured: fpcalcPath != "" && optionalTrim(input.AcoustIDClient) != "",
+		OK:      true,
+		FFmpeg:  ffmpeg,
+		FFprobe: ffprobe,
+		Paths:   paths,
 	}, nil
 }
 
@@ -468,9 +451,6 @@ func (s *Service) complete(ctx context.Context, input SetupInput) (CompletionRes
 			if err := validateAdministrator(input.Administrator); err != nil {
 				return err
 			}
-		}
-		if err := validateFingerprintConfiguration(input.Media); err != nil {
-			return err
 		}
 		var err error
 		source, err = s.sourceValidator.Validate(ctx, input.Source, s.root)
@@ -813,10 +793,6 @@ func (s *Service) buildConfig(input SetupInput) (config.Config, error) {
 			FFmpegPath:  ffmpegConfigured,
 			FFprobePath: ffprobeConfigured,
 		},
-		Scraping: config.Scraping{
-			FPcalcPath:     optionalTrim(input.Media.FPcalcPath),
-			AcoustIDClient: optionalTrim(input.Media.AcoustIDClient),
-		},
 		LocalLibrary: config.LocalLibrary{
 			Name:                strings.TrimSpace(input.Source.Name),
 			Directory:           strings.TrimSpace(input.Source.Directory),
@@ -918,16 +894,6 @@ func (s *Service) resolveRequiredMediaPath(input *string, label string) (string,
 		return candidate, nil
 	}
 	return s.resolvePath(candidate, "media."+label+"Path")
-}
-
-func (s *Service) resolveOptionalMediaPath(input *string, field string) (string, error) {
-	if input == nil || strings.TrimSpace(*input) == "" {
-		return "", nil
-	}
-	if len(*input) > 2000 {
-		return "", apperror.Validation(field + " is too long")
-	}
-	return s.resolvePath(*input, field)
 }
 
 func (s *Service) resolvePath(candidate, field string) (string, error) {
@@ -1159,18 +1125,6 @@ func validateAdministrator(input AdministratorInput) error {
 	displayName := strings.TrimSpace(input.DisplayName)
 	if displayName == "" || utf8.RuneCountInString(displayName) > 64 {
 		return apperror.Validation("Administrator display name must contain 1 to 64 characters")
-	}
-	return nil
-}
-
-func validateFingerprintConfiguration(input MediaInput) error {
-	fpcalc := optionalTrim(input.FPcalcPath)
-	client := optionalTrim(input.AcoustIDClient)
-	if (fpcalc != "") != (client != "") {
-		return apperror.Validation("鍚敤闊抽鎸囩汗鏃跺繀椤诲悓鏃堕厤缃?fpcalc 璺緞鍜?AcoustID Client ID")
-	}
-	if len(client) > 500 {
-		return apperror.Validation("AcoustID Client ID is too long")
 	}
 	return nil
 }

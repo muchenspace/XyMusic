@@ -88,7 +88,7 @@ func TestBuildSetupDatabaseURLReturnsFieldSpecificValidation(t *testing.T) {
 	}
 }
 
-func TestStorageProbeIsReadOnlyAndMediaFingerprintIsOptional(t *testing.T) {
+func TestStorageProbeIsReadOnlyAndMediaIsVerified(t *testing.T) {
 	root := prepareSetupRoot(t)
 	runtime := newFakeRuntime()
 	objects := &fakeStorage{}
@@ -120,21 +120,11 @@ func TestStorageProbeIsReadOnlyAndMediaFingerprintIsOptional(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.FPcalc != nil || result.FingerprintConfigured {
-		t.Fatalf("unexpected fingerprint result: %#v", result)
+	if !result.OK {
+		t.Fatalf("unexpected media test failure: %#v", result)
 	}
 	if !reflect.DeepEqual(media.labels, []string{"ffmpeg", "ffprobe"}) {
 		t.Fatalf("unexpected media probes: %#v", media.labels)
-	}
-
-	fpcalc := "tools/fpcalc.exe"
-	input.FPcalcPath = &fpcalc
-	result, err = service.TestMedia(context.Background(), input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.FPcalc == nil || *result.FPcalc != "fpcalc version test" || result.FingerprintConfigured {
-		t.Fatalf("optional fpcalc probe mismatch: %#v", result)
 	}
 }
 
@@ -314,27 +304,6 @@ func TestCompleteMapsUnknownProbeFailureToSafeStageError(t *testing.T) {
 	}
 	if strings.Contains(applicationError.Error(), "private-password") {
 		t.Fatalf("private diagnostic escaped into the public error: %v", applicationError)
-	}
-}
-
-func TestCompleteRequiresFingerprintExecutableAndAcoustIDTogether(t *testing.T) {
-	service := mustService(t, Options{
-		RootDirectory:   prepareSetupRoot(t),
-		Runtime:         newFakeRuntime(),
-		Store:           &fakeStore{},
-		Databases:       &fakeDatabaseFactory{database: &fakeDatabase{}},
-		MediaStorage:    &fakeStorageFactory{storage: &fakeStorage{}},
-		MediaTool:       &fakeMediaTool{},
-		ListenerProbe:   &fakeListener{},
-		Passwords:       fakePasswords{},
-		SecretGenerator: fixedSecret,
-	})
-	input := validSetupInput()
-	fpcalc := "tools/fpcalc.exe"
-	input.Media.FPcalcPath = &fpcalc
-	_, err := service.Complete(context.Background(), input)
-	if !apperror.IsCode(err, apperror.CodeValidationError) {
-		t.Fatalf("incomplete fingerprint configuration should fail validation, got %v", err)
 	}
 }
 
@@ -677,7 +646,7 @@ func prepareSetupRoot(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(root, "admin", "index.html"), []byte("<!doctype html>"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, tool := range []string{"ffmpeg.exe", "ffprobe.exe", "fpcalc.exe"} {
+	for _, tool := range []string{"ffmpeg.exe", "ffprobe.exe"} {
 		if err := os.WriteFile(filepath.Join(root, "tools", tool), []byte("test"), 0o700); err != nil {
 			t.Fatal(err)
 		}

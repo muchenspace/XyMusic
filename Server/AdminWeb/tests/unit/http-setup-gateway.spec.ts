@@ -13,30 +13,24 @@ import {
 describe("HTTP setup gateway", () => {
   beforeEach(() => apiRequest.mockReset());
 
-  it("omits optional fingerprint fields when they are blank", () => {
+  it("normalizes directory mode media config", () => {
     expect(normalizeMediaConfig({
       mode: "DIRECTORY",
       directory: " tools ",
       ffmpegPath: "",
       ffprobePath: "",
-      fpcalcPath: "",
-      acoustIdClient: "",
     })).toEqual({ directory: "tools" });
   });
 
-  it("keeps fingerprinting separate from advanced FFmpeg paths", () => {
+  it("normalizes advanced FFmpeg paths", () => {
     expect(normalizeMediaConfig({
       mode: "ADVANCED",
       directory: "",
       ffmpegPath: " tools\\ffmpeg.exe ",
       ffprobePath: " D:\\XyMusic\\tools\\ffprobe.exe ",
-      fpcalcPath: " tools\\fpcalc.exe ",
-      acoustIdClient: " xymusic ",
     })).toEqual({
       ffmpegPath: "tools\\ffmpeg.exe",
       ffprobePath: "D:\\XyMusic\\tools\\ffprobe.exe",
-      fpcalcPath: "tools\\fpcalc.exe",
-      acoustIdClient: "xymusic",
     });
   });
 
@@ -77,8 +71,6 @@ function setupInput(): SetupCompleteInput {
       directory: "tools",
       ffmpegPath: "",
       ffprobePath: "",
-      fpcalcPath: "",
-      acoustIdClient: "",
     },
     source: {
       name: "Music",

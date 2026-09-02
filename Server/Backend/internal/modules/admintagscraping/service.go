@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -25,7 +24,6 @@ var defaultSmartSources = []Source{SourceQMusic, SourceNetease, SourceKugou}
 type ServiceDependencies struct {
 	Store                   Store
 	Music                   MusicPlatform
-	Fingerprinter           Fingerprinter
 	Artwork                 ArtworkApplier
 	DefaultLibraryDirectory string
 }
@@ -33,7 +31,6 @@ type ServiceDependencies struct {
 type Service struct {
 	store                   Store
 	music                   MusicPlatform
-	fingerprinter           Fingerprinter
 	artwork                 ArtworkApplier
 	defaultLibraryDirectory string
 }
@@ -61,7 +58,7 @@ func NewService(dependencies ServiceDependencies) (*Service, error) {
 		return nil, errors.New("admin tag scraping library directory is required")
 	}
 	return &Service{
-		store: dependencies.Store, music: dependencies.Music, fingerprinter: dependencies.Fingerprinter,
+		store: dependencies.Store, music: dependencies.Music,
 		artwork: dependencies.Artwork, defaultLibraryDirectory: dependencies.DefaultLibraryDirectory,
 	}, nil
 }
@@ -160,41 +157,6 @@ func (service *Service) CandidateDetails(ctx context.Context, candidate Candidat
 		return CandidateDetailsDTO{}, err
 	}
 	return CandidateDetailsDTO{Candidate: candidate, Lyrics: metadata}, nil
-}
-
-func (service *Service) Fingerprint(ctx context.Context, trackID string) ([]Candidate, error) {
-	if service.fingerprinter == nil {
-		return nil, apperror.DependencyUnavailable("Audio fingerprinting is not configured: install Chromaprint and configure fpcalc")
-	}
-	source, err := service.store.FingerprintSource(ctx, trackID)
-	if err != nil {
-		return nil, err
-	}
-	root := source.RootPath
-	if strings.TrimSpace(root) == "" {
-		root = service.defaultLibraryDirectory
-	}
-	root, err = filepath.Abs(root)
-	if err != nil {
-		return nil, fmt.Errorf("resolve music root: %w", err)
-	}
-	filePath := source.SourcePath
-	if !filepath.IsAbs(filePath) {
-		filePath = filepath.Join(root, filePath)
-	}
-	filePath, err = filepath.Abs(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("resolve fingerprint source: %w", err)
-	}
-	relative, err := filepath.Rel(root, filePath)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
-		return nil, apperror.Forbidden("The source file path is outside the music library")
-	}
-	fingerprint, err := service.fingerprinter.Fingerprint(ctx, filePath, source.StartMS, source.EndMS)
-	if err != nil {
-		return nil, err
-	}
-	return service.music.AcoustID(ctx, fingerprint.DurationSeconds, fingerprint.Fingerprint)
 }
 
 func (service *Service) Artwork(ctx context.Context, url string) (DownloadedArtwork, error) {
@@ -474,9 +436,6 @@ func (service *Service) lyrics(
 	verbatim bool,
 	propagateTransient bool,
 ) (LyricResult, error) {
-	if candidate.Source == SourceAcoustID {
-		return LyricResult{}, nil
-	}
 	result, err := service.music.Lyric(ctx, candidate.Source, candidate, verbatim)
 	if err == nil && strings.TrimSpace(result.Content) != "" {
 		return result, nil
@@ -575,14 +534,14 @@ func validateCandidate(candidate Candidate) error {
 		candidate.DurationMS < 0 || candidate.DurationMS > 24*60*60*1_000 {
 		return apperror.Validation("The scraping candidate is missing required fields")
 	}
-	if !isSearchableSource(candidate.Source) && candidate.Source != SourceAcoustID {
+	if !isSearchableSource(candidate.Source) {
 		return apperror.Validation("The scraping candidate source is invalid")
 	}
 	return nil
 }
 
 func validateVerbatimCandidate(candidate Candidate, verbatim bool) error {
-	if verbatim && candidate.Source != SourceQMusic && candidate.Source != SourceAcoustID {
+	if verbatim && candidate.Source != SourceQMusic {
 		return unsupportedVerbatimSourceError()
 	}
 	return nil

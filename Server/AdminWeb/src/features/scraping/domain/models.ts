@@ -9,7 +9,7 @@ export interface TagCandidate {
   id: string; name: string; artist: string; artistId: string; album: string; albumId: string;
   albumImg: string; year: string; track: string; disc: string; genre: string;
   lyricId?: string; durationMs?: number;
-  source: TagSource | "acoustid"; titleScore?: number; artistScore?: number; albumScore?: number; score?: number;
+  source: TagSource; titleScore?: number; artistScore?: number; albumScore?: number; score?: number;
 }
 
 export interface TagCandidateLyrics {

@@ -7,7 +7,6 @@ import type { TagCandidate, TagCandidateDetail } from "@/features/scraping/domai
 const scraping = vi.hoisted(() => ({
   search: vi.fn(),
   candidateDetail: vi.fn(),
-  fingerprint: vi.fn(),
   apply: vi.fn(),
   artworkUrl: vi.fn((url: string) => `/proxy?url=${encodeURIComponent(url)}`),
 }));

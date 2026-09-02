@@ -60,15 +60,12 @@ const form = reactive<SetupCompleteInput>({
   paths: { migrationsDirectory: "migrations", adminWebDirectory: "admin" },
   database: { host: "", port: 5432, database: "", username: "", password: "", sslMode: "prefer", maxConnections: 10 },
   storage: { assetDirectory: "assets", transcodeDirectory: "transcode", maxUploadBytes: 1_073_741_824, transcodeCacheMaxBytes: 10_737_418_240, uploadTtlSeconds: 3600, streamTtlSeconds: 900, streamMaxConcurrent: 4, streamIdleTimeoutSeconds: 30, transcodeTimeoutSeconds: 30 },
-  media: { mode: "DIRECTORY", directory: "tools", ffmpegPath: "", ffprobePath: "", fpcalcPath: "", acoustIdClient: "" },
+  media: { mode: "DIRECTORY", directory: "tools", ffmpegPath: "", ffprobePath: "" },
   source: { name: "", directory: "music", mode: "READ_ONLY", enabled: true, syncOnStartup: true, scanIntervalMinutes: null, includePatterns: [], excludePatterns: [] },
   registration: { enabled: true },
   administrator: { username: "", displayName: "", password: "" },
 });
 const executableRelativePathHint = "支持相对或绝对路径；相对路径以服务端二进制文件所在目录为基准。";
-const fingerprintConfigured = computed(() => Boolean(
-  form.media.fpcalcPath.trim() || form.media.acoustIdClient.trim(),
-));
 const autoDetectMedia = computed({
   get: () => form.media.mode === "DIRECTORY",
   set: (enabled: boolean) => { form.media.mode = enabled ? "DIRECTORY" : "ADVANCED"; },
@@ -407,9 +404,7 @@ function validationSummary(index: number): string {
   if (steps.value[index]?.key === "admin" && reusesActiveAdministrator.value) return "已确认复用数据库中的现有管理员";
   if (result.serverTimeMs !== undefined) return `数据库连接正常 · ${result.serverTimeMs} ms`;
   if (result.ffmpeg && result.ffprobe) {
-    return [result.ffmpeg, result.ffprobe, result.fpcalc ? `音频指纹：${result.fpcalc}` : undefined]
-      .filter(Boolean)
-      .join(" · ");
+    return `${result.ffmpeg} · ${result.ffprobe}`;
   }
   if (result.resolvedPaths) return Object.values(result.resolvedPaths).join(" · ");
   if (result.directory) return `目录可读：${result.directory}`;
@@ -556,16 +551,6 @@ const ReviewRow = defineComponent({
                     <FieldWrap label="FFmpeg 路径" :error="errorFor('ffmpegPath')" :hint="`留空则从系统 PATH 查找。${executableRelativePathHint}`"><input v-model="form.media.ffmpegPath" class="ui-input font-mono" placeholder="留空使用 PATH" /></FieldWrap>
                     <FieldWrap label="FFprobe 路径" :error="errorFor('ffprobePath')" :hint="`留空则从系统 PATH 查找。${executableRelativePathHint}`"><input v-model="form.media.ffprobePath" class="ui-input font-mono" placeholder="留空使用 PATH" /></FieldWrap>
                   </div>
-                  <div class="rounded-xl border border-violet-500/20 bg-violet-500/8 p-4">
-                    <div class="mb-4">
-                      <p class="font-semibold text-[var(--text)]">音频指纹识别（可选）</p>
-                      <p class="mt-1 text-sm leading-6 text-[var(--muted)]">fpcalc 来自 Chromaprint，不属于 FFmpeg。它会计算音频指纹，再通过 AcoustID 识别曲目；两项都留空即禁用，不影响初始化、扫描或转码。</p>
-                    </div>
-                    <div class="grid gap-5 sm:grid-cols-2">
-                      <FieldWrap label="fpcalc 路径" :error="errorFor('fpcalcPath')" :hint="executableRelativePathHint"><input v-model="form.media.fpcalcPath" class="ui-input font-mono" placeholder="tools\\fpcalc.exe" /></FieldWrap>
-                      <FieldWrap label="AcoustID Client ID" :error="errorFor('acoustIdClient')" hint="仅启用音频指纹识别时填写。"><input v-model="form.media.acoustIdClient" class="ui-input font-mono" /></FieldWrap>
-                    </div>
-                  </div>
                 </div>
               </template>
 
@@ -610,7 +595,6 @@ const ReviewRow = defineComponent({
                   <ReviewRow v-if="form.databaseAction" icon="database" label="数据库处理" :value="form.databaseAction === 'reset' ? '全部清除数据库后重新初始化' : form.databaseAction === 'migrate' ? '迁移并复用数据库内所有配置' : '复用数据库内可用的部分配置'" />
                   <ReviewRow icon="storage" label="资产与转码" :value="`资产：${form.storage.assetDirectory} · 转码：${form.storage.transcodeDirectory}`" />
                   <ReviewRow icon="tools" label="FFmpeg" :value="form.media.mode === 'DIRECTORY' ? `自动检测：${form.media.directory || '系统 PATH'}` : `${form.media.ffmpegPath || '系统 PATH'} · ${form.media.ffprobePath || '系统 PATH'}`" />
-                  <ReviewRow v-if="fingerprintConfigured" icon="tools" label="音频指纹" :value="`${form.media.fpcalcPath} · AcoustID ${form.media.acoustIdClient}`" />
                   <ReviewRow icon="source" label="音乐音源" :value="`${form.source.name} · ${form.source.directory} · ${form.source.mode}`" />
                   <ReviewRow icon="admin" label="管理员" :value="reusesActiveAdministrator ? '复用数据库中的现有管理员' : `${form.administrator.username} · ${form.administrator.displayName}`" />
                 </div>

@@ -53,10 +53,6 @@ func presentSettings(cfg config.Config, version int, source string, listener Lis
 			Directory: mediaDirectory, FFmpegPath: cfg.Media.FFmpegPath,
 			FFprobePath: cfg.Media.FFprobePath, LockedFields: empty(),
 		},
-		Scraping: ScrapingDTO{
-			FPcalcPath: cfg.Scraping.FPcalcPath, AcoustIDClient: cfg.Scraping.AcoustIDClient,
-			LockedFields: empty(),
-		},
 		LocalLibrary: LocalLibraryDTO{
 			Name: cfg.LocalLibrary.Name, Directory: cfg.LocalLibrary.Directory,
 			Mode: cfg.LocalLibrary.Mode, Enabled: cfg.LocalLibrary.Enabled,

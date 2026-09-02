@@ -48,15 +48,6 @@ export const setupStepSchemas = {
     directory: z.string().trim().max(2_000),
     ffmpegPath: z.string().trim().max(2_000),
     ffprobePath: z.string().trim().max(2_000),
-    fpcalcPath: z.string().trim().max(2_000),
-    acoustIdClient: z.string().trim().max(500),
-  }).superRefine((value, context) => {
-    if (value.fpcalcPath && !value.acoustIdClient) {
-      context.addIssue({ code: z.ZodIssueCode.custom, path: ["acoustIdClient"], message: "启用音频指纹时请输入 AcoustID Client ID" });
-    }
-    if (value.acoustIdClient && !value.fpcalcPath) {
-      context.addIssue({ code: z.ZodIssueCode.custom, path: ["fpcalcPath"], message: "启用音频指纹时请输入 fpcalc 路径" });
-    }
   }),
   source: z.object({
     name: z.string().trim().min(1, "请输入音源名称").max(120),

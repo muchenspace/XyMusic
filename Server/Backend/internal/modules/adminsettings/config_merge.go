@@ -28,9 +28,6 @@ func mergeSettings(current config.Config, input UpdateInput) (config.Config, err
 	if err == nil && input.MediaTools != nil {
 		candidate, err = mergeMediaTools(candidate, *input.MediaTools)
 	}
-	if err == nil && input.Scraping != nil {
-		candidate, err = mergeScraping(candidate, *input.Scraping)
-	}
 	if err != nil {
 		return config.Config{}, err
 	}
@@ -335,25 +332,6 @@ func mergeMediaTools(current config.Config, input MediaToolsInput) (config.Confi
 	return parseCandidate(environment)
 }
 
-func mergeScraping(current config.Config, input ScrapingInput) (config.Config, error) {
-	environment := config.ToEnvironment(current)
-	if input.FPcalcPath != nil {
-		value, err := optionalText(*input.FPcalcPath, 2000, "scraping.fpcalcPath")
-		if err != nil {
-			return config.Config{}, err
-		}
-		environment["FPCALC_PATH"] = value
-	}
-	if input.AcoustIDClient != nil {
-		value, err := optionalText(*input.AcoustIDClient, 500, "scraping.acoustIdClient")
-		if err != nil {
-			return config.Config{}, err
-		}
-		environment["ACOUSTID_CLIENT"] = value
-	}
-	return parseCandidate(environment)
-}
-
 func changedFields(previous, candidate config.Config) []string {
 	pairs := []struct {
 		name        string
@@ -373,8 +351,6 @@ func changedFields(previous, candidate config.Config) []string {
 		{"media.ffmpegPath", previous.Media.FFmpegPath, candidate.Media.FFmpegPath},
 		{"media.mode", previous.Media.Mode, candidate.Media.Mode},
 		{"media.ffprobePath", previous.Media.FFprobePath, candidate.Media.FFprobePath},
-		{"scraping.fpcalcPath", previous.Scraping.FPcalcPath, candidate.Scraping.FPcalcPath},
-		{"scraping.acoustIdClient", previous.Scraping.AcoustIDClient, candidate.Scraping.AcoustIDClient},
 		{"localLibrary.name", previous.LocalLibrary.Name, candidate.LocalLibrary.Name},
 		{"localLibrary.directory", previous.LocalLibrary.Directory, candidate.LocalLibrary.Directory},
 		{"localLibrary.mode", previous.LocalLibrary.Mode, candidate.LocalLibrary.Mode},

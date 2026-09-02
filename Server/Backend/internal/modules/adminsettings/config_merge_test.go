@@ -160,13 +160,6 @@ func TestMergeSettingsEverySectionPreservesExternalCredentials(t *testing.T) {
 			},
 		},
 		{
-			name: "scraping",
-			input: func() UpdateInput {
-				fpcalcPath, clientID := "fpcalc", "client-id"
-				return UpdateInput{Scraping: &ScrapingInput{FPcalcPath: &fpcalcPath, AcoustIDClient: &clientID}}
-			},
-		},
-		{
 			name: "local library",
 			input: func() UpdateInput {
 				name := "Updated library"

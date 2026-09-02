@@ -26,7 +26,7 @@ import (
 	"xymusic/server/internal/platform/workerstatus"
 )
 
-const expectedLegacyAPIProbeCount = 135
+const expectedLegacyAPIProbeCount = 134
 
 type fullAPIManifest struct {
 	CountingRules struct {

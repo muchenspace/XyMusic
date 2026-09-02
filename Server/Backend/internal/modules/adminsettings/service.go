@@ -399,11 +399,6 @@ func (service *Service) validateAffectedDependencies(
 			return err
 		}
 	}
-	if previous.Scraping.FPcalcPath != candidate.Scraping.FPcalcPath && resolved.Scraping.FPcalcPath != "" {
-		if _, err := service.mediaTool.Version(ctx, resolved.Scraping.FPcalcPath, "fpcalc"); err != nil {
-			return err
-		}
-	}
 	if previous.LocalLibrary.Directory != candidate.LocalLibrary.Directory {
 		if err := requireDirectory(resolved.LocalLibrary.Directory); err != nil {
 			return err
