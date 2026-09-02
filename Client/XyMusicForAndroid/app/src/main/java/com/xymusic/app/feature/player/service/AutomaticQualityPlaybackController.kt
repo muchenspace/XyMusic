@@ -1,10 +1,12 @@
 package com.xymusic.app.feature.player.service
 
 import android.os.SystemClock
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import com.xymusic.app.feature.player.domain.AutomaticPlaybackQualityPolicy
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
+import com.xymusic.app.feature.player.adapter.media3.globalPlaybackDurationMs
 import com.xymusic.app.feature.player.adapter.media3.globalPlaybackPositionMs
 
 internal class AutomaticQualityPlaybackController(
@@ -55,7 +57,33 @@ internal class AutomaticQualityPlaybackController(
         if (playbackState != Player.STATE_BUFFERING || !player.playWhenReady) return
         if (!hasPlayedCurrentItem || qualityReloadInProgress) return
         if (player.currentPosition < MIN_REBUFFER_POSITION_MS || elapsedRealtime() < suppressRebufferUntilMs) return
+        if (isRebufferAtEndOfTrack()) return
         downgradeCurrentTrack()
+    }
+
+    /**
+     * A rebuffer while the playout position sits in the final seconds of the
+     * current track is not a rebuffer in the quality sense. The served HLS
+     * source is an event playlist that keeps growing and only receives its
+     * end tag when the transcode finishes, so every track approaches its end
+     * with a short live-edge wait (the playlist snapshot lags by one poll
+     * interval). Restarting the transcode at the track end — the previous
+     * behavior — produced a near-end directed grant (startPositionMs ≈ the
+     * exact duration, which the server rejects) or a sub-second clip; the
+     * resolution failure then published an empty timeline, which Media3
+     * treats as the item being ended, so rotation skipped the next song and
+     * the queue cycled forever. A downgrade in the final seconds cannot help
+     * anyway: the live-edge wait is caused by playlist growth, not bandwidth.
+     */
+    private fun isRebufferAtEndOfTrack(): Boolean {
+        val mediaItem = player.currentMediaItem ?: return false
+        val durationMs =
+            mediaItem.globalPlaybackDurationMs(
+                player.duration.takeUnless { it == C.TIME_UNSET }?.coerceAtLeast(0) ?: 0,
+            )
+        if (durationMs <= 0) return false
+        val positionMs = mediaItem.globalPlaybackPositionMs(player.currentPosition)
+        return durationMs - positionMs <= END_OF_TRACK_REBUFFER_MARGIN_MS
     }
 
     override fun onPositionDiscontinuity(
@@ -102,5 +130,9 @@ internal class AutomaticQualityPlaybackController(
         const val SEEK_REBUFFER_SUPPRESSION_MS = 1_500L
         const val QUALITY_SWITCH_REBUFFER_SUPPRESSION_MS = 3_000L
         const val MIN_REBUFFER_POSITION_MS = 3_000L
+        // Covers one HLS playlist refresh interval plus segment padding, so a
+        // rebuffer while the last seconds of the track are still being
+        // published never restarts the transcode.
+        const val END_OF_TRACK_REBUFFER_MARGIN_MS = 10_000L
     }
 }

@@ -1,10 +1,13 @@
 package com.xymusic.app.feature.player.service
 
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaMetadata
 import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaUri
 import com.xymusic.app.feature.player.adapter.media3.PlaybackSessionCommands
+import com.xymusic.app.feature.player.adapter.media3.globalPlaybackDurationMs
 import com.xymusic.app.feature.player.adapter.media3.playbackRequestedStartPositionMs
 import com.xymusic.app.feature.player.adapter.media3.playbackSourceOffsetMs
 import com.xymusic.app.feature.player.adapter.media3.playbackStreamProtocol
@@ -160,7 +163,30 @@ internal class PlaybackMediaReloadCoordinator(
         forceRefresh: Boolean,
     ): Boolean {
         val trackId = item.playbackTrackId() ?: return false
-        val targetPositionMs = globalPositionMs.coerceAtLeast(0)
+        val metadataDurationMs =
+            item.mediaMetadata.extras
+                ?.getLong(PlaybackMediaMetadata.EXTRA_DURATION_MS)
+                ?.takeIf { it > 0 }
+                ?: 0
+        val knownDurationMs =
+            if (metadataDurationMs > 0) {
+                metadataDurationMs
+            } else {
+                item.globalPlaybackDurationMs(
+                    player.duration.takeUnless { it == C.TIME_UNSET }?.coerceAtLeast(0) ?: 0,
+                )
+            }
+        // The server rejects a directed start at or past the end of the track
+        // (startPositionMs >= durationMs). Resolving such a request used to
+        // publish an empty timeline, which Media3 treats as the item ending,
+        // so a reload near the seam skipped the next song and cycled forever.
+        // Clamp the target before requesting the transcode.
+        val targetPositionMs =
+            if (knownDurationMs > 0) {
+                globalPositionMs.coerceIn(0, (knownDurationMs - RELOAD_TAIL_MARGIN_MS).coerceAtLeast(0))
+            } else {
+                globalPositionMs.coerceAtLeast(0)
+            }
         if (forceRefresh) grantRepository.invalidate(trackId)
 
         val canonicalItem = item
@@ -202,5 +228,12 @@ internal class PlaybackMediaReloadCoordinator(
         } finally {
             internalPlayerOperation = false
         }
+    }
+
+    private companion object {
+        // Keeps the directed start inside the transcodeable window even when a
+        // reload races the end of the track (the server rejects a start at or
+        // past durationMs, which would otherwise surface as an empty timeline).
+        const val RELOAD_TAIL_MARGIN_MS = 500L
     }
 }

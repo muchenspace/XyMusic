@@ -80,6 +80,33 @@ class AutomaticQualityPlaybackControllerTest {
             .isEqualTo(PreferredQuality.STANDARD)
     }
 
+    @Test
+    fun rebufferWhileTheFinalSecondsAreStillBeingPublishedDoesNotRestartTheTranscode() {
+        val player = RecordingPlayer().apply { currentPositionMs = 175_000L }
+        val grants = RecordingGrantRepository()
+        val quality = AutomaticPlaybackQualityController().apply {
+            resolveTrackQuality(TRACK_ID, StreamingQuality.AUTO)
+        }
+        val controller =
+            AutomaticQualityPlaybackController(
+                player = player.delegate,
+                grantRepository = grants,
+                qualityController = quality,
+                elapsedRealtime = { 20_000L },
+            )
+
+        controller.onMediaItemTransition(player.mediaItem, Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED)
+        controller.onIsPlayingChanged(true)
+        // A live event playlist reaches its final seconds before the end tag is
+        // published; the resulting live-edge wait is not a bandwidth rebuffer.
+        controller.onPlaybackStateChanged(Player.STATE_BUFFERING)
+
+        assertThat(player.stopCount).isEqualTo(0)
+        assertThat(grants.invalidatedTrackIds).isEmpty()
+        assertThat(quality.resolveTrackQuality(TRACK_ID, StreamingQuality.AUTO))
+            .isEqualTo(PreferredQuality.STANDARD)
+    }
+
     private class RecordingGrantRepository : PlaybackGrantRepository {
         val invalidatedTrackIds = mutableListOf<String>()
 
@@ -148,6 +175,7 @@ class AutomaticQualityPlaybackControllerTest {
 
     private companion object {
         const val TRACK_ID = "11111111-1111-1111-1111-111111111111"
+        const val TRACK_DURATION_MS = 180_000L
 
         fun mediaItem(trackId: String): MediaItem = MediaItem
             .Builder()
@@ -159,6 +187,7 @@ class AutomaticQualityPlaybackControllerTest {
                     .setExtras(
                         Bundle().apply {
                             putString(PlaybackMediaMetadata.EXTRA_TRACK_ID, trackId)
+                            putLong(PlaybackMediaMetadata.EXTRA_DURATION_MS, TRACK_DURATION_MS)
                         },
                     ).build(),
             ).build()

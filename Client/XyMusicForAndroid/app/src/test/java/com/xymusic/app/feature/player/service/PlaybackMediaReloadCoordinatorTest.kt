@@ -89,6 +89,29 @@ class PlaybackMediaReloadCoordinatorTest {
         assertThat(player.playWhenReady).isTrue()
     }
 
+    @Test
+    fun hlsReloadAtOrPastTheTrackEndClampsTheRequestedStartPosition() = runTest {
+        val player = RecordingHlsPlayer()
+        val coordinator =
+            PlaybackMediaReloadCoordinator(
+                player = player.delegate,
+                grantRepository = RecordingGrantRepository(),
+                scope = this,
+            )
+
+        val result = coordinator.seekTo(QUEUE_ITEM_ID, TRACK_DURATION_MS)
+        assertThat(result).isTrue()
+
+        val requestItem = player.replacedItems.single()
+        // The server rejects a directed start at or past durationMs; the clamp
+        // keeps the requested start inside the transcodeable window so a reload
+        // racing the end of the track cannot produce an empty timeline.
+        assertThat(requestItem.playbackSourceOffsetMs())
+            .isEqualTo(TRACK_DURATION_MS - RELOAD_TAIL_MARGIN_MS)
+        assertThat(requestItem.playbackRequestedStartPositionMs())
+            .isEqualTo(TRACK_DURATION_MS - RELOAD_TAIL_MARGIN_MS)
+    }
+
     private class RecordingGrantRepository : PlaybackGrantRepository {
         override suspend fun get(
             trackId: String,
@@ -154,6 +177,8 @@ class PlaybackMediaReloadCoordinatorTest {
         const val QUEUE_ITEM_ID = "queue-1"
         const val TRACK_ID = "11111111-1111-1111-1111-111111111111"
         const val TARGET_POSITION_MS = 60_000L
+        const val TRACK_DURATION_MS = 180_000L
+        const val RELOAD_TAIL_MARGIN_MS = 500L
 
         fun mediaItem(queueItemId: String): MediaItem = MediaItem
             .Builder()
@@ -166,6 +191,7 @@ class PlaybackMediaReloadCoordinatorTest {
                         Bundle().apply {
                             putString(PlaybackMediaMetadata.EXTRA_TRACK_ID, TRACK_ID)
                             putString(PlaybackMediaMetadata.EXTRA_STREAM_PROTOCOL, "HLS")
+                            putLong(PlaybackMediaMetadata.EXTRA_DURATION_MS, TRACK_DURATION_MS)
                         },
                     ).build(),
             ).build()
