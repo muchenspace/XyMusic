@@ -103,7 +103,7 @@ describe("BatchArtistArtworkScrapeDialog", () => {
         { artistId: "missing-1", expectedVersion: 2 },
         { artistId: "missing-2", expectedVersion: 4 },
       ],
-      options: { sources: ["qmusic"], overwrite: false, reason: "批量在线刮削艺术家头像" },
+      options: { sources: ["qmusic"], overwrite: false, reason: "" },
     });
     expect(wrapper.text()).toContain("条件排除 2");
     expect(wrapper.text()).toContain("成功 0 · 已跳过 1 · 失败 0");

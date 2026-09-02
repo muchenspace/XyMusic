@@ -35,7 +35,7 @@ export interface ScrapingFields {
 }
 
 export interface TagSearchInput { source: SearchSource; verbatim: boolean; query?: string; title?: string; artist?: string; album?: string; sources?: TagSource[] }
-export interface ApplyTagInput { expectedVersion: number; candidate: TagCandidate; verbatim: boolean; fields: ScrapingFields; writeBack: boolean; reason: string }
+export interface ApplyTagInput { expectedVersion: number; candidate: TagCandidate; verbatim: boolean; fields: ScrapingFields; writeBack: boolean; reason?: string }
 export interface AppliedTrackMetadataVersion {
   trackId: string;
   version: number;
@@ -68,7 +68,7 @@ export interface ApplyArtistArtworkInput {
   expectedVersion: number;
   candidate: ArtistCandidate;
   overwrite: boolean;
-  reason: string;
+  reason?: string;
 }
 
 export interface ApplyArtistArtworkResult {
@@ -104,7 +104,7 @@ export interface CreateBatchInput {
     missingFields: TagScrapingMissingField[];
     fields: ScrapingFields;
     writeBack: boolean;
-    reason: string;
+    reason?: string;
   };
 }
 
@@ -132,7 +132,7 @@ export interface ArtistArtworkBatch {
   options: {
     sources: ArtistSource[];
     overwrite: boolean;
-    reason: string;
+    reason?: string;
   };
   status: BatchJobStatus;
   total: number;
@@ -154,7 +154,7 @@ export interface CreateArtistArtworkBatchInput {
   options: {
     sources: ArtistSource[];
     overwrite: false;
-    reason: string;
+    reason?: string;
   };
 }
 

@@ -37,7 +37,7 @@ func (routes *Routes) applyArtistArtwork(c *gin.Context) error {
 		return err
 	}
 	var input ArtistArtworkApplyInput
-	shape, err := decodeContractJSON(c, &input, "expectedVersion", "candidate", "overwrite", "reason")
+	shape, err := decodeContractJSON(c, &input, "expectedVersion", "candidate", "overwrite")
 	if err != nil {
 		return err
 	}
@@ -94,7 +94,7 @@ func validateArtistArtworkApplyInput(
 ) error {
 	reason := strings.TrimSpace(input.Reason)
 	if input.ExpectedVersion < 1 || input.ExpectedVersion == math.MaxInt ||
-		!contractStringLength(reason, 2, 500) {
+		(reason != "" && !contractStringLength(reason, 2, 500)) {
 		return contractError()
 	}
 	if err := requireNestedKeys(

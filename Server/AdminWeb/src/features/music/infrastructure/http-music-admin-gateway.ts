@@ -66,12 +66,12 @@ export class HttpMusicAdminGateway implements MusicAdminGateway {
     return adminApi.deleteTrackPermanently(trackId, expectedVersion);
   }
 
-  async writeTrackMetadata(trackId: string, expectedVersion: number, reason: string): Promise<void> {
+  async writeTrackMetadata(trackId: string, expectedVersion: number, reason = ""): Promise<void> {
     await adminApi.writeTrackMetadata(trackId, expectedVersion, reason);
   }
 
   batchUpdateTrackMetadata(command: BatchUpdateTrackMetadataCommand): Promise<BatchUpdateTrackMetadataResult> {
-    return adminApi.bulkUpdateTracks(command.items, command.patch, command.reason);
+    return adminApi.bulkUpdateTracks(command.items, command.patch, command.reason ?? "");
   }
 
   listAlbums(query: MusicListQuery, signal?: AbortSignal): Promise<MusicPage<AlbumSummary>> {

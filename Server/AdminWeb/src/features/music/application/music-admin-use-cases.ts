@@ -68,11 +68,11 @@ export class MusicAdminUseCases {
     return this.gateway.deleteTrackPermanently(trackId, expectedVersion);
   }
 
-  writeTrackMetadata(trackId: string, expectedVersion: number, reason: string): Promise<void> {
+  writeTrackMetadata(trackId: string, expectedVersion: number, reason = ""): Promise<void> {
     return this.gateway.writeTrackMetadata(trackId, expectedVersion, reason);
   }
 
-  batchUpdateTrackMetadata(tracks: readonly TrackSummary[], patch: TrackTagPatch, reason: string): Promise<BatchUpdateTrackMetadataResult> {
+  batchUpdateTrackMetadata(tracks: readonly TrackSummary[], patch: TrackTagPatch, reason = ""): Promise<BatchUpdateTrackMetadataResult> {
     return this.gateway.batchUpdateTrackMetadata({
       items: toMetadataUpdateTargets(tracks),
       patch,

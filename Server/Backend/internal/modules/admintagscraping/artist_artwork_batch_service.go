@@ -1000,7 +1000,7 @@ func validateCreateArtistArtworkBatch(input CreateArtistArtworkBatchInput) error
 		}
 	}
 	reason := normalizeText(input.Options.Reason)
-	if javascriptLength(reason) < 2 || javascriptLength(reason) > 500 {
+	if reason != "" && (javascriptLength(reason) < 2 || javascriptLength(reason) > 500) {
 		return apperror.Validation("Artist artwork batch reason is invalid")
 	}
 	return nil

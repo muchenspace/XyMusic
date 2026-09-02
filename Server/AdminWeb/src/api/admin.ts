@@ -46,10 +46,10 @@ export const adminApi = {
   user: (id: string, params: Pick<ListQuery, "page" | "pageSize" | "cursor" | "cursorMode">, signal?: AbortSignal) => apiRequest<UserDetail>(`/api/v1/admin/users/${id}`, { query: query(params), signal }),
   createUser: (input: CreateUserInput) => apiRequest<UserDetail>("/api/v1/admin/users", { method: "POST", body: input }),
   updateUser: (id: string, input: UpdateUserInput) => apiRequest<UserDetail>(`/api/v1/admin/users/${id}`, { method: "PATCH", body: input }),
-  resetUserPassword: (id: string, expectedVersion: number, password: string, reason: string) => apiRequest<void>(`/api/v1/admin/users/${id}/password`, { method: "POST", body: { expectedVersion, password, reason } }),
-  revokeUserSession: (id: string, sessionId: string, reason: string) => apiRequest<void>(`/api/v1/admin/users/${id}/sessions/${sessionId}/revoke`, { method: "POST", body: { reason } }),
-  deleteUser: (id: string, expectedVersion: number, reason: string) => apiRequest<void>(`/api/v1/admin/users/${id}`, { method: "DELETE", body: { expectedVersion, reason } }),
-  restoreUser: (id: string, expectedVersion: number, reason: string) => apiRequest<UserDetail>(`/api/v1/admin/users/${id}/restore`, { method: "POST", body: { expectedVersion, reason } }),
+  resetUserPassword: (id: string, expectedVersion: number, password: string, reason = "") => apiRequest<void>(`/api/v1/admin/users/${id}/password`, { method: "POST", body: { expectedVersion, password, reason } }),
+  revokeUserSession: (id: string, sessionId: string, reason = "") => apiRequest<void>(`/api/v1/admin/users/${id}/sessions/${sessionId}/revoke`, { method: "POST", body: { reason } }),
+  deleteUser: (id: string, expectedVersion: number, reason = "") => apiRequest<void>(`/api/v1/admin/users/${id}`, { method: "DELETE", body: { expectedVersion, reason } }),
+  restoreUser: (id: string, expectedVersion: number, reason = "") => apiRequest<UserDetail>(`/api/v1/admin/users/${id}/restore`, { method: "POST", body: { expectedVersion, reason } }),
 
   sources: (params: Pick<ListQuery, "page" | "pageSize" | "cursor" | "cursorMode">, signal?: AbortSignal) => apiRequest<PageResult<LibrarySource>>("/api/v1/admin/sources", { query: query(params), signal }),
   createSource: (input: LibrarySourceInput) => apiRequest<LibrarySource>("/api/v1/admin/sources", { method: "POST", body: input }),
@@ -71,7 +71,7 @@ export const adminApi = {
     return apiRequest<TrackDetail>(`/api/v1/admin/tracks/${id}`, options);
   },
   trackMetadata: (id: string, signal?: AbortSignal) => apiRequest<TrackMetadataRecord>(`/api/v1/admin/tracks/${id}/metadata`, { signal }),
-  updateTrackMetadata: (id: string, input: { expectedVersion: number; patch: Partial<Omit<TrackTagValues, "hasArtwork">>; reason: string }) => apiRequest<TrackMetadataRecord>(`/api/v1/admin/tracks/${id}/metadata`, { method: "PATCH", body: input }),
+  updateTrackMetadata: (id: string, input: { expectedVersion: number; patch: Partial<Omit<TrackTagValues, "hasArtwork">>; reason?: string }) => apiRequest<TrackMetadataRecord>(`/api/v1/admin/tracks/${id}/metadata`, { method: "PATCH", body: input }),
   publishTrack: (id: string, expectedVersion: number) => apiRequest<unknown>(`/api/v1/admin/tracks/${id}/publish`, { method: "POST", body: { expectedVersion } }),
   archiveTrack: (id: string, expectedVersion: number) => apiRequest<unknown>(`/api/v1/admin/tracks/${id}/archive`, { method: "POST", body: { expectedVersion } }),
   restoreTrack: (id: string, expectedVersion: number) => apiRequest<unknown>(`/api/v1/admin/tracks/${id}/restore`, { method: "POST", body: { expectedVersion } }),
@@ -85,8 +85,8 @@ export const adminApi = {
     quarantinedFiles: number;
     scheduledObjects: number;
   }>(`/api/v1/admin/tracks/${id}`, { method: "DELETE", body: { expectedVersion } }),
-  writeTrackMetadata: (id: string, expectedVersion: number, reason: string) => apiRequest<{ id: string; status: string }>(`/api/v1/admin/tracks/${id}/metadata/writeback`, { method: "POST", body: { expectedVersion, reason } }),
-  bulkUpdateTracks: (items: Array<{ trackId: string; expectedVersion: number }>, patch: Partial<Omit<TrackTagValues, "hasArtwork">>, reason: string) => apiRequest<{ items: Array<{ trackId: string; version: number; changedFields: string[] }> }>("/api/v1/admin/metadata/batch", { method: "POST", body: { items, patch, reason } }),
+  writeTrackMetadata: (id: string, expectedVersion: number, reason = "") => apiRequest<{ id: string; status: string }>(`/api/v1/admin/tracks/${id}/metadata/writeback`, { method: "POST", body: { expectedVersion, reason } }),
+  bulkUpdateTracks: (items: Array<{ trackId: string; expectedVersion: number }>, patch: Partial<Omit<TrackTagValues, "hasArtwork">>, reason = "") => apiRequest<{ items: Array<{ trackId: string; version: number; changedFields: string[] }> }>("/api/v1/admin/metadata/batch", { method: "POST", body: { items, patch, reason } }),
 
   albums: (params: ListQuery, signal?: AbortSignal) => apiRequest<PageResult<AlbumSummary>>("/api/v1/admin/albums", { query: query(params), signal }),
   albumDuplicates: (params: Pick<ListQuery, "page" | "pageSize" | "cursor" | "cursorMode"> & { albumId?: string; albumPage?: number; albumPageSize?: number; albumCursor?: string; albumCursorMode?: "cursor" | "offset" }, signal?: AbortSignal) => apiRequest<AlbumDuplicateSummary>("/api/v1/admin/albums/duplicates", { query: query(params), signal }),
@@ -112,8 +112,8 @@ export const adminApi = {
   cancelJob: (id: string) => apiRequest<void>(`/api/v1/admin/jobs/${id}/cancel`, { method: "POST" }),
   jobEvents: () => openEventStream("/api/v1/admin/jobs/events"),
   writebackJobs: (params: Pick<ListQuery, "page" | "pageSize" | "cursor" | "cursorMode"> & { status?: string; trackId?: string }, signal?: AbortSignal) => apiRequest<PageResult<MetadataWritebackJob>>("/api/v1/admin/metadata/writeback-jobs", { query: query(params), signal }),
-  retryWritebackJob: (id: string, expectedVersion: number, reason: string) => apiRequest<MetadataWritebackJob>(`/api/v1/admin/metadata/writeback-jobs/${id}/retry`, { method: "POST", body: { expectedVersion, reason } }),
-  cancelWritebackJob: (id: string, expectedVersion: number, reason: string) => apiRequest<MetadataWritebackJob>(`/api/v1/admin/metadata/writeback-jobs/${id}/cancel`, { method: "POST", body: { expectedVersion, reason } }),
+  retryWritebackJob: (id: string, expectedVersion: number, reason = "") => apiRequest<MetadataWritebackJob>(`/api/v1/admin/metadata/writeback-jobs/${id}/retry`, { method: "POST", body: { expectedVersion, reason } }),
+  cancelWritebackJob: (id: string, expectedVersion: number, reason = "") => apiRequest<MetadataWritebackJob>(`/api/v1/admin/metadata/writeback-jobs/${id}/cancel`, { method: "POST", body: { expectedVersion, reason } }),
 
 
   settings: (signal?: AbortSignal) => apiRequest<RuntimeSettings>("/api/v1/admin/settings", { signal }),

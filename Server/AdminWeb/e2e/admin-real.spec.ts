@@ -1,4 +1,4 @@
-﻿import { copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test, expect, type Browser, type Page } from "@playwright/test";
 
@@ -178,7 +178,6 @@ async function manageScannedCatalog(page: Page, sourceName: string, sourceId: st
   let dialog = page.getByRole("dialog", { name: "编辑音乐 Tag" });
   await expect(dialog).toBeVisible();
   await dialog.locator('input.ui-input').nth(0).fill("Admin E2E Tone Updated");
-  await dialog.getByPlaceholder("填写本次修改原因").fill("管理端真实 E2E 修改 Tag");
   await dialog.getByRole("button", { name: "保存覆盖值" }).click();
   await expect(page.getByText("Tag 覆盖值已保存")).toBeVisible();
 

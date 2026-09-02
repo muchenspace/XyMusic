@@ -39,7 +39,6 @@ const writebackCursor = ref("");
 const writebackCursorHistory = ref(new Map<number, string>());
 const selectedWriteback = ref<MetadataWritebackJob>();
 const writebackAction = ref<"retry" | "cancel">("retry");
-const writebackReason = ref("");
 const writebackActionOpen = ref(false);
 let eventSource: JobEventSubscription | undefined;
 let invalidationTimer: number | undefined;
@@ -130,16 +129,14 @@ const retryMutation = useMutation({ mutationFn: (job: JobSummary) => jobAdmin.re
 const cancelMutation = useMutation({ mutationFn: (job: JobSummary) => jobAdmin.cancel(job.id), onSuccess: async () => { ui.notify("success", "任务取消请求已提交"); await refresh(); }, onError: (error) => ui.notify("error", "取消任务失败", error instanceof ApiError ? error.message : undefined) });
 function percent(job: JobSummary): number { return Math.max(0, Math.min(100, job.progress)); }
 function retrySelected(): void { if (selected.value) retryMutation.mutate(selected.value); }
-function askWriteback(job: MetadataWritebackJob, action: "retry" | "cancel"): void { selectedWriteback.value = job; writebackAction.value = action; writebackReason.value = ""; writebackActionOpen.value = true; }
+function askWriteback(job: MetadataWritebackJob, action: "retry" | "cancel"): void { selectedWriteback.value = job; writebackAction.value = action; writebackActionOpen.value = true; }
 const writebackMutation = useMutation({
   mutationFn: () => {
-    if (!writebackReason.value.trim()) throw new Error("请填写操作原因");
     const job = selectedWriteback.value!;
     return jobAdmin.changeWriteback(
       job.id,
       job.version,
       writebackAction.value,
-      writebackReason.value.trim(),
     );
   },
   onSuccess: async () => { allowWritebackActionClose = true; writebackActionOpen.value = false; ui.notify("success", writebackAction.value === "retry" ? "Tag 写回任务已重试" : "Tag 写回取消请求已提交"); await writebackQuery.refetch(); },
@@ -207,6 +204,6 @@ watch(writebackActionOpen, (value) => {
       <template v-else-if="selected"><div class="flex items-center justify-between rounded-xl bg-[var(--surface-muted)] p-4"><div><p class="font-bold">{{ selected.title }}</p><p class="mt-1 text-xs text-[var(--muted)]">尝试 {{ selected.attempts }}<template v-if="detailQuery.data.value"> / {{ detailQuery.data.value.maxAttempts }}</template> 次</p></div><StatusBadge :status="selected.status" dot /></div><div class="mt-5"><div class="mb-2 flex justify-between text-xs font-semibold"><span>处理进度</span><span>{{ selected.processed }} / {{ selected.total }}</span></div><div class="h-2 overflow-hidden rounded-full bg-[var(--surface-muted)]"><div class="progress-fill h-full rounded-full bg-[var(--primary)]" :style="{ width: `${percent(selected)}%` }" /></div></div><dl class="mt-6 grid grid-cols-2 gap-4 text-sm"><div><dt class="text-xs text-[var(--muted)]">创建时间</dt><dd class="mt-1 font-semibold">{{ formatDate(selected.createdAt) }}</dd></div><div><dt class="text-xs text-[var(--muted)]">开始时间</dt><dd class="mt-1 font-semibold">{{ formatDate(selected.startedAt ?? undefined) }}</dd></div><div><dt class="text-xs text-[var(--muted)]">完成时间</dt><dd class="mt-1 font-semibold">{{ formatDate(selected.completedAt ?? undefined) }}</dd></div><div><dt class="text-xs text-[var(--muted)]">任务类型</dt><dd class="mt-1 font-semibold">{{ humanize(selected.type) }}</dd></div><template v-if="detailQuery.data.value"><div><dt class="text-xs text-[var(--muted)]">更新时间</dt><dd class="mt-1 font-semibold">{{ formatDate(detailQuery.data.value.updatedAt) }}</dd></div><div><dt class="text-xs text-[var(--muted)]">任务来源</dt><dd class="mt-1 font-semibold">{{ humanize(detailQuery.data.value.source) }}</dd></div><div><dt class="text-xs text-[var(--muted)]">Worker 心跳</dt><dd class="mt-1 font-semibold">{{ formatDate(detailQuery.data.value.heartbeatAt ?? undefined) }}</dd></div><div><dt class="text-xs text-[var(--muted)]">锁定至</dt><dd class="mt-1 font-semibold">{{ formatDate(detailQuery.data.value.lockedUntil ?? undefined) }}</dd></div></template></dl><div v-if="detailQuery.data.value?.cancelRequested" class="mt-5 rounded-md border border-amber-500/25 bg-amber-500/8 p-3 text-sm text-amber-700 dark:text-amber-300">已提交取消请求，Worker 将在安全点停止任务。</div><div v-if="selected.error" class="mt-5 rounded-xl border border-rose-500/20 bg-rose-500/8 p-4"><p class="flex items-center gap-2 font-semibold text-[var(--danger)]"><AlertTriangle :size="16" />{{ selected.error.code }}</p><p class="mt-2 text-sm leading-6 text-[var(--muted)]">{{ selected.error.message }}</p></div><p class="mt-5 flex items-center gap-1.5 text-xs text-[var(--muted)]"><Clock3 :size="13" />任务状态由服务端工作进程持续更新。</p></template>
       <template #footer><AppButton v-if="selected?.status === 'FAILED'" :loading="retryMutation.isPending.value" @click="retrySelected"><template #icon><RotateCcw :size="15" /></template>重试任务</AppButton><AppButton @click="detailOpen = false">关闭</AppButton></template>
     </BaseDialog>
-    <BaseDialog v-model="writebackActionOpen" :title="writebackAction === 'retry' ? '重试 Tag 写回' : '取消 Tag 写回'" :description="selectedWriteback?.id"><div><label class="ui-label">操作原因</label><input v-model="writebackReason" class="ui-input" /></div><template #footer><AppButton @click="writebackActionOpen = false">取消</AppButton><AppButton :variant="writebackAction === 'cancel' ? 'danger' : 'primary'" :loading="writebackMutation.isPending.value" @click="writebackMutation.mutate()">确认</AppButton></template></BaseDialog>
+    <BaseDialog v-model="writebackActionOpen" :title="writebackAction === 'retry' ? '重试 Tag 写回' : '取消 Tag 写回'" :description="selectedWriteback?.id"><div class="rounded-xl bg-[var(--surface-muted)] p-4 text-sm text-[var(--muted)]"><p>确定要{{ writebackAction === 'retry' ? '重新尝试执行' : '取消' }}此 Tag 写回任务吗？</p></div><template #footer><AppButton @click="writebackActionOpen = false">取消</AppButton><AppButton :variant="writebackAction === 'cancel' ? 'danger' : 'primary'" :loading="writebackMutation.isPending.value" @click="writebackMutation.mutate()">确认</AppButton></template></BaseDialog>
   </div>
 </template>

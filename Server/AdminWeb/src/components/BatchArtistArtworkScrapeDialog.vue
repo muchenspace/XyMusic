@@ -18,7 +18,6 @@ const emit = defineEmits<{ completed: [] }>();
 const scraping = useTagScraping();
 
 const sources = ref<ArtistSource[]>(["qmusic"]);
-const reason = ref("批量在线刮削艺术家头像");
 const job = ref<ArtistArtworkBatch>();
 const loading = ref(false);
 const error = ref("");
@@ -49,7 +48,6 @@ watch(open, (value) => {
     return;
   }
   sources.value = ["qmusic"];
-  reason.value = "批量在线刮削艺术家头像";
   job.value = undefined;
   loading.value = false;
   error.value = "";
@@ -135,11 +133,6 @@ async function start(): Promise<void> {
     error.value = "至少选择一个来源";
     return;
   }
-  const trimmedReason = reason.value.trim();
-  if (trimmedReason.length < 2 || trimmedReason.length > 500) {
-    error.value = "任务原因需为 2 至 500 个字符";
-    return;
-  }
 
   const selected = [...props.artists];
   const eligible = selected.filter((artist) => !artist.artwork);
@@ -164,7 +157,7 @@ async function start(): Promise<void> {
   try {
     const created = await scraping.createArtistArtworkBatch({
       items: eligible.map((artist) => ({ artistId: artist.id, expectedVersion: artist.version })),
-      options: { sources: [...sources.value], overwrite: false, reason: trimmedReason },
+      options: { sources: [...sources.value], overwrite: false, reason: "" },
     });
     if (generation !== pollGeneration || action !== actionGeneration || !open.value) return;
     conditionExcluded.value += created.conditionExcluded;
@@ -241,10 +234,6 @@ async function retry(): Promise<void> {
           <input v-model="sources" type="checkbox" :value="item.value" />
           {{ item.label }}
         </label>
-      </div>
-      <div class="mt-5">
-        <label class="ui-label">任务原因</label>
-        <input v-model="reason" class="ui-input" maxlength="500" />
       </div>
       <div class="mt-5 rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-4 text-sm">
         <p class="font-semibold">默认仅补全缺失头像</p>

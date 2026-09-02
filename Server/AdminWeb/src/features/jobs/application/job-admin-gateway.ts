@@ -17,7 +17,7 @@ export interface JobAdminGateway {
   retry(jobId: string): Promise<JobSummary>;
   cancel(jobId: string): Promise<void>;
   listWritebacks(query: WritebackListQuery, signal?: AbortSignal): Promise<JobPage<MetadataWritebackJob>>;
-  retryWriteback(jobId: string, expectedVersion: number, reason: string): Promise<MetadataWritebackJob>;
-  cancelWriteback(jobId: string, expectedVersion: number, reason: string): Promise<MetadataWritebackJob>;
+  retryWriteback(jobId: string, expectedVersion: number, reason?: string): Promise<MetadataWritebackJob>;
+  cancelWriteback(jobId: string, expectedVersion: number, reason?: string): Promise<MetadataWritebackJob>;
   watch(onOpen: () => void, onUpdate: () => void, onError: () => void): JobEventSubscription;
 }

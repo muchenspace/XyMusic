@@ -88,7 +88,7 @@ describe("ArtistArtworkScrapeDialog", () => {
       expectedVersion: 3,
       candidate: candidate(),
       overwrite: true,
-      reason: "在线刮削艺术家头像",
+      reason: "",
     });
     expect(wrapper.emitted("applied")).toEqual([[4]]);
     expect(notify).toHaveBeenCalledWith("success", "艺术家头像已更新");

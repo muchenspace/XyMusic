@@ -16,7 +16,6 @@ const ui = useUiStore();
 
 const source = ref<ArtistSearchSource>("smart");
 const query = ref("");
-const reason = ref("在线刮削艺术家头像");
 const candidates = ref<ArtistCandidate[]>([]);
 const selected = ref<ArtistCandidate>();
 const searched = ref(false);
@@ -50,7 +49,6 @@ watch(open, (value) => {
   if (!value) return;
   source.value = "smart";
   query.value = props.artist?.name ?? "";
-  reason.value = "在线刮削艺术家头像";
   candidates.value = [];
   selected.value = undefined;
   searched.value = false;
@@ -124,11 +122,6 @@ async function apply(): Promise<void> {
   const artist = props.artist;
   const candidate = selected.value;
   if (!artist || !candidate || searching.value) return;
-  const trimmedReason = reason.value.trim();
-  if (trimmedReason.length < 2 || trimmedReason.length > 500) {
-    error.value = "修改原因需为 2 至 500 个字符";
-    return;
-  }
   const overwrite = Boolean(artist.artwork);
   if (overwrite && !window.confirm(`“${artist.name}”已有头像，确定使用所选候选覆盖吗？`)) return;
 
@@ -142,7 +135,7 @@ async function apply(): Promise<void> {
       expectedVersion: artist.version,
       candidate,
       overwrite,
-      reason: trimmedReason,
+      reason: "",
     });
     if (generation !== applyGeneration || !open.value || props.artist?.id !== artistID) return;
     if (!result.applied) {
@@ -241,10 +234,6 @@ async function apply(): Promise<void> {
         </div>
         <p class="mt-4 truncate text-center font-bold">{{ selected?.name || '未选择候选' }}</p>
         <p v-if="artist?.artwork" class="mt-5 rounded-xl bg-amber-500/10 p-3 text-xs leading-5 text-amber-700 dark:text-amber-300">当前艺术家已有头像，应用时会再次确认是否覆盖。</p>
-        <div class="mt-5">
-          <label class="ui-label">修改原因</label>
-          <input v-model="reason" class="ui-input" maxlength="500" :disabled="applying" />
-        </div>
       </aside>
     </div>
 

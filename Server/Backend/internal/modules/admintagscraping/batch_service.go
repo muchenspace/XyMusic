@@ -1158,7 +1158,7 @@ func validateCreateBatch(input CreateBatchInput) error {
 	if len(input.Options.MissingFields) > 6 || !uniqueMissingFields(input.Options.MissingFields) {
 		return apperror.Validation("Batch missing-field conditions are invalid")
 	}
-	if reason := normalizeText(input.Options.Reason); javascriptLength(reason) < 2 || javascriptLength(reason) > 500 {
+	if reason := normalizeText(input.Options.Reason); reason != "" && (javascriptLength(reason) < 2 || javascriptLength(reason) > 500) {
 		return apperror.Validation("Batch reason is invalid")
 	}
 	return nil

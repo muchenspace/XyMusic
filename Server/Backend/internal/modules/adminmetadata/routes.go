@@ -317,9 +317,11 @@ func decodeVersionReason(body io.Reader) (versionReasonRequest, error) {
 	if err != nil {
 		return versionReasonRequest{}, err
 	}
-	reason, err := requiredRouteString(object, "reason", 1, 500, nil)
-	if err != nil {
-		return versionReasonRequest{}, err
+	reason := ""
+	if raw, exists := object["reason"]; exists && raw != nil {
+		if text, ok := raw.(string); ok {
+			reason = text
+		}
 	}
 	return versionReasonRequest{ExpectedVersion: expectedVersion, Reason: reason}, nil
 }

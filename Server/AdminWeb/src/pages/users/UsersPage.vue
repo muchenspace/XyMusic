@@ -47,9 +47,8 @@ const selected = ref<UserSummary>();
 const selectedSession = ref<UserSessionSummary>();
 const fieldErrors = ref<Record<string, string>>({});
 const actionError = ref("");
-const form = reactive({ id: "", username: "", displayName: "", bio: "", role: "USER" as UserRole, status: "ACTIVE" as UserStatus, password: "", reason: "", version: 0 });
-const passwordForm = reactive({ password: "", reason: "" });
-const operationReason = ref("");
+const form = reactive({ id: "", username: "", displayName: "", bio: "", role: "USER" as UserRole, status: "ACTIVE" as UserStatus, password: "", version: 0 });
+const passwordForm = reactive({ password: "" });
 let allowEditorClose = false;
 let allowPasswordClose = false;
 let allowConfirmClose = false;
@@ -109,19 +108,19 @@ function resetFilters(): void { search.value = ""; status.value = ""; role.value
 function changePageSize(value: number): void { pageSize.value = value; resetPaging(); }
 function changeSessionPageSize(value: number): void { sessionPageSize.value = value; resetSessionPaging(); }
 function openCreate(): void {
-  Object.assign(form, { id: "", username: "", displayName: "", bio: "", role: "USER", status: "ACTIVE", password: "", reason: "", version: 0 });
+  Object.assign(form, { id: "", username: "", displayName: "", bio: "", role: "USER", status: "ACTIVE", password: "", version: 0 });
   fieldErrors.value = {}; actionError.value = ""; editorOpen.value = true;
 }
 function openEdit(user: UserSummary): void {
   selected.value = user;
-  Object.assign(form, { id: user.id, username: user.username, displayName: user.displayName, bio: user.bio ?? "", role: user.role, status: user.status, password: "", reason: "", version: user.version });
+  Object.assign(form, { id: user.id, username: user.username, displayName: user.displayName, bio: user.bio ?? "", role: user.role, status: user.status, password: "", version: user.version });
   fieldErrors.value = {}; actionError.value = ""; editorOpen.value = true;
 }
 function openDetail(user: UserSummary): void { selected.value = user; resetSessionPaging(); detailOpen.value = true; }
 function openAvatar(user: UserSummary): void { selected.value = user; avatarOpen.value = true; }
-function openPassword(user: UserSummary): void { selected.value = user; Object.assign(passwordForm, { password: "", reason: "" }); actionError.value = ""; passwordOpen.value = true; }
-function askUserAction(user: UserSummary, action: "delete" | "restore"): void { selected.value = user; confirmAction.value = action; operationReason.value = ""; actionError.value = ""; confirmOpen.value = true; }
-function askRevoke(session: UserSessionSummary): void { selectedSession.value = session; operationReason.value = ""; actionError.value = ""; sessionOpen.value = true; }
+function openPassword(user: UserSummary): void { selected.value = user; Object.assign(passwordForm, { password: "" }); actionError.value = ""; passwordOpen.value = true; }
+function askUserAction(user: UserSummary, action: "delete" | "restore"): void { selected.value = user; confirmAction.value = action; actionError.value = ""; confirmOpen.value = true; }
+function askRevoke(session: UserSessionSummary): void { selectedSession.value = session; actionError.value = ""; sessionOpen.value = true; }
 
 const userSchema = z.object({
   username: z.string().trim().regex(/^[A-Za-z0-9_]{3,32}$/, "用户名须为 3–32 位字母、数字或下划线"),
@@ -135,7 +134,6 @@ function validateEditor(): boolean {
   fieldErrors.value = {};
   if (!result.success) for (const issue of result.error.issues) fieldErrors.value[issue.path.join(".")] = issue.message;
   if (!form.id && form.password.length < 6) fieldErrors.value.password = "初始密码至少 6 个字符";
-  if (form.id && !form.reason.trim()) fieldErrors.value.reason = "请填写本次修改原因";
   return Object.keys(fieldErrors.value).length === 0;
 }
 
@@ -164,13 +162,13 @@ const saveMutation = useMutation({
       return userAdmin.create(input);
     }
     const original = selected.value!;
-    const input: UpdateUserInput = { expectedVersion: form.version, reason: form.reason.trim() };
+    const input: UpdateUserInput = { expectedVersion: form.version };
     if (form.username.trim() !== original.username) input.username = form.username.trim();
     if (form.displayName.trim() !== original.displayName) input.displayName = form.displayName.trim();
     if (form.bio.trim() !== (original.bio ?? "")) input.bio = form.bio.trim() || null;
     if (form.role !== original.role) input.role = form.role;
     if (form.status !== original.status) input.status = form.status;
-    if (Object.keys(input).length === 2) throw new Error("没有需要保存的用户字段");
+    if (Object.keys(input).length === 1) throw new Error("没有需要保存的用户字段");
     return userAdmin.update(form.id, input);
   },
   onSuccess: async (saved) => {
@@ -185,22 +183,20 @@ const saveMutation = useMutation({
 function save(): void { if (validateEditor()) { actionError.value = ""; saveMutation.mutate(); } }
 
 const passwordMutation = useMutation({
-  mutationFn: () => userAdmin.resetPassword(selected.value!.id, selected.value!.version, passwordForm.password, passwordForm.reason.trim()),
+  mutationFn: () => userAdmin.resetPassword(selected.value!.id, selected.value!.version, passwordForm.password),
   onSuccess: async () => { allowPasswordClose = true; passwordOpen.value = false; ui.notify("success", "用户密码已重置", "该用户的已有会话已被撤销"); await refreshUsers(); },
   onError: (error) => { actionError.value = error instanceof ApiError ? error.message : "密码重置失败"; },
 });
 function resetPassword(): void {
-  actionError.value = passwordForm.password.length < 6 ? "新密码至少 6 个字符" : !passwordForm.reason.trim() ? "请填写重置原因" : "";
+  actionError.value = passwordForm.password.length < 6 ? "新密码至少 6 个字符" : "";
   if (!actionError.value) passwordMutation.mutate();
 }
 const confirmMutation = useMutation({
   mutationFn: async () => {
-    if (!operationReason.value.trim()) throw new Error("请填写操作原因");
     await userAdmin.setDeleted(
       selected.value!.id,
       selected.value!.version,
       confirmAction.value === "delete",
-      operationReason.value.trim(),
     );
   },
   onSuccess: async () => { allowConfirmClose = true; confirmOpen.value = false; ui.notify("success", confirmAction.value === "delete" ? "用户已删除" : "用户已恢复"); await refreshUsers(); },
@@ -208,8 +204,7 @@ const confirmMutation = useMutation({
 });
 const sessionMutation = useMutation({
   mutationFn: () => {
-    if (!operationReason.value.trim()) throw new Error("请填写撤销原因");
-    return userAdmin.revokeSession(selected.value!.id, selectedSession.value!.id, operationReason.value.trim());
+    return userAdmin.revokeSession(selected.value!.id, selectedSession.value!.id);
   },
   onSuccess: async () => { allowSessionClose = true; sessionOpen.value = false; ui.notify("success", "会话已撤销"); await detailQuery.refetch(); },
   onError: (error) => { actionError.value = error instanceof Error ? error.message : "撤销会话失败"; },
@@ -244,8 +239,8 @@ watch(sessionOpen, (value) => { if (!value && sessionMutation.isPending.value &&
         <AppPagination :page="page" :page-size="pageSize" :total="usersQuery.data.value.total" :total-pages="usersQuery.data.value.totalPages" cursor @change="changePage" @page-size-change="changePageSize" /></template>
     </section>
 
-    <BaseDialog v-model="editorOpen" :title="form.id ? '编辑用户' : '创建用户'" :description="form.id ? '修改内容会记录操作原因。' : '创建可立即登录的新账户。'">
-      <div class="space-y-5"><div><label class="ui-label">用户名</label><input v-model="form.username" class="ui-input" autocomplete="username" /><p v-if="fieldErrors.username" class="ui-error">{{ fieldErrors.username }}</p></div><div><label class="ui-label">显示名称</label><input v-model="form.displayName" class="ui-input" /><p v-if="fieldErrors.displayName" class="ui-error">{{ fieldErrors.displayName }}</p></div><div><label class="ui-label">个人简介</label><textarea v-model="form.bio" class="ui-textarea" /><p v-if="fieldErrors.bio" class="ui-error">{{ fieldErrors.bio }}</p></div><div class="grid gap-5 sm:grid-cols-2"><div><label class="ui-label">角色</label><select v-model="form.role" class="ui-select"><option value="USER">普通用户</option><option value="ADMIN">管理员</option></select></div><div v-if="form.id"><label class="ui-label">状态</label><select v-model="form.status" class="ui-select"><option value="ACTIVE">正常</option><option value="SUSPENDED">停用</option><option value="DELETED">删除</option></select></div></div><div v-if="!form.id"><label class="ui-label">初始密码</label><input v-model="form.password" class="ui-input" type="password" autocomplete="new-password" /><p v-if="fieldErrors.password" class="ui-error">{{ fieldErrors.password }}</p></div><div v-else><label class="ui-label">修改原因</label><input v-model="form.reason" class="ui-input" placeholder="例如：根据用户申请更新资料" /><p v-if="fieldErrors.reason" class="ui-error">{{ fieldErrors.reason }}</p></div><p v-if="actionError" class="rounded-xl bg-rose-500/10 px-4 py-3 text-sm text-[var(--danger)]">{{ actionError }}</p></div>
+    <BaseDialog v-model="editorOpen" :title="form.id ? '编辑用户' : '创建用户'" :description="form.id ? '修改用户信息与状态。' : '创建可立即登录的新账户。'">
+      <div class="space-y-5"><div><label class="ui-label">用户名</label><input v-model="form.username" class="ui-input" autocomplete="username" /><p v-if="fieldErrors.username" class="ui-error">{{ fieldErrors.username }}</p></div><div><label class="ui-label">显示名称</label><input v-model="form.displayName" class="ui-input" /><p v-if="fieldErrors.displayName" class="ui-error">{{ fieldErrors.displayName }}</p></div><div><label class="ui-label">个人简介</label><textarea v-model="form.bio" class="ui-textarea" /><p v-if="fieldErrors.bio" class="ui-error">{{ fieldErrors.bio }}</p></div><div class="grid gap-5 sm:grid-cols-2"><div><label class="ui-label">角色</label><select v-model="form.role" class="ui-select"><option value="USER">普通用户</option><option value="ADMIN">管理员</option></select></div><div v-if="form.id"><label class="ui-label">状态</label><select v-model="form.status" class="ui-select"><option value="ACTIVE">正常</option><option value="SUSPENDED">停用</option><option value="DELETED">删除</option></select></div></div><div v-if="!form.id"><label class="ui-label">初始密码</label><input v-model="form.password" class="ui-input" type="password" autocomplete="new-password" /><p v-if="fieldErrors.password" class="ui-error">{{ fieldErrors.password }}</p></div><p v-if="actionError" class="rounded-xl bg-rose-500/10 px-4 py-3 text-sm text-[var(--danger)]">{{ actionError }}</p></div>
       <template #footer><AppButton @click="editorOpen = false">取消</AppButton><AppButton variant="primary" :loading="saveMutation.isPending.value" @click="save">保存</AppButton></template>
     </BaseDialog>
 
@@ -264,10 +259,10 @@ watch(sessionOpen, (value) => { if (!value && sessionMutation.isPending.value &&
       <template #footer><AppButton @click="avatarOpen = false">关闭</AppButton></template>
     </BaseDialog>
 
-    <BaseDialog v-model="passwordOpen" title="重置用户密码" :description="`为 ${selected?.displayName ?? ''} 设置新密码；保存后会撤销其所有会话。`"><div class="space-y-4"><div><label class="ui-label">新密码</label><input v-model="passwordForm.password" class="ui-input" type="password" autocomplete="new-password" /></div><div><label class="ui-label">重置原因</label><input v-model="passwordForm.reason" class="ui-input" /></div><p v-if="actionError" class="rounded-xl bg-rose-500/10 px-4 py-3 text-sm text-[var(--danger)]">{{ actionError }}</p></div><template #footer><AppButton @click="passwordOpen = false">取消</AppButton><AppButton variant="primary" :loading="passwordMutation.isPending.value" @click="resetPassword">重置密码</AppButton></template></BaseDialog>
+    <BaseDialog v-model="passwordOpen" title="重置用户密码" :description="`为 ${selected?.displayName ?? ''} 设置新密码；保存后会撤销其所有会话。`"><div class="space-y-4"><div><label class="ui-label">新密码</label><input v-model="passwordForm.password" class="ui-input" type="password" autocomplete="new-password" /></div><p v-if="actionError" class="rounded-xl bg-rose-500/10 px-4 py-3 text-sm text-[var(--danger)]">{{ actionError }}</p></div><template #footer><AppButton @click="passwordOpen = false">取消</AppButton><AppButton variant="primary" :loading="passwordMutation.isPending.value" @click="resetPassword">重置密码</AppButton></template></BaseDialog>
 
-    <BaseDialog v-model="confirmOpen" :title="confirmAction === 'delete' ? '删除用户' : '恢复用户'" :description="confirmAction === 'delete' ? '用户将标记为已删除，所有会话会被撤销。' : '用户将恢复为正常状态。'"><div class="rounded-xl bg-[var(--surface-muted)] p-4"><p class="font-semibold">{{ selected?.displayName }}</p><p class="text-xs text-[var(--muted)]">@{{ selected?.username }}</p></div><div class="mt-4"><label class="ui-label">操作原因</label><input v-model="operationReason" class="ui-input" /></div><p v-if="actionError" class="mt-4 rounded-xl bg-rose-500/10 px-4 py-3 text-sm text-[var(--danger)]">{{ actionError }}</p><template #footer><AppButton @click="confirmOpen = false">取消</AppButton><AppButton :variant="confirmAction === 'delete' ? 'danger' : 'primary'" :loading="confirmMutation.isPending.value" @click="confirmMutation.mutate()">{{ confirmAction === 'delete' ? '删除用户' : '恢复用户' }}</AppButton></template></BaseDialog>
+    <BaseDialog v-model="confirmOpen" :title="confirmAction === 'delete' ? '删除用户' : '恢复用户'" :description="confirmAction === 'delete' ? '用户将标记为已删除，所有会话会被撤销。' : '用户将恢复为正常状态。'"><div class="rounded-xl bg-[var(--surface-muted)] p-4"><p class="font-semibold">{{ selected?.displayName }}</p><p class="text-xs text-[var(--muted)]">@{{ selected?.username }}</p></div><p v-if="actionError" class="mt-4 rounded-xl bg-rose-500/10 px-4 py-3 text-sm text-[var(--danger)]">{{ actionError }}</p><template #footer><AppButton @click="confirmOpen = false">取消</AppButton><AppButton :variant="confirmAction === 'delete' ? 'danger' : 'primary'" :loading="confirmMutation.isPending.value" @click="confirmMutation.mutate()">{{ confirmAction === 'delete' ? '删除用户' : '恢复用户' }}</AppButton></template></BaseDialog>
 
-    <BaseDialog v-model="sessionOpen" title="撤销登录会话" :description="selectedSession?.deviceName"><div><label class="ui-label">撤销原因</label><input v-model="operationReason" class="ui-input" placeholder="例如：设备已遗失" /></div><p v-if="actionError" class="mt-4 rounded-xl bg-rose-500/10 px-4 py-3 text-sm text-[var(--danger)]">{{ actionError }}</p><template #footer><AppButton @click="sessionOpen = false">取消</AppButton><AppButton variant="danger" :loading="sessionMutation.isPending.value" @click="sessionMutation.mutate()">撤销会话</AppButton></template></BaseDialog>
+    <BaseDialog v-model="sessionOpen" title="撤销登录会话" :description="selectedSession?.deviceName"><div class="rounded-xl bg-[var(--surface-muted)] p-4 text-sm text-[var(--muted)]"><p>确定要撤销此登录会话吗？撤销后该设备将无法继续访问。</p></div><p v-if="actionError" class="mt-4 rounded-xl bg-rose-500/10 px-4 py-3 text-sm text-[var(--danger)]">{{ actionError }}</p><template #footer><AppButton @click="sessionOpen = false">取消</AppButton><AppButton variant="danger" :loading="sessionMutation.isPending.value" @click="sessionMutation.mutate()">撤销会话</AppButton></template></BaseDialog>
   </div>
 </template>
