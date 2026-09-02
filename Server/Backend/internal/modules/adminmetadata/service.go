@@ -364,8 +364,8 @@ func validateVersionReason(input VersionReasonInput) (VersionReasonInput, error)
 
 func validateReason(value string) (string, error) {
 	value = strings.Join(strings.Fields(norm.NFKC.String(value)), " ")
-	if value == "" || javascriptLength(value) > 500 {
-		return "", apperror.Validation("A reason of 1 to 500 characters is required")
+	if javascriptLength(value) > 500 {
+		return "", apperror.Validation("A reason of at most 500 characters is allowed")
 	}
 	return value, nil
 }

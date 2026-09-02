@@ -23,13 +23,13 @@ import type {
 export interface UpdateTrackMetadataCommand {
   expectedVersion: number;
   patch: TrackTagPatch;
-  reason: string;
+  reason?: string;
 }
 
 export interface BatchUpdateTrackMetadataCommand {
   items: TrackMetadataUpdateTarget[];
   patch: TrackTagPatch;
-  reason: string;
+  reason?: string;
 }
 
 export interface BatchUpdateTrackMetadataResult {
@@ -71,7 +71,7 @@ export interface MusicAdminGateway {
     quarantinedFiles: number;
     scheduledObjects: number;
   }>;
-  writeTrackMetadata(trackId: string, expectedVersion: number, reason: string): Promise<void>;
+  writeTrackMetadata(trackId: string, expectedVersion: number, reason?: string): Promise<void>;
   batchUpdateTrackMetadata(command: BatchUpdateTrackMetadataCommand): Promise<BatchUpdateTrackMetadataResult>;
   listAlbums(query: MusicListQuery, signal?: AbortSignal): Promise<MusicPage<AlbumSummary>>;
   getAlbum(albumId: string, query: Pick<MusicListQuery, "page" | "pageSize" | "cursor" | "cursorMode">, signal?: AbortSignal): Promise<AlbumDetail>;

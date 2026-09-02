@@ -161,7 +161,7 @@ func (routes *Routes) apply(c *gin.Context) error {
 		return err
 	}
 	var input ApplyInput
-	shape, err := decodeContractJSON(c, &input, "expectedVersion", "candidate", "fields", "reason")
+	shape, err := decodeContractJSON(c, &input, "expectedVersion", "candidate", "fields")
 	if err != nil {
 		return err
 	}
@@ -392,7 +392,7 @@ func validateCandidateDetailsInput(input CandidateDetailsInput, shape map[string
 }
 
 func validateApplyInput(input ApplyInput, shape map[string]json.RawMessage) error {
-	if input.ExpectedVersion < 1 || !contractStringLength(input.Reason, 2, 500) {
+	if input.ExpectedVersion < 1 || (input.Reason != "" && !contractStringLength(input.Reason, 2, 500)) {
 		return contractError()
 	}
 	if hasExplicitNull(shape, "writeBack", "verbatim") {
@@ -430,11 +430,11 @@ func validateBatchInput(input CreateBatchInput, shape map[string]json.RawMessage
 		}
 		seenTracks[item.TrackID] = struct{}{}
 	}
-	if err := requireNestedKeys(shape["options"], "sources", "matchMode", "missingFields", "fields", "reason"); err != nil {
+	if err := requireNestedKeys(shape["options"], "sources", "matchMode", "missingFields", "fields"); err != nil {
 		return err
 	}
 	var optionShape map[string]json.RawMessage
-	if err := json.Unmarshal(shape["options"], &optionShape); err != nil {
+	if json.Unmarshal(shape["options"], &optionShape) != nil {
 		return contractError()
 	}
 	if hasExplicitNull(optionShape, "writeBack", "verbatim") {
@@ -447,7 +447,7 @@ func validateBatchInput(input CreateBatchInput, shape map[string]json.RawMessage
 	if len(options.Sources) < 1 || len(options.Sources) > 5 || !uniqueSources(options.Sources) ||
 		(options.MatchMode != MatchStrict && options.MatchMode != MatchSimple) ||
 		len(options.MissingFields) > 6 || !uniqueMissingFields(options.MissingFields) ||
-		!contractStringLength(options.Reason, 2, 500) {
+		(options.Reason != "" && !contractStringLength(options.Reason, 2, 500)) {
 		return contractError()
 	}
 	for _, source := range options.Sources {

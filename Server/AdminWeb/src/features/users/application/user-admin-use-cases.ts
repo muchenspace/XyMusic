@@ -26,17 +26,17 @@ export class UserAdminUseCases {
     return this.gateway.update(userId, input);
   }
 
-  resetPassword(userId: string, expectedVersion: number, password: string, reason: string): Promise<void> {
+  resetPassword(userId: string, expectedVersion: number, password: string, reason = ""): Promise<void> {
     return this.gateway.resetPassword(userId, expectedVersion, password, reason);
   }
 
-  setDeleted(userId: string, expectedVersion: number, deleted: boolean, reason: string): Promise<void | UserDetail> {
+  setDeleted(userId: string, expectedVersion: number, deleted: boolean, reason = ""): Promise<void | UserDetail> {
     return deleted
       ? this.gateway.delete(userId, expectedVersion, reason)
       : this.gateway.restore(userId, expectedVersion, reason);
   }
 
-  revokeSession(userId: string, sessionId: string, reason: string): Promise<void> {
+  revokeSession(userId: string, sessionId: string, reason = ""): Promise<void> {
     return this.gateway.revokeSession(userId, sessionId, reason);
   }
 }

@@ -11,8 +11,8 @@ export interface UserAdminGateway {
   detail(userId: string, query: Pick<UserListQuery, "page" | "pageSize" | "cursor" | "cursorMode">, signal?: AbortSignal): Promise<UserDetail>;
   create(input: CreateUserInput): Promise<UserDetail>;
   update(userId: string, input: UpdateUserInput): Promise<UserDetail>;
-  resetPassword(userId: string, expectedVersion: number, password: string, reason: string): Promise<void>;
-  delete(userId: string, expectedVersion: number, reason: string): Promise<void>;
-  restore(userId: string, expectedVersion: number, reason: string): Promise<UserDetail>;
-  revokeSession(userId: string, sessionId: string, reason: string): Promise<void>;
+  resetPassword(userId: string, expectedVersion: number, password: string, reason?: string): Promise<void>;
+  delete(userId: string, expectedVersion: number, reason?: string): Promise<void>;
+  restore(userId: string, expectedVersion: number, reason?: string): Promise<UserDetail>;
+  revokeSession(userId: string, sessionId: string, reason?: string): Promise<void>;
 }

@@ -129,7 +129,7 @@ func (service *Service) ApplyArtistArtwork(
 		return ArtistArtworkApplyResult{}, apperror.Validation("expectedVersion is invalid")
 	}
 	reason := normalizeText(input.Reason)
-	if javascriptLength(reason) < 2 || javascriptLength(reason) > 500 {
+	if reason != "" && (javascriptLength(reason) < 2 || javascriptLength(reason) > 500) {
 		return ArtistArtworkApplyResult{}, apperror.Validation("reason is invalid")
 	}
 	if err := validateArtistCandidate(input.Candidate); err != nil {

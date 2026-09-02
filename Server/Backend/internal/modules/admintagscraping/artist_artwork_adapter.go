@@ -25,7 +25,7 @@ func (adapter *AdminMediaArtworkApplier) ApplyArtistArtwork(
 ) error {
 	details := artistArtworkDetailsFromContext(ctx)
 	details.reason = normalizeText(details.reason)
-	if expectedVersion < 1 || javascriptLength(details.reason) < 2 || javascriptLength(details.reason) > 500 ||
+	if expectedVersion < 1 || (details.reason != "" && (javascriptLength(details.reason) < 2 || javascriptLength(details.reason) > 500)) ||
 		validateArtistCandidate(details.candidate) != nil {
 		return apperror.Validation("Artist artwork apply context is invalid")
 	}

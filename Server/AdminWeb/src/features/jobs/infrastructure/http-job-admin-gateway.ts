@@ -33,11 +33,11 @@ export class HttpJobAdminGateway implements JobAdminGateway {
     return adminApi.writebackJobs(query, signal);
   }
 
-  retryWriteback(jobId: string, expectedVersion: number, reason: string): Promise<MetadataWritebackJob> {
+  retryWriteback(jobId: string, expectedVersion: number, reason = ""): Promise<MetadataWritebackJob> {
     return adminApi.retryWritebackJob(jobId, expectedVersion, reason);
   }
 
-  cancelWriteback(jobId: string, expectedVersion: number, reason: string): Promise<MetadataWritebackJob> {
+  cancelWriteback(jobId: string, expectedVersion: number, reason = ""): Promise<MetadataWritebackJob> {
     return adminApi.cancelWritebackJob(jobId, expectedVersion, reason);
   }
 

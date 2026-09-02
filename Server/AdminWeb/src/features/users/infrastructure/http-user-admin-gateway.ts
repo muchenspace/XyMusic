@@ -25,19 +25,19 @@ export class HttpUserAdminGateway implements UserAdminGateway {
     return adminApi.updateUser(userId, input);
   }
 
-  async resetPassword(userId: string, expectedVersion: number, password: string, reason: string): Promise<void> {
+  async resetPassword(userId: string, expectedVersion: number, password: string, reason = ""): Promise<void> {
     await adminApi.resetUserPassword(userId, expectedVersion, password, reason);
   }
 
-  async delete(userId: string, expectedVersion: number, reason: string): Promise<void> {
+  async delete(userId: string, expectedVersion: number, reason = ""): Promise<void> {
     await adminApi.deleteUser(userId, expectedVersion, reason);
   }
 
-  restore(userId: string, expectedVersion: number, reason: string): Promise<UserDetail> {
+  restore(userId: string, expectedVersion: number, reason = ""): Promise<UserDetail> {
     return adminApi.restoreUser(userId, expectedVersion, reason);
   }
 
-  async revokeSession(userId: string, sessionId: string, reason: string): Promise<void> {
+  async revokeSession(userId: string, sessionId: string, reason = ""): Promise<void> {
     await adminApi.revokeUserSession(userId, sessionId, reason);
   }
 }

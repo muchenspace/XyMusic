@@ -38,7 +38,7 @@ export class JobAdminUseCases {
     jobId: string,
     expectedVersion: number,
     action: "retry" | "cancel",
-    reason: string,
+    reason = "",
   ): Promise<MetadataWritebackJob> {
     return action === "retry"
       ? this.gateway.retryWriteback(jobId, expectedVersion, reason)

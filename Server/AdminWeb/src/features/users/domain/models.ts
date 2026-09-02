@@ -51,7 +51,7 @@ export interface UpdateUserInput {
   role?: UserRole;
   status?: UserStatus;
   expectedVersion: number;
-  reason: string;
+  reason?: string;
 }
 
 export interface UserListQuery {

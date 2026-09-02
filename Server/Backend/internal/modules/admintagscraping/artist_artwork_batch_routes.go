@@ -86,7 +86,7 @@ func validateArtistArtworkBatchContract(
 	input CreateArtistArtworkBatchInput,
 	shape map[string]json.RawMessage,
 ) error {
-	if err := requireNestedKeys(shape["options"], "sources", "overwrite", "reason"); err != nil {
+	if err := requireNestedKeys(shape["options"], "sources", "overwrite"); err != nil {
 		return err
 	}
 	return validateCreateArtistArtworkBatch(input)
