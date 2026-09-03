@@ -17,6 +17,7 @@ import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaUri
 import com.xymusic.app.feature.player.adapter.media3.PlaybackSessionCommands
 import com.xymusic.app.feature.player.adapter.media3.globalPlaybackDurationMs
 import com.xymusic.app.feature.player.adapter.media3.globalPlaybackPositionMs
+import com.xymusic.app.feature.player.adapter.media3.playbackMetadataDurationMs
 import com.xymusic.app.feature.player.adapter.media3.playbackSourceOffsetMs
 import com.xymusic.app.feature.player.domain.PlayerEvent
 import com.xymusic.app.feature.player.domain.PlayerRepository
@@ -147,7 +148,7 @@ constructor(
         val mediaItems =
             withContext(defaultDispatcher) {
                 if (isValidPlayerQueue(items, startQueueItemId, startPositionMs)) {
-                    items.map(::toMediaItem)
+                    items.map(PlayerQueueItem::toMedia3MediaItem)
                 } else {
                     null
                 }
@@ -175,7 +176,7 @@ constructor(
         val mediaItems =
             withContext(defaultDispatcher) {
                 if (items.isNotEmpty() && isValidPlayerQueue(items, null, 0)) {
-                    items.map(::toMediaItem)
+                    items.map(PlayerQueueItem::toMedia3MediaItem)
                 } else {
                     null
                 }
@@ -422,6 +423,8 @@ constructor(
 
     private fun updateProgress(player: Player) {
         val previous = mutableState.value
+        val currentMediaId = player.currentMediaItem?.mediaId
+        if (currentMediaId != null && currentMediaId != previous.currentQueueItemId) return
         val positionMs = player.globalPlaybackPositionMs(player.currentPosition)
         val bufferedPositionMs = player.globalPlaybackPositionMs(player.bufferedPosition)
         val durationMs = player.resolvedDurationMs()
@@ -670,31 +673,6 @@ constructor(
         positionUpdateJob = null
     }
 
-    private fun toMediaItem(item: PlayerQueueItem): MediaItem {
-        val extras =
-            Bundle().apply {
-                putString(PlaybackMediaMetadata.EXTRA_TRACK_ID, item.trackId)
-                putStringArrayList(PlaybackMediaMetadata.EXTRA_ARTISTS, ArrayList(item.artistNames))
-                putString(PlaybackMediaMetadata.EXTRA_ARTWORK_CACHE_KEY, item.artworkCacheKey)
-                putLong(PlaybackMediaMetadata.EXTRA_DURATION_MS, item.durationMs)
-            }
-        val metadata =
-            MediaMetadata
-                .Builder()
-                .setTitle(item.title)
-                .setArtist(item.artistNames.joinToString(" / "))
-                .setAlbumTitle(item.albumTitle)
-                .setArtworkUri(item.artworkUrl?.let(Uri::parse))
-                .setExtras(extras)
-                .build()
-        return MediaItem
-            .Builder()
-            .setMediaId(item.queueItemId)
-            .setUri(PlaybackMediaUri.forTrack(item.trackId))
-            .setMediaMetadata(metadata)
-            .build()
-    }
-
     private fun fromMediaItem(item: MediaItem): PlayerQueueItem {
         val extras = item.mediaMetadata.extras
         val trackId =
@@ -712,7 +690,7 @@ constructor(
             albumTitle = item.mediaMetadata.albumTitle?.toString(),
             artworkUrl = item.mediaMetadata.artworkUri?.toString(),
             artworkCacheKey = extras?.getString(PlaybackMediaMetadata.EXTRA_ARTWORK_CACHE_KEY),
-            durationMs = extras?.getLong(PlaybackMediaMetadata.EXTRA_DURATION_MS) ?: 0,
+            durationMs = item.playbackMetadataDurationMs(),
         )
     }
 
@@ -734,6 +712,32 @@ constructor(
         const val MIN_PLAYBACK_SPEED = 0.5f
         const val MAX_PLAYBACK_SPEED = 2f
     }
+}
+
+internal fun PlayerQueueItem.toMedia3MediaItem(): MediaItem {
+    val extras =
+        Bundle().apply {
+            putString(PlaybackMediaMetadata.EXTRA_TRACK_ID, trackId)
+            putStringArrayList(PlaybackMediaMetadata.EXTRA_ARTISTS, ArrayList(artistNames))
+            putString(PlaybackMediaMetadata.EXTRA_ARTWORK_CACHE_KEY, artworkCacheKey)
+            putLong(PlaybackMediaMetadata.EXTRA_DURATION_MS, durationMs)
+        }
+    val metadata =
+        MediaMetadata
+            .Builder()
+            .setTitle(title)
+            .setArtist(artistNames.joinToString(" / "))
+            .setAlbumTitle(albumTitle)
+            .setArtworkUri(artworkUrl?.let(Uri::parse))
+            .setDurationMs(durationMs.takeIf { it > 0 })
+            .setExtras(extras)
+            .build()
+    return MediaItem
+        .Builder()
+        .setMediaId(queueItemId)
+        .setUri(PlaybackMediaUri.forTrack(trackId))
+        .setMediaMetadata(metadata)
+        .build()
 }
 
 internal class PendingRestoredMediaItemSeek {
@@ -799,18 +803,25 @@ internal fun playerStateWithPublishedPosition(
             previous.currentQueueItemId != null
     val currentQueueItemId =
         if (retainPreviousItem) previous.currentQueueItemId else controllerState.currentQueueItemId
+    val queueItemChanged =
+        currentQueueItemId != previous.currentQueueItemId && !retainPreviousItem
+    val resolvedPositionMs = when {
+        publishedPositionMs != null -> publishedPositionMs
+        queueItemChanged -> 0L
+        else -> controllerState.positionMs
+    }.coerceAtLeast(0)
     return controllerState.copy(
         currentQueueItemId = currentQueueItemId,
-        positionMs = (publishedPositionMs ?: controllerState.positionMs).coerceAtLeast(0),
+        positionMs = resolvedPositionMs,
         positionAnchorElapsedRealtimeMs = sampledAtElapsedRealtimeMs.coerceAtLeast(0),
         positionDiscontinuitySequence =
         nextPositionDiscontinuitySequence(
             previous = previous,
             currentQueueItemId = currentQueueItemId,
-            explicitDiscontinuity = positionDiscontinuity,
+            explicitDiscontinuity = positionDiscontinuity || queueItemChanged,
         ),
         bufferedPositionMs =
-        if (retainPreviousItem) previous.bufferedPositionMs else controllerState.bufferedPositionMs,
+        if (retainPreviousItem) previous.bufferedPositionMs else if (queueItemChanged) 0L else controllerState.bufferedPositionMs,
         durationMs = if (retainPreviousItem) previous.durationMs else controllerState.durationMs,
     )
 }

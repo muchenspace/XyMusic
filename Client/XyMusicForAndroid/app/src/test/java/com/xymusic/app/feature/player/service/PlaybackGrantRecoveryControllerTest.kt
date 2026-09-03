@@ -34,11 +34,27 @@ class PlaybackGrantRecoveryControllerTest {
         val controller = PlaybackGrantRecoveryController(player.delegate, repository)
 
         controller.onPlayWhenReadyChanged(true, 0)
+        controller.onIsPlayingChanged(true)
         player.playWhenReady = false
         controller.onPlayerError(expiredGrantError())
 
         assertThat(repository.invalidatedTrackIds).containsExactly(TRACK_ID)
         assertThat(player.seekCalls).containsExactly(GrantRecoverySeekCall(mediaItemIndex = 0, positionMs = 12_345))
+        assertThat(player.prepareCount).isEqualTo(1)
+        assertThat(player.playWhenReady).isTrue()
+    }
+
+    @Test
+    fun expiredGrantBeforeTrackHasEverPlayedRecoversAtPositionZero() {
+        val player = RecordingPlayer(currentPositionMs = 180_000, playWhenReady = true)
+        val repository = RecordingGrantRepository()
+        val controller = PlaybackGrantRecoveryController(player.delegate, repository)
+
+        controller.onMediaItemTransition(null, Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
+        controller.onPlayerError(expiredGrantError())
+
+        assertThat(repository.invalidatedTrackIds).containsExactly(TRACK_ID)
+        assertThat(player.seekCalls).containsExactly(GrantRecoverySeekCall(mediaItemIndex = 0, positionMs = 0L))
         assertThat(player.prepareCount).isEqualTo(1)
         assertThat(player.playWhenReady).isTrue()
     }

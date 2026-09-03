@@ -58,6 +58,7 @@ private fun StoredPlaybackQueueItem.toMediaMetadata(requestedStartPositionMs: Lo
         .setArtist(artistNames.joinToString(" / "))
         .setAlbumTitle(albumTitle)
         .setArtworkUri(artworkUrl?.let(Uri::parse))
+        .setDurationMs(durationMs.takeIf { it > 0 })
         .setExtras(extras)
         .build()
 }

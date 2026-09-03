@@ -49,12 +49,11 @@ internal class PlaybackMediaSessionCallback(
                     .addAllCommands()
                     .build(),
             )
-        controller.isTrusted ->
+        else ->
             MediaSession.ConnectionResult.accept(
-                SessionCommands.Builder().build(),
+                MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS,
                 SYSTEM_CONTROLLER_COMMANDS,
             )
-        else -> MediaSession.ConnectionResult.reject()
     }
 
     override fun onCustomCommand(

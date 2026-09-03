@@ -25,8 +25,8 @@ import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.session.SessionIdentityProvider
 import com.xymusic.app.core.session.SessionMutationCoordinator
 import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaUri
+import com.xymusic.app.feature.player.adapter.media3.globalPlaybackDurationMs
 import com.xymusic.app.feature.player.adapter.media3.playbackRequestedStartPositionMs
-import com.xymusic.app.feature.player.adapter.media3.playbackSourceOffsetMs
 import com.xymusic.app.feature.player.adapter.media3.playbackStreamProtocol
 import com.xymusic.app.feature.player.adapter.media3.withPlaybackResolution
 import com.xymusic.app.feature.player.domain.PlaybackGrant
@@ -154,7 +154,6 @@ private class GrantResolvingMediaSource(
                 handler.post {
                     if (released) return@post
                     resolutionFailure = failure.asPlaybackIOException()
-                    refreshSourceInfo(Timeline.EMPTY)
                 }
             }
         }
@@ -311,12 +310,39 @@ private fun MediaItem.withUri(
 
 private fun String.toUri(): Uri = Uri.parse(this)
 
-private fun Timeline.withMediaItem(mediaItem: MediaItem): Timeline = object : ForwardingTimeline(this) {
+internal fun Timeline.withMediaItem(mediaItem: MediaItem): Timeline = object : ForwardingTimeline(this) {
     override fun getWindow(
         windowIndex: Int,
         window: Timeline.Window,
         defaultPositionProjectionUs: Long,
     ): Timeline.Window = super.getWindow(windowIndex, window, defaultPositionProjectionUs).also {
         it.mediaItem = mediaItem
+        val knownDurationMs = mediaItem.globalPlaybackDurationMs(
+            if (it.durationUs == C.TIME_UNSET) 0 else it.durationUs / 1000L,
+        )
+        if (knownDurationMs > 0) {
+            it.durationUs = knownDurationMs * 1000L
+            it.isSeekable = true
+            // The backend deliberately publishes an HLS EVENT playlist so
+            // playback can start before transcoding finishes. Media3 treats
+            // that playlist as live until #EXT-X-ENDLIST arrives. This is a
+            // finite track, however, and Android's media controls hide the
+            // position when the window is live. The catalog duration is the
+            // authoritative end of the track, so expose the resolved window
+            // as finite for the player/session while the HLS source continues
+            // refreshing in the background.
+            it.isDynamic = false
+            it.liveConfiguration = null
+        }
     }
+
+    override fun getPeriod(periodIndex: Int, period: Timeline.Period, setIds: Boolean): Timeline.Period =
+        super.getPeriod(periodIndex, period, setIds).also {
+            val knownDurationMs = mediaItem.globalPlaybackDurationMs(
+                if (it.durationUs == C.TIME_UNSET) 0 else it.durationUs / 1000L,
+            )
+            if (knownDurationMs > 0 && it.durationUs == C.TIME_UNSET) {
+                it.durationUs = knownDurationMs * 1000L
+            }
+        }
 }

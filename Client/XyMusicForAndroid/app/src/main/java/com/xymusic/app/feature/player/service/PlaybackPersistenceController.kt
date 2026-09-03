@@ -8,6 +8,7 @@ import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaMetadata
 import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaUri
 import com.xymusic.app.feature.player.adapter.media3.globalPlaybackDurationMs
 import com.xymusic.app.feature.player.adapter.media3.globalPlaybackPositionMs
+import com.xymusic.app.feature.player.adapter.media3.playbackMetadataDurationMs
 import com.xymusic.app.feature.player.domain.PlaybackCheckpoint
 import com.xymusic.app.feature.player.domain.PlaybackEventSink
 import com.xymusic.app.feature.player.domain.PlaybackEventType
@@ -146,10 +147,12 @@ internal class PlaybackPersistenceController(
         scheduleCheckpoint(checkpoint, markCurrent = true)
     }
 
-    private fun scheduleCurrentState() {
+    private fun scheduleCurrentState(explicitPositionMs: Long? = null) {
         val target = currentPersistenceTarget() ?: return
         val queueItemId = player.currentMediaItem?.mediaId ?: return
-        val positionMs = player.currentMediaItem?.globalPlaybackPositionMs(player.currentPosition) ?: 0
+        val positionMs = explicitPositionMs
+            ?: player.currentMediaItem?.globalPlaybackPositionMs(player.currentPosition)
+            ?: 0
         launchPersistence {
             persistCurrentStateSafely(target, queueItemId, positionMs)
         }
@@ -279,11 +282,7 @@ internal class PlaybackPersistenceController(
                             artworkCacheKey =
                             mediaItem.mediaMetadata.extras
                                 ?.getString(PlaybackMediaMetadata.EXTRA_ARTWORK_CACHE_KEY),
-                            durationMs =
-                            mediaItem.mediaMetadata.extras
-                                ?.getLong(PlaybackMediaMetadata.EXTRA_DURATION_MS)
-                                ?.coerceAtLeast(0)
-                                ?: 0,
+                            durationMs = mediaItem.playbackMetadataDurationMs(),
                         ),
                     )
                 }
@@ -442,7 +441,7 @@ internal class PlaybackPersistenceController(
                 if (player.isPlaying && startPlaybackSessionIfNeeded()) {
                     scheduleCurrentCheckpoint(PlaybackEventType.STARTED)
                 } else {
-                    scheduleCurrentState()
+                    scheduleCurrentState(explicitPositionMs = if (queueItemChanged) 0L else null)
                 }
             }
 
