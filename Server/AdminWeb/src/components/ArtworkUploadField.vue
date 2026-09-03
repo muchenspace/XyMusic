@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { CheckCircle2, UploadCloud } from "lucide-vue-next";
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { ApiError } from "@/shared/application/api-error";
 import { ARTWORK_ACCEPT, type ArtworkUploadPhase } from "@/features/music/application/artwork-upload-use-case";
 import { useArtworkUpload } from "@/app/services/music";
@@ -76,6 +76,15 @@ async function selected(event: Event): Promise<void> {
     controller = undefined;
   }
 }
+
+watch(() => props.targetId, () => {
+  controller?.abort();
+  controller = undefined;
+  uploading.value = false;
+  completed.value = false;
+  progress.value = 0;
+  error.value = "";
+});
 
 onBeforeUnmount(() => controller?.abort());
 </script>

@@ -37,6 +37,8 @@ func (repository *Repository) CreateUpload(ctx context.Context, upload UploadRes
 		err = tx.QueryRow(ctx, `select exists(select 1 from artists where id = $1)`, upload.TargetID).Scan(&targetExists)
 	case PurposeAlbumArtwork:
 		err = tx.QueryRow(ctx, `select exists(select 1 from albums where id = $1)`, upload.TargetID).Scan(&targetExists)
+	case PurposeUserAvatar:
+		err = tx.QueryRow(ctx, `select exists(select 1 from users where id = $1)`, upload.TargetID).Scan(&targetExists)
 	default:
 		return apperror.Validation("Unsupported upload purpose")
 	}
@@ -208,7 +210,7 @@ func (repository *Repository) FinalizeUpload(ctx context.Context, input Finalize
 	switch upload.Purpose {
 	case PurposeTrackSource:
 		assetKind = "AUDIO_SOURCE"
-	case PurposeArtistArtwork, PurposeAlbumArtwork:
+	case PurposeArtistArtwork, PurposeAlbumArtwork, PurposeUserAvatar:
 		assetKind = "ARTWORK"
 	default:
 		return errors.New("unsupported asset purpose")
@@ -268,6 +270,46 @@ func (repository *Repository) FinalizeUpload(ctx context.Context, input Finalize
 		}
 		if command.RowsAffected() != 1 {
 			return apperror.NotFound("Album was not found")
+		}
+	case PurposeUserAvatar:
+		var previousAssetID *string
+		err = tx.QueryRow(ctx, `
+			select avatar_asset_id
+			from user_profiles
+			where user_id = $1
+			for update`, upload.TargetID).Scan(&previousAssetID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apperror.NotFound("User profile was not found")
+		}
+		if err != nil {
+			return fmt.Errorf("lock avatar profile: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
+			update user_profiles
+			set avatar_asset_id = $2, updated_at = $3
+			where user_id = $1`, upload.TargetID, input.AssetID, input.Now); err != nil {
+			return fmt.Errorf("attach avatar asset: %w", err)
+		}
+		command, err := tx.Exec(ctx, `
+			update users
+			set version = version + 1, updated_at = $2
+			where id = $1`, upload.TargetID, input.Now)
+		if err != nil {
+			return fmt.Errorf("advance avatar user version: %w", err)
+		}
+		if command.RowsAffected() != 1 {
+			return apperror.NotFound("User no longer exists")
+		}
+		if previousAssetID != nil && *previousAssetID != input.AssetID {
+			_, _ = tx.Exec(ctx, `
+				update media_assets
+				set status = 'DELETE_PENDING', updated_at = $2
+				where id = $1
+				  and not exists (select 1 from artists where artwork_asset_id = media_assets.id)
+				  and not exists (select 1 from albums where cover_asset_id = media_assets.id)
+				  and not exists (select 1 from playlists where cover_asset_id = media_assets.id)
+				  and not exists (select 1 from user_profiles where avatar_asset_id = media_assets.id)`,
+				*previousAssetID, input.Now)
 		}
 	}
 
