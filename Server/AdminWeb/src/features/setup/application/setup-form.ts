@@ -75,34 +75,17 @@ export const setupCompleteSchema = z.object({
   source: setupStepSchemas.source,
   registration: z.object({ enabled: z.boolean() }),
   administrator: setupStepSchemas.administrator,
-  databaseAction: z.enum(["reuse_partial", "migrate", "reset"]).optional(),
-  storageAction: z.enum(["reuse", "reset"]).optional(),
+  databaseAction: z.enum(["reset"]).optional(),
+  storageAction: z.enum(["reset"]).optional(),
 });
 
-const setupCompleteWithReusedAdministratorSchema = setupCompleteSchema.extend({
-  administrator: z.union([
-    setupStepSchemas.administrator,
-    z.object({
-      username: z.literal(""),
-      displayName: z.literal(""),
-      password: z.literal(""),
-    }),
-  ]),
-});
-
-export interface SetupCompleteValidationContext {
-  reusesActiveAdministrator: boolean;
-}
 
 export function validateSetupComplete(
   input: unknown,
-  context: SetupCompleteValidationContext,
 ): z.SafeParseReturnType<unknown, SetupCompleteInput> {
-  const schema = context.reusesActiveAdministrator
-    ? setupCompleteWithReusedAdministratorSchema
-    : setupCompleteSchema;
-  return schema.safeParse(input) as z.SafeParseReturnType<unknown, SetupCompleteInput>;
+  return setupCompleteSchema.safeParse(input) as z.SafeParseReturnType<unknown, SetupCompleteInput>;
 }
+
 
 export function normalizeSetupInput(input: unknown): SetupCompleteInput {
   return setupCompleteSchema.parse(input) as SetupCompleteInput;

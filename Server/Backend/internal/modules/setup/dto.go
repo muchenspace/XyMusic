@@ -146,8 +146,11 @@ type StorageInspection struct {
 	TranscodeDirectoryExists bool  `json:"transcodeDirectoryExists"`
 	HasAssets                bool  `json:"hasAssets"`
 	AssetCount               int64 `json:"assetCount"`
+	HasTranscode             bool  `json:"hasTranscode"`
+	TranscodeCount           int64 `json:"transcodeCount"`
 	CountLimited             bool  `json:"countLimited"`
 }
+
 
 type MediaTestResponse struct {
 	OK      bool               `json:"ok"`

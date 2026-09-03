@@ -39,28 +39,34 @@ describe("setup administrator form", () => {
     expect(setupStepSchemas.administrator.safeParse({ ...base, password: "12345" }).success).toBe(false);
   });
 
-  it("allows an empty administrator only when reusing an active administrator", () => {
+  it("rejects an empty administrator and always requires valid credentials", () => {
     const input = completeSetupInput();
     input.administrator = { username: "", displayName: "", password: "" };
 
-    expect(validateSetupComplete(input, { reusesActiveAdministrator: true }).success).toBe(true);
-    expect(validateSetupComplete(input, { reusesActiveAdministrator: false }).success).toBe(false);
+    expect(validateSetupComplete(input).success).toBe(false);
     expect(setupCompleteSchema.safeParse(input).success).toBe(false);
   });
 
-  it("rejects partially filled fallback credentials while reusing an active administrator", () => {
-    const input = completeSetupInput();
-    input.administrator = { username: "admin", displayName: "", password: "" };
-
-    expect(validateSetupComplete(input, { reusesActiveAdministrator: true }).success).toBe(false);
-  });
-
-  it("keeps valid administrator credentials accepted in every completion scenario", () => {
+  it("keeps valid administrator credentials accepted in completion", () => {
     const input = completeSetupInput();
 
-    expect(validateSetupComplete(input, { reusesActiveAdministrator: true }).success).toBe(true);
-    expect(validateSetupComplete(input, { reusesActiveAdministrator: false }).success).toBe(true);
+    expect(validateSetupComplete(input).success).toBe(true);
   });
+
+  it("only allows reset as storageAction and rejects reuse", () => {
+    const input = completeSetupInput();
+    input.storageAction = "reset";
+    expect(validateSetupComplete(input).success).toBe(true);
+
+    // @ts-expect-error testing invalid action
+    input.storageAction = "reuse";
+    expect(validateSetupComplete(input).success).toBe(false);
+
+    delete input.storageAction;
+    expect(validateSetupComplete(input).success).toBe(true);
+  });
+
+
 
   it("accepts relative and absolute server directories", () => {
     expect(setupStepSchemas.paths.parse({
@@ -163,6 +169,7 @@ function completeSetupInput(): SetupCompleteInput {
       displayName: "管理员",
       password: "a-secure-password",
     },
-    databaseAction: "migrate",
+    databaseAction: "reset",
   };
 }
+

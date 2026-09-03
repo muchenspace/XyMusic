@@ -389,22 +389,34 @@ func (storage *productionSetupMediaStorage) Inspect(ctx context.Context) (Storag
 	if fi, err := os.Stat(storage.transcodeDir); err == nil && fi.IsDir() {
 		transcodeExists = true
 	}
-	var count int64
+	var assetCount int64
 	hasAssets := false
 	if assetExists {
 		entries, err := os.ReadDir(storage.assetDir)
 		if err == nil {
-			count = int64(len(entries))
-			hasAssets = count > 0
+			assetCount = int64(len(entries))
+			hasAssets = assetCount > 0
+		}
+	}
+	var transcodeCount int64
+	hasTranscode := false
+	if transcodeExists {
+		entries, err := os.ReadDir(storage.transcodeDir)
+		if err == nil {
+			transcodeCount = int64(len(entries))
+			hasTranscode = transcodeCount > 0
 		}
 	}
 	return StorageInspection{
 		AssetDirectoryExists:     assetExists,
 		TranscodeDirectoryExists: transcodeExists,
 		HasAssets:                hasAssets,
-		AssetCount:               count,
+		AssetCount:               assetCount,
+		HasTranscode:             hasTranscode,
+		TranscodeCount:           transcodeCount,
 	}, nil
 }
+
 
 func (storage *productionSetupMediaStorage) EnsureDirectories(ctx context.Context) error {
 	if err := os.MkdirAll(storage.assetDir, 0755); err != nil {

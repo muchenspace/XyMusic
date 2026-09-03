@@ -434,14 +434,16 @@ func TestDatabaseDecisionMatchesInspectionState(t *testing.T) {
 		wantError  bool
 	}{
 		{name: "empty without action", inspection: InstallationInspection{State: DatabaseStateEmpty}},
+		{name: "empty with reset", inspection: InstallationInspection{State: DatabaseStateEmpty}, action: databaseActionReset},
+		{name: "empty rejects unsupported action", inspection: InstallationInspection{State: DatabaseStateEmpty}, action: "migrate", wantError: true},
 		{name: "partial without action", inspection: InstallationInspection{State: DatabaseStatePartial}, wantError: true},
-		{name: "partial reuse", inspection: InstallationInspection{State: DatabaseStatePartial}, action: databaseActionReusePartial},
+		{name: "partial rejects reuse_partial", inspection: InstallationInspection{State: DatabaseStatePartial}, action: "reuse_partial", wantError: true},
 		{name: "partial reset", inspection: InstallationInspection{State: DatabaseStatePartial}, action: databaseActionReset},
-		{name: "partial rejects migrate", inspection: InstallationInspection{State: DatabaseStatePartial}, action: databaseActionMigrate, wantError: true},
+		{name: "partial rejects migrate", inspection: InstallationInspection{State: DatabaseStatePartial}, action: "migrate", wantError: true},
 		{name: "complete without action", inspection: InstallationInspection{State: DatabaseStateComplete}, wantError: true},
-		{name: "complete migrate", inspection: InstallationInspection{State: DatabaseStateComplete}, action: databaseActionMigrate},
+		{name: "complete rejects migrate", inspection: InstallationInspection{State: DatabaseStateComplete}, action: "migrate", wantError: true},
 		{name: "complete reset", inspection: InstallationInspection{State: DatabaseStateComplete}, action: databaseActionReset},
-		{name: "complete rejects partial reuse", inspection: InstallationInspection{State: DatabaseStateComplete}, action: databaseActionReusePartial, wantError: true},
+		{name: "complete rejects partial reuse", inspection: InstallationInspection{State: DatabaseStateComplete}, action: "reuse_partial", wantError: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -454,6 +456,7 @@ func TestDatabaseDecisionMatchesInspectionState(t *testing.T) {
 			}
 		})
 	}
+
 }
 
 func TestStorageProbeReportsExistingObjects(t *testing.T) {
@@ -495,7 +498,7 @@ func TestCompleteRequiresExistingDataDecisionWhenAdministratorExists(t *testing.
 	}
 }
 
-func TestCompleteReusesExistingInstallationAndFillsMissingParts(t *testing.T) {
+func TestCompleteRejectsDatabaseReuseAndRequiresReset(t *testing.T) {
 	db := &fakeDatabase{inspection: InstallationInspection{
 		State:   DatabaseStateComplete,
 		HasData: true, HasAdministrator: true, HasActiveAdministrator: true,
@@ -508,18 +511,23 @@ func TestCompleteReusesExistingInstallationAndFillsMissingParts(t *testing.T) {
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	input := validSetupInput()
-	input.DatabaseAction = databaseActionMigrate
-	input.Administrator = AdministratorInput{}
+	input.DatabaseAction = "migrate"
+	if _, err := service.Complete(context.Background(), input); err == nil {
+		t.Fatal("expected migrate to be rejected")
+	}
+	input.DatabaseAction = databaseActionReset
 	if _, err := service.Complete(context.Background(), input); err != nil {
 		t.Fatal(err)
 	}
-	if !db.provisioned.ReuseExisting || db.reset {
-		t.Fatalf("existing installation was not reused safely: provision=%#v reset=%v", db.provisioned, db.reset)
+	if !db.reset || db.provisioned.ReuseExisting {
+		t.Fatalf("expected database reset and new administrator: reset=%v provision=%#v", db.reset, db.provisioned)
 	}
-	if db.provisioned.Administrator != (AdministratorRecord{}) {
-		t.Fatalf("reused installation unexpectedly provisioned an administrator: %#v", db.provisioned.Administrator)
+	if db.provisioned.Administrator.Username != "administrator" {
+		t.Fatalf("expected newly provisioned admin, got: %#v", db.provisioned.Administrator)
 	}
 }
+
+
 
 func TestDatabaseResetDoesNotClearObjectStorage(t *testing.T) {
 	db := &fakeDatabase{inspection: InstallationInspection{
@@ -584,6 +592,43 @@ func TestStorageResetDoesNotClearDatabase(t *testing.T) {
 		t.Fatalf("storage reset affected the wrong resource: database=%v storage=%#v", db.reset, objects.calls)
 	}
 }
+
+func TestCompleteRejectsStorageReuseAndRequiresResetWhenTranscodeOrAssetsExist(t *testing.T) {
+	db := &fakeDatabase{}
+	objects := &fakeStorage{inspection: StorageInspection{
+		TranscodeDirectoryExists: true, HasTranscode: true, TranscodeCount: 2,
+	}}
+	service := mustService(t, Options{
+		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
+		Databases:     &fakeDatabaseFactory{database: db},
+		MediaStorage:  &fakeStorageFactory{storage: objects}, MediaTool: &fakeMediaTool{},
+		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
+	})
+	// 1. Without storage action
+	_, err := service.Complete(context.Background(), validSetupInput())
+	applicationError, ok := err.(*apperror.Error)
+	if !ok || applicationError.Code != apperror.CodeSetupDecisionRequired || applicationError.Metadata["decisionResource"] != "storage" {
+		t.Fatalf("nonempty transcode storage did not require an independent decision: %#v", err)
+	}
+
+	// 2. Reject "reuse"
+	input := validSetupInput()
+	input.StorageAction = "reuse"
+	_, err = service.Complete(context.Background(), input)
+	if err == nil {
+		t.Fatal("expected validation error when storageAction is reuse")
+	}
+
+	// 3. Accept "reset"
+	input.StorageAction = storageActionReset
+	if _, err := service.Complete(context.Background(), input); err != nil {
+		t.Fatalf("storage reset failed: %v", err)
+	}
+	if !slices.Contains(objects.calls, "clear") {
+		t.Fatalf("storage reset did not call clear: %#v", objects.calls)
+	}
+}
+
 
 func TestStorageConfigurationResolvesDirectories(t *testing.T) {
 	service := mustService(t, Options{

@@ -26,12 +26,11 @@ import (
 )
 
 const (
-	databaseActionReusePartial = "reuse_partial"
-	databaseActionMigrate      = "migrate"
-	databaseActionReset        = "reset"
-	storageActionReuse         = "reuse"
-	storageActionReset         = "reset"
+	databaseActionReset = "reset"
+	storageActionReset  = "reset"
 )
+
+
 
 type Options struct {
 	RootDirectory       string
@@ -432,26 +431,25 @@ func (s *Service) complete(ctx context.Context, input SetupInput) (CompletionRes
 			nil,
 		)
 	}
-	if input.DatabaseAction != "" && input.DatabaseAction != databaseActionReusePartial &&
-		input.DatabaseAction != databaseActionMigrate && input.DatabaseAction != databaseActionReset {
-		return CompletionResponse{}, apperror.Validation("鏁版嵁搴撳鐞嗘柟寮忔棤鏁?", map[string][]string{
-			"databaseAction": {"璇烽€夋嫨澶嶇敤閮ㄥ垎鏁版嵁銆佽縼绉诲苟澶嶇敤鎴栧叏閮ㄦ竻闄?"},
+	if input.DatabaseAction != "" && input.DatabaseAction != databaseActionReset {
+		return CompletionResponse{}, apperror.Validation("数据库处理方式无效", map[string][]string{
+			"databaseAction": {"仅支持清空数据库 (reset)"},
 		})
 	}
-	if input.StorageAction != "" && input.StorageAction != storageActionReuse && input.StorageAction != storageActionReset {
-		return CompletionResponse{}, apperror.Validation("瀵硅薄瀛樺偍澶勭悊鏂瑰紡鏃犳晥", map[string][]string{
-			"storageAction": {"璇烽€夋嫨缁х画澶嶇敤 Bucket 鎴栧叏閮ㄦ竻闄?Bucket"},
+	if input.StorageAction != "" && input.StorageAction != storageActionReset {
+		return CompletionResponse{}, apperror.Validation("存储处理方式无效", map[string][]string{
+			"storageAction": {"仅支持清空目录 (reset)"},
 		})
 	}
+
 
 	var candidate config.Config
 	var source ValidatedSource
 	if err := runSetupStage("configuration_validation", func() error {
-		if input.DatabaseAction != databaseActionReusePartial && input.DatabaseAction != databaseActionMigrate {
-			if err := validateAdministrator(input.Administrator); err != nil {
-				return err
-			}
+		if err := validateAdministrator(input.Administrator); err != nil {
+			return err
 		}
+
 		var err error
 		source, err = s.sourceValidator.Validate(ctx, input.Source, s.root)
 		if err != nil {
@@ -535,11 +533,18 @@ func (s *Service) complete(ctx context.Context, input SetupInput) (CompletionRes
 			if err != nil {
 				return storageFailure("Media storage contents could not be inspected", err)
 			}
-			if storageInspection.HasAssets && input.StorageAction == "" {
+			hasExistingFiles := storageInspection.HasAssets || storageInspection.HasTranscode
+			if hasExistingFiles && input.StorageAction != storageActionReset {
 				return apperror.New(
 					apperror.CodeSetupDecisionRequired,
-					"濯掍綋璧勬簮鐩綍宸插寘鍚幇鏈夋枃浠讹紝蹇呴』鍏堥€夋嫨缁х画澶嶇敤鎴栧叏閮ㄦ竻闄ゃ€?",
-					apperror.WithMetadata(map[string]any{"decisionResource": "storage"}),
+					"检测到媒体资产或转码缓存目录中已存在文件，本项目不支持复用旧文件，必须确认清空目录后继续。",
+					apperror.WithMetadata(map[string]any{
+						"decisionResource": "storage",
+						"hasAssets":        storageInspection.HasAssets,
+						"assetCount":       storageInspection.AssetCount,
+						"hasTranscode":     storageInspection.HasTranscode,
+						"transcodeCount":   storageInspection.TranscodeCount,
+					}),
 				)
 			}
 			if err := mediaStorage.EnsureDirectories(ctx); err != nil {
@@ -577,41 +582,32 @@ func (s *Service) complete(ctx context.Context, input SetupInput) (CompletionRes
 				return err
 			}
 		}
-		if storageInspection.HasAssets && input.StorageAction == storageActionReset {
+		hasExistingStorageFiles := storageInspection.HasAssets || storageInspection.HasTranscode
+		if hasExistingStorageFiles && input.StorageAction == storageActionReset {
 			destructiveStageStarted = true
 			if err := runSetupStage("storage_clear", func() error { return mediaStorage.Clear(ctx) }); err != nil {
 				return err
 			}
 		}
-		if storageInspection.HasAssets && input.StorageAction != storageActionReuse && input.StorageAction != storageActionReset {
-			return apperror.New(
-				apperror.CodeSetupDecisionRequired,
-				"濯掍綋璧勬簮鐩綍宸插寘鍚幇鏈夋枃浠讹紝蹇呴』鍏堥€夋嫨缁х画澶嶇敤鎴栧叏閮ㄦ竻闄ゃ€?",
-				apperror.WithMetadata(map[string]any{"decisionResource": "storage"}),
-			)
-		}
+
 		if err := runSetupStage("installation_provision", func() error {
-			administrator := AdministratorRecord{}
-			reuseDatabase := input.DatabaseAction == databaseActionReusePartial || input.DatabaseAction == databaseActionMigrate
-			if !reuseDatabase || !databaseInspection.HasActiveAdministrator {
-				if err := validateAdministrator(input.Administrator); err != nil {
-					return err
-				}
-				passwordHash, err := s.passwords.Hash(input.Administrator.Password)
-				if err != nil {
-					return err
-				}
-				administrator = AdministratorRecord{
-					Username:           strings.TrimSpace(input.Administrator.Username),
-					NormalizedUsername: normalizeIdentity(input.Administrator.Username),
-					DisplayName:        strings.TrimSpace(input.Administrator.DisplayName),
-					PasswordHash:       passwordHash,
-				}
+			if err := validateAdministrator(input.Administrator); err != nil {
+				return err
+			}
+			passwordHash, err := s.passwords.Hash(input.Administrator.Password)
+			if err != nil {
+				return err
+			}
+			administrator := AdministratorRecord{
+				Username:           strings.TrimSpace(input.Administrator.Username),
+				NormalizedUsername: normalizeIdentity(input.Administrator.Username),
+				DisplayName:        strings.TrimSpace(input.Administrator.DisplayName),
+				PasswordHash:       passwordHash,
 			}
 			created, err := connection.Provision(ctx, ProvisionInput{
 				Administrator: administrator,
 				Source:        source,
-				ReuseExisting: reuseDatabase,
+				ReuseExisting: false,
 			})
 			if err == nil {
 				provisioned = &created
@@ -620,6 +616,7 @@ func (s *Service) complete(ctx context.Context, input SetupInput) (CompletionRes
 		}); err != nil {
 			return err
 		}
+
 		if err := runSetupStage("runtime_initialize", func() error {
 			before := s.runtime.Status()
 			if err := s.runtime.Initialize(ctx, candidate, RuntimeSourceManaged); err != nil {
@@ -1313,33 +1310,21 @@ func setupStageDetail(stage string, rollbackIncomplete bool) string {
 func validateDatabaseDecision(inspection InstallationInspection, action string) error {
 	switch inspection.State {
 	case DatabaseStateEmpty:
-		if action == "" {
+		if action == "" || action == databaseActionReset {
 			return nil
 		}
 		return apperror.Conflict(
 			apperror.CodeResourceConflict,
-			"鏁版嵁搴撶姸鎬佸凡缁忓彉鍖栵紝褰撳墠鏁版嵁搴撲负绌猴紝璇烽噸鏂伴獙璇佸悗缁х画銆?",
+			"数据库状态已经变化，当前数据库为空，请重新验证后继续。",
 			nil,
 		)
-	case DatabaseStatePartial:
-		if action == databaseActionReusePartial || action == databaseActionReset {
+	case DatabaseStatePartial, DatabaseStateComplete:
+		if action == databaseActionReset {
 			return nil
 		}
 		return apperror.New(
 			apperror.CodeSetupDecisionRequired,
-			"鏁版嵁搴撳寘鍚儴鍒?XyMusic 閰嶇疆锛岃閫夋嫨澶嶇敤閮ㄥ垎鏁版嵁鎴栧叏閮ㄦ竻闄ゃ€?",
-			apperror.WithMetadata(map[string]any{
-				"decisionResource": "database", "databaseState": inspection.State,
-				"reusable": inspection.Reusable, "missing": inspection.Missing,
-			}),
-		)
-	case DatabaseStateComplete:
-		if action == databaseActionMigrate || action == databaseActionReset {
-			return nil
-		}
-		return apperror.New(
-			apperror.CodeSetupDecisionRequired,
-			"妫€娴嬪埌瀹屾暣鐨?XyMusic 鏁版嵁搴擄紝璇烽€夋嫨杩佺Щ骞跺鐢ㄧ幇鏈夋暟鎹垨鍏ㄩ儴娓呴櫎銆?",
+			"检测到现有数据库不为空，本项目不支持复用旧数据库，必须确认清空数据库后继续。",
 			apperror.WithMetadata(map[string]any{
 				"decisionResource": "database", "databaseState": inspection.State,
 				"migrationRequired": inspection.MigrationRequired,
@@ -1347,9 +1332,10 @@ func validateDatabaseDecision(inspection InstallationInspection, action string) 
 			}),
 		)
 	default:
-		return apperror.New(apperror.CodeSetupFailed, "鏃犳硶璇嗗埆鏁版嵁搴撻厤缃姸鎬侊紝璇锋鏌ヨ縼绉昏褰曞悗閲嶈瘯銆?")
+		return apperror.New(apperror.CodeSetupFailed, "无法识别数据库配置状态，请检查迁移记录后重试。")
 	}
 }
+
 
 func setupErrorStage(err error) string {
 	if applicationError, ok := apperror.As(err); ok {

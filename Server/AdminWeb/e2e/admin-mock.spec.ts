@@ -392,13 +392,9 @@ test.describe("administrator browser contract", () => {
     await expect(page).toHaveURL(/\/admin\/login\?username=admin$/);
   });
 
-  test("complete database reuse keeps the existing administrator and reaches login without username", async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== "chromium-desktop", "desktop complete database reuse workflow");
+  test("non-empty database triggers warning dialog requiring reset confirmation to proceed", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "chromium-desktop", "desktop non-empty database reset warning workflow");
     await installMockApi(page, false, true);
-    let administratorTestRequests = 0;
-    page.on("request", (request) => {
-      if (new URL(request.url()).pathname === "/api/setup/administrator/test") administratorTestRequests += 1;
-    });
     await page.route("**/api/setup/database/test", (route) => json(route, {
       ok: true,
       serverTimeMs: 4,
@@ -414,63 +410,27 @@ test.describe("administrator browser contract", () => {
     }));
 
     await reachSetupDatabaseDecision(page);
-    const dialog = page.getByRole("dialog", { name: "可复用所有配置" });
+    const dialog = page.getByRole("dialog", { name: "检测到现有数据库不为空" });
     await expect(dialog).toBeVisible();
-    await dialog.getByRole("button", { name: "是，复用所有配置", exact: false }).click();
-    await dialog.locator("footer").getByRole("button", { name: "确认并继续" }).click();
-
-    await advanceSetupFromStorageToAdministrator(page);
-    await expect(page.getByRole("heading", { name: "复用现有管理员" })).toBeVisible();
-    await expect(page.getByText("无需创建新管理员", { exact: true })).toBeVisible();
-    await expect(page.getByText("管理员用户名", { exact: true })).toHaveCount(0);
-    await expect(page.getByText("管理员密码", { exact: true })).toHaveCount(0);
-    await expect(page.locator("main input:visible")).toHaveCount(0);
-    await page.getByRole("button", { name: "验证并继续" }).click();
-
-    await expect(page.getByRole("heading", { name: "确认并应用配置" })).toBeVisible();
-    expect(administratorTestRequests).toBe(0);
-    await page.getByRole("button", { name: "应用配置并进入控制台" }).click();
-    await expect(page).toHaveURL(/\/admin\/login$/);
-    expect(new URL(page.url()).search).toBe("");
-  });
-
-  test("partial database reuse offers reuse or same-dialog reset confirmation", async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== "chromium-desktop", "desktop partial database reuse decision");
-    await installMockApi(page, false, true);
-    await page.route("**/api/setup/database/test", (route) => json(route, {
-      ok: true,
-      serverTimeMs: 5,
-      databaseInspection: {
-        state: "PARTIAL",
-        migrationRequired: true,
-        hasData: true,
-        hasAdministrator: false,
-        hasActiveAdministrator: false,
-        reusable: ["catalog", "playlists"],
-        missing: ["administrator", "librarySource"],
-      },
-    }));
-
-    await reachSetupDatabaseDecision(page);
-    const dialog = page.getByRole("dialog", { name: "可复用部分配置" });
-    const confirm = dialog.locator("footer").getByRole("button", { name: "确认并继续" });
-    await expect(dialog).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "是，复用部分配置", exact: false })).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "否，清空数据库", exact: false })).toBeVisible();
+    const confirm = dialog.locator("footer").getByRole("button", { name: "确认清空并继续" });
     await expect(confirm).toBeDisabled();
 
-    await dialog.getByRole("button", { name: "是，复用部分配置", exact: false }).click();
-    await expect(confirm).toBeEnabled();
-    await expect(dialog.getByText("输入数据库名", { exact: false })).toHaveCount(0);
-
-    await dialog.getByRole("button", { name: "否，清空数据库", exact: false }).click();
-    await expect(dialog.getByText("输入数据库名“xymusic”确认清除", { exact: true })).toBeVisible();
-    await expect(confirm).toBeDisabled();
     await dialog.locator("input.ui-input").fill("xymusic");
     await expect(confirm).toBeEnabled();
     await confirm.click();
-    await expect(page.getByRole("heading", { name: "配置 S3 兼容存储" })).toBeVisible();
+
+    await advanceSetupFromStorageToAdministrator(page);
+    await expect(page.getByRole("heading", { name: "创建首位管理员" })).toBeVisible();
+    await page.getByPlaceholder("admin").fill("admin");
+    await page.getByLabel("显示名称").fill("管理员");
+    await page.locator("input[type=password]").fill("123456");
+    await page.getByRole("button", { name: "验证并继续" }).click();
+
+    await expect(page.getByRole("heading", { name: "确认并应用配置" })).toBeVisible();
+    await page.getByRole("button", { name: "应用配置并进入控制台" }).click();
+    await expect(page).toHaveURL(/\/admin\/login\?username=admin$/);
   });
+
 
   test("setup database failures identify the exact field and reason", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "chromium-desktop", "desktop setup error contract");
