@@ -6,12 +6,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"xymusic/server/internal/modules/identity"
+	"xymusic/server/internal/modules/adminauth"
 )
 
-type Authenticator interface {
-	Authenticate(context.Context, string) (identity.AuthenticatedActor, error)
-}
+type Identity = adminauth.Identity
+type Authenticator = adminauth.Identity
 
 type CompletionFence interface {
 	Lock(context.Context, pgx.Tx) error

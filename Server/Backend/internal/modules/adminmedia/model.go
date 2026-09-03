@@ -8,10 +8,11 @@ const (
 	PurposeTrackSource   UploadPurpose = "TRACK_SOURCE"
 	PurposeArtistArtwork UploadPurpose = "ARTIST_ARTWORK"
 	PurposeAlbumArtwork  UploadPurpose = "ALBUM_ARTWORK"
+	PurposeUserAvatar    UploadPurpose = "USER_AVATAR"
 )
 
 func (purpose UploadPurpose) Valid() bool {
-	return purpose == PurposeTrackSource || purpose == PurposeArtistArtwork || purpose == PurposeAlbumArtwork
+	return purpose == PurposeTrackSource || purpose == PurposeArtistArtwork || purpose == PurposeAlbumArtwork || purpose == PurposeUserAvatar
 }
 
 const (

@@ -9,7 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"xymusic/server/internal/modules/identity"
+	"xymusic/server/internal/modules/adminauth"
 	"xymusic/server/internal/platform/httpserver"
 	"xymusic/server/internal/shared/apperror"
 )
@@ -21,12 +21,12 @@ type Application interface {
 }
 
 type Routes struct {
-	authenticator Authenticator
-	application   Application
+	identity    Identity
+	application Application
 }
 
-func NewRoutes(authenticator Authenticator, application Application) *Routes {
-	return &Routes{authenticator: authenticator, application: application}
+func NewRoutes(identity Identity, application Application) *Routes {
+	return &Routes{identity: identity, application: application}
 }
 
 func (routes *Routes) Register(router gin.IRouter) {
@@ -41,7 +41,7 @@ func (routes *Routes) createUpload(c *gin.Context) error {
 	if err := decodeMediaJSON(c, &input); err != nil {
 		return err
 	}
-	actor, err := routes.authenticateAdmin(c)
+	actor, err := adminauth.RequireAdmin(c, routes.identity, true)
 	if err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func (routes *Routes) uploadDirect(c *gin.Context) error {
 	if _, err := uuid.Parse(uploadID); err != nil {
 		return apperror.Validation("id must be a UUID")
 	}
-	if _, err := routes.authenticateAdmin(c); err != nil {
+	if _, err := adminauth.RequireAdmin(c, routes.identity, true); err != nil {
 		return err
 	}
 	err := routes.application.UploadDirect(c.Request.Context(), uploadID, c.Request.Body, c.Request.ContentLength)
@@ -84,7 +84,7 @@ func (routes *Routes) completeUpload(c *gin.Context) error {
 	if err := decodeMediaJSON(c, &input); err != nil {
 		return err
 	}
-	actor, err := routes.authenticateAdmin(c)
+	actor, err := adminauth.RequireAdmin(c, routes.identity, true)
 	if err != nil {
 		return err
 	}
@@ -101,23 +101,6 @@ func (routes *Routes) completeUpload(c *gin.Context) error {
 	c.Header("X-Idempotent-Replay", formatReplay(replayed))
 	c.JSON(http.StatusOK, result)
 	return nil
-}
-
-func (routes *Routes) authenticateAdmin(c *gin.Context) (identity.AuthenticatedActor, error) {
-	if routes.authenticator == nil {
-		return identity.AuthenticatedActor{}, apperror.Unauthorized(
-			apperror.CodeAuthenticationRequired,
-			"Authentication is required",
-		)
-	}
-	actor, err := routes.authenticator.Authenticate(c.Request.Context(), c.GetHeader("Authorization"))
-	if err != nil {
-		return identity.AuthenticatedActor{}, err
-	}
-	if actor.Role != "ADMIN" {
-		return identity.AuthenticatedActor{}, apperror.Forbidden("Admin access required")
-	}
-	return actor, nil
 }
 
 func decodeMediaJSON(c *gin.Context, destination any) error {

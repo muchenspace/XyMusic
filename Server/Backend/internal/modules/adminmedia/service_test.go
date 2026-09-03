@@ -242,3 +242,81 @@ func TestValidationErrors(t *testing.T) {
 		t.Fatalf("expected validation error, got %v", err)
 	}
 }
+
+func TestCreateAndCompleteUserAvatarUpload(t *testing.T) {
+	now := time.Date(2026, 7, 16, 1, 2, 3, 0, time.UTC)
+	checksum := strings.Repeat("d", 64)
+	var created UploadReservation
+	var finalized FinalizeUploadParams
+
+	store := &mediaStoreStub{
+		createUpload: func(_ context.Context, input UploadReservation) error {
+			created = input
+			return nil
+		},
+		claimUploadCompletion: func(_ context.Context, uploadID, token string, _ time.Time, _ time.Duration) (CompletionClaim, error) {
+			return CompletionClaim{
+				Outcome: CompletionClaimed,
+				Token:   token,
+				Upload: UploadReservation{
+					ID:          uploadID,
+					Purpose:     PurposeUserAvatar,
+					TargetID:    "00000000-0000-0000-0000-000000000002",
+					StoragePath: "temp/upload_upload-1.partial",
+					Status:      UploadStatusCompleting,
+				},
+			}, nil
+		},
+		finalizeUpload: func(_ context.Context, input FinalizeUploadParams) error {
+			finalized = input
+			return nil
+		},
+	}
+
+	w, h := 400, 400
+	inspector := &mediaInspectorStub{
+		result: InspectedMedia{
+			StoragePath:    "artworks/upload-1.jpg",
+			Kind:           "ARTWORK",
+			MIMEType:       "image/jpeg",
+			SizeBytes:      2048,
+			ChecksumSHA256: checksum,
+			Width:          &w,
+			Height:         &h,
+		},
+	}
+
+	service := newTestMediaService(t, store, inspector, now)
+
+	// 1. Create upload reservation
+	res, _, err := service.CreateUpload(context.Background(), "admin-1", "key-avatar-1", CreateUploadInput{
+		Purpose:        PurposeUserAvatar,
+		TargetID:       "00000000-0000-0000-0000-000000000002",
+		FileName:       "avatar.png",
+		ContentType:    "image/png",
+		SizeBytes:      2048,
+		ChecksumSHA256: checksum,
+	})
+	if err != nil {
+		t.Fatalf("create user avatar upload failed: %v", err)
+	}
+	if res.Purpose != PurposeUserAvatar || res.TargetID != "00000000-0000-0000-0000-000000000002" {
+		t.Fatalf("unexpected res: %#v", res)
+	}
+	if created.Purpose != PurposeUserAvatar || created.TrackID != nil {
+		t.Fatalf("unexpected created reservation: %#v", created)
+	}
+
+	// 2. Complete upload
+	compRes, _, err := service.CompleteUpload(context.Background(), "admin-1", "upload-1", "key-comp-avatar", CompleteUploadInput{})
+	if err != nil {
+		t.Fatalf("complete user avatar upload failed: %v", err)
+	}
+	if compRes.Status != UploadStatusCompleted || compRes.UploadID != "upload-1" {
+		t.Fatalf("unexpected complete res: %#v", compRes)
+	}
+	if finalized.Inspected.Kind != "ARTWORK" {
+		t.Fatalf("expected ARTWORK kind in finalized: %#v", finalized)
+	}
+}
+
