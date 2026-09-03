@@ -313,4 +313,6 @@
     <string name="library_create_playlist">新建歌单</string>
     <string name="library_unfavorite">取消收藏</string>
     <string name="library_favorite">收藏</string>
+    <string name="playback_notification_channel_name">音乐播放控制</string>
+    <string name="playback_notification_channel_description">显示当前正在播放的音乐及播放控制通知</string>
 </resources>

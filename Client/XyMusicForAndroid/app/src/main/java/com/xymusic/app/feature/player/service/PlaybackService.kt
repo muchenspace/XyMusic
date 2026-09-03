@@ -1,7 +1,10 @@
 package com.xymusic.app.feature.player.service
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -77,9 +80,16 @@ class PlaybackService : MediaSessionService() {
     private lateinit var codecFallbackController: PlaybackCodecFallbackController
     private lateinit var grantRecoveryController: PlaybackGrantRecoveryController
     private lateinit var automaticQualityPlaybackController: AutomaticQualityPlaybackController
+    private lateinit var artworkBitmapLoader: PlaybackArtworkBitmapLoader
 
     override fun onCreate() {
         super.onCreate()
+
+        artworkBitmapLoader =
+            PlaybackArtworkBitmapLoader(
+                context = applicationContext,
+                scope = serviceScope,
+            )
 
         player = createPlayer()
         mediaReloadCoordinator =
@@ -145,10 +155,14 @@ class PlaybackService : MediaSessionService() {
             )
         player.addListener(automaticQualityPlaybackController)
 
+        ensureNotificationChannel()
         setMediaNotificationProvider(
-            DefaultMediaNotificationProvider(this).apply {
-                setSmallIcon(R.drawable.ic_stat_xymusic)
-            },
+            DefaultMediaNotificationProvider.Builder(this)
+                .setChannelId(PLAYBACK_NOTIFICATION_CHANNEL_ID)
+                .setChannelName(R.string.playback_notification_channel_name)
+                .build().apply {
+                    setSmallIcon(R.drawable.ic_stat_xymusic)
+                },
         )
 
         serviceScope.launch {
@@ -159,6 +173,11 @@ class PlaybackService : MediaSessionService() {
                 if (state != AppSessionState.Loading) initialSessionReady.complete(Unit)
             }
         }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        super.onStartCommand(intent, flags, startId)
+        return START_STICKY
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = mediaSession
@@ -229,12 +248,7 @@ class PlaybackService : MediaSessionService() {
             .Builder(this, player)
             .setSessionActivity(sessionActivity)
             .setCallback(callback)
-            .setBitmapLoader(
-                PlaybackArtworkBitmapLoader(
-                    context = applicationContext,
-                    scope = serviceScope,
-                ),
-            )
+            .setBitmapLoader(artworkBitmapLoader)
             .build()
     }
 
@@ -256,5 +270,23 @@ class PlaybackService : MediaSessionService() {
                 persistenceController.restoreQueue()
             }
         }
+    }
+
+    private fun ensureNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                PLAYBACK_NOTIFICATION_CHANNEL_ID,
+                getString(R.string.playback_notification_channel_name),
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply {
+                description = getString(R.string.playback_notification_channel_description)
+                setShowBadge(false)
+            }
+            getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
+        }
+    }
+
+    private companion object {
+        const val PLAYBACK_NOTIFICATION_CHANNEL_ID = "xymusic_playback_channel"
     }
 }

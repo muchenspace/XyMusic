@@ -137,6 +137,27 @@ class PlaybackServiceQueueRestoreTest {
     }
 
     @Test
+    fun restoredMediaItemPublishesDurationThroughStandardMediaMetadata() {
+        val stored =
+            queueItem(
+                queueItemId = "current",
+                position = 0,
+                trackId = "00000000-0000-0000-0000-000000000001",
+                isCurrent = true,
+                resumePositionMs = 12_345,
+                durationMs = 180_000,
+            )
+
+        val metadata = stored.toPlaybackMediaItem().mediaMetadata
+
+        assertThat(metadata.durationMs).isEqualTo(180_000L)
+        // Keep the app-specific copy for queues written by older versions and
+        // for the app's global-position compatibility layer.
+        assertThat(metadata.extras?.getLong(PlaybackMediaMetadata.EXTRA_DURATION_MS))
+            .isEqualTo(180_000L)
+    }
+
+    @Test
     fun currentResumeItemDeclaresTheSourceOffsetWithTheRequest() {
         val stored =
             queueItem(

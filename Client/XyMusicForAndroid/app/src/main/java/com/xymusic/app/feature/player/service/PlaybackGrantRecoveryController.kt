@@ -23,6 +23,7 @@ internal class PlaybackGrantRecoveryController(
     private var lastRecoveredMediaId: String? = null
     private var lastRecoveryAtElapsedRealtimeMs = 0L
     private var lastPlayWhenReady = player.playWhenReady
+    private var hasPlayedCurrentMediaItem = player.isPlaying
 
     override fun onPlayerError(error: PlaybackException) {
         if (!isExpiredPlaybackGrantError(error)) return
@@ -42,14 +43,18 @@ internal class PlaybackGrantRecoveryController(
         val shouldPlay = player.playWhenReady || lastPlayWhenReady
         lastRecoveredMediaId = mediaId
         lastRecoveryAtElapsedRealtimeMs = now
-        val positionMs = mediaItem.globalPlaybackPositionMs(player.currentPosition)
+        val positionMs = if (hasPlayedCurrentMediaItem) {
+            mediaItem.globalPlaybackPositionMs(player.currentPosition)
+        } else {
+            0L
+        }
         mediaReloadCoordinator?.reloadCurrent(
             globalPositionMs = positionMs,
             forceRefresh = true,
             playWhenReady = shouldPlay,
         ) ?: run {
             grantRepository.invalidate(trackId)
-            player.seekTo(mediaItemIndex, player.currentPosition.coerceAtLeast(0))
+            player.seekTo(mediaItemIndex, positionMs)
             player.prepare()
             player.playWhenReady = shouldPlay
         }
@@ -57,10 +62,20 @@ internal class PlaybackGrantRecoveryController(
 
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
         lastPlayWhenReady = playWhenReady
+        if (playWhenReady && player.playbackState == Player.STATE_READY) {
+            hasPlayedCurrentMediaItem = true
+        }
+    }
+
+    override fun onPlaybackStateChanged(playbackState: Int) {
+        if (playbackState == Player.STATE_READY && player.playWhenReady) {
+            hasPlayedCurrentMediaItem = true
+        }
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
         if (isPlaying) {
+            hasPlayedCurrentMediaItem = true
             // A successful recovery may be needed again after the next long
             // pause, so a new playing transition starts a fresh recovery window.
             lastRecoveredMediaId = null
@@ -69,6 +84,7 @@ internal class PlaybackGrantRecoveryController(
     }
 
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+        hasPlayedCurrentMediaItem = false
         if (mediaItem?.mediaId != lastRecoveredMediaId) {
             lastRecoveredMediaId = null
             lastRecoveryAtElapsedRealtimeMs = 0L
@@ -76,6 +92,7 @@ internal class PlaybackGrantRecoveryController(
     }
 
     fun resetForAccountChange() {
+        hasPlayedCurrentMediaItem = false
         lastRecoveredMediaId = null
         lastRecoveryAtElapsedRealtimeMs = 0L
         lastPlayWhenReady = player.playWhenReady

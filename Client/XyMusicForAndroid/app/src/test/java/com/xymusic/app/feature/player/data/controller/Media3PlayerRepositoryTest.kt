@@ -1,6 +1,7 @@
 package com.xymusic.app.feature.player.data.controller
 
 import com.google.common.truth.Truth.assertThat
+import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaMetadata
 import com.xymusic.app.feature.player.adapter.media3.PlaybackSessionCommands
 import com.xymusic.app.feature.player.domain.PlayerEvent
 import com.xymusic.app.feature.player.domain.model.PlaybackState
@@ -9,8 +10,26 @@ import com.xymusic.app.feature.player.domain.model.PlayerFailure
 import com.xymusic.app.feature.player.domain.model.PlayerQueueItem
 import com.xymusic.app.feature.player.domain.model.PlayerState
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class Media3PlayerRepositoryTest {
+    @Test
+    fun queueMediaItemPublishesDurationThroughStandardMediaMetadata() {
+        val mediaItem =
+            queueItem(
+                queueItemId = "queue-1",
+                trackId = "00000000-0000-0000-0000-000000000001",
+            ).copy(durationMs = 180_000).toMedia3MediaItem()
+
+        assertThat(mediaItem.mediaMetadata.durationMs).isEqualTo(180_000L)
+        assertThat(mediaItem.mediaMetadata.extras?.getLong(PlaybackMediaMetadata.EXTRA_DURATION_MS))
+            .isEqualTo(180_000L)
+    }
+
     @Test
     fun controllerDisconnectionClearsStalePlaybackState() {
         val disconnected = disconnectedPlayerState()
@@ -115,7 +134,42 @@ class Media3PlayerRepositoryTest {
         assertThat(published.positionAnchorElapsedRealtimeMs).isEqualTo(20_000)
         assertThat(published.positionDiscontinuitySequence).isEqualTo(4)
         assertThat(published.bufferedPositionMs).isEqualTo(2_000)
-        assertThat(published.durationMs).isEqualTo(10_000)
+    }
+
+    @Test
+    fun trackTransitionClearsStalePositionAndIncrementsDiscontinuitySequence() {
+        val previous =
+            PlayerState(
+                connectionState = PlayerConnectionState.CONNECTED,
+                currentQueueItemId = "queue-1",
+                positionMs = 210_000,
+                positionDiscontinuitySequence = 3,
+                bufferedPositionMs = 210_000,
+                durationMs = 210_000,
+            )
+        val nextControllerState =
+            PlayerState(
+                connectionState = PlayerConnectionState.CONNECTED,
+                currentQueueItemId = "queue-2",
+                positionMs = 210_000,
+                bufferedPositionMs = 210_000,
+                durationMs = 180_000,
+            )
+
+        val updated =
+            playerStateWithPublishedPosition(
+                previous = previous,
+                controllerState = nextControllerState,
+                publishedPositionMs = null,
+                sampledAtElapsedRealtimeMs = 30_000,
+                positionDiscontinuity = false,
+            )
+
+        assertThat(updated.currentQueueItemId).isEqualTo("queue-2")
+        assertThat(updated.positionMs).isEqualTo(0L)
+        assertThat(updated.bufferedPositionMs).isEqualTo(0L)
+        assertThat(updated.positionDiscontinuitySequence).isEqualTo(4)
+        assertThat(updated.durationMs).isEqualTo(180_000)
     }
 
     @Test

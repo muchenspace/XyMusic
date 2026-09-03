@@ -41,6 +41,7 @@ class PlaybackCodecFallbackControllerTest {
             var broadcasts = 0
             val controller = controller(player, repository) { broadcasts += 1 }
 
+            controller.onIsPlayingChanged(true)
             controller.onPlayerError(rendererError(MimeTypes.AUDIO_FLAC, errorCode))
 
             assertThat(repository.fallbackTrackIds).containsExactly(TRACK_2)
@@ -51,6 +52,18 @@ class PlaybackCodecFallbackControllerTest {
             assertThat(player.playWhenReady).isTrue()
             assertThat(broadcasts).isEqualTo(1)
         }
+    }
+
+    @Test
+    fun flacDecoderErrorBeforeTrackStartsRecoversAtPositionZero() {
+        val player = RecordingPlayer(currentPositionMs = 180_000, playWhenReady = true)
+        val repository = RecordingGrantRepository(fallbackEnabled = true)
+        val controller = controller(player, repository) { }
+
+        controller.onMediaItemTransition(null, Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
+        controller.onPlayerError(rendererError(MimeTypes.AUDIO_FLAC, PlaybackException.ERROR_CODE_DECODER_INIT_FAILED))
+
+        assertThat(player.seekCalls).containsExactly(SeekCall(mediaItemIndex = 0, positionMs = 0L))
     }
 
     @Test
@@ -96,10 +109,12 @@ class PlaybackCodecFallbackControllerTest {
         val controller = controller(player, repository) { broadcasts += 1 }
         val error = rendererError(MimeTypes.AUDIO_FLAC, PlaybackException.ERROR_CODE_DECODING_FAILED)
 
+        controller.onIsPlayingChanged(true)
         controller.onPlayerError(error)
         controller.onPlayerError(error)
         player.currentMediaItemIndex = 1
         player.currentPositionMs = 8_000
+        controller.onIsPlayingChanged(true)
         controller.onPlayerError(error)
         controller.onPlayerError(error)
 
@@ -156,8 +171,10 @@ class PlaybackCodecFallbackControllerTest {
         val controller = controller(player, repository) { broadcasts += 1 }
         val error = rendererError(MimeTypes.AUDIO_FLAC, PlaybackException.ERROR_CODE_DECODING_FAILED)
 
+        controller.onIsPlayingChanged(true)
         controller.onPlayerError(error)
         controller.resetForAccountChange()
+        controller.onIsPlayingChanged(true)
         controller.onPlayerError(error)
 
         assertThat(player.prepareCount).isEqualTo(2)

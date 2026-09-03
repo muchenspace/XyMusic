@@ -1,5 +1,8 @@
 package com.xymusic.app
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
@@ -7,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.ReportDrawnWhen
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.getValue
@@ -27,9 +31,13 @@ class MainActivity : ComponentActivity() {
     private var frameJankMonitor: FrameJankMonitor? = null
     private var lastSlowFrameLogNanos = 0L
 
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* system handles state */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
+        requestNotificationPermissionIfNeeded()
         // Resolve the Hilt ViewModel before Compose starts its first composition.
         // Its dependencies remain lazy, while graph creation no longer competes with the first frame.
         val viewModel = appViewModel
@@ -66,6 +74,14 @@ class MainActivity : ComponentActivity() {
                     onDynamicColorChanged = viewModel::setDynamicColorEnabled,
                     onServerEndpointChanged = viewModel::setServerEndpoint,
                 )
+            }
+        }
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
     }

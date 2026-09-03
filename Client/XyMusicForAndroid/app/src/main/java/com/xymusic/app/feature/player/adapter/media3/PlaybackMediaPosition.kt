@@ -18,20 +18,32 @@ internal fun MediaItem.playbackSourceOffsetMs(): Long =
         ?: 0
 
 internal fun MediaItem.globalPlaybackPositionMs(localPositionMs: Long): Long =
-    localPositionMs.coerceAtLeast(0) + playbackSourceOffsetMs()
+    localPositionMs.coerceAtLeast(0).saturatingAdd(playbackSourceOffsetMs())
 
-internal fun MediaItem.globalPlaybackDurationMs(localDurationMs: Long): Long {
-    val resolvedLocalDurationMs = localDurationMs.coerceAtLeast(0)
-    val metadataDurationMs =
+internal fun MediaItem.playbackMetadataDurationMs(): Long {
+    val standardDurationMs = mediaMetadata.durationMs?.takeIf { it > 0 } ?: 0
+    val legacyDurationMs =
         mediaMetadata.extras
             ?.getLong(PlaybackMediaMetadata.EXTRA_DURATION_MS)
             ?.takeIf { it > 0 }
             ?: 0
+    return maxOf(standardDurationMs, legacyDurationMs)
+}
+
+internal fun MediaItem.globalPlaybackDurationMs(localDurationMs: Long): Long {
+    val resolvedLocalDurationMs =
+        localDurationMs
+            .takeIf { it > 0 }
+            ?.saturatingAdd(playbackSourceOffsetMs())
+            ?: 0
     return maxOf(
-        resolvedLocalDurationMs + playbackSourceOffsetMs(),
-        metadataDurationMs,
+        resolvedLocalDurationMs,
+        playbackMetadataDurationMs(),
     )
 }
+
+private fun Long.saturatingAdd(other: Long): Long =
+    if (other > 0 && this > Long.MAX_VALUE - other) Long.MAX_VALUE else this + other
 
 internal fun MediaItem.playbackRequestedStartPositionMs(): Long? {
     val extras = mediaMetadata.extras ?: return null

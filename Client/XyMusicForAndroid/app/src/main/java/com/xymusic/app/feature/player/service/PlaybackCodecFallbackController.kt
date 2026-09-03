@@ -22,6 +22,7 @@ internal class PlaybackCodecFallbackController(
 ) : Player.Listener {
     private val attemptedQueueItemIds = mutableSetOf<String>()
     private var fallbackNotificationSent = false
+    private var hasPlayedCurrentMediaItem = player.isPlaying
 
     override fun onPlayerError(error: PlaybackException) {
         val target = fallbackTarget(error) ?: return
@@ -46,6 +47,20 @@ internal class PlaybackCodecFallbackController(
         }
     }
 
+    override fun onIsPlayingChanged(isPlaying: Boolean) {
+        if (isPlaying) hasPlayedCurrentMediaItem = true
+    }
+
+    override fun onPlaybackStateChanged(playbackState: Int) {
+        if (playbackState == Player.STATE_READY && player.playWhenReady) {
+            hasPlayedCurrentMediaItem = true
+        }
+    }
+
+    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+        hasPlayedCurrentMediaItem = false
+    }
+
     override fun onTimelineChanged(timeline: Timeline, reason: Int) {
         attemptedQueueItemIds.retainAll(activeQueueItemIds())
     }
@@ -53,6 +68,7 @@ internal class PlaybackCodecFallbackController(
     fun resetForAccountChange() {
         attemptedQueueItemIds.clear()
         fallbackNotificationSent = false
+        hasPlayedCurrentMediaItem = false
     }
 
     private fun fallbackTarget(error: PlaybackException): CodecFallbackTarget? {
@@ -63,11 +79,16 @@ internal class PlaybackCodecFallbackController(
         val mediaItem = player.getMediaItemAt(mediaItemIndex)
         val queueItemId = mediaItem.mediaId.takeIf(String::isNotBlank) ?: return null
         val trackId = mediaItem.playbackTrackId() ?: return null
+        val positionMs = if (hasPlayedCurrentMediaItem) {
+            mediaItem.globalPlaybackPositionMs(player.currentPosition)
+        } else {
+            0L
+        }
         return CodecFallbackTarget(
             queueItemId = queueItemId,
             trackId = trackId,
             mediaItemIndex = mediaItemIndex,
-            positionMs = mediaItem.globalPlaybackPositionMs(player.currentPosition),
+            positionMs = positionMs,
             playWhenReady = player.playWhenReady,
         )
     }

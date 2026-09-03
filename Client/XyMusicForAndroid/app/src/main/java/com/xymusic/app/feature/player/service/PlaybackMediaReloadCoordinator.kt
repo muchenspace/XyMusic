@@ -4,10 +4,10 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaMetadata
 import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaUri
 import com.xymusic.app.feature.player.adapter.media3.PlaybackSessionCommands
 import com.xymusic.app.feature.player.adapter.media3.globalPlaybackDurationMs
+import com.xymusic.app.feature.player.adapter.media3.playbackMetadataDurationMs
 import com.xymusic.app.feature.player.adapter.media3.playbackRequestedStartPositionMs
 import com.xymusic.app.feature.player.adapter.media3.playbackSourceOffsetMs
 import com.xymusic.app.feature.player.adapter.media3.playbackStreamProtocol
@@ -163,11 +163,7 @@ internal class PlaybackMediaReloadCoordinator(
         forceRefresh: Boolean,
     ): Boolean {
         val trackId = item.playbackTrackId() ?: return false
-        val metadataDurationMs =
-            item.mediaMetadata.extras
-                ?.getLong(PlaybackMediaMetadata.EXTRA_DURATION_MS)
-                ?.takeIf { it > 0 }
-                ?: 0
+        val metadataDurationMs = item.playbackMetadataDurationMs()
         val knownDurationMs =
             if (metadataDurationMs > 0) {
                 metadataDurationMs
