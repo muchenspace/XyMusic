@@ -128,70 +128,20 @@ describe("local user interface preferences", () => {
     }).not.toThrow();
   });
 
-  it("migrates the previous desktop lyrics defaults to the redesigned palette", () => {
+  it("reads stored desktop lyrics colors or defaults", () => {
     const storage = new MemoryStorage({
-      "xymusic.desktop-lyrics.text-color": "#f8fafc",
-      "xymusic.desktop-lyrics.highlight-color": "#8eb1d2",
+      "xymusic.desktop-lyrics.text-color": "#112233",
+      "xymusic.desktop-lyrics.highlight-color": "#445566",
     });
     const preferences = new LocalUserInterfacePreferences(storage);
 
     expect(preferences.readDesktopLyrics()).toMatchObject({
-      textColor: "#f4f5f7",
-      highlightColor: "#cf9437",
-    });
-    expect(storage.values).toMatchObject({
-      "xymusic.desktop-lyrics.text-color": "#f4f5f7",
-      "xymusic.desktop-lyrics.highlight-color": "#cf9437",
-      "xymusic.desktop-lyrics.palette-version": "3",
+      textColor: "#112233",
+      highlightColor: "#445566",
     });
 
     preferences.writeDesktopLyricsHighlightColor("#8eb1d2");
     expect(preferences.readDesktopLyrics().highlightColor).toBe("#8eb1d2");
-  });
-
-  it("does not overwrite desktop lyrics colors when a migration read fails", () => {
-    const values: Record<string, string> = {
-      "xymusic.desktop-lyrics.text-color": "#abcdef",
-      "xymusic.desktop-lyrics.highlight-color": "#123456",
-    };
-    const preferences = new LocalUserInterfacePreferences({
-      getItem(key) {
-        if (key === "xymusic.desktop-lyrics.text-color") throw new DOMException("read failed");
-        return values[key] ?? null;
-      },
-      setItem(key, value) { values[key] = value; },
-      removeItem(key) { delete values[key]; },
-    });
-
-    expect(preferences.readDesktopLyrics()).toMatchObject({
-      textColor: "#f4f5f7",
-      highlightColor: "#123456",
-    });
-    expect(values).toEqual({
-      "xymusic.desktop-lyrics.text-color": "#abcdef",
-      "xymusic.desktop-lyrics.highlight-color": "#123456",
-    });
-  });
-
-  it("does not mark the palette migration complete when a color write fails", () => {
-    const values: Record<string, string> = {
-      "xymusic.desktop-lyrics.text-color": "#f8fafc",
-      "xymusic.desktop-lyrics.highlight-color": "#8eb1d2",
-    };
-    const preferences = new LocalUserInterfacePreferences({
-      getItem: (key) => values[key] ?? null,
-      setItem(key, value) {
-        if (key === "xymusic.desktop-lyrics.highlight-color") throw new DOMException("write failed");
-        values[key] = value;
-      },
-      removeItem(key) { delete values[key]; },
-    });
-
-    expect(preferences.readDesktopLyrics()).toMatchObject({
-      textColor: "#f4f5f7",
-      highlightColor: "#cf9437",
-    });
-    expect(values["xymusic.desktop-lyrics.palette-version"]).toBeUndefined();
   });
 });
 

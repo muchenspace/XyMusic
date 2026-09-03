@@ -3,7 +3,7 @@ import type { PersistedPlaybackState, PlaybackProgressCheckpoint } from "../../d
 
 export class LocalPlaybackStateRepository implements PlaybackStateRepository {
   read(ownerKey: string): PersistedPlaybackState | null {
-    const snapshot = readSnapshot(SNAPSHOT_STORAGE_KEY, ownerKey) ?? this.migrateLegacy(ownerKey);
+    const snapshot = readSnapshot(SNAPSHOT_STORAGE_KEY, ownerKey);
     if (!snapshot) return null;
     const checkpoint = readCheckpoint(ownerKey);
     if (!checkpoint || checkpoint.snapshotSavedAt !== snapshot.savedAt) return snapshot;
@@ -14,7 +14,6 @@ export class LocalPlaybackStateRepository implements PlaybackStateRepository {
   write(state: PersistedPlaybackState): void {
     localStorage.setItem(SNAPSHOT_STORAGE_KEY, JSON.stringify(encodeSnapshot(state)));
     localStorage.removeItem(CHECKPOINT_STORAGE_KEY);
-    removeOwnedValue(LEGACY_STORAGE_KEY, state.ownerKey);
   }
 
   writeCheckpoint(checkpoint: PlaybackProgressCheckpoint): void {
@@ -24,15 +23,6 @@ export class LocalPlaybackStateRepository implements PlaybackStateRepository {
   clear(ownerKey: string): void {
     removeOwnedValue(SNAPSHOT_STORAGE_KEY, ownerKey);
     removeOwnedValue(CHECKPOINT_STORAGE_KEY, ownerKey);
-    removeOwnedValue(LEGACY_STORAGE_KEY, ownerKey);
-  }
-
-  private migrateLegacy(ownerKey: string): PersistedPlaybackState | null {
-    const legacy = readSnapshot(LEGACY_STORAGE_KEY, ownerKey);
-    if (!legacy) return null;
-    try { this.write(legacy); }
-    catch { /* Keep the readable legacy value when migration cannot be persisted. */ }
-    return legacy;
   }
 }
 
@@ -181,7 +171,6 @@ function finiteNonNegative(value: unknown): number {
 
 const SNAPSHOT_STORAGE_KEY = "xymusic.desktop.playback-state.snapshot.v2";
 const CHECKPOINT_STORAGE_KEY = "xymusic.desktop.playback-state.checkpoint.v2";
-const LEGACY_STORAGE_KEY = "xymusic.desktop.playback-state.v1";
 const COMPACT_SNAPSHOT_VERSION = 3;
 
 type CompactTrack = [string, string, string, string[], string, string | null, string, number, boolean, string];

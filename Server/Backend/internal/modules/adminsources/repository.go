@@ -562,36 +562,6 @@ func (repository *Repository) CancelScan(ctx context.Context, command CancelScan
 }
 
 func (repository *Repository) InitializeScans(ctx context.Context, now time.Time) error {
-	// Dynamic playback no longer has a media worker to transition legacy
-	// source rows out of PENDING/PROCESSING or publish tracks. Repair those
-	// durable states before claiming a new scan so an upgrade cannot leave
-	// existing music stuck forever. A later scan still validates the file.
-	if _, err := repository.database.Exec(ctx, `UPDATE local_music_sources source SET
-		status='READY',last_error=NULL,updated_at=$1
-		WHERE source.status IN ('PENDING','PROCESSING')
-		  AND EXISTS (
-			SELECT 1 FROM local_music_source_tracks mapping
-			JOIN tracks track ON track.id=mapping.track_id
-			WHERE mapping.source_id=source.id AND track.status <> 'ARCHIVED'
-		  )`, now); err != nil {
-		return fmt.Errorf("repair legacy local library source states: %w", err)
-	}
-	if _, err := repository.database.Exec(ctx, `UPDATE tracks track SET
-		status='READY',published_at=COALESCE(published_at,$1),version=version+1,updated_at=$1
-		WHERE track.status IN ('DRAFT','PROCESSING','READY')
-		  AND track.duration_ms > 0 AND track.published_at IS NULL
-		  AND (
-			EXISTS (
-				SELECT 1 FROM local_music_source_tracks mapping
-				JOIN local_music_sources source ON source.id=mapping.source_id
-				WHERE mapping.track_id=track.id AND source.status='READY'
-			) OR EXISTS (
-				SELECT 1 FROM media_assets asset
-				WHERE asset.id=track.source_asset_id AND asset.kind='AUDIO_SOURCE' AND asset.status='READY'
-			)
-		  )`, now); err != nil {
-		return fmt.Errorf("repair unpublished playable tracks: %w", err)
-	}
 	if _, err := repository.database.Exec(ctx, `UPDATE library_scan_runs SET
 		status='FAILED',completed_at=$1,locked_by=NULL,locked_until=NULL,heartbeat_at=NULL,
 		last_error='The scan worker lease expired before completion',updated_at=$1
@@ -665,13 +635,6 @@ func (repository *Repository) EnsureDefaultRoot(ctx context.Context, mutation Ro
 		return Root{}, fmt.Errorf("find existing default music source: %w", err)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
-		// Only the very first managed root may adopt legacy source rows that
-		// predate root_id. When a second root is added, those rows belong to
-		// the old catalog and must never be reassigned to the new root.
-		var existingRootCount int
-		if err := transaction.QueryRow(ctx, `SELECT count(*)::int FROM library_roots`).Scan(&existingRootCount); err != nil {
-			return Root{}, fmt.Errorf("count existing music source roots: %w", err)
-		}
 		root, err = scanRoot(transaction.QueryRow(ctx, `INSERT INTO library_roots(
 			name,path,normalized_path,mode,configuration_managed,enabled,scan_on_startup,
 			scan_interval_minutes,include_patterns,exclude_patterns,status
@@ -684,14 +647,6 @@ func (repository *Repository) EnsureDefaultRoot(ctx context.Context, mutation Ro
 		))
 		if err != nil {
 			return Root{}, fmt.Errorf("create default music source: %w", err)
-		}
-		// A concurrent insert can make the ON CONFLICT branch return an
-		// administrator-owned root even though this transaction saw no roots
-		// in its snapshot. Never attach legacy rows to that unrelated root.
-		if existingRootCount == 0 && root.ConfigurationManaged {
-			if _, err := transaction.Exec(ctx, `UPDATE local_music_sources SET root_id=$1 WHERE root_id IS NULL`, root.ID); err != nil {
-				return Root{}, fmt.Errorf("attach legacy files to default music source: %w", err)
-			}
 		}
 	} else if root.ConfigurationManaged {
 		// Only the configuration-owned default root follows LOCAL_MUSIC_* values.

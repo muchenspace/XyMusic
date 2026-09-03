@@ -1072,33 +1072,17 @@ func validateHTTP(input HTTPInput) error {
 func normalizedHTTPListeners(input HTTPInput) (ListenerAddress, ListenerAddress) {
 	ipv4Host := strings.Trim(strings.TrimSpace(input.IPv4Host), "[]")
 	if ipv4Host == "" {
-		legacyHost := strings.Trim(strings.TrimSpace(input.Host), "[]")
-		if address := net.ParseIP(legacyHost); address != nil && address.To4() != nil {
-			ipv4Host = legacyHost
-		} else {
-			ipv4Host = "0.0.0.0"
-		}
+		ipv4Host = "0.0.0.0"
 	}
 	ipv6Host := strings.Trim(strings.TrimSpace(input.IPv6Host), "[]")
 	if ipv6Host == "" {
-		legacyHost := strings.Trim(strings.TrimSpace(input.Host), "[]")
-		if address := net.ParseIP(legacyHost); address != nil && address.To4() == nil {
-			ipv6Host = legacyHost
-		} else {
-			ipv6Host = "::"
-		}
+		ipv6Host = "::"
 	}
 	ipv4Port := input.IPv4Port
-	if ipv4Port == 0 {
-		ipv4Port = input.Port
-	}
 	if ipv4Port == 0 {
 		ipv4Port = 3000
 	}
 	ipv6Port := input.IPv6Port
-	if ipv6Port == 0 {
-		ipv6Port = input.Port
-	}
 	if ipv6Port == 0 {
 		ipv6Port = 3000
 	}

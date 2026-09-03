@@ -169,15 +169,11 @@ func Parse(env map[string]string) (Config, error) {
 		return Config{}, err
 	}
 
-	legacyHTTPPort, err := integer(env, "HTTP_PORT", 3000, 1, 65535)
+	httpIPv4Port, err := integer(env, "HTTP_IPV4_PORT", 3000, 1, 65535)
 	if err != nil {
 		return Config{}, err
 	}
-	httpIPv4Port, err := integer(env, "HTTP_IPV4_PORT", legacyHTTPPort, 1, 65535)
-	if err != nil {
-		return Config{}, err
-	}
-	httpIPv6Port, err := integer(env, "HTTP_IPV6_PORT", legacyHTTPPort, 1, 65535)
+	httpIPv6Port, err := integer(env, "HTTP_IPV6_PORT", 3000, 1, 65535)
 	if err != nil {
 		return Config{}, err
 	}
@@ -347,18 +343,8 @@ func Parse(env map[string]string) (Config, error) {
 		return Config{}, errors.New("LOCAL_MUSIC_SOURCE_MODE has an unsupported value")
 	}
 
-	legacyHost := strings.Trim(strings.TrimSpace(env["HTTP_HOST"]), "[]")
-	ipv4Fallback := "0.0.0.0"
-	ipv6Fallback := "::"
-	if address := net.ParseIP(legacyHost); address != nil {
-		if address.To4() != nil {
-			ipv4Fallback = legacyHost
-		} else {
-			ipv6Fallback = legacyHost
-		}
-	}
-	ipv4Host := strings.Trim(value(env, "HTTP_IPV4_HOST", ipv4Fallback), "[]")
-	ipv6Host := strings.Trim(value(env, "HTTP_IPV6_HOST", ipv6Fallback), "[]")
+	ipv4Host := strings.Trim(value(env, "HTTP_IPV4_HOST", "0.0.0.0"), "[]")
+	ipv6Host := strings.Trim(value(env, "HTTP_IPV6_HOST", "::"), "[]")
 	if err := validateListenerHost(ipv4Host, true, "HTTP_IPV4_HOST"); err != nil {
 		return Config{}, err
 	}

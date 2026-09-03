@@ -25,12 +25,9 @@ describe("optional browser storage resilience", () => {
     expect(store.read()).toEqual(emptyServerConfig());
   });
 
-  it("ignores an unavailable legacy session store when no secure web credential exists", async () => {
+  it("returns null when no credential exists", async () => {
     const current = new MemoryStorage();
-    const credentials = new SessionCredentialStore(current, {
-      getItem: () => { throw new DOMException("denied"); },
-      removeItem: () => { throw new DOMException("denied"); },
-    });
+    const credentials = new SessionCredentialStore(current);
 
     await expect(credentials.read()).resolves.toBeNull();
   });
