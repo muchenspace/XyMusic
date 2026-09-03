@@ -114,7 +114,7 @@ func TestCreateBatchRejectsUnsupportedVerbatimSources(t *testing.T) {
 	_, err = service.Create(context.Background(), "admin", CreateBatchInput{
 		Items: []BatchItemInput{{TrackID: "track", ExpectedVersion: 1}},
 		Options: BatchOptions{
-			Sources: []Source{SourceQMusic, SourceNetease}, Verbatim: true,
+			Sources: []Source{Source("unsupported")}, Verbatim: true,
 			MatchMode: MatchStrict, Fields: ApplyFields{Lyrics: true}, Reason: "verbatim source validation",
 		},
 	})
@@ -122,6 +122,7 @@ func TestCreateBatchRejectsUnsupportedVerbatimSources(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
 
 func TestCreateBatchPrefiltersMissingFieldsBeforeWritebackAndPersistence(t *testing.T) {
 	present := metadataFixture(11)

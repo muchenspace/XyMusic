@@ -124,7 +124,8 @@ describe("TagScrapeDialog candidate details", () => {
     await button(wrapper, "搜索").trigger("click");
     await flushPromises();
 
-    expect(scraping.search).toHaveBeenCalledWith(expect.objectContaining({ source: "qmusic", verbatim: true }), expect.any(AbortSignal));
+    expect(scraping.search).toHaveBeenCalledWith(expect.objectContaining({ source: "smart", verbatim: true }), expect.any(AbortSignal));
+
 
     let cards = wrapper.findAll("[data-testid='tag-candidate']");
     expect(cards).toHaveLength(2);

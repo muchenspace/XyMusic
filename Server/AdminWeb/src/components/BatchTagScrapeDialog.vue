@@ -59,13 +59,8 @@ let pollFailures = 0;
 let completedEmitted = false;
 let actionGeneration = 0;
 const sourceOptions: Array<{ value: TagSource; label: string }> = [{ value: "qmusic", label: "QQ 音乐" }, { value: "netease", label: "网易云" }, { value: "kugou", label: "酷狗" }];
-const visibleSourceOptions = computed(() => verbatim.value
-  ? sourceOptions.filter((source) => source.value === "qmusic")
-  : sourceOptions);
+const visibleSourceOptions = computed(() => sourceOptions);
 
-watch(verbatim, (value) => {
-  if (value) sources.value = ["qmusic"];
-});
 
 watch(open, (value) => {
   actionGeneration += 1;

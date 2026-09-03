@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+
+
 func TestProductionMusicPlatformSearchesLiveSources(t *testing.T) {
 	if os.Getenv("XYMUSIC_LIVE_SCRAPING") == "" {
 		t.Skip("set XYMUSIC_LIVE_SCRAPING=1 to query live music platforms")
@@ -27,10 +29,28 @@ func TestProductionMusicPlatformSearchesLiveSources(t *testing.T) {
 		}
 		results[source] = items
 	}
-	qq := results[SourceQMusic][0]
-	if _, err := platform.Lyric(ctx, SourceQMusic, qq, false); err != nil {
-		t.Fatalf("qmusic lyric: %v", err)
+	for _, source := range []Source{SourceQMusic, SourceKugou, SourceNetease} {
+		cand := results[source][0]
+		t.Logf("%s candidate: Name=%q AlbumImg=%q", source, cand.Name, cand.AlbumImg)
+		lyricRes, err := platform.Lyric(ctx, source, cand, true)
+		if err != nil {
+			t.Logf("%s verbatim lyric: %v", source, err)
+		} else {
+			t.Logf("%s verbatim lyric success: timing=%s len=%d", source, lyricRes.Timing, len(lyricRes.Content))
+		}
 	}
+
+	// NetEase specific test for track with YRC
+	neItems, err := platform.Search(ctx, SourceNetease, "蔡健雅 达尔文")
+	if err == nil && len(neItems) > 0 {
+		neLyric, err := platform.Lyric(ctx, SourceNetease, neItems[0], true)
+		if err != nil {
+			t.Logf("netease darwin verbatim error: %v", err)
+		} else {
+			t.Logf("netease darwin verbatim success: timing=%s len=%d", neLyric.Timing, len(neLyric.Content))
+		}
+	}
+	qq := results[SourceQMusic][0]
 	if qq.AlbumImg != "" {
 		artwork, err := platform.DownloadArtwork(ctx, qq.AlbumImg)
 		if err != nil {
@@ -40,4 +60,14 @@ func TestProductionMusicPlatformSearchesLiveSources(t *testing.T) {
 			t.Fatalf("qmusic artwork=%#v", artwork)
 		}
 	}
+	if len(neItems) > 0 && neItems[0].AlbumImg != "" {
+		art, err := platform.DownloadArtwork(ctx, neItems[0].AlbumImg)
+		if err != nil {
+			t.Fatalf("NetEase DownloadArtwork failed: %v", err)
+		}
+		if len(art.Bytes) == 0 || art.ContentType == "" {
+			t.Fatalf("NetEase artwork=%#v", art)
+		}
+	}
 }
+

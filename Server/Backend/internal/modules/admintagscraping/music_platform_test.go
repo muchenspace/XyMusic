@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"compress/zlib"
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+
 	"io"
 	"net/http"
 	"strings"
@@ -105,6 +107,22 @@ func TestArtworkCacheHitBypassesHostCircuit(t *testing.T) {
 		t.Fatalf("artwork upstream calls = %d, want 1", calls.Load())
 	}
 }
+
+func TestArtworkDownloadToleratesImageJpgAndDetectsRealFormat(t *testing.T) {
+	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return responseFor(request, http.StatusOK, "image/jpg", pngBytes), nil
+	})}
+	platform := NewMusicPlatformClient(client)
+	artwork, err := platform.DownloadArtwork(context.Background(), "http://p1.music.126.net/cover.jpg")
+	if err != nil {
+		t.Fatalf("DownloadArtwork failed: %v", err)
+	}
+	if artwork.ContentType != "image/png" || artwork.Extension != "png" {
+		t.Fatalf("artwork = %#v, want image/png", artwork)
+	}
+}
+
 
 func TestSongSearchesAreCoalescedAndCached(t *testing.T) {
 	var calls atomic.Int32
@@ -435,6 +453,75 @@ func TestQQVerbatimLyricUsesMusicUAndDecryptsQRC(t *testing.T) {
 		t.Fatalf("verbatim lyrics = %#v", result)
 	}
 }
+
+func TestNetEaseVerbatimLyricUsesEAPIAndDecryptsYRC(t *testing.T) {
+	yrc := "[0,1000](0,500,0)你(500,500,0)好"
+	respJSON, _ := json.Marshal(map[string]any{
+		"code": 200,
+		"yrc":  map[string]any{"lyric": yrc},
+	})
+	encryptedResp, err := encryptECB(neteaseEapiKey, respJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Host != "interface.music.163.com" || request.URL.Path != "/eapi/song/lyric/v1" || request.Method != http.MethodPost {
+			t.Fatalf("unexpected NetEase lyric request: %s", request.URL.String())
+		}
+		return responseFor(request, http.StatusOK, "application/octet-stream", encryptedResp), nil
+	})}
+	platform := NewMusicPlatformClient(client)
+	result, err := platform.Lyric(context.Background(), SourceNetease, Candidate{
+		ID: "12345", Name: "歌曲", Artist: "歌手",
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "[00:00.000]<00:00.000>你<00:00.500>好<00:01.000>" || result.Timing != "WORD" {
+		t.Fatalf("NetEase verbatim lyrics = %#v", result)
+	}
+}
+
+func TestKugouVerbatimLyricSearchesAndDecryptsKRC(t *testing.T) {
+	krc := "[0,1000]<0,500,0>你<500,500,0>好"
+	compressed := zlibBytes(t, []byte(krc))
+	xorData := make([]byte, len(compressed))
+	for i := 0; i < len(compressed); i++ {
+		xorData[i] = compressed[i] ^ krcKey[i%len(krcKey)]
+	}
+	krcPayload := append([]byte("krc1"), xorData...)
+	b64Krc := base64.StdEncoding.EncodeToString(krcPayload)
+
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if strings.Contains(request.URL.Path, "search") {
+			body, _ := json.Marshal(map[string]any{
+				"candidates": []map[string]any{
+					{"id": "cand-123", "accesskey": "access-456"},
+				},
+			})
+			return responseFor(request, http.StatusOK, "application/json", body), nil
+		}
+		if strings.Contains(request.URL.Path, "download") {
+			body, _ := json.Marshal(map[string]any{
+				"content": b64Krc,
+			})
+			return responseFor(request, http.StatusOK, "application/json", body), nil
+		}
+		t.Fatalf("unexpected Kugou request: %s", request.URL.String())
+		return nil, nil
+	})}
+	platform := NewMusicPlatformClient(client)
+	result, err := platform.Lyric(context.Background(), SourceKugou, Candidate{
+		ID: "hash789", Name: "晴天", Artist: "周杰伦", DurationMS: 1_000,
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "[00:00.000]<00:00.000>你<00:00.500>好<00:01.000>" || result.Timing != "WORD" {
+		t.Fatalf("Kugou verbatim lyrics = %#v", result)
+	}
+}
+
 
 func encryptQRCForTest(content []byte) ([]byte, error) {
 	var compressed bytes.Buffer

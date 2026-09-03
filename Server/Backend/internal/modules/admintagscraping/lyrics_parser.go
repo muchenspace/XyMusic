@@ -30,6 +30,8 @@ var (
 	lyricLinePattern  = regexp.MustCompile(`^\[(\d+),(\d+)\](.*)$`)
 	qrcWordPattern    = regexp.MustCompile(`\((\d+),(\d+)\)`)
 	qrcContentPattern = regexp.MustCompile(`(?s)<Lyric_1\s+LyricType="1"\s+LyricContent="(.*?)"\s*/>`)
+	krcWordPattern    = regexp.MustCompile(`<(\d+),(\d+),\d+>`)
+	yrcWordPattern    = regexp.MustCompile(`\((\d+),(\d+),\d+\)`)
 )
 
 func parseQRC(content string) (lyricDocument, error) {
@@ -41,6 +43,19 @@ func parseQRC(content string) (lyricDocument, error) {
 		return parseQRCWords(line, raw)
 	})
 }
+
+func parseKRC(content string) (lyricDocument, error) {
+	return parseTimedLines(content, func(line lyricLine, raw string) (lyricLine, bool, error) {
+		return parseKRCWords(line, raw)
+	})
+}
+
+func parseYRC(content string) (lyricDocument, error) {
+	return parseTimedLines(content, func(line lyricLine, raw string) (lyricLine, bool, error) {
+		return parseYRCWords(line, raw)
+	})
+}
+
 
 func parseTimedLines(content string, parseWords func(lyricLine, string) (lyricLine, bool, error)) (lyricDocument, error) {
 	document := lyricDocument{Lines: make([]lyricLine, 0)}
@@ -115,7 +130,103 @@ func parseQRCWords(line lyricLine, raw string) (lyricLine, bool, error) {
 	return line, true, nil
 }
 
+func parseKRCWords(line lyricLine, raw string) (lyricLine, bool, error) {
+	if strings.HasPrefix(raw, "[") {
+		if closing := strings.Index(raw, "]"); closing >= 0 {
+			raw = raw[closing+1:]
+		}
+	}
+	markers := krcWordPattern.FindAllStringSubmatchIndex(raw, -1)
+	if len(markers) == 0 {
+		text := strings.TrimSpace(raw)
+		if text == "" {
+			return line, false, nil
+		}
+		line.Words = []lyricWord{{StartMS: line.StartMS, EndMS: line.EndMS, Text: text}}
+		return line, false, nil
+	}
+	words := make([]lyricWord, 0, len(markers))
+	for index, marker := range markers {
+		relStart, err := parseInt(raw[marker[2]:marker[3]])
+		if err != nil {
+			return lyricLine{}, false, err
+		}
+		duration, err := parseInt(raw[marker[4]:marker[5]])
+		if err != nil {
+			return lyricLine{}, false, err
+		}
+		textEnd := len(raw)
+		if index+1 < len(markers) {
+			textEnd = markers[index+1][0]
+		}
+		text := raw[marker[1]:textEnd]
+		if text == "" {
+			continue
+		}
+		startMS := line.StartMS + relStart
+		words = append(words, lyricWord{
+			StartMS: startMS,
+			EndMS:   startMS + duration,
+			Text:    text,
+			Timed:   true,
+		})
+	}
+	if len(words) == 0 {
+		return line, false, nil
+	}
+	line.Words = words
+	return line, true, nil
+}
+
+func parseYRCWords(line lyricLine, raw string) (lyricLine, bool, error) {
+	if strings.HasPrefix(raw, "[") {
+		if closing := strings.Index(raw, "]"); closing >= 0 {
+			raw = raw[closing+1:]
+		}
+	}
+	markers := yrcWordPattern.FindAllStringSubmatchIndex(raw, -1)
+	if len(markers) == 0 {
+		text := strings.TrimSpace(raw)
+		if text == "" {
+			return line, false, nil
+		}
+		line.Words = []lyricWord{{StartMS: line.StartMS, EndMS: line.EndMS, Text: text}}
+		return line, false, nil
+	}
+	words := make([]lyricWord, 0, len(markers))
+	for index, marker := range markers {
+		start, err := parseInt(raw[marker[2]:marker[3]])
+		if err != nil {
+			return lyricLine{}, false, err
+		}
+		duration, err := parseInt(raw[marker[4]:marker[5]])
+		if err != nil {
+			return lyricLine{}, false, err
+		}
+		textEnd := len(raw)
+		if index+1 < len(markers) {
+			textEnd = markers[index+1][0]
+		}
+		text := raw[marker[1]:textEnd]
+		if text == "" {
+			continue
+		}
+		words = append(words, lyricWord{
+			StartMS: start,
+			EndMS:   start + duration,
+			Text:    text,
+			Timed:   true,
+		})
+	}
+	if len(words) == 0 {
+		return line, false, nil
+	}
+	line.Words = words
+	return line, true, nil
+}
+
 func renderEnhancedLRC(document lyricDocument) string {
+
 	lines := make([]string, 0, len(document.Lines))
 	for _, line := range document.Lines {
 		text := strings.Builder{}

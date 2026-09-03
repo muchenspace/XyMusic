@@ -42,7 +42,12 @@ const (
 	kugouSignatureSalt       = "NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt"
 )
 
-var allowedArtworkHosts = []string{"music.126.net", "y.qq.com", "kugou.com"}
+var allowedArtworkHosts = []string{
+	"music.126.net", "126.net", "127.net", "netease.com",
+	"y.qq.com", "qq.com", "gtimg.cn",
+	"kugou.com", "kgimg.com",
+}
+
 
 type ProductionMusicPlatform struct {
 	client       *http.Client
@@ -340,14 +345,15 @@ func (platform *ProductionMusicPlatform) Lyric(ctx context.Context, source Sourc
 	var err error
 	switch source {
 	case SourceNetease:
-		result, err = platform.lyricNetease(ctx, candidate.ID)
+		result, err = platform.lyricNetease(ctx, candidate, verbatim)
 	case SourceQMusic:
 		result, err = platform.lyricQQ(ctx, candidate, verbatim)
 	case SourceKugou:
-		result, err = platform.lyricKugou(ctx, candidate)
+		result, err = platform.lyricKugou(ctx, candidate, verbatim)
 	default:
 		return LyricResult{}, apperror.Validation("The music platform source is invalid")
 	}
+
 	if err != nil {
 		return LyricResult{}, normalizeUpstreamError(err, ctx)
 	}
@@ -485,13 +491,12 @@ func (platform *ProductionMusicPlatform) downloadArtworkRequest(ctx context.Cont
 		return DownloadedArtwork{}, err
 	}
 	declared := strings.ToLower(strings.TrimSpace(strings.Split(response.Header.Get("Content-Type"), ";")[0]))
-	if declared != "" && declared != "image/jpeg" && declared != "image/png" && declared != "image/webp" {
+	if declared != "" && !strings.HasPrefix(declared, "image/") && declared != "application/octet-stream" && declared != "binary/octet-stream" {
 		return DownloadedArtwork{}, errors.New("artwork MIME type is unsupported")
 	}
-	if declared != "" && declared != contentType {
-		return DownloadedArtwork{}, errors.New("artwork content does not match its MIME type")
-	}
 	return DownloadedArtwork{Bytes: response.Bytes, ContentType: contentType, Extension: extension}, nil
+
+
 }
 
 func (platform *ProductionMusicPlatform) searchNetease(ctx context.Context, query string) ([]Candidate, error) {
@@ -527,13 +532,75 @@ func (platform *ProductionMusicPlatform) searchNetease(ctx context.Context, quer
 	return result, nil
 }
 
-func (platform *ProductionMusicPlatform) lyricNetease(ctx context.Context, id string) (string, error) {
-	data, err := platform.neteaseForward(ctx, "https://music.163.com/api/song/lyric?lv=-1&kv=-1&tv=-1", map[string]any{"id": id})
+func (platform *ProductionMusicPlatform) lyricNetease(ctx context.Context, candidate Candidate, verbatim bool) (string, error) {
+	if verbatim {
+		return platform.lyricNeteaseVerbatim(ctx, candidate)
+	}
+	data, err := platform.neteaseForward(ctx, "https://music.163.com/api/song/lyric?lv=-1&kv=-1&tv=-1", map[string]any{"id": candidate.ID})
 	if err != nil {
 		return "", err
 	}
 	return cleanScrapedText(mapValue(data["lrc"])["lyric"]), nil
 }
+
+func (platform *ProductionMusicPlatform) lyricNeteaseVerbatim(ctx context.Context, candidate Candidate) (string, error) {
+	deviceHeader, err := json.Marshal(map[string]any{
+		"clientSign": "00:11:22:33:44:55@@@LDDC@@@@@@1234567890abcdef1234567890abcdef",
+		"os":         "pc",
+		"appver":     "3.1.3.203419",
+		"deviceId":   "AA9955F5FE37BA7EAF48F8EF0C9966B28293CC8D6415CCD93549",
+		"requestId":  0,
+		"osver":      "Microsoft-Windows-10--build-22000-64bit",
+	})
+	if err != nil {
+		return "", err
+	}
+	params := map[string]any{
+		"id":     numberOrString(candidate.ID),
+		"lv":     "-1",
+		"tv":     "-1",
+		"rv":     "-1",
+		"yv":     "-1",
+		"e_r":    true,
+		"header": string(deviceHeader),
+	}
+	encryptedBody, err := encryptNetEaseEAPI("/eapi/song/lyric/v1", params)
+	if err != nil {
+		return "", err
+	}
+	response, err := platform.requestBytes(ctx, "https://interface.music.163.com/eapi/song/lyric/v1", requestOptions{
+		Method: http.MethodPost,
+		Headers: map[string]string{
+			"Content-Type": "application/x-www-form-urlencoded",
+			"User-Agent":   "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 Chrome/91.0.4472.164 NeteaseMusicDesktop/3.1.3.203419",
+			"Origin":       "orpheus://orpheus",
+		},
+		Body: encryptedBody,
+	}, maximumJSONBytes)
+	if err != nil {
+		return "", err
+	}
+	var rawData map[string]any
+	if decErr := json.Unmarshal(response.Bytes, &rawData); decErr != nil {
+		decrypted, err := decryptNetEaseEAPI(response.Bytes)
+		if err != nil {
+			return "", err
+		}
+		if err := json.Unmarshal(decrypted, &rawData); err != nil {
+			return "", fmt.Errorf("decode NetEase lyric response: %w", err)
+		}
+	}
+	yrcData := mapValue(rawData["yrc"])
+	yrcContent := stringValue(yrcData["lyric"])
+	if yrcContent != "" {
+		document, err := parseYRC(yrcContent)
+		if err == nil && len(document.Lines) > 0 {
+			return renderEnhancedLRC(document), nil
+		}
+	}
+	return "", nil
+}
+
 
 func (platform *ProductionMusicPlatform) neteaseForward(ctx context.Context, endpoint string, parameters map[string]any) (map[string]any, error) {
 	payload, err := json.Marshal(struct {
@@ -697,10 +764,98 @@ func (platform *ProductionMusicPlatform) searchKugou(ctx context.Context, query 
 	return result, nil
 }
 
-func (platform *ProductionMusicPlatform) lyricKugou(ctx context.Context, candidate Candidate) (string, error) {
+func (platform *ProductionMusicPlatform) lyricKugou(ctx context.Context, candidate Candidate, verbatim bool) (string, error) {
+	if verbatim {
+		return platform.lyricKugouVerbatim(ctx, candidate)
+	}
 	response, err := platform.requestBytes(ctx, "https://m.kugou.com/app/i/krc.php?cmd=100&timelength=999999&hash="+url.QueryEscape(candidate.ID), requestOptions{}, maximumTextBytes)
 	return string(response.Bytes), err
 }
+
+func (platform *ProductionMusicPlatform) lyricKugouVerbatim(ctx context.Context, candidate Candidate) (string, error) {
+	hash := candidate.ID
+	albumAudioID := candidate.LyricID
+	if albumAudioID == "" {
+		albumAudioID = "0"
+	}
+	duration := ""
+	if candidate.DurationMS > 0 {
+		duration = strconv.Itoa(candidate.DurationMS)
+	}
+	keyword := candidate.Name
+	if candidate.Artist != "" {
+		keyword = candidate.Artist + " - " + candidate.Name
+	}
+	searchParams := map[string]string{
+		"album_audio_id": albumAudioID,
+		"appid":          "3116",
+		"clientver":      "11070",
+		"duration":       duration,
+		"hash":           hash,
+		"keyword":        keyword,
+		"lrctxt":         "1",
+		"man":            "no",
+	}
+	searchParams["signature"] = calcKugouLyricsSignature(searchParams)
+	values := url.Values{}
+	for k, v := range searchParams {
+		values.Set(k, v)
+	}
+	searchURL := "https://lyrics.kugou.com/v1/search?" + values.Encode()
+	searchData, err := platform.requestJSON(ctx, searchURL, requestOptions{})
+	if err != nil {
+		return "", err
+	}
+	candidates := sliceValue(searchData["candidates"])
+	if len(candidates) == 0 {
+		return "", nil
+	}
+	cand := mapValue(candidates[0])
+	candID := stringValue(cand["id"])
+	accessKey := stringValue(cand["accesskey"])
+	if candID == "" || accessKey == "" {
+		return "", nil
+	}
+
+	downloadParams := map[string]string{
+		"accesskey": accessKey,
+		"appid":     "3116",
+		"charset":   "utf8",
+		"client":    "mobi",
+		"clientver": "11070",
+		"fmt":       "krc",
+		"id":        candID,
+		"ver":       "1",
+	}
+	downloadParams["signature"] = calcKugouLyricsSignature(downloadParams)
+	downloadValues := url.Values{}
+	for k, v := range downloadParams {
+		downloadValues.Set(k, v)
+	}
+	downloadURL := "http://lyrics.kugou.com/download?" + downloadValues.Encode()
+	downloadData, err := platform.requestJSON(ctx, downloadURL, requestOptions{})
+	if err != nil {
+		return "", err
+	}
+	contentB64 := stringValue(downloadData["content"])
+	if contentB64 == "" {
+		return "", nil
+	}
+	rawBytes, err := base64.StdEncoding.DecodeString(contentB64)
+	if err != nil {
+		return "", err
+	}
+	plainBytes, err := decryptKRC(rawBytes)
+	if err != nil {
+		return "", err
+	}
+	document, err := parseKRC(string(plainBytes))
+	if err != nil {
+		return "", err
+	}
+	return renderEnhancedLRC(document), nil
+}
+
 
 type requestOptions struct {
 	Method      string

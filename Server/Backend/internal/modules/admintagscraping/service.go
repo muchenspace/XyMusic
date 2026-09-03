@@ -78,14 +78,24 @@ func (service *Service) Search(ctx context.Context, input SearchInput) ([]Candid
 		return nil, apperror.Validation("The music platform source is invalid")
 	}
 	sources := []Source{input.Source}
-	if input.Verbatim {
-		if input.Source != SourceSmart && input.Source != SourceQMusic {
-			return nil, unsupportedVerbatimSourceError()
-		}
-		sources = []Source{SourceQMusic}
-	} else if input.Source == SourceSmart {
+	if input.Source == SourceSmart {
 		sources = validSmartSources(input.Sources)
+		if input.Verbatim {
+			verbatimSources := make([]Source, 0, len(sources))
+			for _, s := range sources {
+				if isVerbatimSource(s) {
+					verbatimSources = append(verbatimSources, s)
+				}
+			}
+			if len(verbatimSources) == 0 {
+				return nil, unsupportedVerbatimSourceError()
+			}
+			sources = verbatimSources
+		}
+	} else if input.Verbatim && !isVerbatimSource(input.Source) {
+		return nil, unsupportedVerbatimSourceError()
 	}
+
 	var candidates []Candidate
 	if input.Source != SourceSmart {
 		result, err := service.music.Search(ctx, sources[0], searchText)
@@ -437,39 +447,54 @@ func (service *Service) lyrics(
 	propagateTransient bool,
 ) (LyricResult, error) {
 	result, err := service.music.Lyric(ctx, candidate.Source, candidate, verbatim)
-	if err == nil && strings.TrimSpace(result.Content) != "" {
+	if err == nil && strings.TrimSpace(result.Content) != "" && (!verbatim || result.Timing == lyrics.TimingWord) {
 		return result, nil
 	}
-	if candidate.Source == SourceQMusic && err != nil {
+	if candidate.Source == SourceQMusic && err != nil && !verbatim {
 		return LyricResult{}, err
 	}
 	if propagateTransient && err != nil && transientScrapingDependencyError(err) {
 		return LyricResult{}, err
 	}
-	if candidate.Source != SourceQMusic && candidate.Name != "" {
-		matches, searchErr := service.music.Search(ctx, SourceQMusic, candidate.Name)
-		if searchErr != nil {
-			return LyricResult{}, searchErr
-		}
-		type fallback struct {
-			candidate Candidate
-			score     float64
-		}
-		fallbacks := make([]fallback, 0, len(matches))
-		for _, match := range matches {
-			artist := candidate.Artist
-			if artist == "" {
-				artist = candidate.Name
+	if candidate.Name != "" {
+		fallbackSources := []Source{SourceQMusic, SourceKugou, SourceNetease}
+		for _, fbSource := range fallbackSources {
+			if fbSource == candidate.Source {
+				continue
 			}
-			fallbacks = append(fallbacks, fallback{candidate: match, score: tagMatchScore(candidate.Name, match.Name) + tagArtistMatchScore(artist, match.Artist)})
+			matches, searchErr := service.music.Search(ctx, fbSource, candidate.Name)
+			if searchErr != nil {
+				continue
+			}
+			type fallback struct {
+				candidate Candidate
+				score     float64
+			}
+			fallbacks := make([]fallback, 0, len(matches))
+			for _, match := range matches {
+				artist := candidate.Artist
+				if artist == "" {
+					artist = candidate.Name
+				}
+				fallbacks = append(fallbacks, fallback{candidate: match, score: tagMatchScore(candidate.Name, match.Name) + tagArtistMatchScore(artist, match.Artist)})
+			}
+			sort.SliceStable(fallbacks, func(left, right int) bool { return fallbacks[left].score > fallbacks[right].score })
+			if len(fallbacks) > 0 && fallbacks[0].score >= 2 {
+				fbResult, fbErr := service.music.Lyric(ctx, fbSource, fallbacks[0].candidate, verbatim)
+				if fbErr == nil && strings.TrimSpace(fbResult.Content) != "" {
+					if !verbatim || fbResult.Timing == lyrics.TimingWord {
+						return fbResult, nil
+					}
+				}
+			}
 		}
-		sort.SliceStable(fallbacks, func(left, right int) bool { return fallbacks[left].score > fallbacks[right].score })
-		if len(fallbacks) > 0 && fallbacks[0].score >= 2 {
-			return service.music.Lyric(ctx, SourceQMusic, fallbacks[0].candidate, verbatim)
-		}
+	}
+	if err == nil && strings.TrimSpace(result.Content) != "" {
+		return result, nil
 	}
 	return LyricResult{}, nil
 }
+
 
 func transientScrapingDependencyError(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
@@ -540,16 +565,21 @@ func validateCandidate(candidate Candidate) error {
 	return nil
 }
 
+func isVerbatimSource(source Source) bool {
+	return source == SourceQMusic || source == SourceNetease || source == SourceKugou
+}
+
 func validateVerbatimCandidate(candidate Candidate, verbatim bool) error {
-	if verbatim && candidate.Source != SourceQMusic {
+	if verbatim && !isVerbatimSource(candidate.Source) {
 		return unsupportedVerbatimSourceError()
 	}
 	return nil
 }
 
 func unsupportedVerbatimSourceError() error {
-	return apperror.Validation("Verbatim lyrics are only supported by QQ Music")
+	return apperror.Validation("The music platform source does not support verbatim lyrics")
 }
+
 
 func cleanScrapedText(value any) string {
 	if value == nil {
