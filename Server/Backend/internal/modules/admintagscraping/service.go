@@ -21,6 +21,8 @@ import (
 
 var defaultSmartSources = []Source{SourceQMusic, SourceNetease, SourceKugou}
 
+const unknownArtistPlaceholder = "Unknown Artist"
+
 type ServiceDependencies struct {
 	Store                   Store
 	Music                   MusicPlatform
@@ -495,7 +497,6 @@ func (service *Service) lyrics(
 	return LyricResult{}, nil
 }
 
-
 func transientScrapingDependencyError(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return false
@@ -580,7 +581,6 @@ func unsupportedVerbatimSourceError() error {
 	return apperror.Validation("The music platform source does not support verbatim lyrics")
 }
 
-
 func cleanScrapedText(value any) string {
 	if value == nil {
 		return ""
@@ -639,7 +639,7 @@ func scoreCandidate(query SearchInput, candidate Candidate) (float64, float64, f
 		title = *query.Query
 	}
 	artist := ""
-	if query.Artist != nil {
+	if query.Artist != nil && !isUnknownArtistPlaceholder(*query.Artist) {
 		artist = *query.Artist
 	}
 	album := ""
@@ -664,6 +664,10 @@ func scoreCandidate(query SearchInput, candidate Candidate) (float64, float64, f
 		titleScore = 2
 	}
 	return titleScore, artistScore, albumScore, titleScore + artistScore + albumScore
+}
+
+func isUnknownArtistPlaceholder(value string) bool {
+	return strings.EqualFold(strings.TrimSpace(value), unknownArtistPlaceholder)
 }
 
 func reliableTagMatch(candidate Candidate, mode MatchMode) bool {
