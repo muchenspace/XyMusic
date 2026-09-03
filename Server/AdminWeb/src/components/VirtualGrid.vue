@@ -1,4 +1,4 @@
-﻿<script setup lang="ts" generic="T">
+<script setup lang="ts" generic="T">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const props = withDefaults(defineProps<{
@@ -13,7 +13,7 @@ const props = withDefaults(defineProps<{
   itemHeight: 156,
   minItemWidth: 280,
   gap: 12,
-  overscan: 2,
+  overscan: 6,
   height: "min(72vh, 760px)",
   rowKey: undefined,
 });
@@ -58,8 +58,10 @@ function updateMetrics(): void {
 function onScroll(event: Event): void {
   const element = event.currentTarget as HTMLElement;
   scrollTop.value = element.scrollTop;
-  viewportWidth.value = element.clientWidth;
-  viewportHeight.value = element.clientHeight;
+  if (viewportWidth.value <= 0 || viewportHeight.value <= 0) {
+    viewportWidth.value = element.clientWidth;
+    viewportHeight.value = element.clientHeight;
+  }
 }
 
 const datasetMarker = computed(() => {
@@ -93,7 +95,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect());
   <div
     ref="viewport"
     class="overflow-auto overscroll-contain"
-    :style="{ height, maxHeight: height }"
+    :style="{ height, maxHeight: height, willChange: 'scroll-position' }"
     :aria-rowcount="items.length"
     @scroll="onScroll"
   >
@@ -101,7 +103,8 @@ onBeforeUnmount(() => resizeObserver?.disconnect());
       <div
         class="absolute left-0 right-0 top-0 grid"
         :style="{
-          transform: `translateY(${startRow * itemHeight}px)`,
+          transform: `translate3d(0, ${startRow * itemHeight}px, 0)`,
+          willChange: 'transform',
           gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
           gridAutoRows: `${cellHeight}px`,
           gap: `${gap}px`,
@@ -111,7 +114,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect());
           v-for="(item, index) in visibleItems"
           :key="rowKey?.(item, startIndex + index) ?? startIndex + index"
           class="min-w-0"
-          :style="{ height: `${cellHeight}px` }"
+          :style="{ height: `${cellHeight}px`, contain: 'layout style' }"
         >
           <slot :item="item" :index="startIndex + index" />
         </div>
