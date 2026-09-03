@@ -1149,7 +1149,7 @@ func validateCreateBatch(input CreateBatchInput) error {
 	if len(input.Options.Sources) < 1 || len(input.Options.Sources) > 5 || !uniqueSources(input.Options.Sources) {
 		return apperror.Validation("Batch scraping sources are invalid")
 	}
-	if input.Options.Verbatim && !onlyQQMusicSource(input.Options.Sources) {
+	if input.Options.Verbatim && !supportedVerbatimSources(input.Options.Sources) {
 		return unsupportedVerbatimSourceError()
 	}
 	if input.Options.MatchMode != MatchStrict && input.Options.MatchMode != MatchSimple {
@@ -1164,14 +1164,15 @@ func validateCreateBatch(input CreateBatchInput) error {
 	return nil
 }
 
-func onlyQQMusicSource(sources []Source) bool {
+func supportedVerbatimSources(sources []Source) bool {
 	for _, source := range sources {
-		if source != SourceQMusic {
+		if !isVerbatimSource(source) {
 			return false
 		}
 	}
 	return len(sources) > 0
 }
+
 
 func presentBatch(job BatchJobRecord, items []BatchItemRecord, partial bool) BatchJobDTO {
 	skipped := max(0, job.Processed-job.Succeeded-job.Failed)

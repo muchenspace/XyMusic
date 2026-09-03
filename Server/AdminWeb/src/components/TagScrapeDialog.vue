@@ -29,14 +29,13 @@ const detailOpen = ref(false);
 const detailCandidate = ref<TagCandidate>();
 const fields = reactive(defaultScrapingFields());
 const archived = computed(() => props.track?.status === "ARCHIVED");
-const sourceOptions = computed<Array<{ value: SearchSource; label: string }>>(() => verbatim.value
-  ? [{ value: "qmusic", label: "QQ 音乐" }]
-  : [
-      { value: "smart", label: "智能多源" },
-      { value: "netease", label: "网易云" },
-      { value: "qmusic", label: "QQ 音乐" },
-      { value: "kugou", label: "酷狗" },
-    ]);
+const sourceOptions: Array<{ value: SearchSource; label: string }> = [
+  { value: "smart", label: "智能多源" },
+  { value: "netease", label: "网易云" },
+  { value: "qmusic", label: "QQ 音乐" },
+  { value: "kugou", label: "酷狗" },
+];
+
 const writebackCapability = computed(() => sourceWritebackCapability(props.writebackSource));
 const writeBack = useWritebackSelection(writebackCapability);
 const loading = ref(false);
@@ -65,14 +64,14 @@ function selectCandidate(candidate: TagCandidate): void {
   selected.value = candidate;
 }
 
-watch(verbatim, (value) => {
-  source.value = value ? "qmusic" : "smart";
+watch(verbatim, () => {
   cancelLookup();
   resetCandidateDetail();
   candidates.value = [];
   selected.value = undefined;
   error.value = "";
 });
+
 
 watch(open, (value) => {
   applyGeneration += 1;

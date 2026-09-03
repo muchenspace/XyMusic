@@ -116,14 +116,16 @@ describe("BatchTagScrapeDialog", () => {
     const wrapper = mountDialog([track("track-1"), track("2"), track("3")]);
 
     await wrapper.get("select[data-testid='batch-verbatim']").setValue("true");
+    expect(wrapper.find("input[type='checkbox'][value='netease']").exists()).toBe(true);
+    expect(wrapper.find("input[type='checkbox'][value='kugou']").exists()).toBe(true);
     await startButton(wrapper).trigger("click");
     await flushPromises();
 
     expect(scraping.createBatch).toHaveBeenCalledWith(expect.objectContaining({
-      options: expect.objectContaining({ sources: ["qmusic"], verbatim: true }),
+      options: expect.objectContaining({ sources: ["qmusic", "netease", "kugou"], verbatim: true }),
     }));
-    expect(wrapper.find("input[type='checkbox'][value='netease']").exists()).toBe(false);
-    expect(wrapper.find("input[type='checkbox'][value='kugou']").exists()).toBe(false);
+
+
 
     expect(wrapper.text()).toContain("已完成");
     expect(wrapper.text()).toContain("条件排除 2");

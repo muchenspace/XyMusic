@@ -50,7 +50,7 @@ func TestSmartSearchToleratesFailedSourcesAndRanksCandidates(t *testing.T) {
 	}
 }
 
-func TestVerbatimSmartSearchUsesQQMusicOnly(t *testing.T) {
+func TestVerbatimSmartSearchUsesSupportedSources(t *testing.T) {
 	music := &musicStub{
 		searchResults: map[Source][]Candidate{
 			SourceQMusic:  {{ID: "qmusic", Name: "Song", Source: SourceQMusic}},
@@ -72,29 +72,46 @@ func TestVerbatimSmartSearchUsesQQMusicOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result) != 1 || result[0].ID != "qmusic" {
-		t.Fatalf("verbatim results = %#v", result)
+	if len(result) != 2 {
+		t.Fatalf("verbatim results count = %d, want 2", len(result))
 	}
-	if calls := music.searchCallSources(); !reflect.DeepEqual(calls, []Source{SourceQMusic}) {
+	calls := music.searchCallSources()
+	if len(calls) != 2 {
 		t.Fatalf("verbatim search sources = %#v", calls)
 	}
 }
 
-func TestVerbatimSearchRejectsUnsupportedSource(t *testing.T) {
+func TestVerbatimSearchSupportsAllPlatformSources(t *testing.T) {
+	music := &musicStub{
+		searchResults: map[Source][]Candidate{
+			SourceQMusic:  {{ID: "qmusic", Name: "Song", Source: SourceQMusic}},
+			SourceNetease: {{ID: "netease", Name: "Song", Source: SourceNetease}},
+			SourceKugou:   {{ID: "kugou", Name: "Song", Source: SourceKugou}},
+		},
+	}
 	service, err := NewService(ServiceDependencies{
-		Store: &storeStub{}, Music: &musicStub{}, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
+		Store: &storeStub{}, Music: music, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	title := "Song"
-	for _, source := range []Source{SourceNetease, SourceKugou} {
-		_, err := service.Search(context.Background(), SearchInput{Source: source, Verbatim: true, Title: &title})
-		if !apperror.IsCode(err, apperror.CodeValidationError) {
-			t.Fatalf("source %q error = %v", source, err)
+	for _, source := range []Source{SourceQMusic, SourceNetease, SourceKugou} {
+		candidates, err := service.Search(context.Background(), SearchInput{Source: source, Verbatim: true, Title: &title})
+		if err != nil {
+			t.Fatalf("source %q verbatim search failed: %v", source, err)
+		}
+		if len(candidates) != 1 || candidates[0].Source != source {
+			t.Fatalf("source %q candidates = %#v", source, candidates)
 		}
 	}
+	// Invalid source should still be rejected
+	_, err = service.Search(context.Background(), SearchInput{Source: Source("unknown"), Verbatim: true, Title: &title})
+	if !apperror.IsCode(err, apperror.CodeValidationError) {
+		t.Fatalf("unknown source error = %v", err)
+	}
 }
+
 
 func TestSearchRejectsRemovedMusicSources(t *testing.T) {
 	service, err := NewService(ServiceDependencies{
