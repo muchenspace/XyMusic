@@ -1,4 +1,4 @@
-﻿<script setup lang="ts" generic="T">
+<script setup lang="ts" generic="T">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const props = withDefaults(defineProps<{
@@ -49,7 +49,9 @@ function updateViewportMetrics(): void {
 function onScroll(event: Event): void {
   const element = event.currentTarget as HTMLElement;
   scrollTop.value = element.scrollTop;
-  viewportHeight.value = element.clientHeight;
+  if (viewportHeight.value <= 0) {
+    viewportHeight.value = element.clientHeight;
+  }
 }
 
 const datasetMarker = computed(() => {
@@ -92,7 +94,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect());
   <div
     ref="viewport"
     class="overflow-auto overscroll-contain"
-    :style="{ height, maxHeight: height }"
+    :style="{ height, maxHeight: height, willChange: 'scroll-position' }"
     :aria-rowcount="items.length"
     @scroll="onScroll"
   >

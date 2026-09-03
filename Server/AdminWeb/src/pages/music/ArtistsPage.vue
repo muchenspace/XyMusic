@@ -253,13 +253,12 @@ watch(editorOpen, (value) => {
           :item-height="120"
           :min-item-width="280"
           :gap="1"
-          :overscan="2"
+          :overscan="6"
           :row-key="artistKey"
         >
-          <template #default="{ item: artist, index }">
+          <template #default="{ item: artist }">
             <article
-            class="group motion-item media-tile relative flex h-full items-center gap-4 bg-[var(--surface-solid)] p-4 hover:bg-[var(--surface-muted)]"
-            :style="{ '--motion-index': index }"
+            class="group media-tile relative flex h-full items-center gap-4 bg-[var(--surface-solid)] p-4 hover:bg-[var(--surface-muted)]"
           >
             <label
               class="absolute left-1.5 top-1.5 z-10 grid h-7 w-7 place-items-center rounded-lg border border-[var(--border)] bg-[var(--surface-solid)]/95 shadow-sm"
@@ -276,7 +275,7 @@ watch(editorOpen, (value) => {
               />
             </label>
             <span class="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--primary-soft)] text-[var(--primary)]">
-              <img v-if="artist.artwork" :src="artist.artwork.url" :alt="artist.name" class="media-artwork h-full w-full object-cover" width="64" height="64" loading="lazy" decoding="async" />
+              <img v-if="artist.artwork" :src="artist.artwork.url" :alt="artist.name" class="media-artwork h-full w-full object-cover" width="64" height="64" decoding="async" />
               <Mic2 v-else :size="23" />
             </span>
             <div class="min-w-0 flex-1">
