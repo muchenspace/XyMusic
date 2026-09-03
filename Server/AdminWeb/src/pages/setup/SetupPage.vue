@@ -50,17 +50,17 @@ type DatabaseInspection = NonNullable<SetupValidationResult["databaseInspection"
 type StorageInspection = NonNullable<SetupValidationResult["storageInspection"]>;
 const databaseInspection = ref<DatabaseInspection>();
 const storageInspection = ref<StorageInspection>();
+const storageDecisionOpen = ref(false);
 const databaseDecisionOpen = ref(false);
-const databaseDecision = ref<"reuse_partial" | "migrate" | "reset">();
 const databaseResetConfirmation = ref("");
-const submittedWithReusedAdministrator = ref(false);
+
 
 const form = reactive<SetupCompleteInput>({
   http: { ipv4Host: "0.0.0.0", ipv4Port: 3000, ipv6Host: "::", ipv6Port: 3000, trustedProxyAddresses: [] },
   paths: { migrationsDirectory: "migrations", adminWebDirectory: "admin" },
   database: { host: "", port: 5432, database: "", username: "", password: "", sslMode: "prefer", maxConnections: 10 },
   storage: { assetDirectory: "assets", transcodeDirectory: "transcode", maxUploadBytes: 1_073_741_824, transcodeCacheMaxBytes: 10_737_418_240, uploadTtlSeconds: 3600, streamTtlSeconds: 900, streamMaxConcurrent: 4, streamIdleTimeoutSeconds: 30, transcodeTimeoutSeconds: 30 },
-  media: { mode: "DIRECTORY", directory: "tools", ffmpegPath: "", ffprobePath: "" },
+  media: { mode: "DIRECTORY", directory: "", ffmpegPath: "", ffprobePath: "" },
   source: { name: "", directory: "music", mode: "READ_ONLY", enabled: true, syncOnStartup: true, scanIntervalMinutes: null, includePatterns: [], excludePatterns: [] },
   registration: { enabled: true },
   administrator: { username: "", displayName: "", password: "" },
@@ -70,12 +70,7 @@ const autoDetectMedia = computed({
   get: () => form.media.mode === "DIRECTORY",
   set: (enabled: boolean) => { form.media.mode = enabled ? "DIRECTORY" : "ADVANCED"; },
 });
-const reusesDatabase = computed(() => (
-  form.databaseAction === "reuse_partial" || form.databaseAction === "migrate"
-));
-const reusesActiveAdministrator = computed(() => (
-  reusesDatabase.value && Boolean(databaseInspection.value?.hasActiveAdministrator)
-));
+
 
 function linesModel(values: string[]) {
   return computed({
@@ -102,8 +97,9 @@ const steps = computed(() => [
   { key: "storage", label: "对象存储", icon: HardDrive },
   { key: "media", label: "媒体工具", icon: Wrench },
   { key: "source", label: "音乐音源", icon: Disc3 },
-  { key: "admin", label: reusesActiveAdministrator.value ? "访问设置" : "管理员", icon: UserRoundCog },
+  { key: "admin", label: "管理员", icon: UserRoundCog },
   { key: "review", label: "确认配置", icon: CheckCircle2 },
+
 ]);
 const isLast = computed(() => current.value === steps.value.length - 1);
 
@@ -143,14 +139,11 @@ function focusFailedSetupStage(error: unknown): void {
     return;
   }
   if (error.problem.decisionResource === "storage") {
+    requireStorageDecision();
     current.value = 3;
     return;
   }
   const stage = error.problem.setupStage ?? "";
-  if (stage === "installation_provision" && reusesActiveAdministrator.value) {
-    resetDatabaseDecisionForRetry();
-    return;
-  }
   const target = stage.startsWith("listener") || stage.startsWith("http") ? 0
     : stage.startsWith("path") ? 1
       : stage.startsWith("database") ? 2
@@ -172,7 +165,6 @@ function existingItemLabel(value: string): string { return existingItemLabels[va
 
 function resetDatabaseDecisionUi(): void {
   databaseDecisionOpen.value = false;
-  databaseDecision.value = undefined;
   databaseResetConfirmation.value = "";
 }
 
@@ -182,23 +174,29 @@ function requireDatabaseDecision(): void {
   databaseDecisionOpen.value = true;
 }
 
-function selectDatabaseDecision(action: "reuse_partial" | "migrate" | "reset"): void {
-  if (action !== "reset") databaseResetConfirmation.value = "";
-  databaseDecision.value = action;
-}
-
-function confirmDatabaseAction(expectedState: "PARTIAL" | "COMPLETE"): void {
-  if (databaseInspection.value?.state !== expectedState) return;
-  const reuseAction = expectedState === "COMPLETE" ? "migrate" : "reuse_partial";
-  if (databaseDecision.value !== reuseAction && databaseDecision.value !== "reset") return;
-  if (databaseDecision.value === "reset" && databaseResetConfirmation.value !== form.database.database) return;
-  if (databaseDecision.value === reuseAction && databaseInspection.value.hasActiveAdministrator) {
-    Object.assign(form.administrator, { username: "", displayName: "", password: "" });
-  }
-  form.databaseAction = databaseDecision.value;
+function confirmDatabaseReset(): void {
+  if (databaseResetConfirmation.value !== form.database.database) return;
+  form.databaseAction = "reset";
   databaseDecisionOpen.value = false;
   current.value = 3;
 }
+
+function resetStorageDecisionUi(): void {
+  storageDecisionOpen.value = false;
+}
+
+function requireStorageDecision(): void {
+  form.storageAction = undefined;
+  resetStorageDecisionUi();
+  storageDecisionOpen.value = true;
+}
+
+function confirmStorageReset(): void {
+  form.storageAction = "reset";
+  storageDecisionOpen.value = false;
+  current.value = 4;
+}
+
 
 async function validateCurrent(index: number): Promise<boolean> {
   actionError.value = "";
@@ -227,10 +225,7 @@ async function validateCurrent(index: number): Promise<boolean> {
         form.databaseAction = undefined;
         resetDatabaseDecisionUi();
       } else if (result.databaseInspection) {
-        const decisionMatches = result.databaseInspection.state === "PARTIAL"
-          ? form.databaseAction === "reuse_partial" || form.databaseAction === "reset"
-          : form.databaseAction === "migrate" || form.databaseAction === "reset";
-        if (!decisionMatches) {
+        if (form.databaseAction !== "reset") {
           requireDatabaseDecision();
           validation[index] = result;
           return false;
@@ -241,7 +236,19 @@ async function validateCurrent(index: number): Promise<boolean> {
       if (!input) return false;
       result = await setup.testStorage(input);
       storageInspection.value = result.storageInspection;
+      const hasFiles = Boolean(
+        result.storageInspection?.hasAssets || result.storageInspection?.hasTranscode
+      );
+      if (!hasFiles) {
+        form.storageAction = undefined;
+        resetStorageDecisionUi();
+      } else if (form.storageAction !== "reset") {
+        requireStorageDecision();
+        validation[index] = result;
+        return false;
+      }
     } else if (key === "media") {
+
       const input = parsedStep(setupStepSchemas.media.safeParse(form.media));
       if (!input) return false;
       result = await setup.testMedia(input);
@@ -250,13 +257,9 @@ async function validateCurrent(index: number): Promise<boolean> {
       if (!input) return false;
       result = await setup.testSource(input);
     } else if (key === "admin") {
-      if (reusesActiveAdministrator.value) {
-        result = { ok: true };
-      } else {
-        const input = parsedStep(setupStepSchemas.administrator.safeParse(form.administrator));
-        if (!input) return false;
-        result = await setup.testAdministrator(input);
-      }
+      const input = parsedStep(setupStepSchemas.administrator.safeParse(form.administrator));
+      if (!input) return false;
+      result = await setup.testAdministrator(input);
     } else return true;
     validation[index] = result;
     return true;
@@ -307,14 +310,10 @@ const completeMutation = useMutation({
       ui.notify(
         "success",
         "XyMusic 配置完成",
-        submittedWithReusedAdministrator.value ? "请使用现有管理员账户登录" : "请使用新建的管理员账户登录",
+        "请使用新建的管理员账户登录",
       );
     }
-    if (submittedWithReusedAdministrator.value) {
-      await router.replace({ name: "login" });
-    } else {
-      await router.replace({ name: "login", query: { username: input.administrator.username } });
-    }
+    await router.replace({ name: "login", query: { username: input.administrator.username } });
   },
   onError: (error) => {
     focusFailedSetupStage(error);
@@ -326,17 +325,12 @@ function complete(): void {
   if (completeMutation.isPending.value || validating.value) return;
   actionError.value = "";
   fieldErrors.value = {};
-  if (reusesActiveAdministrator.value) {
-    Object.assign(form.administrator, { username: "", displayName: "", password: "" });
-  }
-  const normalized = validateSetupComplete(form, {
-    reusesActiveAdministrator: reusesActiveAdministrator.value,
-  });
+  const normalized = validateSetupComplete(form);
   if (normalized.success) {
-    submittedWithReusedAdministrator.value = reusesActiveAdministrator.value;
     completeMutation.mutate(normalized.data as SetupCompleteInput);
     return;
   }
+
   const section = String(normalized.error.issues[0]?.path[0] ?? "");
   const sectionSteps: Record<string, number> = {
     http: 0,
@@ -393,7 +387,9 @@ watch(() => form.storage, () => {
   invalidateValidation(3);
   storageInspection.value = undefined;
   form.storageAction = undefined;
+  resetStorageDecisionUi();
 }, { deep: true });
+
 watch(() => form.media, () => { invalidateValidation(4); }, { deep: true });
 watch(() => form.source, () => { invalidateValidation(5); }, { deep: true });
 watch(() => [form.registration, form.administrator], () => { invalidateValidation(6); }, { deep: true });
@@ -401,9 +397,9 @@ watch(() => [form.registration, form.administrator], () => { invalidateValidatio
 function validationSummary(index: number): string {
   const result = validation[index];
   if (!result) return "";
-  if (steps.value[index]?.key === "admin" && reusesActiveAdministrator.value) return "已确认复用数据库中的现有管理员";
   if (result.serverTimeMs !== undefined) return `数据库连接正常 · ${result.serverTimeMs} ms`;
   if (result.ffmpeg && result.ffprobe) {
+
     return `${result.ffmpeg} · ${result.ffprobe}`;
   }
   if (result.resolvedPaths) return Object.values(result.resolvedPaths).join(" · ");
@@ -569,34 +565,29 @@ const ReviewRow = defineComponent({
 
               <template v-else-if="steps[current]?.key === 'admin'">
                 <StepTitle
-                  :title="reusesActiveAdministrator ? '复用现有管理员' : '创建首位管理员'"
-                  :description="reusesActiveAdministrator ? '数据库中的活跃管理员将直接复用，现有用户名和密码不会被修改。' : '该账户拥有完整管理权限。你可以选择是否允许其他用户自行注册。'"
+                  title="创建首位管理员"
+                  description="该账户拥有完整管理权限。你可以选择是否允许其他用户自行注册。"
                 />
                 <div class="mt-8 space-y-5">
-                  <div v-if="reusesActiveAdministrator" class="flex items-start gap-3 rounded-md border border-emerald-500/25 bg-emerald-500/8 px-4 py-4 text-sm leading-6 text-emerald-700 dark:text-emerald-300">
-                    <CheckCircle2 :size="19" class="mt-0.5 shrink-0" />
-                    <div><p class="font-semibold">无需创建新管理员</p><p>初始化完成后，请直接使用数据库中已有的管理员账户登录。</p></div>
-                  </div>
-                  <template v-else>
-                    <FieldWrap label="管理员用户名" :error="errorFor('username')"><input v-model="form.administrator.username" class="ui-input" autocomplete="username" placeholder="admin" /></FieldWrap>
-                    <FieldWrap label="显示名称" :error="errorFor('displayName')"><input v-model="form.administrator.displayName" class="ui-input" autocomplete="name" /></FieldWrap>
-                    <FieldWrap label="管理员密码" :error="errorFor('password')" hint="6–128 个字符。"><PasswordInput v-model="form.administrator.password" v-model:reveal="reveal.admin" autocomplete="new-password" /></FieldWrap>
-                  </template>
+                  <FieldWrap label="管理员用户名" :error="errorFor('username')"><input v-model="form.administrator.username" class="ui-input" autocomplete="username" placeholder="admin" /></FieldWrap>
+                  <FieldWrap label="显示名称" :error="errorFor('displayName')"><input v-model="form.administrator.displayName" class="ui-input" autocomplete="name" /></FieldWrap>
+                  <FieldWrap label="管理员密码" :error="errorFor('password')" hint="6–128 个字符。"><PasswordInput v-model="form.administrator.password" v-model:reveal="reveal.admin" autocomplete="new-password" /></FieldWrap>
                   <ToggleRow v-model="form.registration.enabled" label="开放用户注册" detail="关闭后仅管理员可创建用户。" />
                 </div>
               </template>
 
               <template v-else>
-                <StepTitle title="确认并应用配置" :description="reusesActiveAdministrator ? '服务会依次迁移并复用数据库、保存 .env 配置和补齐缺失内容。候选运行验证失败时可修正后重试。' : '服务会依次迁移数据库、保存 .env 配置、创建管理员和音源。候选运行验证失败时可修正后重试。'" />
+                <StepTitle title="确认并应用配置" description="服务会依次迁移数据库、保存 .env 配置、创建管理员和音源。候选运行验证失败时可修正后重试。" />
                 <div class="mt-8 divide-y divide-[var(--border)] overflow-hidden rounded-md border border-[var(--border)] bg-[var(--surface)]">
                   <ReviewRow icon="source" label="数据库迁移" :value="form.paths.migrationsDirectory" />
                   <ReviewRow icon="source" label="管理端资源" :value="form.paths.adminWebDirectory" />
                   <ReviewRow icon="database" label="PostgreSQL" :value="`${form.database.host}:${form.database.port}/${form.database.database} · 最大 ${form.database.maxConnections} 个连接`" />
-                  <ReviewRow v-if="form.databaseAction" icon="database" label="数据库处理" :value="form.databaseAction === 'reset' ? '全部清除数据库后重新初始化' : form.databaseAction === 'migrate' ? '迁移并复用数据库内所有配置' : '复用数据库内可用的部分配置'" />
                   <ReviewRow icon="storage" label="资产与转码" :value="`资产：${form.storage.assetDirectory} · 转码：${form.storage.transcodeDirectory}`" />
+                  <ReviewRow v-if="form.storageAction" icon="storage" label="存储处理" value="全部清空媒体资产与转码缓存目录" />
+
                   <ReviewRow icon="tools" label="FFmpeg" :value="form.media.mode === 'DIRECTORY' ? `自动检测：${form.media.directory || '系统 PATH'}` : `${form.media.ffmpegPath || '系统 PATH'} · ${form.media.ffprobePath || '系统 PATH'}`" />
                   <ReviewRow icon="source" label="音乐音源" :value="`${form.source.name} · ${form.source.directory} · ${form.source.mode}`" />
-                  <ReviewRow icon="admin" label="管理员" :value="reusesActiveAdministrator ? '复用数据库中的现有管理员' : `${form.administrator.username} · ${form.administrator.displayName}`" />
+                  <ReviewRow icon="admin" label="管理员" :value="`${form.administrator.username} · ${form.administrator.displayName}`" />
                 </div>
                 <div class="mt-5 flex gap-3 rounded-md border border-amber-500/25 bg-amber-500/8 p-4 text-sm leading-6 text-[var(--muted)]"><ShieldCheck :size="20" class="mt-0.5 shrink-0 text-amber-500" /><p>配置将保存到后端 `.env` 文件，请限制该文件权限并做好持久化备份。</p></div>
               </template>
@@ -616,65 +607,59 @@ const ReviewRow = defineComponent({
       </section>
     </div>
 
-    <BaseDialog v-if="databaseInspection?.state === 'COMPLETE'" v-model="databaseDecisionOpen" title="可复用所有配置" description="检测到完整的 XyMusic 数据库，数据库内现有配置可以全部复用。" prevent-close width="md">
+    <BaseDialog v-if="databaseInspection && databaseInspection.state !== 'EMPTY'" v-model="databaseDecisionOpen" title="检测到现有数据库不为空" description="本项目不支持复用旧数据库，继续初始化将会完全清空数据库中的所有旧数据。" prevent-close width="lg">
       <div class="min-w-0 space-y-6 overflow-x-hidden">
         <div class="flex min-w-0 items-start gap-3 border-b border-[var(--border)] pb-5">
-          <span class="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-[var(--primary-soft)] text-[var(--primary)]"><Database :size="18" /></span>
-          <div class="min-w-0"><p class="font-semibold">{{ form.database.database }}</p><p class="mt-1 break-words text-sm leading-6 text-[var(--muted)]">活跃管理员、音乐音源及现有业务数据将保持不变，必要的数据库迁移会在初始化时执行。</p></div>
+          <span class="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-rose-500/10 text-[var(--danger)]"><Database :size="18" /></span>
+          <div class="min-w-0">
+            <p class="font-semibold">{{ form.database.database }}</p>
+            <p class="mt-1 break-words text-sm leading-6 text-[var(--muted)]">目标数据库已存在数据或历史表结构。由于本项目不支持复用旧数据库，继续初始化将会彻底清空该数据库内全部现有表与数据。</p>
+          </div>
         </div>
 
-        <section class="rounded-md border border-emerald-500/25 bg-emerald-500/8 p-4"><h3 class="flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300"><CheckCircle2 :size="17" />可复用所有配置</h3><ul class="mt-3 space-y-2 break-words text-sm text-[var(--muted)]"><li v-for="item in databaseInspection.reusable" :key="item">{{ existingItemLabel(item) }}</li><li v-if="!databaseInspection.reusable.length">数据库核心配置完整，可直接复用。</li></ul></section>
+        <section class="rounded-md border border-rose-500/25 bg-rose-500/8 p-4">
+          <h3 class="flex items-center gap-2 text-sm font-semibold text-[var(--danger)]"><Trash2 :size="16" />清空数据库高危警告</h3>
+          <p class="mt-2 text-sm leading-6 text-[var(--muted)]">
+            初始化时将执行<strong>清空重置</strong>，删除当前数据库内全部旧数据并重新创建基础表（不会清除本地音频媒体源文件）。该操作不可逆，请务必确认是否继续。
+          </p>
+        </section>
 
-        <fieldset class="space-y-3">
-          <legend class="mb-3 text-sm font-semibold">是否复用数据库中的所有配置？</legend>
-          <button type="button" class="flex min-w-0 w-full items-start gap-3 rounded-md border p-4 text-left transition" :class="databaseDecision === 'migrate' ? 'border-[var(--primary)] bg-[var(--primary-soft)]' : 'border-[var(--border)] hover:border-[var(--border-strong)]'" @click="selectDatabaseDecision('migrate')">
-            <span class="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded border" :class="databaseDecision === 'migrate' ? 'border-[var(--primary)] bg-[var(--primary)] text-white' : 'border-[var(--border-strong)]'"><Check v-if="databaseDecision === 'migrate'" :size="13" /></span>
-            <span class="min-w-0"><span class="flex flex-wrap items-center gap-2 font-semibold"><span>是，复用所有配置</span><span class="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-300">推荐</span></span><span class="mt-1 block break-words text-sm leading-6 text-[var(--muted)]">保留现有管理员、音源及业务数据，并执行必要迁移。</span></span>
-          </button>
-          <button type="button" class="flex min-w-0 w-full items-start gap-3 rounded-md border p-4 text-left transition" :class="databaseDecision === 'reset' ? 'border-rose-500 bg-rose-500/8' : 'border-[var(--border)] hover:border-rose-500/50'" @click="selectDatabaseDecision('reset')">
-            <span class="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded border" :class="databaseDecision === 'reset' ? 'border-rose-500 bg-rose-500 text-white' : 'border-[var(--border-strong)]'"><XCircle v-if="databaseDecision === 'reset'" :size="13" /></span>
-            <span class="min-w-0"><span class="flex items-center gap-2 font-semibold text-[var(--danger)]"><Trash2 :size="15" />否，清空数据库</span><span class="mt-1 block break-words text-sm leading-6 text-[var(--muted)]">永久删除当前数据库内全部 XyMusic 业务数据，不会清除本地媒体资产。</span></span>
-          </button>
-        </fieldset>
-
-        <div v-if="databaseDecision === 'reset'" class="min-w-0 border-t border-rose-500/25 pt-5 text-sm">
-          <label class="block break-words font-medium text-[var(--text)]">输入数据库名“{{ form.database.database }}”确认清除</label>
-          <input v-model="databaseResetConfirmation" class="ui-input mt-2 min-w-0 w-full" autocomplete="off" />
+        <div class="min-w-0 border-t border-[var(--border)] pt-5 text-sm">
+          <label class="block break-words font-medium text-[var(--text)]">请输入数据库名“{{ form.database.database }}”确认清空并继续：</label>
+          <input v-model="databaseResetConfirmation" class="ui-input mt-2 min-w-0 w-full" placeholder="输入数据库名确认" autocomplete="off" />
         </div>
       </div>
-      <template #footer><AppButton :variant="databaseDecision === 'reset' ? 'danger' : 'primary'" :disabled="(databaseDecision !== 'migrate' && databaseDecision !== 'reset') || (databaseDecision === 'reset' && databaseResetConfirmation !== form.database.database)" @click="confirmDatabaseAction('COMPLETE')">确认并继续</AppButton></template>
+      <template #footer>
+        <AppButton variant="ghost" @click="resetDatabaseDecisionUi">返回修改</AppButton>
+        <AppButton variant="danger" :disabled="databaseResetConfirmation !== form.database.database" @click="confirmDatabaseReset">确认清空并继续</AppButton>
+      </template>
     </BaseDialog>
 
-    <BaseDialog v-else-if="databaseInspection?.state === 'PARTIAL'" v-model="databaseDecisionOpen" title="可复用部分配置" description="检测到部分可用的 XyMusic 配置，可选择复用有效内容并在后续步骤补齐缺失项。" prevent-close width="lg">
+    <BaseDialog v-if="storageInspection && (storageInspection.hasAssets || storageInspection.hasTranscode)" v-model="storageDecisionOpen" title="检测到存储目录不为空" description="本项目不支持复用旧媒体资产或转码缓存，继续初始化将会完全清空目录中的所有现有文件。" prevent-close width="lg">
       <div class="min-w-0 space-y-6 overflow-x-hidden">
         <div class="flex min-w-0 items-start gap-3 border-b border-[var(--border)] pb-5">
-          <span class="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-[var(--primary-soft)] text-[var(--primary)]"><Database :size="18" /></span>
-          <div class="min-w-0"><p class="font-semibold">{{ form.database.database }}</p><p class="mt-1 break-words text-sm leading-6 text-[var(--muted)]">仅保留检测到的有效配置和业务数据，缺失配置将在后续步骤补齐。</p></div>
+          <span class="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-rose-500/10 text-[var(--danger)]"><HardDrive :size="18" /></span>
+          <div class="min-w-0">
+            <p class="font-semibold">存储目录包含历史文件</p>
+            <p class="mt-1 break-words text-sm leading-6 text-[var(--muted)]">
+              媒体资产目录包含 {{ storageInspection.assetCount }} 个文件/条目，转码临时目录包含 {{ storageInspection.transcodeCount }} 个文件/条目。由于转码缓存和未嵌入音频原文件的旧封面无法在新实例中直接复用，继续操作将会彻底清空这两个目录。
+            </p>
+          </div>
         </div>
 
-        <div class="grid grid-cols-1 gap-5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-          <section class="min-w-0"><h3 class="flex items-center gap-2 text-sm font-semibold"><CheckCircle2 :size="16" class="text-emerald-500" />可复用配置</h3><ul class="mt-3 space-y-2 break-words text-sm text-[var(--muted)]"><li v-for="item in databaseInspection.reusable" :key="item">{{ existingItemLabel(item) }}</li><li v-if="!databaseInspection.reusable.length">没有可复用的业务配置</li></ul></section>
-          <section class="min-w-0"><h3 class="flex items-center gap-2 text-sm font-semibold"><Circle :size="16" class="text-amber-500" />需要补齐</h3><ul class="mt-3 space-y-2 break-words text-sm text-[var(--muted)]"><li v-for="item in databaseInspection.missing" :key="item">{{ existingItemLabel(item) }}</li><li v-if="!databaseInspection.missing.length">无需补齐核心配置</li></ul></section>
-        </div>
-
-        <fieldset class="space-y-3">
-          <legend class="mb-3 text-sm font-semibold">是否复用检测到的部分配置？</legend>
-          <button type="button" class="flex min-w-0 w-full items-start gap-3 rounded-md border p-4 text-left transition" :class="databaseDecision === 'reuse_partial' ? 'border-[var(--primary)] bg-[var(--primary-soft)]' : 'border-[var(--border)] hover:border-[var(--border-strong)]'" @click="selectDatabaseDecision('reuse_partial')">
-            <span class="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded border" :class="databaseDecision === 'reuse_partial' ? 'border-[var(--primary)] bg-[var(--primary)] text-white' : 'border-[var(--border-strong)]'"><Check v-if="databaseDecision === 'reuse_partial'" :size="13" /></span>
-            <span class="min-w-0"><span class="flex flex-wrap items-center gap-2 font-semibold"><span>是，复用部分配置</span><span class="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-300">推荐</span></span><span class="mt-1 block break-words text-sm leading-6 text-[var(--muted)]">保留现有有效内容，仅创建或补齐缺失配置。</span></span>
-          </button>
-          <button type="button" class="flex min-w-0 w-full items-start gap-3 rounded-md border p-4 text-left transition" :class="databaseDecision === 'reset' ? 'border-rose-500 bg-rose-500/8' : 'border-[var(--border)] hover:border-rose-500/50'" @click="selectDatabaseDecision('reset')">
-            <span class="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded border" :class="databaseDecision === 'reset' ? 'border-rose-500 bg-rose-500 text-white' : 'border-[var(--border-strong)]'"><XCircle v-if="databaseDecision === 'reset'" :size="13" /></span>
-            <span class="min-w-0"><span class="flex items-center gap-2 font-semibold text-[var(--danger)]"><Trash2 :size="15" />否，清空数据库</span><span class="mt-1 block break-words text-sm leading-6 text-[var(--muted)]">永久删除当前数据库内全部 XyMusic 业务数据，不会清除本地媒体资产。</span></span>
-          </button>
-        </fieldset>
-
-        <div v-if="databaseDecision === 'reset'" class="min-w-0 border-t border-rose-500/25 pt-5 text-sm">
-          <label class="block break-words font-medium text-[var(--text)]">输入数据库名“{{ form.database.database }}”确认清除</label>
-          <input v-model="databaseResetConfirmation" class="ui-input mt-2 min-w-0 w-full" autocomplete="off" />
-        </div>
+        <section class="rounded-md border border-rose-500/25 bg-rose-500/8 p-4">
+          <h3 class="flex items-center gap-2 text-sm font-semibold text-[var(--danger)]"><Trash2 :size="16" />清空存储目录高危警告</h3>
+          <p class="mt-2 text-sm leading-6 text-[var(--muted)]">
+            初始化时将<strong>清空媒体资产目录（{{ form.storage.assetDirectory }}）与转码缓存目录（{{ form.storage.transcodeDirectory }}）</strong>。注意：这<strong>不会</strong>影响您的音频源文件目录（{{ form.source.directory }}）。初始化完成后，系统将自动重新扫描音频并提取内嵌封面。
+          </p>
+        </section>
       </div>
-      <template #footer><AppButton :variant="databaseDecision === 'reset' ? 'danger' : 'primary'" :disabled="(databaseDecision !== 'reuse_partial' && databaseDecision !== 'reset') || (databaseDecision === 'reset' && databaseResetConfirmation !== form.database.database)" @click="confirmDatabaseAction('PARTIAL')">确认并继续</AppButton></template>
+      <template #footer>
+        <AppButton variant="ghost" @click="resetStorageDecisionUi">返回修改</AppButton>
+        <AppButton variant="danger" @click="confirmStorageReset">确认清空并继续</AppButton>
+      </template>
     </BaseDialog>
+
   </main>
 </template>
+

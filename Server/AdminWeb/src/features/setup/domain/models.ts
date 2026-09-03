@@ -92,6 +92,10 @@ export interface SetupValidationResult {
   storageInspection?: {
     assetDirectoryExists: boolean;
     transcodeDirectoryExists: boolean;
+    hasAssets: boolean;
+    assetCount: number;
+    hasTranscode: boolean;
+    transcodeCount: number;
   };
 }
 
@@ -104,9 +108,11 @@ export interface SetupCompleteInput {
   source: SetupSourceInput;
   registration: { enabled: boolean };
   administrator: BootstrapAdminInput;
-  databaseAction?: "reuse_partial" | "migrate" | "reset";
-  storageAction?: "reuse" | "reset";
+  databaseAction?: "reset";
+  storageAction?: "reset";
 }
+
+
 
 export interface SetupCompletion {
   configured: true;
