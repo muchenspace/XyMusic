@@ -20,12 +20,12 @@ const dialogStub = {
   template: "<section v-if='modelValue' :data-dialog-title='title'><h2>{{ title }}</h2><p>{{ description }}</p><slot /><footer><slot name='footer' /></footer></section>",
 };
 
-function track(): TrackSummary {
+function track(artists: string[] = ["本地歌手"]): TrackSummary {
   return {
     id: "track-1",
     title: "本地歌曲",
     artistCredits: [],
-    artists: ["本地歌手"],
+    artists,
     album: { id: "album-local", title: "本地专辑" },
     artwork: null,
     durationMs: 180_000,
@@ -69,9 +69,9 @@ function detail(item: TagCandidate): TagCandidateDetail {
   };
 }
 
-function mountDialog() {
+function mountDialog(artists: string[] = ["本地歌手"], modelValue = true) {
   return mount(TagScrapeDialog, {
-    props: { modelValue: true, track: track(), expectedVersion: 3 },
+    props: { modelValue, track: track(artists), expectedVersion: 3 },
     global: { stubs: { BaseDialog: dialogStub } },
   });
 }
@@ -102,6 +102,42 @@ function deferred<T>() {
 
 afterEach(() => {
   vi.clearAllMocks();
+});
+
+describe("TagScrapeDialog search query", () => {
+  it("uses only the title when the artist is Unknown Artist", async () => {
+    scraping.search.mockResolvedValue([]);
+    const wrapper = mountDialog(["Unknown Artist"], false);
+
+    await wrapper.setProps({ modelValue: true });
+
+    const input = wrapper.get("input[placeholder='歌曲、艺术家或专辑']").element as HTMLInputElement;
+    expect(input.value).toBe("本地歌曲");
+
+    await button(wrapper, "搜索").trigger("click");
+    await flushPromises();
+
+    expect(scraping.search).toHaveBeenCalledWith(expect.objectContaining({
+      query: "本地歌曲", title: "本地歌曲", artist: "",
+    }), expect.any(AbortSignal));
+  });
+
+  it("keeps the title and real artist in the default search query", async () => {
+    scraping.search.mockResolvedValue([]);
+    const wrapper = mountDialog(["本地歌手"], false);
+
+    await wrapper.setProps({ modelValue: true });
+
+    const input = wrapper.get("input[placeholder='歌曲、艺术家或专辑']").element as HTMLInputElement;
+    expect(input.value).toBe("本地歌曲 本地歌手");
+
+    await button(wrapper, "搜索").trigger("click");
+    await flushPromises();
+
+    expect(scraping.search).toHaveBeenCalledWith(expect.objectContaining({
+      query: "本地歌曲 本地歌手", title: "本地歌曲", artist: "本地歌手",
+    }), expect.any(AbortSignal));
+  });
 });
 
 describe("TagScrapeDialog candidate details", () => {

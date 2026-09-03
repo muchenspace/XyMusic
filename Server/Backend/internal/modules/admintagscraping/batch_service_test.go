@@ -123,7 +123,6 @@ func TestCreateBatchRejectsUnsupportedVerbatimSources(t *testing.T) {
 	}
 }
 
-
 func TestCreateBatchPrefiltersMissingFieldsBeforeWritebackAndPersistence(t *testing.T) {
 	present := metadataFixture(11)
 	present.Effective.Lyrics = &MetadataLyrics{Content: "already present", Format: "PLAIN", Language: "und", Timing: "LINE"}
@@ -299,6 +298,39 @@ func TestBatchItemAppliesFirstReliableCandidate(t *testing.T) {
 	}
 	if processor.applyCalls != 1 || processor.applyInput.ExpectedVersion != 1 || !processor.applyInput.Verbatim || processor.applyInput.Reason != "batch apply" {
 		t.Fatalf("apply = %d/%#v", processor.applyCalls, processor.applyInput)
+	}
+}
+
+func TestBatchItemOmitsUnknownArtistFromSearchCriteria(t *testing.T) {
+	metadata := metadataFixture(1)
+	metadata.Effective.Title = "Song"
+	metadata.Effective.Credits = []MetadataCredit{{Name: "Unknown Artist", Role: "PRIMARY"}}
+	processor := &batchProcessorStub{
+		metadata: metadata,
+		matches: []Candidate{{
+			ID: "candidate", Name: "Song", Source: SourceQMusic,
+			TitleScore: floatPointer(2), Score: floatPointer(4),
+		}},
+	}
+	service, err := NewBatchService(BatchServiceDependencies{Store: &storeStub{}, Processor: processor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := "admin"
+	status, candidate, message := service.executeItem(context.Background(), ClaimedBatchItem{
+		Job: BatchJobRecord{ID: "job", RequestedBy: &actor, Options: BatchOptions{
+			Sources: []Source{SourceQMusic}, MatchMode: MatchStrict,
+			Fields: ApplyFields{Title: true}, Reason: "unknown artist search",
+		}},
+		Item: BatchItemRecord{ID: "item", TrackID: "track", ExpectedVersion: 1},
+	}, nilAtomicBool())
+	if status != ItemSucceeded || candidate == nil || message != "Scraping completed" {
+		t.Fatalf("item result = %s/%#v/%q", status, candidate, message)
+	}
+	searchInputs := processor.searchCallInputs()
+	if len(searchInputs) != 1 || searchInputs[0].Artist != nil || searchInputs[0].Query != nil ||
+		searchInputs[0].Title == nil || *searchInputs[0].Title != "Song" {
+		t.Fatalf("search input = %#v", searchInputs)
 	}
 }
 
@@ -1046,6 +1078,7 @@ type batchProcessorStub struct {
 	matchesBySource  map[Source][]Candidate
 	searchErr        error
 	searchCalls      int
+	searchInputs     []SearchInput
 	applyResult      ApplyResult
 	applyErr         error
 	applyCalls       int
@@ -1423,6 +1456,7 @@ func (stub *batchProcessorStub) TrackMetadata(_ context.Context, trackID string)
 func (stub *batchProcessorStub) Search(_ context.Context, input SearchInput) ([]Candidate, error) {
 	stub.mu.Lock()
 	stub.searchCalls++
+	stub.searchInputs = append(stub.searchInputs, input)
 	if stub.matchesBySource != nil {
 		matches, err := stub.matchesBySource[input.Source], stub.searchErr
 		stub.mu.Unlock()
@@ -1431,6 +1465,12 @@ func (stub *batchProcessorStub) Search(_ context.Context, input SearchInput) ([]
 	matches, err := stub.matches, stub.searchErr
 	stub.mu.Unlock()
 	return matches, err
+}
+
+func (stub *batchProcessorStub) searchCallInputs() []SearchInput {
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	return append([]SearchInput(nil), stub.searchInputs...)
 }
 func (stub *batchProcessorStub) Apply(_ context.Context, _, _ string, input ApplyInput) (ApplyResult, error) {
 	stub.applyCalls++

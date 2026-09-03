@@ -112,7 +112,6 @@ func TestVerbatimSearchSupportsAllPlatformSources(t *testing.T) {
 	}
 }
 
-
 func TestSearchRejectsRemovedMusicSources(t *testing.T) {
 	service, err := NewService(ServiceDependencies{
 		Store: &storeStub{}, Music: &musicStub{}, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
@@ -178,6 +177,36 @@ func TestSearchFallsBackToTitleWhenQueryIsAbsent(t *testing.T) {
 	}
 	if queries := music.searchCallQueries(); !reflect.DeepEqual(queries, []string{title}) {
 		t.Fatalf("provider queries = %#v", queries)
+	}
+}
+
+func TestSearchTreatsUnknownArtistAsAbsentForMatching(t *testing.T) {
+	music := &musicStub{
+		searchResults: map[Source][]Candidate{
+			SourceQMusic: {{ID: "title-match", Name: "Song", Artist: "Remote Artist", Source: SourceQMusic}},
+		},
+	}
+	service, err := NewService(ServiceDependencies{
+		Store: &storeStub{}, Music: music, Artwork: &artworkStub{}, DefaultLibraryDirectory: "music",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	title, artist := "Song", "Unknown Artist"
+	result, err := service.Search(context.Background(), SearchInput{
+		Source: SourceQMusic, Title: &title, Artist: &artist,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 1 || result[0].ID != "title-match" {
+		t.Fatalf("search result = %#v", result)
+	}
+	if queries := music.searchCallQueries(); !reflect.DeepEqual(queries, []string{title}) {
+		t.Fatalf("provider queries = %#v", queries)
+	}
+	if valueOrZero(result[0].ArtistScore) != 0 || valueOrZero(result[0].Score) != 2 {
+		t.Fatalf("matching scores = %#v", result[0])
 	}
 }
 

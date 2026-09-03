@@ -44,6 +44,13 @@ let lookupController: AbortController | undefined;
 let lookupGeneration = 0;
 let applyGeneration = 0;
 
+function searchableArtistNames(artists: string[]): string[] {
+  return artists.filter((artist) => {
+    const name = artist.trim();
+    return name.length > 0 && name.toLowerCase() !== "unknown artist";
+  });
+}
+
 function cancelLookup(): void {
   lookupGeneration += 1;
   lookupController?.abort();
@@ -78,7 +85,8 @@ watch(open, (value) => {
   cancelLookup();
   resetCandidateDetail();
   if (!value || !props.track) return;
-  query.value = [props.track.title, props.track.artists.join(" ")].filter(Boolean).join(" ");
+  const artistNames = searchableArtistNames(props.track.artists);
+  query.value = [props.track.title, artistNames.join(" ")].filter(Boolean).join(" ");
   verbatim.value = false;
   candidates.value = []; selected.value = undefined; writeBack.value = false;
   error.value = archived.value ? "已归档曲目需先恢复后才能在线刮削" : "";
@@ -103,9 +111,10 @@ async function search(): Promise<void> {
   lookupController = controller;
   loading.value = true; error.value = "";
   try {
+    const artistNames = searchableArtistNames(track.artists);
     const result = await scraping.search({
       source: source.value, verbatim: verbatim.value, query: query.value.trim(), title: track.title,
-      artist: track.artists.join(","), album: track.album?.title ?? "",
+      artist: artistNames.join(","), album: track.album?.title ?? "",
     }, controller.signal);
     if (generation !== lookupGeneration || !open.value) return;
     candidates.value = result;

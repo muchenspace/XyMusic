@@ -868,10 +868,15 @@ func (service *BatchService) executeItem(
 	query := SearchInput{Title: &metadata.Effective.Title, Verbatim: claim.Job.Options.Verbatim}
 	artistNames := make([]string, 0, len(metadata.Effective.Credits))
 	for _, credit := range metadata.Effective.Credits {
+		if isUnknownArtistPlaceholder(credit.Name) {
+			continue
+		}
 		artistNames = append(artistNames, credit.Name)
 	}
-	artist := strings.Join(artistNames, ",")
-	query.Artist = &artist
+	if len(artistNames) > 0 {
+		artist := strings.Join(artistNames, ",")
+		query.Artist = &artist
+	}
 	if metadata.Effective.Album != nil {
 		query.Album = metadata.Effective.Album
 	} else {
@@ -1172,7 +1177,6 @@ func supportedVerbatimSources(sources []Source) bool {
 	}
 	return len(sources) > 0
 }
-
 
 func presentBatch(job BatchJobRecord, items []BatchItemRecord, partial bool) BatchJobDTO {
 	skipped := max(0, job.Processed-job.Succeeded-job.Failed)
