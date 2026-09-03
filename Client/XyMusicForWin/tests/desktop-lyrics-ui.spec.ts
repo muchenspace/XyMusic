@@ -29,7 +29,6 @@ describe("desktop lyrics window UI", () => {
       await flushPromises();
       expect(animationFrames).toHaveLength(0);
 
-      const transitionStartedAt = performance.now();
       clockListener({
         version: 4,
         transportEpoch: TEST_TRANSPORT_EPOCH,
@@ -42,11 +41,6 @@ describe("desktop lyrics window UI", () => {
       await nextTick();
 
       expect(wrapper.get(".desktop-lyric-line-current").text()).toContain("second line");
-      expect(wrapper.get(".desktop-lyric-line-outgoing").text()).toContain("first line");
-      expect(animationFrames).toHaveLength(1);
-
-      animationFrames.shift()?.(transitionStartedAt + 600);
-      await nextTick();
       expect(wrapper.find(".desktop-lyric-line-outgoing").exists()).toBe(false);
       expect(wrapper.get(".desktop-lyric-line-current").attributes("style"))
         .toContain("--desktop-lyric-line-emphasis: 1");
@@ -56,23 +50,7 @@ describe("desktop lyrics window UI", () => {
     }
   });
 
-  it("separates and fades a wrapped outgoing line before removing it", async () => {
-    const animationFrames: FrameRequestCallback[] = [];
-    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
-      animationFrames.push(callback);
-      return animationFrames.length;
-    });
-    vi.stubGlobal("cancelAnimationFrame", () => undefined);
-    const offsetHeight = vi.spyOn(HTMLElement.prototype, "offsetHeight", "get")
-      .mockImplementation(function measuredLyricHeight() {
-        if (this.textContent?.includes("wrapped source line")) return 96;
-        if (this.classList.contains("desktop-lyric-line")) return 48;
-        return 0;
-      });
-    const computedStyle = vi.spyOn(window, "getComputedStyle").mockImplementation((element) => ({
-      direction: "ltr",
-      rowGap: element.classList.contains("desktop-lyrics-copy") ? "8px" : "0px",
-    }) as CSSStyleDeclaration);
+  it("updates dual-slot lyrics immediately without outgoing animation", async () => {
     let wrapper: ReturnType<typeof mount> | null = null;
 
     try {
@@ -103,7 +81,6 @@ describe("desktop lyrics window UI", () => {
       });
       await flushPromises();
 
-      const transitionStartedAt = performance.now();
       clockListener({
         version: 4,
         transportEpoch: TEST_TRANSPORT_EPOCH,
@@ -116,38 +93,11 @@ describe("desktop lyrics window UI", () => {
       await nextTick();
       await nextTick();
 
-      const incoming = wrapper.get<HTMLElement>(".desktop-lyric-line-current");
-      const outgoing = wrapper.get<HTMLElement>(".desktop-lyric-line-outgoing");
-      const currentTopBeforeFinish = incoming.element.getBoundingClientRect().top;
-      const incomingShift = Number.parseFloat(
-        incoming.element.style.getPropertyValue("--desktop-lyric-transition-shift"),
-      );
-      const initialOpacity = Number.parseFloat(
-        outgoing.element.style.getPropertyValue("--desktop-lyric-transition-opacity"),
-      );
-      expect(incomingShift).toBeGreaterThan(103.5);
-      expect(incomingShift).toBeLessThanOrEqual(104);
-      expect(initialOpacity).toBeGreaterThan(0.99);
-      expect(initialOpacity).toBeLessThanOrEqual(1);
-
-      animationFrames.shift()?.(transitionStartedAt + 150);
-      await nextTick();
-      const fadingOpacity = Number.parseFloat(
-        wrapper.get<HTMLElement>(".desktop-lyric-line-outgoing").element.style
-          .getPropertyValue("--desktop-lyric-transition-opacity"),
-      );
-      expect(fadingOpacity).toBeGreaterThan(0);
-      expect(fadingOpacity).toBeLessThan(1);
-
-      animationFrames.shift()?.(transitionStartedAt + 600);
-      await nextTick();
+      expect(wrapper.get(".desktop-lyric-slot-bottom").text()).toContain("target line");
+      expect(wrapper.get(".desktop-lyric-slot-top").text()).toContain("following line");
       expect(wrapper.find(".desktop-lyric-line-outgoing").exists()).toBe(false);
-      expect(wrapper.get<HTMLElement>(".desktop-lyric-line-current").element.getBoundingClientRect().top)
-        .toBeCloseTo(currentTopBeforeFinish, 0);
     } finally {
       wrapper?.unmount();
-      offsetHeight.mockRestore();
-      computedStyle.mockRestore();
       vi.unstubAllGlobals();
     }
   });

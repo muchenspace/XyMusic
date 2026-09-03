@@ -5,7 +5,7 @@ import {
   DEFAULT_DESKTOP_LYRICS_HIGHLIGHT_COLOR,
   DEFAULT_DESKTOP_LYRICS_TEXT_COLOR,
 } from "../application/ports/UserInterfacePreferences";
-import type { LyricLine, Lyrics } from "../domain/music";
+import type { Lyrics } from "../domain/music";
 import type { DesktopLyricsBridge, DesktopLyricsUnlisten } from "./bridge";
 import { createDesktopLyricsBridge } from "./bridge";
 import type {
@@ -24,15 +24,8 @@ import {
 import {
   DESKTOP_LYRICS_TRANSITION_LINE_DISTANCE_PX,
   buildDesktopLyricsFrame,
-  createDesktopLyricsTransition,
-  desktopLyricsLineShiftPx,
-  desktopLyricsTransitionWeight,
   estimatePlaybackSeconds,
   fastOutSlowIn,
-  resolveDesktopLyricsTransitionMode,
-  retargetDesktopLyricsTransition,
-  sampleDesktopLyricsTransition,
-  smoothstep,
   type DesktopLyricsTransition,
 } from "./timeline";
 import {
@@ -63,12 +56,6 @@ interface DesktopPlaybackPositionCorrection {
   startedAtMs: number;
 }
 
-interface DesktopLyricsOutgoingLine {
-  index: number;
-  line: LyricLine;
-  weight: number;
-}
-
 const initialState = isSupportedState(props.initialState) ? props.initialState : null;
 const state = ref<DesktopLyricsStatePayload | null>(initialState);
 const clock = ref<LocalDesktopLyricsClock | null>(initialState ? localClock(clockFromState(initialState)) : null);
@@ -76,7 +63,8 @@ const nowMs = ref(monotonicNow());
 const lyricTransition = ref<DesktopLyricsTransition | null>(null);
 const desktopLyricsCopyElement = ref<HTMLElement | null>(null);
 const currentLineElement = ref<HTMLElement | null>(null);
-const outgoingLineElements = ref<HTMLElement[]>([]);
+const topLineElement = ref<HTMLElement | null>(null);
+const bottomLineElement = ref<HTMLElement | null>(null);
 const transitionLineDistancePx = ref(DESKTOP_LYRICS_TRANSITION_LINE_DISTANCE_PX);
 const optimisticLocked = ref(false);
 const optimisticFontScale = ref<number | null>(null);
@@ -94,8 +82,6 @@ let activeTransportEpoch: string | null = initialState?.transportEpoch ?? null;
 const retiredTransportEpochs = new Set<string>();
 let stateHandshakeComplete = initialState !== null;
 let bridgeConnected = false;
-let observedLyricsIdentity: string | null = null;
-let observedActiveIndex: number | null = null;
 let playbackPositionCorrection: DesktopPlaybackPositionCorrection | null = null;
 let lastRenderedPlaybackSeconds = clock.value?.positionSeconds ?? 0;
 let lyricLayoutObserver: ResizeObserver | null = null;
@@ -131,52 +117,36 @@ const lyricsIdentity = computed(() => desktopLyricsIdentity(
   clock.value?.trackId ?? null,
 ));
 const currentLine = computed(() => frame.value?.current ?? null);
-const nextLine = computed(() => frame.value?.next ?? null);
-const lyricTransitionSample = computed(() => {
-  const transition = lyricTransition.value;
-  return transition ? sampleDesktopLyricsTransition(transition, nowMs.value) : null;
-});
-const transitionInProgress = computed(() => {
-  const sample = lyricTransitionSample.value;
-  return Boolean(sample && !sample.done);
-});
-const outgoingLines = computed<readonly DesktopLyricsOutgoingLine[]>(() => {
-  const sample = lyricTransitionSample.value;
-  const lyrics = state.value?.lyrics;
-  const currentIndex = currentLine.value?.index;
-  if (!sample || sample.done || !lyrics || currentIndex === undefined) return [];
-  return sample.weights.flatMap(({ index, value }) => {
-    if (index === currentIndex) return [];
-    const line = lyrics.lines[index];
-    return line ? [{ index, line, weight: value }] : [];
-  });
-});
-const currentLineTransitionStyle = computed<Record<string, string | number>>(() => {
-  const current = currentLine.value;
-  const sample = lyricTransitionSample.value;
-  if (!current || !sample || sample.done) return desktopLyricLineStyle(current?.started ? 1 : 0, 0);
-  const weight = desktopLyricsTransitionWeight(sample, current.index);
-  return desktopLyricLineStyle(
-    weight,
-    desktopLyricsLineShiftPx(current.index, sample.linePosition, 0, transitionLineDistancePx.value),
-  );
-});
-const nextLineTransitionStyle = computed<Record<string, string | number>>(() => {
-  const sample = lyricTransitionSample.value;
-  const next = nextLine.value;
-  const shift = sample && !sample.done && next
-    ? desktopLyricsLineShiftPx(next.index, sample.linePosition, 1, transitionLineDistancePx.value)
-    : 0;
-  return { "--desktop-lyric-next-shift": `${shift}px` };
-});
-const currentWordProgresses = computed(() => {
-  const lineFrame = currentLine.value;
-  if (state.value?.lyrics?.timing !== "WORD" || !lineFrame?.line.words?.length) return [];
+const topLine = computed(() => frame.value?.top ?? null);
+const bottomLine = computed(() => frame.value?.bottom ?? null);
+const activeSlot = computed(() => frame.value?.activeSlot ?? null);
+const topWordProgresses = computed(() => {
+  const lineFrame = topLine.value;
+  if (state.value?.lyrics?.timing !== "WORD" || !lineFrame?.line.words?.length || (activeSlot.value !== "top" && activeSlot.value !== null)) return [];
   return lineFrame.line.words.map((word, wordIndex) => ({
     word,
     progress: desktopLyricWordProgress(lineFrame.index, wordIndex),
   }));
 });
+const bottomWordProgresses = computed(() => {
+  const lineFrame = bottomLine.value;
+  if (state.value?.lyrics?.timing !== "WORD" || !lineFrame?.line.words?.length || activeSlot.value !== "bottom") return [];
+  return lineFrame.line.words.map((word, wordIndex) => ({
+    word,
+    progress: desktopLyricWordProgress(lineFrame.index, wordIndex),
+  }));
+});
+
+function slotLineStyle(slot: "top" | "bottom"): Record<string, string | number> {
+  const isActive = activeSlot.value === slot || (activeSlot.value === null && slot === "top");
+  return {
+    "--desktop-lyric-line-emphasis": isActive ? 1 : 0,
+    "--desktop-lyric-word-emphasis": isActive ? 1 : 0,
+    "--desktop-lyric-transition-opacity": isActive ? 1 : 0.82,
+    "--desktop-lyric-transition-shift": "0px",
+    "--desktop-lyric-transition-scale": 1,
+  };
+}
 const emptyMessage = computed(() => {
   if (!state.value?.track) return "等待播放";
   return state.value.lyrics?.lines.length ? "等待歌词" : "暂无歌词";
@@ -188,8 +158,6 @@ function clearProtocolState(): void {
   playbackPositionCorrection = null;
   lastRenderedPlaybackSeconds = 0;
   lyricTransition.value = null;
-  observedLyricsIdentity = null;
-  observedActiveIndex = null;
   stateRevision = -1;
   latestTimelineSample = null;
   activeTransportEpoch = null;
@@ -366,38 +334,8 @@ function requestClose(): void {
   sendAction(createDesktopLyricsAction("close"));
 }
 
-function syncDesktopLyricsTransition(identity: string, targetIndex: number): void {
-  if (identity !== observedLyricsIdentity) {
-    observedLyricsIdentity = identity;
-    observedActiveIndex = targetIndex;
-    lyricTransition.value = null;
-    return;
-  }
-  const previousIndex = observedActiveIndex;
-  if (previousIndex === targetIndex) return;
-  observedActiveIndex = targetIndex;
-  const lines = state.value?.lyrics?.lines;
-  const previousTime = previousIndex === null || previousIndex < 0
-    ? null
-    : lines?.[previousIndex]?.time ?? null;
-  const targetTime = targetIndex < 0 ? null : lines?.[targetIndex]?.time ?? null;
-  const mode = resolveDesktopLyricsTransitionMode(
-    previousIndex,
-    targetIndex,
-    previousTime,
-    targetTime,
-  );
-  if (mode === "SNAP" || prefersReducedMotion()) {
-    lyricTransition.value = null;
-    return;
-  }
-
-  const timestamp = nowMs.value;
-  const previousTransition = lyricTransition.value;
-  lyricTransition.value = previousTransition
-    && !sampleDesktopLyricsTransition(previousTransition, timestamp).done
-    ? retargetDesktopLyricsTransition(previousTransition, targetIndex, timestamp)
-    : createDesktopLyricsTransition(previousIndex ?? targetIndex, targetIndex, timestamp);
+function syncDesktopLyricsTransition(_identity: string, _targetIndex: number): void {
+  lyricTransition.value = null;
 }
 
 function schedulePlaybackUpdate(reset = false, frameTimestamp?: number): void {
@@ -410,7 +348,7 @@ function schedulePlaybackUpdate(reset = false, frameTimestamp?: number): void {
   const playbackSeconds = frame.value?.playbackSeconds;
   if (playbackSeconds === undefined) return;
   const plan = resolveLyricPlaybackRenderPlan(state.value?.lyrics ?? null, playbackSeconds);
-  if (plan.requiresAnimationFrame || transitionInProgress.value || playbackPositionCorrection !== null) {
+  if (plan.requiresAnimationFrame || playbackPositionCorrection !== null) {
     const generation = playbackScheduleGeneration;
     animationFrame = requestPlaybackFrame((timestamp) => {
       if (generation !== playbackScheduleGeneration) return;
@@ -433,8 +371,7 @@ function schedulePlaybackUpdate(reset = false, frameTimestamp?: number): void {
 }
 
 function settleCompletedLyricTransition(): void {
-  const sample = lyricTransitionSample.value;
-  if (sample?.done) lyricTransition.value = null;
+  lyricTransition.value = null;
 }
 
 function stopPlaybackUpdates(): void {
@@ -450,7 +387,7 @@ function stopPlaybackUpdates(): void {
 function canRenderTimeline(): boolean {
   return !disposed
     && renderActive.value
-    && (isPlaying.value || transitionInProgress.value)
+    && isPlaying.value
     && (typeof document === "undefined" || document.visibilityState !== "hidden");
 }
 
@@ -471,7 +408,6 @@ watch(isPlaying, () => schedulePlaybackUpdate(true));
 watch(
   [
     () => currentLine.value?.index ?? -1,
-    () => outgoingLines.value.map(({ index }) => index).join(","),
     fontScale,
     () => state.value?.showTranslation ?? false,
   ],
@@ -604,27 +540,6 @@ function desktopLyricsIdentity(lyrics: Lyrics | null, clockTrackId: string | nul
   ]);
 }
 
-function desktopLyricLineStyle(weight: number, shiftPx: number): Record<string, string | number> {
-  const emphasis = clamp(weight, 0, 1);
-  return {
-    "--desktop-lyric-line-emphasis": emphasis,
-    "--desktop-lyric-word-emphasis": smoothstep(emphasis),
-    "--desktop-lyric-transition-opacity": emphasis,
-    "--desktop-lyric-transition-shift": `${Number.isFinite(shiftPx) ? shiftPx : 0}px`,
-    "--desktop-lyric-transition-scale": 1 + 0.012 * emphasis,
-  };
-}
-
-function outgoingLineTransitionStyle(line: DesktopLyricsOutgoingLine): Record<string, string | number> {
-  const sample = lyricTransitionSample.value;
-  return desktopLyricLineStyle(
-    line.weight,
-    sample
-      ? desktopLyricsLineShiftPx(line.index, sample.linePosition, 0, transitionLineDistancePx.value)
-      : 0,
-  );
-}
-
 function queueTransitionDistanceMeasure(): void {
   if (transitionDistanceMeasureQueued || disposed) return;
   transitionDistanceMeasureQueued = true;
@@ -643,7 +558,8 @@ function observeDesktopLyricLayout(): void {
   const elements = [
     desktopLyricsCopyElement.value,
     currentLineElement.value,
-    ...outgoingLineElements.value,
+    topLineElement.value,
+    bottomLineElement.value,
   ];
   elements.forEach((element) => {
     if (element) observer.observe(element);
@@ -652,8 +568,11 @@ function observeDesktopLyricLayout(): void {
 
 function measureTransitionLineDistance(): void {
   if (disposed) return;
-  const lineElements = [currentLineElement.value, ...outgoingLineElements.value]
-    .filter((element): element is HTMLElement => element !== null);
+  const lineElements = [
+    topLineElement.value,
+    bottomLineElement.value,
+    currentLineElement.value,
+  ].filter((element): element is HTMLElement => element !== null);
   const tallestLineHeight = lineElements.reduce(
     (height, element) => Math.max(height, element.offsetHeight),
     0,
@@ -686,11 +605,6 @@ function desktopLyricWordProgress(lineIndex: number, wordIndex: number): number 
     line.words?.[wordIndex + 1]?.time,
     lyrics?.lines[lineIndex + 1]?.time,
   );
-}
-
-function prefersReducedMotion(): boolean {
-  return typeof window !== "undefined"
-    && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
 }
 
 function requestPlaybackFrame(callback: FrameRequestCallback): number {
@@ -758,69 +672,33 @@ function monotonicNow(): number {
         v-if="currentLine"
         ref="desktopLyricsCopyElement"
         class="desktop-lyrics-copy"
-        :class="{ 'is-transitioning': transitionInProgress }"
         data-tauri-drag-region
         aria-live="off"
       >
-        <div
-          v-for="outgoingLine in outgoingLines"
-          :key="`outgoing-${outgoingLine.index}`"
-          ref="outgoingLineElements"
-          class="desktop-lyric-line desktop-lyric-line-outgoing"
-          :style="outgoingLineTransitionStyle(outgoingLine)"
-          data-tauri-drag-region
-          aria-hidden="true"
-        >
-          <p class="desktop-lyric-primary" data-tauri-drag-region>
-            <WordByWordLyricText
-              v-if="state?.lyrics?.timing === 'WORD' && outgoingLine.line.words?.length"
-              :text="outgoingLine.line.text"
-              :words="outgoingLine.line.words"
-              :progresses="outgoingLine.line.words.map((_, wordIndex) => desktopLyricWordProgress(outgoingLine.index, wordIndex))"
-              container-class="desktop-lyric-words"
-              highlight-color="color-mix(in srgb, var(--desktop-lyric-highlight) calc(var(--desktop-lyric-word-emphasis, 0) * 100%), var(--desktop-lyric-idle))"
-            >
-              <span
-                v-for="(word, wordIndex) in outgoingLine.line.words"
-                :key="`${word.time}-${wordIndex}`"
-                v-memo="[word, desktopLyricWordProgress(outgoingLine.index, wordIndex)]"
-                class="desktop-lyric-word"
-                dir="auto"
-                :class="{
-                  'is-sung': desktopLyricWordProgress(outgoingLine.index, wordIndex) > 0,
-                  'is-current': desktopLyricWordProgress(outgoingLine.index, wordIndex) > 0 && desktopLyricWordProgress(outgoingLine.index, wordIndex) < 1,
-                }"
-                :style="{ '--desktop-lyric-word-progress': `${desktopLyricWordProgress(outgoingLine.index, wordIndex) * 100}%` }"
-                data-tauri-drag-region
-              >{{ word.text }}</span>
-            </WordByWordLyricText>
-            <span v-else data-tauri-drag-region>{{ outgoingLine.line.text }}</span>
-          </p>
-          <p
-            v-if="state?.showTranslation && outgoingLine.line.translation"
-            class="desktop-lyric-translation"
-            data-tauri-drag-region
-          >{{ outgoingLine.line.translation }}</p>
-        </div>
 
         <div
-          ref="currentLineElement"
-          class="desktop-lyric-line desktop-lyric-line-current"
-          :class="{ 'has-started': currentLine.started, 'is-transitioning': transitionInProgress }"
-          :style="currentLineTransitionStyle"
+          v-if="topLine"
+          :ref="(el) => { topLineElement = el as HTMLElement | null; if (activeSlot === 'top' || activeSlot === null) currentLineElement = el as HTMLElement | null; }"
+          class="desktop-lyric-line desktop-lyric-slot-top"
+          :class="{
+            'desktop-lyric-line-current is-active': activeSlot === 'top' || (activeSlot === null && topLine.index === 0),
+            'desktop-lyric-line-next is-upcoming': activeSlot === 'bottom',
+            'has-started': topLine.started,
+          }"
+          :style="slotLineStyle('top')"
           data-tauri-drag-region
         >
           <p class="desktop-lyric-primary" data-tauri-drag-region>
             <WordByWordLyricText
-              v-if="state?.lyrics?.timing === 'WORD' && currentWordProgresses.length"
-              :text="currentLine.line.text"
-              :words="currentLine.line.words ?? []"
-              :progresses="currentWordProgresses.map(({ progress }) => progress)"
+              v-if="state?.lyrics?.timing === 'WORD' && (activeSlot === 'top' || activeSlot === null) && topWordProgresses.length"
+              :text="topLine.line.text"
+              :words="topLine.line.words ?? []"
+              :progresses="topWordProgresses.map(({ progress }) => progress)"
               container-class="desktop-lyric-words"
               highlight-color="color-mix(in srgb, var(--desktop-lyric-highlight) calc(var(--desktop-lyric-word-emphasis, 0) * 100%), var(--desktop-lyric-idle))"
             >
               <span
-                v-for="({ word, progress }, wordIndex) in currentWordProgresses"
+                v-for="({ word, progress }, wordIndex) in topWordProgresses"
                 :key="`${word.time}-${wordIndex}`"
                 v-memo="[word, progress]"
                 class="desktop-lyric-word"
@@ -830,24 +708,57 @@ function monotonicNow(): number {
                 data-tauri-drag-region
               >{{ word.text }}</span>
             </WordByWordLyricText>
-            <span v-else data-tauri-drag-region>{{ currentLine.line.text }}</span>
+            <span v-else data-tauri-drag-region>{{ topLine.line.text }}</span>
           </p>
           <p
-            v-if="state?.showTranslation && currentLine.line.translation"
+            v-if="state?.showTranslation && topLine.line.translation"
             class="desktop-lyric-translation"
             data-tauri-drag-region
-          >{{ currentLine.line.translation }}</p>
+          >{{ topLine.line.translation }}</p>
         </div>
+        <div v-else class="desktop-lyric-line desktop-lyric-slot-top desktop-lyric-placeholder" aria-hidden="true">&nbsp;</div>
 
-        <div v-if="nextLine" class="desktop-lyric-line desktop-lyric-line-next" :style="nextLineTransitionStyle" data-tauri-drag-region>
-          <p class="desktop-lyric-primary" data-tauri-drag-region>{{ nextLine.line.text }}</p>
+        <div
+          v-if="bottomLine"
+          :ref="(el) => { bottomLineElement = el as HTMLElement | null; if (activeSlot === 'bottom') currentLineElement = el as HTMLElement | null; }"
+          class="desktop-lyric-line desktop-lyric-slot-bottom"
+          :class="{
+            'desktop-lyric-line-current is-active': activeSlot === 'bottom',
+            'desktop-lyric-line-next is-upcoming': activeSlot !== 'bottom',
+            'has-started': bottomLine.started,
+          }"
+          :style="slotLineStyle('bottom')"
+          data-tauri-drag-region
+        >
+          <p class="desktop-lyric-primary" data-tauri-drag-region>
+            <WordByWordLyricText
+              v-if="state?.lyrics?.timing === 'WORD' && activeSlot === 'bottom' && bottomWordProgresses.length"
+              :text="bottomLine.line.text"
+              :words="bottomLine.line.words ?? []"
+              :progresses="bottomWordProgresses.map(({ progress }) => progress)"
+              container-class="desktop-lyric-words"
+              highlight-color="color-mix(in srgb, var(--desktop-lyric-highlight) calc(var(--desktop-lyric-word-emphasis, 0) * 100%), var(--desktop-lyric-idle))"
+            >
+              <span
+                v-for="({ word, progress }, wordIndex) in bottomWordProgresses"
+                :key="`${word.time}-${wordIndex}`"
+                v-memo="[word, progress]"
+                class="desktop-lyric-word"
+                dir="auto"
+                :class="{ 'is-sung': progress > 0, 'is-current': progress > 0 && progress < 1 }"
+                :style="{ '--desktop-lyric-word-progress': `${progress * 100}%` }"
+                data-tauri-drag-region
+              >{{ word.text }}</span>
+            </WordByWordLyricText>
+            <span v-else data-tauri-drag-region>{{ bottomLine.line.text }}</span>
+          </p>
           <p
-            v-if="state?.showTranslation && nextLine.line.translation"
+            v-if="state?.showTranslation && bottomLine.line.translation"
             class="desktop-lyric-translation"
             data-tauri-drag-region
-          >{{ nextLine.line.translation }}</p>
+          >{{ bottomLine.line.translation }}</p>
         </div>
-        <div v-else class="desktop-lyric-line desktop-lyric-line-next desktop-lyric-placeholder" aria-hidden="true">&nbsp;</div>
+        <div v-else class="desktop-lyric-line desktop-lyric-slot-bottom desktop-lyric-placeholder" aria-hidden="true">&nbsp;</div>
       </div>
 
       <div v-else class="desktop-lyrics-empty" data-tauri-drag-region role="status">
