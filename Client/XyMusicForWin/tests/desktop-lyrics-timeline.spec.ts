@@ -212,6 +212,36 @@ describe("desktop lyrics timeline", () => {
     expect(frame.current?.started).toBe(false);
     expect(frame.next?.line.text).toBe("plain second");
   });
+
+  it("alternates active slot between top and bottom lines in a ping-pong pattern", () => {
+    const lyrics = synchronizedLyrics();
+
+    // Line 0 (even index): Top is active, Bottom is next line
+    const frame0 = buildDesktopLyricsFrame(lyrics, clock({ positionSeconds: 0.5 }), 0, 0);
+    expect(frame0.activeIndex).toBe(0);
+    expect(frame0.activeSlot).toBe("top");
+    expect(frame0.top?.line.text).toBe("hello world");
+    expect(frame0.top?.started).toBe(true);
+    expect(frame0.bottom?.line.text).toBe("next line");
+    expect(frame0.bottom?.started).toBe(false);
+
+    // Line 1 (odd index): Bottom is active, Top switches to the line after next
+    const frame1 = buildDesktopLyricsFrame(lyrics, clock({ positionSeconds: 2.5 }), 0, 0);
+    expect(frame1.activeIndex).toBe(1);
+    expect(frame1.activeSlot).toBe("bottom");
+    expect(frame1.bottom?.line.text).toBe("next line");
+    expect(frame1.bottom?.started).toBe(true);
+    expect(frame1.top?.line.text).toBe("last line");
+    expect(frame1.top?.started).toBe(false);
+
+    // Line 2 (even index): Top is active, Bottom is null (end of lyrics)
+    const frame2 = buildDesktopLyricsFrame(lyrics, clock({ positionSeconds: 4.5 }), 0, 0);
+    expect(frame2.activeIndex).toBe(2);
+    expect(frame2.activeSlot).toBe("top");
+    expect(frame2.top?.line.text).toBe("last line");
+    expect(frame2.top?.started).toBe(true);
+    expect(frame2.bottom).toBeNull();
+  });
 });
 
 function clock(overrides: Partial<DesktopLyricsClockPayload> = {}): DesktopLyricsClockPayload {

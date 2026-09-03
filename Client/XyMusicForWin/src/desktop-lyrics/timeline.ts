@@ -14,6 +14,9 @@ export interface DesktopLyricsFrame {
   activeIndex: number;
   current: DesktopLyricLineFrame | null;
   next: DesktopLyricLineFrame | null;
+  top: DesktopLyricLineFrame | null;
+  bottom: DesktopLyricLineFrame | null;
+  activeSlot: "top" | "bottom" | null;
 }
 
 /** The two ways a desktop lyric line can change, matching the Android player contract. */
@@ -277,7 +280,7 @@ export function buildDesktopLyricsFrame(
 ): DesktopLyricsFrame {
   const playbackSeconds = estimatePlaybackSeconds(clock, nowMs) + finiteNumber(offsetSeconds);
   if (!lyrics?.lines.length || !isMatchingTrack(lyrics, clock)) {
-    return { playbackSeconds, activeIndex: -1, current: null, next: null };
+    return { playbackSeconds, activeIndex: -1, current: null, next: null, top: null, bottom: null, activeSlot: null };
   }
 
   const position = lyrics.synchronized
@@ -286,11 +289,33 @@ export function buildDesktopLyricsFrame(
   const activeIndex = position.lineIndex;
   const currentIndex = activeIndex >= 0 ? activeIndex : 0;
   const nextIndex = currentIndex + 1;
+
+  let top: DesktopLyricLineFrame | null = null;
+  let bottom: DesktopLyricLineFrame | null = null;
+  let activeSlot: "top" | "bottom" | null = null;
+
+  if (activeIndex < 0) {
+    top = lineFrame(lyrics.lines, 0, false, -1);
+    bottom = lineFrame(lyrics.lines, 1, false, -1);
+    activeSlot = null;
+  } else if (activeIndex % 2 === 0) {
+    top = lineFrame(lyrics.lines, activeIndex, true, position.wordIndex);
+    bottom = lineFrame(lyrics.lines, activeIndex + 1, false, -1);
+    activeSlot = "top";
+  } else {
+    bottom = lineFrame(lyrics.lines, activeIndex, true, position.wordIndex);
+    top = lineFrame(lyrics.lines, activeIndex + 1, false, -1);
+    activeSlot = "bottom";
+  }
+
   return {
     playbackSeconds,
     activeIndex,
     current: lineFrame(lyrics.lines, currentIndex, activeIndex === currentIndex, activeIndex === currentIndex ? position.wordIndex : -1),
     next: lineFrame(lyrics.lines, nextIndex, false, -1),
+    top,
+    bottom,
+    activeSlot,
   };
 }
 
