@@ -118,28 +118,9 @@ export class LocalUserInterfacePreferences implements UserInterfacePreferences {
   private readDesktopLyricsColors(): Pick<DesktopLyricsPreferencesSnapshot, "textColor" | "highlightColor"> {
     const storedTextColor = this.tryGet(DESKTOP_LYRICS_TEXT_COLOR_KEY);
     const storedHighlightColor = this.tryGet(DESKTOP_LYRICS_HIGHLIGHT_COLOR_KEY);
-    const storedPaletteVersion = this.tryGet(DESKTOP_LYRICS_PALETTE_VERSION_KEY);
     const textColor = normalizeColor(storedTextColor.value, DEFAULT_DESKTOP_LYRICS_TEXT_COLOR);
     const highlightColor = normalizeColor(storedHighlightColor.value, DEFAULT_DESKTOP_LYRICS_HIGHLIGHT_COLOR);
-    if (!storedTextColor.available || !storedHighlightColor.available || !storedPaletteVersion.available) {
-      return { textColor, highlightColor };
-    }
-    if (storedPaletteVersion.value === DESKTOP_LYRICS_PALETTE_VERSION) {
-      return { textColor, highlightColor };
-    }
-
-    const migrated = {
-      textColor: LEGACY_DESKTOP_LYRICS_TEXT_COLORS.includes(textColor) ? DEFAULT_DESKTOP_LYRICS_TEXT_COLOR : textColor,
-      highlightColor: LEGACY_DESKTOP_LYRICS_HIGHLIGHT_COLORS.includes(highlightColor)
-        ? DEFAULT_DESKTOP_LYRICS_HIGHLIGHT_COLOR
-        : highlightColor,
-    };
-    const textColorWritten = this.set(DESKTOP_LYRICS_TEXT_COLOR_KEY, migrated.textColor);
-    const highlightColorWritten = this.set(DESKTOP_LYRICS_HIGHLIGHT_COLOR_KEY, migrated.highlightColor);
-    if (textColorWritten && highlightColorWritten) {
-      this.set(DESKTOP_LYRICS_PALETTE_VERSION_KEY, DESKTOP_LYRICS_PALETTE_VERSION);
-    }
-    return migrated;
+    return { textColor, highlightColor };
   }
 
   private readOffsets(): Record<string, number> {
@@ -227,7 +208,6 @@ const DESKTOP_LYRICS_FULLSCREEN_BEHAVIOR_KEY = "xymusic.desktop-lyrics.fullscree
 const DESKTOP_LYRICS_FONT_SCALE_KEY = "xymusic.desktop-lyrics.font-scale";
 const DESKTOP_LYRICS_TEXT_COLOR_KEY = "xymusic.desktop-lyrics.text-color";
 const DESKTOP_LYRICS_HIGHLIGHT_COLOR_KEY = "xymusic.desktop-lyrics.highlight-color";
-const DESKTOP_LYRICS_PALETTE_VERSION_KEY = "xymusic.desktop-lyrics.palette-version";
 const OFFSETS_KEY = "xymusic.desktop.lyrics.offsets.v1";
 const DEFAULT_FONT_SCALE = 1;
 const MIN_FONT_SCALE = 0.85;
@@ -238,6 +218,3 @@ const MAX_LYRICS_OFFSETS = 100;
 const DEFAULT_DESKTOP_LYRICS_FONT_SCALE = 1;
 const MIN_DESKTOP_LYRICS_FONT_SCALE = 0.75;
 const MAX_DESKTOP_LYRICS_FONT_SCALE = 1.5;
-const LEGACY_DESKTOP_LYRICS_TEXT_COLORS: readonly string[] = ["#ffffff", "#f8fafc"];
-const LEGACY_DESKTOP_LYRICS_HIGHLIGHT_COLORS: readonly string[] = ["#5af5df", "#63e6be", "#8eb1d2"];
-const DESKTOP_LYRICS_PALETTE_VERSION = "3";

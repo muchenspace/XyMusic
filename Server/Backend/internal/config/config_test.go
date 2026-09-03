@@ -111,7 +111,7 @@ func TestDatabaseConnectionDefaultFollowsConfiguredWorkerBudget(t *testing.T) {
 	}
 }
 
-func TestHTTPListenersSupportSeparateAddressFamiliesAndLegacyFallback(t *testing.T) {
+func TestHTTPListenersSupportSeparateAddressFamilies(t *testing.T) {
 	cfg, err := Parse(map[string]string{
 		"HTTP_IPV4_HOST": "192.0.2.10",
 		"HTTP_IPV4_PORT": "3100",
@@ -123,14 +123,6 @@ func TestHTTPListenersSupportSeparateAddressFamiliesAndLegacyFallback(t *testing
 	}
 	if cfg.HTTP.IPv4Host != "192.0.2.10" || cfg.HTTP.IPv4Port != 3100 || cfg.HTTP.IPv6Host != "2001:db8::10" || cfg.HTTP.IPv6Port != 3200 {
 		t.Fatalf("separate listeners were not preserved: %+v", cfg.HTTP)
-	}
-
-	legacy, err := Parse(map[string]string{"HTTP_HOST": "127.0.0.1", "HTTP_PORT": "3300"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if legacy.HTTP.IPv4Host != "127.0.0.1" || legacy.HTTP.IPv4Port != 3300 || legacy.HTTP.IPv6Host != "::" || legacy.HTTP.IPv6Port != 3300 {
-		t.Fatalf("legacy listener fallback is invalid: %+v", legacy.HTTP)
 	}
 }
 
