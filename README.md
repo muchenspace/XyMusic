@@ -43,9 +43,8 @@ curl -fsSL https://github.com/muchenspace/XyMusic/raw/main/install.sh | sudo bas
 http://服务器地址:3000
 ```
 
-首次打开会进入配置向导。按照页面提示连接 PostgreSQL，配置本地媒体目录、媒体工具与第一个音乐音源，并创建管理员账号即可。详细步骤和页面截图见[部署教程](./docs/教程.md)。
 
-> 一键安装脚本会将程序安装到 `/opt/xymusic`，注册为 systemd 服务并设置为开机启动。执行前请确认服务器已安装 `curl` 和 `unzip`。
+一键安装脚本会将程序安装到 `/opt/xymusic`，注册为 systemd 服务并设置为开机启动。执行前请确认服务器已安装 `curl` 和 `unzip`。
 
 ## 使用流程
 
