@@ -2,6 +2,7 @@ package com.xymusic.app.feature.player.data.controller
 
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
@@ -58,6 +59,13 @@ constructor(@ApplicationContext private val context: Context) {
             ?.takeIf { it.isConnected }
             ?.let { return@withLock it }
         takeController()?.release()
+        val serviceIntent =
+            Intent().setComponent(
+                ComponentName(context, PlaybackServiceContract.SERVICE_CLASS_NAME),
+            )
+        runCatching {
+            context.startService(serviceIntent)
+        }
         val token = SessionToken(
             context,
             ComponentName(context, PlaybackServiceContract.SERVICE_CLASS_NAME),

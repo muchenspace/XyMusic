@@ -327,11 +327,13 @@ internal fun Timeline.withMediaItem(mediaItem: MediaItem): Timeline = object : F
             // playback can start before transcoding finishes. Media3 treats
             // that playlist as live until #EXT-X-ENDLIST arrives. This is a
             // finite track, however, and Android's media controls hide the
-            // position when the window is live. The catalog duration is the
-            // authoritative end of the track, so expose the resolved window
-            // as finite for the player/session while the HLS source continues
-            // refreshing in the background.
-            it.isDynamic = false
+            // position when the window is live. Setting liveConfiguration to null
+            // ensures Media3 exposes the window as non-live (window.isLive() == false),
+            // which displays the seekbar and duration in the notification bar and lock screen.
+            // We do NOT override isDynamic to false here for growing HLS event playlists;
+            // ExoPlayer requires isDynamic=true to continue querying new segments from
+            // HlsPlaylistTracker without prematurely ending playback at the end of the
+            // initial period.
             it.liveConfiguration = null
         }
     }

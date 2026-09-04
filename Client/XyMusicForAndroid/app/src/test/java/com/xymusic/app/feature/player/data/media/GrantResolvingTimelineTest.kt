@@ -63,7 +63,9 @@ class GrantResolvingTimelineTest {
         assertThat(window.mediaItem).isEqualTo(publishedItem)
         assertThat(window.durationUs).isEqualTo(TRACK_DURATION_MS * 1_000L)
         assertThat(window.isSeekable).isTrue()
-        assertThat(window.isDynamic).isFalse()
+        // isDynamic remains true for an active HLS Event playlist so ExoPlayer continues polling and does not end early
+        assertThat(window.isDynamic).isTrue()
+        // isLive remains false because liveConfiguration is cleared, ensuring system media controls show seekbar and duration
         assertThat(window.isLive()).isFalse()
         assertThat(period.durationUs).isEqualTo(TRACK_DURATION_MS * 1_000L)
     }
@@ -93,6 +95,28 @@ class GrantResolvingTimelineTest {
         val window = publishedTimeline.getWindow(0, Timeline.Window(), 0)
 
         assertThat(window.durationUs).isEqualTo(25_000_000L)
+        assertThat(window.isSeekable).isTrue()
+        assertThat(window.isDynamic).isTrue()
+        assertThat(window.isLive()).isFalse()
+    }
+
+    @Test
+    fun staticChildTimelineRemainsNonDynamic() {
+        val item = MediaItem.Builder().setMediaId("queue-1").build()
+        val childTimeline =
+            SinglePeriodTimeline(
+                TRACK_DURATION_MS * 1_000L,
+                true,
+                false,
+                false,
+                null,
+                MediaItem.Builder().setMediaId("resolved").build(),
+            )
+
+        val publishedTimeline = childTimeline.withMediaItem(item)
+        val window = publishedTimeline.getWindow(0, Timeline.Window(), 0)
+
+        assertThat(window.durationUs).isEqualTo(TRACK_DURATION_MS * 1_000L)
         assertThat(window.isSeekable).isTrue()
         assertThat(window.isDynamic).isFalse()
         assertThat(window.isLive()).isFalse()

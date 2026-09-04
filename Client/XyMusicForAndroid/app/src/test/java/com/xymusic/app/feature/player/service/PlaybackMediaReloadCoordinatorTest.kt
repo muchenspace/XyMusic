@@ -68,7 +68,8 @@ class PlaybackMediaReloadCoordinatorTest {
         assertThat(requestItem.playbackSourceOffsetMs()).isEqualTo(TARGET_POSITION_MS)
         assertThat(requestItem.globalPlaybackPositionMs(0)).isEqualTo(TARGET_POSITION_MS)
         assertThat(requestItem.playbackRequestedStartPositionMs()).isEqualTo(TARGET_POSITION_MS)
-        assertThat(player.stopCount).isEqualTo(1)
+        // player.stop() must NOT be called on reprepare to avoid dropping foreground status in background/screen-off state.
+        assertThat(player.stopCount).isEqualTo(0)
         assertThat(player.prepareCount).isEqualTo(1)
         assertThat(player.playWhenReady).isTrue()
     }

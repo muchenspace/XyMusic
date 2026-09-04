@@ -117,7 +117,6 @@ internal class AutomaticQualityPlaybackController(
             playWhenReady = resumePlayback,
         ) ?: run {
             grantRepository.invalidate(trackId)
-            player.stop()
             player.seekTo(mediaItemIndex, positionMs)
             player.prepare()
             player.playWhenReady = resumePlayback

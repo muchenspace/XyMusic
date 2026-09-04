@@ -43,7 +43,7 @@ class AutomaticQualityPlaybackControllerTest {
         controller.onPlaybackStateChanged(Player.STATE_BUFFERING)
 
         assertThat(grants.invalidatedTrackIds).containsExactly(TRACK_ID)
-        assertThat(player.stopCount).isEqualTo(1)
+        assertThat(player.stopCount).isEqualTo(0)
         assertThat(player.seekCalls).containsExactly(SeekCall(0, 10_000))
         assertThat(player.prepareCount).isEqualTo(1)
         assertThat(player.playWhenReady).isTrue()
@@ -52,7 +52,7 @@ class AutomaticQualityPlaybackControllerTest {
 
         nowMs += 1_000
         controller.onPlaybackStateChanged(Player.STATE_BUFFERING)
-        assertThat(player.stopCount).isEqualTo(1)
+        assertThat(player.stopCount).isEqualTo(0)
     }
 
     @Test

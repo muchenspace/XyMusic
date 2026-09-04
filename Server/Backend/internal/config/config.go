@@ -197,7 +197,7 @@ func Parse(env map[string]string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	streamIdleTimeout, err := integer(env, "MEDIA_STREAM_IDLE_TIMEOUT_SECONDS", 60, 5, 3600)
+	streamIdleTimeout, err := integer(env, "MEDIA_STREAM_IDLE_TIMEOUT_SECONDS", 300, 5, 3600)
 	if err != nil {
 		return Config{}, err
 	}
