@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	applicationVersion     = "0.1.2"
+	applicationVersion     = "0.1.3"
 	firstRunIPv4Host       = "0.0.0.0"
 	firstRunIPv6Host       = "::"
 	firstRunListenerPort   = 3000

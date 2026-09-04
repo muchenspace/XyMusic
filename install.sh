@@ -2,7 +2,7 @@
 
 
 APP_NAME="xymusic"
-DOWNLOAD_URL="https://github.com/muchenspace/XyMusic/releases/download/v0.1.2/XyMusic_0.1.2_linux_server.zip" 
+DOWNLOAD_URL="https://github.com/muchenspace/XyMusic/releases/download/v0.1.3/XyMusic_0.1.3_linux_server.zip" 
 INSTALL_DIR="/opt/xymusic"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
 TMP_DIR=$(mktemp -d)
