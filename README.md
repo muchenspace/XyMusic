@@ -87,29 +87,3 @@ XyMusic/
 ├── docs/                      # 部署说明与界面截图
 └── install.sh                 # Linux 一键安装脚本
 ```
-
-
-## Large-library performance
-
-All admin list views use signed keyset cursors instead of deep `OFFSET` scans. There is no artificial total-row limit; the maximum selectable page size is 100,000 rows. PostgreSQL does not need to discard all preceding rows when moving through deep pages. The explicit `cursorMode=offset` form remains available only for legacy admin clients.
-
-For large installations, these settings can be tuned in the managed environment file:
-
-- `LOCAL_MUSIC_SCAN_WORKERS`: metadata preparation concurrency.
-- `LOCAL_MUSIC_SCAN_COMMIT_WORKERS`: database commit concurrency.
-- `LOCAL_MUSIC_SCAN_COMMIT_BATCH_SIZE`: files committed per bounded scan transaction (default 32).
-- `LOCAL_MUSIC_SCAN_PROBE_WORKERS`: ffprobe concurrency.
-- `TAG_SCRAPING_WORKERS` / `TAG_SCRAPING_REQUEST_WORKERS`: scraping queue and upstream request concurrency.
-- `TAG_WRITEBACK_WORKERS`: concurrent source-file Tag writeback workers (default 2).
-- `DATABASE_MAX_CONNECTIONS`: should cover commit workers, scraping workers, artwork workers, and writeback workers.
-
-The runtime also idempotently creates the large-library btree/trigram/queue indexes after the immutable baseline migration.
-
-For a read-only production-scale check, set `XYMUSIC_SCALE_BENCHMARK=1` together with `XYMUSIC_INTEGRATION_ENV` and run:
-
-```powershell
-cd Server/Backend
-go test ./internal/modules/admincatalog -run '^$' -bench '^BenchmarkConfiguredLargeCatalogCursor$' -benchtime=1x
-```
-
-The benchmark follows up to 100 pages of 1,000 tracks and does not mutate catalog data.
