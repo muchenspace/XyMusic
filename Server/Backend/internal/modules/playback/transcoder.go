@@ -199,7 +199,7 @@ func NewTranscodeSessionManager(
 		maxConcurrent = 8
 	}
 	if idleTimeout <= 0 {
-		idleTimeout = 60 * time.Second
+		idleTimeout = 300 * time.Second
 	}
 	if transcodeTimeout <= 0 {
 		transcodeTimeout = 120 * time.Second

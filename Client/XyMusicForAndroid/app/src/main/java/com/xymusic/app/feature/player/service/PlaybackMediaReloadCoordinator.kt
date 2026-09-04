@@ -215,7 +215,6 @@ internal class PlaybackMediaReloadCoordinator(
         }
         internalPlayerOperation = true
         return try {
-            player.stop()
             player.replaceMediaItem(mediaItemIndex, requestItem)
             player.seekTo(mediaItemIndex, localStartPositionMs)
             player.prepare()
