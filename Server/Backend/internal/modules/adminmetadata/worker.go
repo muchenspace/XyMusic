@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -35,25 +34,23 @@ func (NoopLogger) Warn(string, map[string]any)  {}
 func (NoopLogger) Error(string, map[string]any) {}
 
 type WorkerDependencies struct {
-	Store         WorkerStore
-	FFmpegPath    string
-	FFprobePath   string
-	Artwork       ArtworkDownloader
-	SourceStorage SourceObjectStorage
-	Runner        ProcessRunner
-	Logger        Logger
-	Clock         Clock
+	Store       WorkerStore
+	FFmpegPath  string
+	FFprobePath string
+	Artwork     ArtworkDownloader
+	Runner      ProcessRunner
+	Logger      Logger
+	Clock       Clock
 }
 
 type WritebackWorker struct {
-	store         WorkerStore
-	ffmpegPath    string
-	ffprobePath   string
-	artwork       ArtworkDownloader
-	sourceStorage SourceObjectStorage
-	runner        ProcessRunner
-	logger        Logger
-	clock         Clock
+	store       WorkerStore
+	ffmpegPath  string
+	ffprobePath string
+	artwork     ArtworkDownloader
+	runner      ProcessRunner
+	logger      Logger
+	clock       Clock
 }
 
 func NewWritebackWorker(dependencies WorkerDependencies) (*WritebackWorker, error) {
@@ -78,8 +75,7 @@ func NewWritebackWorker(dependencies WorkerDependencies) (*WritebackWorker, erro
 	return &WritebackWorker{
 		store: dependencies.Store, ffmpegPath: dependencies.FFmpegPath,
 		ffprobePath: dependencies.FFprobePath, runner: dependencies.Runner,
-		artwork: dependencies.Artwork, sourceStorage: dependencies.SourceStorage,
-		logger: dependencies.Logger, clock: dependencies.Clock,
+		artwork: dependencies.Artwork, logger: dependencies.Logger, clock: dependencies.Clock,
 	}, nil
 }
 
@@ -474,29 +470,10 @@ func (worker *WritebackWorker) process(
 	); err != nil {
 		return err
 	}
-	var sourceObjectKey, sourceMIMEType string
-	if worker.sourceStorage != nil {
-		sourceObjectKey, sourceMIMEType, err = writebackSourceObjectDetails(
-			contextRecord.Job.TrackID, sourcePath, outputChecksum,
-		)
-		if err != nil {
-			return err
-		}
-		uploadedSize, uploadErr := worker.sourceStorage.UploadFile(
-			ctx, sourceObjectKey, sourcePath, sourceMIMEType, outputChecksum,
-		)
-		if uploadErr != nil {
-			return wrapWritebackError("SOURCE_ASSET_UPLOAD_FAILED", "The rewritten source could not be uploaded", uploadErr)
-		}
-		if uploadedSize != outputFile.Size() {
-			return NewWritebackError("SOURCE_ASSET_UPLOAD_FAILED", "The uploaded rewritten source size did not match")
-		}
-	}
 	if err := worker.store.CommitWriteback(ctx, WritebackCommit{
 		JobID: jobID, WorkerID: workerID, AttemptID: attemptID,
 		OriginalSHA256: originalChecksum, OutputSHA256: outputChecksum,
 		OutputSize: outputFile.Size(), OutputModified: outputFile.ModTime(),
-		SourceObjectKey: sourceObjectKey, SourceMIMEType: sourceMIMEType,
 		Metadata: expectedMetadata,
 	}); err != nil {
 		return err
@@ -509,20 +486,6 @@ func (worker *WritebackWorker) process(
 	}
 	rollbackActive = false
 	return nil
-}
-
-func writebackSourceObjectDetails(trackID, sourcePath, checksum string) (string, string, error) {
-	extension := strings.ToLower(filepath.Ext(sourcePath))
-	mimeType := map[string]string{
-		".flac": "audio/flac", ".aac": "audio/aac", ".aif": "audio/aiff", ".aiff": "audio/aiff",
-		".ape": "audio/ape", ".caf": "audio/x-caf", ".mp3": "audio/mpeg", ".m4a": "audio/mp4",
-		".mp4": "audio/mp4", ".mka": "audio/webm", ".webm": "audio/webm", ".ogg": "audio/ogg",
-		".opus": "audio/ogg", ".wav": "audio/wav", ".wma": "audio/x-ms-wma",
-	}[extension]
-	if mimeType == "" {
-		return "", "", fmt.Errorf("unsupported source audio extension %q", extension)
-	}
-	return fmt.Sprintf("library/sources/%s/%s%s", trackID, checksum, extension), mimeType, nil
 }
 
 func (worker *WritebackWorker) throwIfCancelled(

@@ -240,7 +240,7 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	}
 	metadataWorker, err := adminmetadata.NewWritebackWorker(adminmetadata.WorkerDependencies{
 		Store: metadataRepository, FFmpegPath: resolved.Media.FFmpegPath, FFprobePath: resolved.Media.FFprobePath,
-		Artwork: localMedia, SourceStorage: localMedia, Logger: workerLogger,
+		Artwork: localMedia, Logger: workerLogger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create metadata writeback worker: %w", err)

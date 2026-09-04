@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,7 +52,6 @@ func TestProductionWritebackWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	objects := localMedia
-	sourceObjects := localMedia
 
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
 	username := "metadata_worker_it_" + suffix
@@ -103,8 +103,7 @@ func TestProductionWritebackWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var actorID, artistID, albumID, artworkAssetID, sourceAssetID, trackID, rootID, sourceID string
-	var sourceObjectKey string
+	var actorID, artistID, albumID, artworkAssetID, trackID, rootID, sourceID string
 	artworkObjectKey := "integration/writeback-artwork-" + suffix + ".jpg"
 	if err := pool.QueryRow(ctx, `
 		insert into users (username, normalized_username, password_hash, role)
@@ -122,12 +121,6 @@ func TestProductionWritebackWorker(t *testing.T) {
 		}
 		if artworkAssetID != "" {
 			_, _ = pool.Exec(cleanupContext, `delete from media_assets where id = $1`, artworkAssetID)
-		}
-		if sourceAssetID != "" {
-			_, _ = pool.Exec(cleanupContext, `delete from media_assets where id = $1`, sourceAssetID)
-		}
-		if sourceObjectKey != "" {
-			_ = objects.DeleteAsset(sourceObjectKey)
 		}
 		_ = objects.DeleteAsset(artworkObjectKey)
 		if artistID != "" {
@@ -224,7 +217,7 @@ func TestProductionWritebackWorker(t *testing.T) {
 	}
 	worker, err := NewWritebackWorker(WorkerDependencies{
 		Store: repository, FFmpegPath: cfg.Media.FFmpegPath, FFprobePath: cfg.Media.FFprobePath,
-		Artwork: objects, SourceStorage: sourceObjects, Runner: OSProcessRunner{}, Logger: NoopLogger{}, Clock: SystemClock{},
+		Artwork: objects, Runner: OSProcessRunner{}, Logger: NoopLogger{}, Clock: SystemClock{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -272,17 +265,25 @@ func TestProductionWritebackWorker(t *testing.T) {
 	if outputChecksum != *job.OutputChecksumSHA256 || outputChecksum == originalChecksum {
 		t.Fatalf("output checksum=%s job=%v original=%s", outputChecksum, job.OutputChecksumSHA256, originalChecksum)
 	}
-	sourceObjectKey = "library/sources/" + trackID + "/" + outputChecksum + ".flac"
-	var storedSourceKey, storedSourceChecksum string
+	var storedSourceChecksum, storedSourceStatus string
+	var storedSourceAssetID *string
 	if err := pool.QueryRow(ctx, `
-		select source.source_asset_id::text, asset.storage_path, asset.checksum_sha256
-		from local_music_sources source
-		join media_assets asset on asset.id = source.source_asset_id
-		where source.id = $1`, sourceID).Scan(&sourceAssetID, &storedSourceKey, &storedSourceChecksum); err != nil {
+		select checksum_sha256, status::text, source_asset_id::text
+		from local_music_sources
+		where id = $1`, sourceID).Scan(&storedSourceChecksum, &storedSourceStatus, &storedSourceAssetID); err != nil {
 		t.Fatal(err)
 	}
-	if sourceAssetID == "" || storedSourceKey != sourceObjectKey || storedSourceChecksum != outputChecksum {
-		t.Fatalf("source asset id=%s key=%s checksum=%s", sourceAssetID, storedSourceKey, storedSourceChecksum)
+	if storedSourceChecksum != outputChecksum || storedSourceStatus != "READY" {
+		t.Fatalf("source checksum=%s status=%s", storedSourceChecksum, storedSourceStatus)
+	}
+	if storedSourceAssetID != nil {
+		t.Fatalf("source_asset_id should remain nil, got %v", *storedSourceAssetID)
+	}
+	potentialSourceKey := "library/sources/" + trackID + "/" + outputChecksum + ".flac"
+	if potentialPath, err := objects.ResolveAssetPath(potentialSourceKey); err == nil {
+		if _, statErr := os.Stat(potentialPath); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("audio source should not be copied to media assets: %s", potentialPath)
+		}
 	}
 	entries, err := os.ReadDir(rootPath)
 	if err != nil {
