@@ -357,29 +357,12 @@ func (repository *Repository) CommitWriteback(ctx context.Context, input Writeba
 	if err := assertWritebackContextUnchanged(contextRecord, input.OriginalSHA256, input.Metadata); err != nil {
 		return err
 	}
-	var sourceAssetID string
-	if input.SourceObjectKey != "" {
-		if input.SourceMIMEType == "" {
-			return NewWritebackError("SOURCE_ASSET_UPLOAD_FAILED", "The rewritten source MIME type is unavailable")
-		}
-		if err := tx.QueryRow(ctx, `
-			insert into media_assets(storage_path,kind,mime_type,size_bytes,checksum_sha256,status)
-			values($1,'AUDIO_SOURCE',$2,$3,$4,'READY')
-			on conflict(storage_path) do update set mime_type=excluded.mime_type,
-				size_bytes=excluded.size_bytes,checksum_sha256=excluded.checksum_sha256,
-				status='READY',updated_at=now()
-			returning id::text`, input.SourceObjectKey, input.SourceMIMEType,
-			input.OutputSize, input.OutputSHA256).Scan(&sourceAssetID); err != nil {
-			return fmt.Errorf("create rewritten source asset: %w", err)
-		}
-	}
 	sourceCommand, err := tx.Exec(ctx, `
 		update local_music_sources set checksum_sha256 = $2, size_bytes = $3,
 			modified_at = $4, status = 'READY', last_error = null,
-			last_seen_at = now(), updated_at = now(),
-			source_asset_id = coalesce(nullif($6, '')::uuid, source_asset_id)
+			last_seen_at = now(), updated_at = now()
 		where id = $1 and checksum_sha256 = $5`, contextRecord.Source.ID,
-		input.OutputSHA256, input.OutputSize, input.OutputModified, input.OriginalSHA256, sourceAssetID)
+		input.OutputSHA256, input.OutputSize, input.OutputModified, input.OriginalSHA256)
 	if err != nil {
 		return fmt.Errorf("commit metadata writeback source: %w", err)
 	}
