@@ -22,7 +22,7 @@ import VirtualTable from "@/components/VirtualTable.vue";
 import type { CreditRole, MusicPage, PermanentDeleteTrackJobItem, PermanentDeleteTracksJob, TrackMetadataRecord, TrackSummary, TrackTagValues } from "@/features/music/domain/models";
 import type { ApplyTagResult } from "@/features/scraping/domain/models";
 import { useMusicAdmin } from "@/app/services/music";
-import { normalizeTrackTagScalars } from "@/features/music/presentation/track-tag-form";
+import { normalizeTrackTagScalars, parseLyricsOffset, updateLyricsOffset } from "@/features/music/presentation/track-tag-form";
 import { assertWritebackAllowed, sourceWritebackCapability, writebackBlockedMessage } from "@/features/music/presentation/writeback-capability";
 import { DEFAULT_CATALOG_PAGE_SIZE } from "@/shared/presentation/pagination";
 import { useUiStore } from "@/stores/ui";
@@ -133,6 +133,28 @@ watch(tags, () => { if (editorOpen.value && !populating) editorDirty.value = tru
 watch(() => tags.lyricsFormat, (format) => {
   if (format === "PLAIN") tags.lyricsTiming = "LINE";
 });
+const lyricsOffsetMs = ref(0);
+let updatingLyricsOffset = false;
+
+watch(
+  () => tags.lyrics,
+  (content) => {
+    if (updatingLyricsOffset) return;
+    lyricsOffsetMs.value = parseLyricsOffset(content);
+  },
+  { immediate: true },
+);
+
+function applyLyricsOffset(offsetMs: number): void {
+  const clamped = Math.max(-300_000, Math.min(300_000, Math.round(offsetMs || 0)));
+  lyricsOffsetMs.value = clamped;
+  updatingLyricsOffset = true;
+  try {
+    tags.lyrics = updateLyricsOffset(tags.lyrics, clamped);
+  } finally {
+    updatingLyricsOffset = false;
+  }
+}
 watch(() => editorWritebackCapability.value.canWriteBack, (canWriteBack) => {
   if (!canWriteBack) writeBackAfterSave.value = false;
 }, { immediate: true });
@@ -583,7 +605,43 @@ watch(bulkOpen, (value) => { if (!value && bulkMutation.isPending.value && !allo
     <BaseDialog v-model="editorOpen" title="编辑音乐 Tag" :description="selectedTrack?.source?.relativePath ?? selectedTrack?.title" side="right" :prevent-close="savingMetadata" :confirm-close="editorDirty ? '曲目 Tag 尚未保存，确定关闭吗？' : undefined"><StatePanel v-if="metadataQuery.isPending.value" state="loading" compact /><StatePanel v-else-if="metadataQuery.isError.value" state="error" compact @retry="metadataQuery.refetch()" /><template v-else-if="metadataQuery.data.value"><div class="flex gap-4 rounded-2xl bg-[var(--surface-muted)] p-4"><span class="grid h-16 w-16 place-items-center overflow-hidden rounded-xl bg-[var(--surface-solid)]"><img v-if="selectedTrack?.artwork" :src="selectedTrack.artwork.url" class="h-full w-full object-cover" alt="封面" width="64" height="64" decoding="async" /><Disc3 v-else :size="24" /></span><div class="min-w-0 flex-1"><h3 class="truncate text-lg font-bold">{{ metadataQuery.data.value.effective.title }}</h3><p class="mt-1 text-sm text-[var(--muted)]">{{ credits(metadataQuery.data.value.effective, 'PRIMARY') }}</p><div class="mt-2 flex flex-wrap gap-2"><AudioStatusBadge v-if="selectedTrack" :status="selectedTrack.audioStatus" :source-status="selectedTrack.source?.status" /><StatusBadge :status="selectedTrack?.metadataStatus ?? 'NORMAL'" /><StatusBadge :status="editorWritebackCapability.canWriteBack ? 'READ_WRITE' : 'READ_ONLY'" /></div></div></div><div class="mt-5 flex gap-1 overflow-x-auto rounded-xl bg-[var(--surface-muted)] p-1"><button v-for="item in [{key:'metadata',label:'基本 Tag'},{key:'lyrics',label:'歌词'}]" :key="item.key" class="pressable min-w-max flex-1 rounded-lg px-3 py-2 text-xs font-bold" :class="editorTab === item.key ? 'bg-[var(--surface-solid)] text-[var(--primary)] shadow-sm' : 'text-[var(--muted)]'" type="button" @click="editorTab = item.key as EditorTab">{{ item.label }}</button></div>
       <Transition name="content-swap" mode="out-in">
       <div v-if="editorTab === 'metadata'" key="metadata" class="mt-6 grid gap-5 sm:grid-cols-2"><div class="sm:col-span-2"><label class="ui-label">标题</label><input v-model="tags.title" class="ui-input" /></div><div class="sm:col-span-2"><label class="ui-label">主要艺术家</label><input v-model="tags.primary" class="ui-input" /></div><div class="sm:col-span-2"><label class="ui-label">专辑艺术家</label><input v-model="tags.albumArtists" class="ui-input" placeholder="多个艺术家使用分号或换行分隔" /></div><div><label class="ui-label">合作艺术家</label><input v-model="tags.featured" class="ui-input" /></div><div><label class="ui-label">专辑</label><input v-model="tags.album" class="ui-input" /></div><div><label class="ui-label">作曲</label><input v-model="tags.composers" class="ui-input" /></div><div><label class="ui-label">作词</label><input v-model="tags.lyricists" class="ui-input" /></div><div><label class="ui-label">制作人</label><input v-model="tags.producers" class="ui-input" /></div><div><label class="ui-label">发行日期</label><input v-model="tags.releaseDate" class="ui-input" inputmode="numeric" maxlength="10" placeholder="YYYY、YYYY-MM 或 YYYY-MM-DD" /></div><div class="grid grid-cols-2 gap-2"><div><label class="ui-label">音轨号</label><input v-model="tags.trackNumber" class="ui-input" type="number" min="1" max="9999" step="1" /></div><div><label class="ui-label">总音轨</label><input v-model="tags.trackTotal" class="ui-input" type="number" min="1" max="9999" step="1" /></div></div><div class="grid grid-cols-2 gap-2"><div><label class="ui-label">碟号</label><input v-model="tags.discNumber" class="ui-input" type="number" min="1" max="999" step="1" /></div><div><label class="ui-label">总碟数</label><input v-model="tags.discTotal" class="ui-input" type="number" min="1" max="999" step="1" /></div></div><div><label class="ui-label">流派</label><input v-model="tags.genres" class="ui-input" /></div><div><label class="ui-label">BPM</label><input v-model="tags.bpm" class="ui-input" type="number" min="1" max="999.99" step="any" /></div><div><label class="ui-label">ISRC</label><input v-model="tags.isrc" class="ui-input uppercase" maxlength="20" placeholder="USABC1234567" /></div><div><label class="ui-label">版权</label><input v-model="tags.copyright" class="ui-input" /></div><div class="sm:col-span-2"><label class="ui-label">备注</label><textarea v-model="tags.comment" class="ui-textarea" /></div></div>
-      <div v-else-if="editorTab === 'lyrics'" key="lyrics" class="mt-6"><div class="grid gap-3 sm:grid-cols-3"><select v-model="tags.lyricsFormat" class="ui-select" aria-label="歌词格式"><option value="PLAIN">普通文本</option><option value="LRC">LRC 时间轴</option></select><select v-model="tags.lyricsTiming" class="ui-select" aria-label="歌词粒度" :disabled="tags.lyricsFormat === 'PLAIN'"><option value="LINE">逐行歌词</option><option value="WORD">逐字歌词</option></select><input v-model="tags.lyricsLanguage" class="ui-input" maxlength="35" aria-label="歌词语言" placeholder="语言标签，例如 zh-CN 或 und" /></div><textarea v-model="tags.lyrics" class="ui-textarea mt-4 min-h-[380px] font-mono leading-7" aria-label="歌词内容" /></div>
+      <div v-else-if="editorTab === 'lyrics'" key="lyrics" class="mt-6 grid gap-5 sm:grid-cols-2">
+        <div>
+          <label class="ui-label">歌词格式</label>
+          <select v-model="tags.lyricsFormat" class="ui-select" aria-label="歌词格式">
+            <option value="PLAIN">普通文本</option>
+            <option value="LRC">LRC 时间轴</option>
+          </select>
+        </div>
+        <div>
+          <label class="ui-label">歌词粒度</label>
+          <select v-model="tags.lyricsTiming" class="ui-select" aria-label="歌词粒度" :disabled="tags.lyricsFormat === 'PLAIN'">
+            <option value="LINE">逐行歌词</option>
+            <option value="WORD">逐字歌词</option>
+          </select>
+        </div>
+        <div>
+          <label class="ui-label">歌词语言</label>
+          <input v-model="tags.lyricsLanguage" class="ui-input" maxlength="35" aria-label="歌词语言" placeholder="例如 zh-CN 或 und" />
+        </div>
+        <div>
+          <label class="ui-label">时间轴偏移 (毫秒)</label>
+          <input
+            v-model.number="lyricsOffsetMs"
+            type="number"
+            step="50"
+            class="ui-input font-mono"
+            aria-label="歌词时间轴偏移"
+            placeholder="0"
+            :disabled="tags.lyricsFormat === 'PLAIN'"
+            @change="applyLyricsOffset(lyricsOffsetMs)"
+          />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="ui-label">歌词内容</label>
+          <textarea v-model="tags.lyrics" class="ui-textarea min-h-[380px] font-mono leading-7" aria-label="歌词内容" />
+        </div>
+      </div>
       </Transition>
       <label v-if="editorWritebackCapability.canWriteBack" class="mt-4 flex items-center justify-between rounded-xl border border-[var(--border)] p-4"><span><span class="block font-semibold">写回源文件 Tag</span><span class="text-xs text-[var(--muted)]">保存后创建安全写回任务；默认关闭。</span></span><button type="button" class="switch" role="switch" :aria-checked="writeBackAfterSave" @click="writeBackAfterSave = !writeBackAfterSave" /></label><p v-else class="mt-4 rounded-xl bg-[var(--surface-muted)] p-4 text-xs leading-5 text-[var(--muted)]">{{ writebackBlockedMessage(editorWritebackCapability) }}，只保存数据库中的 Tag 修改。</p><p v-if="actionError" class="mt-4 rounded-xl bg-rose-500/10 p-3 text-sm text-[var(--danger)]">{{ actionError }}</p></template>
       <template #footer><AppButton v-if="selectedTrack?.status !== 'ARCHIVED'" @click="openScrape"><template #icon><Sparkles :size="15" /></template>在线刮削</AppButton><span class="flex-1" /><AppButton :disabled="savingMetadata" @click="closeEditor">关闭</AppButton><AppButton v-if="selectedTrack?.status !== 'ARCHIVED'" variant="primary" :loading="savingMetadata" @click="saveMetadata"><template #icon><Save :size="15" /></template>{{ writeBackAfterSave ? '保存并写回' : '保存覆盖值' }}</AppButton></template>

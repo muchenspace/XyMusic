@@ -89,3 +89,56 @@ function normalizeLanguage(value: string): string {
 function leapYear(year: number): boolean {
   return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
 }
+
+const LRC_OFFSET_REGEX = /(?:^|\n)\s*\[offset:\s*([+-]?\d+)\s*\]/i;
+const LINE_TIMESTAMP_REGEX = /^\s*\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]/;
+const METADATA_TAG_REGEX = /^\s*\[[A-Za-z][A-Za-z0-9_-]*:[^\]]*\]\s*$/;
+
+export function parseLyricsOffset(content: string): number {
+  const match = LRC_OFFSET_REGEX.exec(content);
+  if (!match?.[1]) return 0;
+  const parsed = Number(match[1]);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(-300_000, Math.min(300_000, Math.round(parsed)));
+}
+
+export function updateLyricsOffset(content: string, offsetMs: number): string {
+  const targetOffset = Math.max(-300_000, Math.min(300_000, Math.round(offsetMs || 0)));
+  const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const offsetLine = `[offset:${targetOffset}]`;
+
+  if (LRC_OFFSET_REGEX.test(normalized)) {
+    let replaced = false;
+    const lines = normalized.split("\n");
+    for (let i = 0; i < lines.length; i += 1) {
+      if (/\[offset:\s*[+-]?\d+\s*\]/i.test(lines[i]!)) {
+        if (!replaced) {
+          lines[i] = lines[i]!.replace(/\[offset:\s*[+-]?\d+\s*\]/i, offsetLine);
+          replaced = true;
+        } else {
+          lines[i] = lines[i]!.replace(/\[offset:\s*[+-]?\d+\s*\]/gi, "");
+        }
+      }
+    }
+    return lines.filter((line, index) => line.length > 0 || index === lines.length - 1).join("\n");
+  }
+
+  if (!normalized.trim()) {
+    return targetOffset === 0 ? "" : `${offsetLine}\n`;
+  }
+
+  const lines = normalized.split("\n");
+  let insertIndex = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    if (METADATA_TAG_REGEX.test(line)) {
+      insertIndex = i + 1;
+    } else if (LINE_TIMESTAMP_REGEX.test(line)) {
+      break;
+    }
+  }
+
+  lines.splice(insertIndex, 0, offsetLine);
+  return lines.join("\n");
+}
+
