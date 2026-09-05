@@ -209,3 +209,34 @@ func TestNetEaseEAPIEncryptDecryptRoundtrip(t *testing.T) {
 	}
 }
 
+func TestParseTimedLinesPreservesOffset(t *testing.T) {
+	qrcWithOffset := `<Lyric_1 LyricType="1" LyricContent="[offset:500]&#10;[270,3700]first(270,500)second(770,190)"/>`
+	doc, err := parseQRC(qrcWithOffset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.OffsetMS != 500 {
+		t.Fatalf("doc.OffsetMS = %d, want 500", doc.OffsetMS)
+	}
+	rendered := renderEnhancedLRC(doc)
+	want := "[offset:500]\n[00:00.270]<00:00.270>first<00:00.770>second<00:00.960>"
+	if rendered != want {
+		t.Fatalf("rendered = %q, want %q", rendered, want)
+	}
+
+	qrcZeroOffset := `<Lyric_1 LyricType="1" LyricContent="[offset:0]&#10;[270,3700]first(270,500)second(770,190)"/>`
+	docZero, err := parseQRC(qrcZeroOffset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if docZero.OffsetMS != 0 {
+		t.Fatalf("docZero.OffsetMS = %d, want 0", docZero.OffsetMS)
+	}
+	renderedZero := renderEnhancedLRC(docZero)
+	wantZero := "[00:00.270]<00:00.270>first<00:00.770>second<00:00.960>"
+	if renderedZero != wantZero {
+		t.Fatalf("renderedZero = %q, want %q", renderedZero, wantZero)
+	}
+}
+
+

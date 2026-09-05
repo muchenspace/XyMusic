@@ -11,6 +11,7 @@ import (
 type lyricDocument struct {
 	Lines         []lyricLine
 	HasWordTiming bool
+	OffsetMS      int
 }
 
 type lyricLine struct {
@@ -27,6 +28,7 @@ type lyricWord struct {
 }
 
 var (
+	offsetPattern     = regexp.MustCompile(`(?i)^\s*\[offset:\s*([+-]?\d+)\s*\]\s*$`)
 	lyricLinePattern  = regexp.MustCompile(`^\[(\d+),(\d+)\](.*)$`)
 	qrcWordPattern    = regexp.MustCompile(`\((\d+),(\d+)\)`)
 	qrcContentPattern = regexp.MustCompile(`(?s)<Lyric_1\s+LyricType="1"\s+LyricContent="(.*?)"\s*/>`)
@@ -60,7 +62,14 @@ func parseYRC(content string) (lyricDocument, error) {
 func parseTimedLines(content string, parseWords func(lyricLine, string) (lyricLine, bool, error)) (lyricDocument, error) {
 	document := lyricDocument{Lines: make([]lyricLine, 0)}
 	for _, rawLine := range strings.Split(strings.ReplaceAll(content, "\r", ""), "\n") {
-		lineMatch := lyricLinePattern.FindStringSubmatch(strings.TrimSpace(rawLine))
+		trimmed := strings.TrimSpace(rawLine)
+		if offsetMatch := offsetPattern.FindStringSubmatch(trimmed); len(offsetMatch) == 2 {
+			if offset, err := strconv.Atoi(offsetMatch[1]); err == nil {
+				document.OffsetMS = offset
+			}
+			continue
+		}
+		lineMatch := lyricLinePattern.FindStringSubmatch(trimmed)
 		if len(lineMatch) != 4 {
 			continue
 		}
@@ -226,8 +235,10 @@ func parseYRCWords(line lyricLine, raw string) (lyricLine, bool, error) {
 }
 
 func renderEnhancedLRC(document lyricDocument) string {
-
-	lines := make([]string, 0, len(document.Lines))
+	lines := make([]string, 0, len(document.Lines)+1)
+	if document.OffsetMS != 0 {
+		lines = append(lines, fmt.Sprintf("[offset:%d]", document.OffsetMS))
+	}
 	for _, line := range document.Lines {
 		text := strings.Builder{}
 		text.WriteString(formatLyricTimestamp(line.StartMS, '[', ']'))
