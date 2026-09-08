@@ -6,8 +6,6 @@ data class StoredPlaybackQueueItem(
     val queueItemId: String,
     val position: Int,
     val trackId: String,
-    val variantId: String?,
-    val stableCacheKey: String?,
     val resumePositionMs: Long,
     val isCurrent: Boolean,
     val enqueuedAtEpochMillis: Long,

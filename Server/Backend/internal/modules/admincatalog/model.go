@@ -117,7 +117,6 @@ type SourceRecord struct {
 	RootEnabled    *bool
 	ScanActive     bool
 	MappingCount   int
-	Cue            bool
 }
 
 type LyricRecord struct {

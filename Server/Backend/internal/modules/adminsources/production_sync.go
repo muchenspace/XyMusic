@@ -209,7 +209,7 @@ func (synchronizer *ProductionSynchronizer) PrepareFile(
 	file DiscoveredFile,
 	seenAt time.Time,
 ) (any, bool, error) {
-	if file.ScanError != nil || file.CuePath != "" {
+	if file.ScanError != nil {
 		return nil, false, nil
 	}
 	metadata := file.FileInfo
@@ -698,12 +698,7 @@ func (synchronizer *ProductionSynchronizer) ProcessFile(
 		// failure rather than silently treating it as processed.
 		return file.ScanError
 	}
-	var err error
-	if file.CuePath != "" {
-		err = synchronizer.syncCueFile(ctx, rootID, scanRunID, file, seenAt)
-	} else {
-		_, err = synchronizer.syncStandardFile(ctx, rootID, scanRunID, file, seenAt, false)
-	}
+	_, err := synchronizer.syncStandardFile(ctx, rootID, scanRunID, file, seenAt)
 	if err != nil {
 		_ = synchronizer.markSourceFailed(ctx, rootID, sourceFailurePath(file), err, seenAt)
 		return err
@@ -717,15 +712,11 @@ func (synchronizer *ProductionSynchronizer) syncStandardFile(
 	scanRunID string,
 	file DiscoveredFile,
 	seenAt time.Time,
-	preserveCueMappings bool,
 ) (localSourceRecord, error) {
-	return synchronizer.syncStandardFileWithOptions(ctx, rootID, scanRunID, file, seenAt, standardSyncOptions{
-		PreserveCueMappings: preserveCueMappings,
-	})
+	return synchronizer.syncStandardFileWithOptions(ctx, rootID, scanRunID, file, seenAt, standardSyncOptions{})
 }
 
 type standardSyncOptions struct {
-	PreserveCueMappings bool
 	Metadata            os.FileInfo
 	Probed              *adminmetadata.ProbedMetadataFile
 	Checksum            string
@@ -867,19 +858,15 @@ func (synchronizer *ProductionSynchronizer) syncStandardFileWithOptions(
 		}
 	}
 
-	var artwork *stagedArtwork
-	if !options.PreserveCueMappings {
-		artwork, err = synchronizer.stageArtwork(ctx, file.AudioPath, probed.Metadata.HasArtwork, checksum)
-		if err != nil {
-			return localSourceRecord{}, err
-		}
+	artwork, err := synchronizer.stageArtwork(ctx, file.AudioPath, probed.Metadata.HasArtwork, checksum)
+	if err != nil {
+		return localSourceRecord{}, err
 	}
 	catalogCache := newScanCatalogCache()
 	source, artworkUsed, err := synchronizer.storeStandardFile(ctx, standardFileMutation{
 		RootID: rootID, ScanRunID: scanRunID, File: file, Metadata: metadata,
 		Raw: probed.Metadata, Probed: probed, Checksum: checksum,
 		Existing: existing, ExistingFound: found,
-		PreserveCueMappings: options.PreserveCueMappings,
 		Lyrics:              mergeLyrics(sidecars, probed.Metadata.Lyrics),
 		Artwork:             artwork, CatalogCache: catalogCache,
 		SeenAt: seenAt,

@@ -1,4 +1,4 @@
-import type { PlaybackQuality, ReadonlyTrack } from "../../domain/music";
+import type { ReadonlyTrack } from "../../domain/music";
 import type { PlayMode, RepeatMode } from "../../domain/playbackState";
 
 export type PlaybackTerminalEvent = "PAUSED" | "COMPLETED";
@@ -19,7 +19,6 @@ export interface PlaybackSessionState {
   readonly volume: number;
   readonly shuffled: boolean;
   readonly repeatMode: RepeatMode;
-  readonly quality: PlaybackQuality;
   readonly crossfadeSeconds: number;
   readonly notificationsEnabled: boolean;
   readonly miniMode: boolean;
@@ -63,7 +62,6 @@ export interface PlaybackSession {
   setPlayMode(mode: PlayMode): void;
   cyclePlayMode(): void;
   setVolume(value: number): void;
-  setQuality(value: PlaybackQuality): void;
   setCrossfadeSeconds(value: number): void;
   setNotificationsEnabled(value: boolean): void;
   dispose(): void;

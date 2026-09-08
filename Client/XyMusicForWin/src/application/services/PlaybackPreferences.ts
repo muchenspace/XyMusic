@@ -1,7 +1,6 @@
 import type { AudioPlayer } from "../ports/AudioPlayer";
 import type { PlayerPreferences, PlayerPreferencesSnapshot } from "../ports/PlayerPreferences";
 import type { TaskScheduler } from "../ports/TaskScheduler";
-import type { PlaybackQuality } from "../../domain/music";
 
 /**
  * Applies player preferences immediately where playback needs them and defers
@@ -33,10 +32,6 @@ export class PlaybackPreferences {
     this.cancelVolumeWrite?.();
     this.cancelVolumeWrite = this.scheduler.delay(() => this.flush(), VOLUME_PERSIST_DEBOUNCE_MS);
     return normalized;
-  }
-
-  setQuality(value: PlaybackQuality): void {
-    this.preferences.writeQuality(value);
   }
 
   setCrossfadeSeconds(value: number): number {

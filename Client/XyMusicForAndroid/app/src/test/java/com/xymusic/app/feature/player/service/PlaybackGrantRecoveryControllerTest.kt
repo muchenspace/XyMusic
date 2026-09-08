@@ -16,7 +16,6 @@ import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaUri
 import com.xymusic.app.feature.player.domain.PlaybackGrant
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
 import com.xymusic.app.feature.player.domain.PlayerResult
-import com.xymusic.app.feature.player.domain.model.PreferredQuality
 import java.lang.reflect.Proxy
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -96,14 +95,14 @@ class PlaybackGrantRecoveryControllerTest {
     }
 
     @Test
-    fun serverTranscodeFailuresAreNotTreatedAsExpiredGrants() {
+    fun serverInternalErrorsAreNotTreatedAsExpiredGrants() {
         val player = RecordingPlayer()
         val repository = RecordingGrantRepository()
         val controller = PlaybackGrantRecoveryController(player.delegate, repository)
 
         controller.onPlayerError(
             PlaybackException(
-                "transcode failed",
+                "server internal error",
                 httpStatusError(500, "Internal Server Error"),
                 PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
             ),
@@ -124,7 +123,7 @@ class PlaybackGrantRecoveryControllerTest {
         message,
         null,
         emptyMap<String, List<String>>(),
-        DataSpec.Builder().setUri("https://example.com/streams/session/index.m3u8").build(),
+        DataSpec.Builder().setUri("https://example.com/api/v1/playback/streams/$TRACK_ID").build(),
         ByteArray(0),
     )
 
@@ -133,11 +132,7 @@ class PlaybackGrantRecoveryControllerTest {
 
         override suspend fun get(
             trackId: String,
-            preferredQuality: PreferredQuality,
-            acceptedCodecs: List<String>,
             forceRefresh: Boolean,
-            streamProtocol: com.xymusic.app.feature.player.domain.PlaybackStreamProtocol?,
-            startPositionMs: Long,
         ): PlayerResult<PlaybackGrant> = error("Not used")
 
         override fun invalidate(trackId: String) {

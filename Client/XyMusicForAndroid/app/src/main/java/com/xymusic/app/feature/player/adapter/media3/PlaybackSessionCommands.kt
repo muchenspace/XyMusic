@@ -9,8 +9,6 @@ internal object PlaybackSessionCommands {
     const val ARG_SLEEP_TIMER_DURATION_MS = "sleep_timer_duration_ms"
     const val EXTRA_SLEEP_TIMER_DEADLINE_ELAPSED_REALTIME_MS =
         "sleep_timer_deadline_elapsed_realtime_ms"
-    const val ACTION_CODEC_FALLBACK_APPLIED =
-        "com.xymusic.app.player.CODEC_FALLBACK_APPLIED"
     const val ARG_SEEK_QUEUE_ITEM_ID = "seek_queue_item_id"
     const val ARG_SEEK_POSITION_MS = "seek_position_ms"
 
@@ -27,11 +25,6 @@ internal object PlaybackSessionCommands {
     val SLEEP_TIMER_CHANGED =
         SessionCommand(
             "com.xymusic.app.player.SLEEP_TIMER_CHANGED",
-            Bundle.EMPTY,
-        )
-    val CODEC_FALLBACK_APPLIED =
-        SessionCommand(
-            ACTION_CODEC_FALLBACK_APPLIED,
             Bundle.EMPTY,
         )
     val SEEK_TO_GLOBAL_POSITION =

@@ -52,9 +52,8 @@ interface PlayerRepository {
     suspend fun setSleepTimer(durationMs: Long?): PlayerResult<Unit>
 }
 
-sealed interface PlayerEvent {
-    data object CompatibleCodecFallbackApplied : PlayerEvent
-}
+sealed interface PlayerEvent
+
 
 sealed interface PlayerResult<out T> {
     data class Success<T>(val value: T) : PlayerResult<T>

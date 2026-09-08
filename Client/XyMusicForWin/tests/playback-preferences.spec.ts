@@ -28,13 +28,11 @@ describe("playback preferences", () => {
 
     expect(service.setVolume(Number.NaN)).toBe(0);
     expect(service.setCrossfadeSeconds(9.6)).toBe(5);
-    service.setQuality("LOSSLESS");
     service.setNotificationsEnabled(true);
     service.dispose();
 
     expect(preferences.writeVolume).toHaveBeenCalledExactlyOnceWith(0);
     expect(preferences.writeCrossfadeSeconds).toHaveBeenCalledExactlyOnceWith(5);
-    expect(preferences.writeQuality).toHaveBeenCalledExactlyOnceWith("LOSSLESS");
     expect(preferences.writeNotificationsEnabled).toHaveBeenCalledExactlyOnceWith(true);
     expect(VOLUME_PERSIST_DEBOUNCE_MS).toBeGreaterThan(0);
   });
@@ -42,14 +40,12 @@ describe("playback preferences", () => {
 
 function createPreferences(): PlayerPreferences & {
   writeVolume: ReturnType<typeof vi.fn>;
-  writeQuality: ReturnType<typeof vi.fn>;
   writeCrossfadeSeconds: ReturnType<typeof vi.fn>;
   writeNotificationsEnabled: ReturnType<typeof vi.fn>;
 } {
   return {
-    read: () => ({ volume: 72, quality: "AUTO", crossfadeSeconds: 0, notificationsEnabled: false, hasCrossfadePreference: false }),
+    read: () => ({ volume: 72, crossfadeSeconds: 0, notificationsEnabled: false, hasCrossfadePreference: false }),
     writeVolume: vi.fn(),
-    writeQuality: vi.fn(),
     writeCrossfadeSeconds: vi.fn(),
     writeNotificationsEnabled: vi.fn(),
   };

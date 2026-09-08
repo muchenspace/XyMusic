@@ -103,7 +103,6 @@ function snapshot(position: number) {
     shuffled: false,
     repeat: false,
     repeatMode: "off" as const,
-    quality: "AUTO" as const,
     crossfadeSeconds: 0,
   };
 }

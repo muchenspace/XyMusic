@@ -5,7 +5,7 @@ import org.junit.Test
 
 class MediaArtworkTest {
     @Test
-    fun stableCacheKeyIgnoresMissingValuesAndPreservesContentIdentity() {
+    fun artworkCacheKeyIgnoresMissingValuesAndPreservesContentIdentity() {
         assertThat(stableArtworkCacheKey(null)).isNull()
         assertThat(stableArtworkCacheKey("   ")).isNull()
         assertThat(stableArtworkCacheKey("artwork:asset-1:generation-2"))

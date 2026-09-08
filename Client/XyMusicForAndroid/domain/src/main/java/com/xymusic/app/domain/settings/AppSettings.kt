@@ -3,7 +3,6 @@ package com.xymusic.app.domain.settings
 data class AppSettings(
     val theme: ThemePreference = ThemePreference.SYSTEM,
     val dynamicColorEnabled: Boolean = false,
-    val streamingQuality: StreamingQuality = StreamingQuality.AUTO,
     val mobileDataPolicy: MobileDataPolicy = MobileDataPolicy.ALLOW_STREAMING,
     val cacheLimitMiB: Int = 512,
 ) {
@@ -20,7 +19,5 @@ enum class ThemePreference(val supportsDynamicColor: Boolean) {
     OCEAN_BLUE(false),
     TWILIGHT_PURPLE(false),
 }
-
-enum class StreamingQuality { AUTO, DATA_SAVER, STANDARD, HIGH, LOSSLESS }
 
 enum class MobileDataPolicy { ALLOW_STREAMING, WIFI_ONLY }

@@ -109,8 +109,8 @@ func TestRepositoryRunsLibrarySourceLifecycleInConfiguredDatabase(t *testing.T) 
 		t.Fatal(err)
 	}
 	if _, err := transaction.Exec(ctx, `INSERT INTO local_music_source_tracks(
-		source_id,track_id,segment_index,start_ms
-	) VALUES($1,$2,0,0)`, sourceID, trackID); err != nil {
+		source_id,track_id
+	) VALUES($1,$2)`, sourceID, trackID); err != nil {
 		t.Fatal(err)
 	}
 	views, total, err := repository.ListRootViews(ctx, RootQuery{Limit: 25})
@@ -537,7 +537,7 @@ func TestEnsureDefaultRootSynchronizesConfiguredRoot(t *testing.T) {
 	}
 }
 
-func TestProductionSynchronizerPersistsFilesMetadataAndCUEInConfiguredDatabase(t *testing.T) {
+func TestProductionSynchronizerPersistsFilesMetadataInConfiguredDatabase(t *testing.T) {
 	environmentPath := os.Getenv("XYMUSIC_INTEGRATION_ENV")
 	if environmentPath == "" {
 		t.Skip("set XYMUSIC_INTEGRATION_ENV to run production local library synchronization checks")
@@ -713,48 +713,6 @@ func TestProductionSynchronizerPersistsFilesMetadataAndCUEInConfiguredDatabase(t
 		t.Fatalf("renamed source=%s want=%s", renamedSourceID, sourceID)
 	}
 
-	cueAudio := filepath.Join(directory, "disc.wav")
-	cuePath := filepath.Join(directory, "disc.cue")
-	if err := os.WriteFile(cueAudio, []byte("cue-audio"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cueContent := `TITLE "Cue Album"
-PERFORMER "Cue Artist"
-FILE "disc.wav" WAVE
-  TRACK 01 AUDIO
-    TITLE "First"
-    INDEX 01 00:00:00
-  TRACK 02 AUDIO
-    TITLE "Second"
-    INDEX 01 01:00:00`
-	if err := os.WriteFile(cuePath, []byte(cueContent), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	probeCallsBeforeCue := probe.calls.Load()
-	if err := synchronizer.ProcessFile(ctx, rootID, "", DiscoveredFile{
-		AudioPath: cueAudio, RelativePath: "disc.wav", CuePath: cuePath,
-	}, seenAt.Add(5*time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	if probe.calls.Load()-probeCallsBeforeCue != 1 {
-		t.Fatalf("CUE metadata probe calls=%d, want 1", probe.calls.Load()-probeCallsBeforeCue)
-	}
-	var cueSourceID string
-	if err := transaction.QueryRow(ctx, `SELECT id FROM local_music_sources
-		WHERE root_id=$1 AND normalized_source_path='disc.wav'`, rootID).Scan(&cueSourceID); err != nil {
-		t.Fatal(err)
-	}
-	var mappingCount int
-	var segmentEnd *int64
-	if err := transaction.QueryRow(ctx, `SELECT count(*)::int,
-		max(cue_end_time_ms) FILTER(WHERE cue_track_number=1) FROM local_music_source_tracks WHERE source_id=$1`, cueSourceID).Scan(
-		&mappingCount, &segmentEnd,
-	); err != nil {
-		t.Fatal(err)
-	}
-	if mappingCount != 2 || segmentEnd == nil || *segmentEnd != 60000 {
-		t.Fatalf("CUE mappings=%d first end=%v", mappingCount, segmentEnd)
-	}
 	if _, err := transaction.Exec(ctx, `UPDATE local_music_sources SET last_seen_at=$2,status='READY'
 		WHERE id=$1`, sourceID, seenAt.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
@@ -956,15 +914,15 @@ func TestProductionSynchronizerScannerPersistsDiscoveryAndPreparedFailurePaths(t
 		t.Fatal(err)
 	}
 	if _, err := transaction.Exec(ctx, `INSERT INTO local_music_source_tracks(
-		source_id,track_id,segment_index,start_ms
-	) VALUES($1,$2,0,0)`, sourceID, trackID); err != nil {
+		source_id,track_id
+	) VALUES($1,$2)`, sourceID, trackID); err != nil {
 		t.Fatal(err)
 	}
 
-	const discoveryRelativePath = "discovery-fails.cue"
+	const discoveryRelativePath = "discovery-fails.flac"
 	if err := os.WriteFile(
 		filepath.Join(directory, discoveryRelativePath),
-		[]byte(`TITLE "missing FILE directive"`), 0o600,
+		[]byte("not audio"), 0o600,
 	); err != nil {
 		t.Fatal(err)
 	}

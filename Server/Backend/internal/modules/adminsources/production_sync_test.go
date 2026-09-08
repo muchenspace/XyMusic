@@ -177,7 +177,7 @@ func TestStageArtworkExtractsRealEmbeddedCoverWithFFmpeg(t *testing.T) {
 	if !probed.Metadata.HasArtwork {
 		t.Fatalf("embedded cover was not detected: %+v", probed)
 	}
-	mediaStore, err := localmedia.NewStore(filepath.Join(tempDir, "assets"), filepath.Join(tempDir, "transcode"), 10*1024*1024)
+	mediaStore, err := localmedia.NewStore(filepath.Join(tempDir, "assets"), 10*1024*1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestStageArtworkExtractsRealEmbeddedCoverWithFFmpeg(t *testing.T) {
 
 func TestStageArtworkStoresEmbeddedCoverAsLocalAsset(t *testing.T) {
 	tempDir := t.TempDir()
-	mediaStore, err := localmedia.NewStore(filepath.Join(tempDir, "assets"), filepath.Join(tempDir, "transcode"), 10*1024*1024)
+	mediaStore, err := localmedia.NewStore(filepath.Join(tempDir, "assets"), 10*1024*1024)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -273,7 +273,7 @@ async function verifySettings(page: Page): Promise<void> {
   await verifyPage(page, "settings", "系统设置");
   await page.getByRole("button", { name: "测试当前配置" }).click();
   await expect(page.getByText(/ms|连接|成功/).last()).toBeVisible({ timeout: 60_000 });
-  await page.getByRole("button", { name: "资产与转码" }).click();
+  await page.getByRole("button", { name: "资产存储" }).click();
   await page.getByRole("button", { name: "测试当前配置" }).click();
   await expect(page.getByText(/ms|连接|成功/).last()).toBeVisible({ timeout: 60_000 });
   await page.getByRole("button", { name: "媒体工具" }).click();

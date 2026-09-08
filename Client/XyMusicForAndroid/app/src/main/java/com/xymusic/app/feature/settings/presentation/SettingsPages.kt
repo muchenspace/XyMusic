@@ -8,7 +8,6 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.Cached
-import androidx.compose.material.icons.outlined.HighQuality
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.MaterialTheme
@@ -19,7 +18,6 @@ import androidx.compose.ui.unit.dp
 import com.xymusic.app.R
 import com.xymusic.app.domain.server.ServerEndpoint
 import com.xymusic.app.domain.settings.MobileDataPolicy
-import com.xymusic.app.domain.settings.StreamingQuality
 import com.xymusic.app.domain.settings.ThemePreference
 
 internal data class SettingsActions(
@@ -165,17 +163,6 @@ private fun PlaybackSettingsPage(
     compact: Boolean,
 ) {
     SettingsPageList(SettingsPage.Playback, modifier, showHeading, compact) {
-        item(key = "quality") {
-            OptionRow(
-                icon = Icons.Outlined.HighQuality,
-                title = stringResource(R.string.settings_streaming_quality),
-                selected = uiState.settings.streamingQuality,
-                options = StreamingQuality.entries,
-                optionLabel = { stringResource(it.labelRes()) },
-                onSelected = viewModel::setStreamingQuality,
-                position = SettingsRowPosition.First,
-            )
-        }
         item(key = "wifi-only") {
             SettingsToggleItem(
                 icon = Icons.Outlined.Wifi,
@@ -183,14 +170,14 @@ private fun PlaybackSettingsPage(
                 summary = stringResource(R.string.settings_wifi_only_summary),
                 checked = uiState.settings.mobileDataPolicy == MobileDataPolicy.WIFI_ONLY,
                 onCheckedChange = viewModel::setWifiOnly,
-                position = SettingsRowPosition.Middle,
+                position = SettingsRowPosition.First,
             )
         }
         item(key = "cache") {
             CacheLimitRow(
                 valueMiB = uiState.settings.cacheLimitMiB,
                 onValueChanged = viewModel::setCacheLimitMiB,
-                position = SettingsRowPosition.Middle,
+                position = SettingsRowPosition.Last,
             )
         }
     }

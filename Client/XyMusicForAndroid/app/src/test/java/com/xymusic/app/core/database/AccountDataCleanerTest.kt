@@ -100,7 +100,7 @@ class AccountDataCleanerTest {
         )
         database.playbackQueueDao().replace(
             owner,
-            listOf(PlaybackQueueEntity(owner, "queue-$owner", 0, "track-1", null, null, 0, true, 1_000)),
+            listOf(PlaybackQueueEntity(owner, "queue-$owner", 0, "track-1", 0, true, 1_000)),
         )
         database.searchHistoryDao().record(
             SearchHistoryEntity(owner, "track", SearchScope.ALL, "Track", 1_000),

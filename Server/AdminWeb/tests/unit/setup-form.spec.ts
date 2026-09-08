@@ -108,15 +108,13 @@ describe("setup administrator form", () => {
     }).success).toBe(true);
   });
 
-  it("validates local media asset and transcode directories", () => {
+  it("validates local media asset directory", () => {
     const base = {
       assetDirectory: "assets",
-      transcodeDirectory: "transcode",
       maxUploadBytes: 1024,
     };
     expect(setupStepSchemas.storage.safeParse(base).success).toBe(true);
     expect(setupStepSchemas.storage.safeParse({ ...base, assetDirectory: "" }).success).toBe(false);
-    expect(setupStepSchemas.storage.safeParse({ ...base, transcodeDirectory: "" }).success).toBe(false);
   });
 });
 
@@ -144,7 +142,6 @@ function completeSetupInput(): SetupCompleteInput {
     },
     storage: {
       assetDirectory: "assets",
-      transcodeDirectory: "transcode",
       maxUploadBytes: 1024,
     },
     media: {

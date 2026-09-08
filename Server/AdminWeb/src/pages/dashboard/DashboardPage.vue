@@ -79,7 +79,7 @@ function trackPercentage(state: typeof trackStates[number]): number {
         </article>
         <div class="grid gap-6">
           <article class="ui-card p-5 sm:p-6"><h2 class="font-bold">音源文件状态</h2><p class="mt-1 text-xs text-[var(--muted)]">所有音源的文件汇总</p><StatePanel v-if="!Object.keys(query.data.value?.sources ?? {}).length" state="empty" compact title="暂无音源文件" /><div v-else class="mt-5 space-y-3"><div v-for="(count, state) in query.data.value?.sources" :key="state" class="flex items-center justify-between"><StatusBadge :status="state" :label="sourceFileStatusPresentation(state).label" :tone="sourceFileStatusPresentation(state).tone" /><span class="font-bold"><AnimatedNumber :value="count" /></span></div></div></article>
-          <article class="ui-card p-5 sm:p-6"><h2 class="font-bold">播放时动态转码</h2><p class="mt-1 text-xs text-[var(--muted)]">扫描期间不会创建预转码任务。</p><div class="mt-5 rounded-xl bg-[var(--primary-soft)] p-4 text-sm text-[var(--primary)]"><p class="font-semibold">按需生成</p><p class="mt-1 text-xs leading-5">服务端只保存音源基础信息。客户端开始播放时，服务端根据质量和编码能力即时生成临时音频，过期后自动清理。</p></div></article>
+          <article class="ui-card p-5 sm:p-6"><h2 class="font-bold">直接播放</h2><p class="mt-1 text-xs text-[var(--muted)]">服务端按源文件格式直接提供音频流，不生成播放中间文件。</p><div class="mt-5 rounded-xl bg-[var(--primary-soft)] p-4 text-sm text-[var(--primary)]"><p class="font-semibold">源文件直出</p><p class="mt-1 text-xs leading-5">客户端播放已发布的源音频，服务端只负责授权、范围请求和缓存控制。</p></div></article>
         </div>
       </section>
     </template>

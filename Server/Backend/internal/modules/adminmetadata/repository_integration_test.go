@@ -117,8 +117,8 @@ func TestRepositoryProductionMetadataLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `
-		insert into local_music_source_tracks (source_id, track_id, segment_index, start_ms)
-		values ($1, $2, 0, 0)`, sourceID, trackID); err != nil {
+		insert into local_music_source_tracks (source_id, track_id)
+		values ($1, $2)`, sourceID, trackID); err != nil {
 		t.Fatal(err)
 	}
 

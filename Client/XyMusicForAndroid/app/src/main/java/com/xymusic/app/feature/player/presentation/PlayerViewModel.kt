@@ -10,7 +10,6 @@ import com.xymusic.app.core.model.media.LyricsFormat
 import com.xymusic.app.core.model.media.LyricsTiming
 import com.xymusic.app.feature.player.domain.LyricsSource
 import com.xymusic.app.feature.player.domain.PlaybackQueueUseCases
-import com.xymusic.app.feature.player.domain.PlayerEvent
 import com.xymusic.app.feature.player.domain.PlayerResult
 import com.xymusic.app.feature.player.domain.PlayerUseCases
 import com.xymusic.app.feature.player.domain.model.PlayerFailure
@@ -163,16 +162,6 @@ constructor(
                 .collect { failure ->
                     mutableEffects.emit(PlayerUiEffect.ShowMessage(failure.messageRes()))
                 }
-        }
-        viewModelScope.launch {
-            playerUseCases.events.collect { event ->
-                when (event) {
-                    PlayerEvent.CompatibleCodecFallbackApplied ->
-                        mutableEffects.emit(
-                            PlayerUiEffect.ShowMessage(R.string.player_codec_fallback_applied),
-                        )
-                }
-            }
         }
     }
 

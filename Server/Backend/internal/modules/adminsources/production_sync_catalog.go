@@ -193,26 +193,24 @@ func (synchronizer *ProductionSynchronizer) storeStandardFileInTransaction(
 		source.ID, input.TrackID); err != nil {
 		return localSourceRecord{}, false, fmt.Errorf("link local library source track: %w", err)
 	}
-	if !input.PreserveCueMappings {
-		rows, err := transaction.Query(ctx, `DELETE FROM local_music_source_tracks
-			WHERE source_id=$1 AND track_id<>$2 RETURNING track_id`, source.ID, input.TrackID)
-		if err != nil {
-			return localSourceRecord{}, false, fmt.Errorf("remove stale CUE source mappings: %w", err)
+	rows, err := transaction.Query(ctx, `DELETE FROM local_music_source_tracks
+		WHERE source_id=$1 AND track_id<>$2 RETURNING track_id`, source.ID, input.TrackID)
+	if err != nil {
+		return localSourceRecord{}, false, fmt.Errorf("remove stale source mappings: %w", err)
+	}
+	staleTrackIDs := make([]string, 0)
+	for rows.Next() {
+		var trackID string
+		if err := rows.Scan(&trackID); err != nil {
+			rows.Close()
+			return localSourceRecord{}, false, err
 		}
-		staleTrackIDs := make([]string, 0)
-		for rows.Next() {
-			var trackID string
-			if err := rows.Scan(&trackID); err != nil {
-				rows.Close()
-				return localSourceRecord{}, false, err
-			}
-			staleTrackIDs = append(staleTrackIDs, trackID)
-		}
-		rows.Close()
-		if len(staleTrackIDs) > 0 {
-			if _, err := deleteOrphanedTracks(ctx, transaction, staleTrackIDs); err != nil {
-				return localSourceRecord{}, false, fmt.Errorf("delete stale CUE tracks: %w", err)
-			}
+		staleTrackIDs = append(staleTrackIDs, trackID)
+	}
+	rows.Close()
+	if len(staleTrackIDs) > 0 {
+		if _, err := deleteOrphanedTracks(ctx, transaction, staleTrackIDs); err != nil {
+			return localSourceRecord{}, false, fmt.Errorf("delete stale tracks: %w", err)
 		}
 	}
 	artworkUsed, err := attachAlbumArtwork(ctx, transaction, albumID, input.Artwork)
@@ -315,7 +313,7 @@ type trackArtistAssignment struct {
 }
 
 // scanCatalogCache is intentionally scoped to one write transaction. It can
-// reuse rows created earlier in a multi-track CUE transaction without making
+// reuse rows created earlier in a multi-file scan transaction without making
 // uncommitted IDs visible to another scan.
 type scanCatalogCache struct {
 	artistIDs map[string]string
@@ -769,9 +767,7 @@ func upsertScanTrack(
 			title=$2,normalized_title=$3,album_id=$4,track_number=$5,disc_number=$6,duration_ms=$7,
 			status=CASE WHEN status='ARCHIVED' THEN status ELSE 'READY' END,
 			-- Local source synchronization is the authoritative readiness boundary
-			-- now that playback transcodes on demand. The old media worker used
-			-- to fill published_at after generating variants; without that worker
-			-- scanned tracks would remain in the derived PROCESSING state forever.
+			-- playback serves the indexed source directly; local synchronization is the readiness boundary.
 			published_at=CASE WHEN status='ARCHIVED' THEN published_at ELSE COALESCE(published_at, now()) END,
 			version=version+1,updated_at=now()
 			FROM current WHERE track.id=$1 RETURNING current.album_id`,

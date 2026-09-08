@@ -252,7 +252,7 @@ func (repository *Repository) DeleteTrackPermanently(
 	}
 	for _, sourceID := range primaryIDs {
 		var replacementTrack string
-		err := tx.QueryRow(ctx, `SELECT track_id FROM local_music_source_tracks WHERE source_id=$1 AND track_id<>$2 ORDER BY segment_index LIMIT 1`, sourceID, id).Scan(&replacementTrack)
+		err := tx.QueryRow(ctx, `SELECT track_id FROM local_music_source_tracks WHERE source_id=$1 AND track_id<>$2 ORDER BY track_id LIMIT 1`, sourceID, id).Scan(&replacementTrack)
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue
 		}

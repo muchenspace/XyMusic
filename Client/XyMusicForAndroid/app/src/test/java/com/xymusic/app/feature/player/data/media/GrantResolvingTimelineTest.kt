@@ -19,7 +19,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34])
 class GrantResolvingTimelineTest {
     @Test
-    fun eventHlsTimelineIsPublishedAsFiniteSeekableTrack() {
+    fun unsetDurationTimelineIsPublishedAsFiniteSeekableTrack() {
         val publishedItem =
             MediaItem
                 .Builder()
@@ -63,7 +63,7 @@ class GrantResolvingTimelineTest {
         assertThat(window.mediaItem).isEqualTo(publishedItem)
         assertThat(window.durationUs).isEqualTo(TRACK_DURATION_MS * 1_000L)
         assertThat(window.isSeekable).isTrue()
-        // isDynamic remains true for an active HLS Event playlist so ExoPlayer continues polling and does not end early
+        // isDynamic remains true for an active stream so ExoPlayer does not end early
         assertThat(window.isDynamic).isTrue()
         // isLive remains false because liveConfiguration is cleared, ensuring system media controls show seekbar and duration
         assertThat(window.isLive()).isFalse()

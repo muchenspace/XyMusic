@@ -14,9 +14,7 @@ import (
 func TestLocalMediaStoreInitializationAndPing(t *testing.T) {
 	tempDir := t.TempDir()
 	assetDir := filepath.Join(tempDir, "assets")
-	transcodeDir := filepath.Join(tempDir, "transcode")
-
-	store, err := NewStore(assetDir, transcodeDir, 10*1024*1024)
+	store, err := NewStore(assetDir, 10*1024*1024)
 	if err != nil {
 		t.Fatalf("unexpected NewStore error: %v", err)
 	}
@@ -28,7 +26,7 @@ func TestLocalMediaStoreInitializationAndPing(t *testing.T) {
 
 func TestPathTraversalPrevention(t *testing.T) {
 	tempDir := t.TempDir()
-	store, err := NewStore(filepath.Join(tempDir, "assets"), filepath.Join(tempDir, "transcode"), 10*1024*1024)
+	store, err := NewStore(filepath.Join(tempDir, "assets"), 10*1024*1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +48,7 @@ func TestPathTraversalPrevention(t *testing.T) {
 
 func TestUploadStreamValidationAndCommit(t *testing.T) {
 	tempDir := t.TempDir()
-	store, err := NewStore(filepath.Join(tempDir, "assets"), filepath.Join(tempDir, "transcode"), 10*1024*1024)
+	store, err := NewStore(filepath.Join(tempDir, "assets"), 10*1024*1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +99,7 @@ func TestUploadStreamValidationAndCommit(t *testing.T) {
 
 func TestUploadStreamChecksumMismatch(t *testing.T) {
 	tempDir := t.TempDir()
-	store, err := NewStore(filepath.Join(tempDir, "assets"), filepath.Join(tempDir, "transcode"), 10*1024*1024)
+	store, err := NewStore(filepath.Join(tempDir, "assets"), 10*1024*1024)
 	if err != nil {
 		t.Fatal(err)
 	}

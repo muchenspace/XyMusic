@@ -467,8 +467,8 @@ func TestProductionArchivedTrackScrapingGuards(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO local_music_source_tracks(
-		source_id,track_id,segment_index,start_ms
-	) VALUES($1,$2,0,0)`, sourceID, trackID); err != nil {
+		source_id,track_id
+	) VALUES($1,$2)`, sourceID, trackID); err != nil {
 		t.Fatal(err)
 	}
 	rawTags, err := json.Marshal(MetadataSnapshot{
@@ -578,8 +578,8 @@ func TestProductionBatchCancellationAcrossServiceInstances(t *testing.T) {
 	) VALUES($1,$2,$3,$4,$4,repeat('a',64),1,now(),'READY')`, sourceID, rootID, trackID, sourcePath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO local_music_source_tracks(source_id,track_id,segment_index,start_ms)
-		VALUES($1,$2,0,0)`, sourceID, trackID); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO local_music_source_tracks(source_id,track_id)
+		VALUES($1,$2)`, sourceID, trackID); err != nil {
 		t.Fatal(err)
 	}
 	rawTags, err := json.Marshal(MetadataSnapshot{
@@ -1104,7 +1104,7 @@ func TestProductionStaleBatchAttemptCannotCommitMutations(t *testing.T) {
 	}()
 	generatedIDs := []string{uuid.NewString(), raceAssetID, uuid.NewString()}
 	generatedIndex := 0
-	localMediaStore, _ := localmedia.NewStore(t.TempDir(), t.TempDir(), 0)
+	localMediaStore, _ := localmedia.NewStore(t.TempDir(), 0)
 	mediaService, err := adminmedia.NewService(cfg, adminmedia.ServiceDependencies{
 		Repository:  mediaRepository,
 		LocalMedia:  localMediaStore,

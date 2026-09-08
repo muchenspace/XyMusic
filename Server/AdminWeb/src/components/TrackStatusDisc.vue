@@ -109,7 +109,7 @@ onBeforeUnmount(() => {
             <dt class="text-[var(--muted)]">音源</dt><dd class="truncate" :title="track.source?.rootName ?? undefined">{{ track.source?.rootName ?? '—' }}</dd>
             <dt class="text-[var(--muted)]">源文件</dt><dd class="truncate" :title="track.source?.relativePath">{{ track.source?.relativePath ?? '—' }}</dd>
           </dl>
-          <div class="mt-4 border-t border-[var(--border)] pt-3"><p class="text-xs font-bold">播放时动态转码</p><p class="mt-2 text-xs leading-5 text-[var(--muted)]">首次播放时服务端才按客户端能力生成音频；生成完成后会按源文件版本和输出音质缓存，后续相同请求可复用。</p></div>
+          <div class="mt-4 border-t border-[var(--border)] pt-3"><p class="text-xs font-bold">源文件直出</p><p class="mt-2 text-xs leading-5 text-[var(--muted)]">播放时直接读取已发布的源音频，不生成或缓存播放中间文件。</p></div>
           <p v-if="track.source?.status === 'FAILED' && track.source.lastError" class="mt-3 rounded-xl bg-rose-500/10 p-3 text-xs leading-5 text-[var(--danger)]"><span class="font-semibold">源文件分析：</span>{{ track.source.lastError }}</p>
           <p v-if="writebackErrorDetail" class="mt-3 rounded-xl bg-rose-500/10 p-3 text-xs leading-5 text-[var(--danger)]"><span class="font-semibold">Tag 写回：</span>{{ writebackErrorDetail }}</p>
         </div>

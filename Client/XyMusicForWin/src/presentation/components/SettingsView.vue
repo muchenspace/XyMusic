@@ -3,13 +3,11 @@ import { computed, ref, watch } from "vue";
 import { Camera, Headphones, Languages, LogOut, MonitorCog, Palette, Save, Server, ShieldCheck, UserRound } from "@lucide/vue";
 import type { ServerConfig, ServerProtocol, UserProfile } from "../../application/ports/SessionRepository";
 import type { DesktopLyricsFullscreenBehavior } from "../../application/ports/UserInterfacePreferences";
-import type { PlaybackQuality } from "../../domain/music";
 import type { ThemePreference } from "../stores/themeStore";
 
 const props = defineProps<{
   user: UserProfile;
   serverConfig: ServerConfig;
-  quality: PlaybackQuality;
   crossfadeSeconds: number;
   notificationsEnabled: boolean;
   theme: "dark" | "light";
@@ -30,7 +28,6 @@ const props = defineProps<{
   error: string;
 }>();
 const emit = defineEmits<{
-  "update:quality": [value: PlaybackQuality];
   "update:crossfadeSeconds": [value: number];
   "update:notificationsEnabled": [value: boolean];
   "update:themePreference": [value: ThemePreference];
@@ -52,17 +49,10 @@ const emit = defineEmits<{
   logoutAll: [];
 }>();
 
-const qualities: Array<{ value: PlaybackQuality; label: string; description: string }> = [
-  { value: "AUTO", label: "自动", description: "根据网络状况选择" },
-  { value: "DATA_SAVER", label: "省流", description: "降低流量消耗" },
-  { value: "STANDARD", label: "标准", description: "兼顾音质与流量" },
-  { value: "HIGH", label: "高品质", description: "优先更高码率" },
-  { value: "LOSSLESS", label: "无损", description: "使用可用的无损音源" },
-];
 type SettingsCategory = "account" | "playback" | "lyrics" | "system";
 const settingsCategories = [
   { id: "account", label: "账户", description: "个人资料、账号信息与登录状态", icon: UserRound },
-  { id: "playback", label: "播放", description: "音质、切歌效果与播放通知", icon: Headphones },
+  { id: "playback", label: "播放", description: "切歌效果与播放通知", icon: Headphones },
   { id: "lyrics", label: "歌词", description: "播放页歌词与桌面歌词显示", icon: Languages },
   { id: "system", label: "外观与系统", description: "界面主题与服务器连接", icon: MonitorCog },
 ] as const;
@@ -180,13 +170,7 @@ function normalizedPort(value: string): string { return validPort(value) ? Strin
 
           <template v-else-if="activeCategory === 'playback'">
             <section class="settings-card">
-              <div class="settings-card-heading"><span class="settings-icon"><Headphones :size="19" /></span><div><h3>播放偏好</h3><p>控制音频质量、切歌效果与系统通知</p></div></div>
-              <label class="field-group">
-                <span>默认音质</span>
-                <select :value="quality" @change="emit('update:quality', ($event.target as HTMLSelectElement).value as PlaybackQuality)">
-                  <option v-for="item in qualities" :key="item.value" :value="item.value">{{ item.label }} · {{ item.description }}</option>
-                </select>
-              </label>
+              <div class="settings-card-heading"><span class="settings-icon"><Headphones :size="19" /></span><div><h3>播放偏好</h3><p>控制切歌效果与系统通知</p></div></div>
               <label class="field-group">
                 <span>切歌淡入淡出</span>
                 <select :value="crossfadeSeconds" @change="emit('update:crossfadeSeconds', Number(($event.target as HTMLSelectElement).value))">

@@ -242,12 +242,6 @@ func mergeStorage(current config.Config, input StorageInput) (config.Config, err
 			return config.Config{}, err
 		}
 	}
-	if input.TranscodeDirectory != nil {
-		environment["MEDIA_TRANSCODE_DIRECTORY"], err = requiredText(*input.TranscodeDirectory, 4000, "storage.transcodeDirectory")
-		if err != nil {
-			return config.Config{}, err
-		}
-	}
 	if input.UploadTTLSeconds != nil {
 		if *input.UploadTTLSeconds < 60 || *input.UploadTTLSeconds > 86400 {
 			return config.Config{}, validation("storage.uploadTtlSeconds is invalid")
@@ -259,30 +253,6 @@ func mergeStorage(current config.Config, input StorageInput) (config.Config, err
 			return config.Config{}, validation("storage.streamTtlSeconds is invalid")
 		}
 		environment["MEDIA_STREAM_TTL_SECONDS"] = strconv.Itoa(*input.StreamTTLSeconds)
-	}
-	if input.StreamMaxConcurrent != nil {
-		if *input.StreamMaxConcurrent < 1 || *input.StreamMaxConcurrent > 100 {
-			return config.Config{}, validation("storage.streamMaxConcurrent is invalid")
-		}
-		environment["MEDIA_STREAM_MAX_CONCURRENT"] = strconv.Itoa(*input.StreamMaxConcurrent)
-	}
-	if input.StreamIdleTimeoutSeconds != nil {
-		if *input.StreamIdleTimeoutSeconds < 10 || *input.StreamIdleTimeoutSeconds > 3600 {
-			return config.Config{}, validation("storage.streamIdleTimeoutSeconds is invalid")
-		}
-		environment["MEDIA_STREAM_IDLE_TIMEOUT_SECONDS"] = strconv.Itoa(*input.StreamIdleTimeoutSeconds)
-	}
-	if input.TranscodeTimeoutSeconds != nil {
-		if *input.TranscodeTimeoutSeconds < 30 || *input.TranscodeTimeoutSeconds > 3600 {
-			return config.Config{}, validation("storage.transcodeTimeoutSeconds is invalid")
-		}
-		environment["MEDIA_TRANSCODE_TIMEOUT_SECONDS"] = strconv.Itoa(*input.TranscodeTimeoutSeconds)
-	}
-	if input.TranscodeCacheMaxBytes != nil {
-		if *input.TranscodeCacheMaxBytes < config.MinMediaTranscodeCacheMaxBytes || *input.TranscodeCacheMaxBytes > config.MaxMediaTranscodeCacheMaxBytes {
-			return config.Config{}, validation("storage.transcodeCacheMaxBytes is invalid")
-		}
-		environment["MEDIA_TRANSCODE_CACHE_MAX_BYTES"] = strconv.FormatInt(*input.TranscodeCacheMaxBytes, 10)
 	}
 	if input.MaxUploadBytes != nil {
 		if *input.MaxUploadBytes < 1 || *input.MaxUploadBytes > config.MaxServerRequestBodyBytes {
@@ -340,13 +310,8 @@ func changedFields(previous, candidate config.Config) []string {
 		{"database.url", previous.Database.URL, candidate.Database.URL},
 		{"database.maximumConnections", previous.Database.MaxConnections, candidate.Database.MaxConnections},
 		{"storage.assetDirectory", previous.MediaStorage.AssetDirectory, candidate.MediaStorage.AssetDirectory},
-		{"storage.transcodeDirectory", previous.MediaStorage.TranscodeDirectory, candidate.MediaStorage.TranscodeDirectory},
 		{"storage.uploadTtlSeconds", previous.MediaStorage.UploadTTLSeconds, candidate.MediaStorage.UploadTTLSeconds},
 		{"storage.streamTtlSeconds", previous.MediaStorage.StreamTTLSeconds, candidate.MediaStorage.StreamTTLSeconds},
-		{"storage.streamMaxConcurrent", previous.MediaStorage.StreamMaxConcurrent, candidate.MediaStorage.StreamMaxConcurrent},
-		{"storage.streamIdleTimeoutSeconds", previous.MediaStorage.StreamIdleTimeoutSeconds, candidate.MediaStorage.StreamIdleTimeoutSeconds},
-		{"storage.transcodeTimeoutSeconds", previous.MediaStorage.TranscodeTimeoutSeconds, candidate.MediaStorage.TranscodeTimeoutSeconds},
-		{"storage.transcodeCacheMaxBytes", previous.MediaStorage.TranscodeCacheMaxBytes, candidate.MediaStorage.TranscodeCacheMaxBytes},
 		{"storage.maxUploadBytes", previous.MediaStorage.MaxUploadBytes, candidate.MediaStorage.MaxUploadBytes},
 		{"media.ffmpegPath", previous.Media.FFmpegPath, candidate.Media.FFmpegPath},
 		{"media.mode", previous.Media.Mode, candidate.Media.Mode},

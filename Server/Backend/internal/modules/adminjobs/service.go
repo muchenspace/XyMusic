@@ -276,7 +276,6 @@ func userFacingOperationalError(message, code *string) *string {
 		"Object cleanup lease expired after all retry attempts were used": "\u8d44\u6e90\u6e05\u7406\u591a\u6b21\u91cd\u8bd5\u540e\u4ecd\u672a\u5b8c\u6210\uff0c\u8bf7\u68c0\u67e5\u670d\u52a1\u72b6\u6001\u3002",
 		"A newer upload superseded this media job":                        "\u8be5\u4efb\u52a1\u5df2\u88ab\u8f83\u65b0\u7684\u4e0a\u4f20\u66ff\u4ee3\u3002",
 		"A newer source generation superseded this media job":             "\u8be5\u4efb\u52a1\u5df2\u88ab\u8f83\u65b0\u7684\u97f3\u4e50\u6e90\u7248\u672c\u66ff\u4ee3\u3002",
-		"A newer CUE definition superseded this media job":                "\u8be5\u4efb\u52a1\u5df2\u88ab\u8f83\u65b0\u7684 CUE \u5b9a\u4e49\u66ff\u4ee3\u3002",
 	}
 	if value, exists := known[normalized]; exists {
 		return &value

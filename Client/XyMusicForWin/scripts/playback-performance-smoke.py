@@ -229,15 +229,13 @@ class LocalApi:
 
         if method == "POST" and re.fullmatch(r"/api/v1/tracks/track-\d+/playback", path):
             body = self._json_body(request, "playback grant")
-            if body.get("preferredQuality") != "STANDARD" or body.get("acceptedCodecs") != ["aac", "mp3", "flac", "opus"]:
-                self.contract_failures.append("Playback grant request did not contain the expected quality and codecs")
+            if body != {}:
+                self.contract_failures.append("Playback grant request must not contain a quality or codec selector")
             self._json(
                 route,
                 {
                     "trackId": TRACK_ID,
-                    "sessionId": "00000000-0000-4000-8000-000000000900",
-                    "selectedQuality": "STANDARD",
-                    "streamUrl": "/api/v1/playback/streams/00000000-0000-4000-8000-000000000900?ticket=performance",
+                    "streamUrl": f"/api/v1/playback/streams/{TRACK_ID}?ticket=performance",
                     "expiresAt": "2099-01-01T00:00:00.000Z",
                     "mimeType": "audio/wav",
                     "codec": "pcm_s16le",
@@ -245,8 +243,6 @@ class LocalApi:
                     "bitrate": 128000,
                     "sampleRate": 8000,
                     "contentLength": len(AUDIO_BYTES),
-                    "checksumSha256": None,
-                    "cacheKey": "perf-track-1",
                 },
             )
             return

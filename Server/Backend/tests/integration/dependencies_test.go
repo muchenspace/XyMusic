@@ -20,7 +20,7 @@ import (
 	platformsecurity "xymusic/server/internal/platform/security"
 )
 
-func TestProductionDependenciesAreCompatible(t *testing.T) {
+func TestProductionDependencies(t *testing.T) {
 	environmentPath := os.Getenv("XYMUSIC_INTEGRATION_ENV")
 	if environmentPath == "" {
 		t.Skip("set XYMUSIC_INTEGRATION_ENV to run production dependency probes")
@@ -95,7 +95,7 @@ func TestProductionDependenciesAreCompatible(t *testing.T) {
 			t.Fatalf("Go cannot decrypt an existing Bun idempotency response: %v", err)
 		}
 	}
-	localMedia, err := localmedia.NewStore(cfg.MediaStorage.AssetDirectory, cfg.MediaStorage.TranscodeDirectory, cfg.MediaStorage.MaxUploadBytes)
+	localMedia, err := localmedia.NewStore(cfg.MediaStorage.AssetDirectory, cfg.MediaStorage.MaxUploadBytes)
 	if err != nil {
 		t.Fatalf("local media store initialization failed: %v", err)
 	}

@@ -15,7 +15,6 @@ type sourceScanSnapshot struct {
 	sourcesByPath         map[string]*localSourceRecord
 	renameCandidates      map[string][]*localSourceRecord
 	assetsByID            map[string]sourceScanAsset
-	mappingsBySource      map[string][]cueMapping
 	externalLyricsByID    map[string]struct{}
 	missingArtworkTracks  map[string]struct{}
 	missingArtworkSources map[string]struct{}
@@ -71,7 +70,6 @@ func (synchronizer *ProductionSynchronizer) loadSourceScanSnapshot(
 		sourcesByPath:         make(map[string]*localSourceRecord),
 		renameCandidates:      make(map[string][]*localSourceRecord),
 		assetsByID:            make(map[string]sourceScanAsset),
-		mappingsBySource:      make(map[string][]cueMapping),
 		externalLyricsByID:    make(map[string]struct{}),
 		missingArtworkTracks:  make(map[string]struct{}),
 		missingArtworkSources: make(map[string]struct{}),
@@ -90,7 +88,7 @@ func (synchronizer *ProductionSynchronizer) loadSourceScanSnapshot(
 			SELECT track_id
 			FROM local_music_source_tracks
 			WHERE source_id = source.id
-			ORDER BY cue_track_number NULLS FIRST, segment_index, track_id
+			ORDER BY track_id
 			LIMIT 1
 		) track_link ON true
 		WHERE source.root_id = $1`, rootID)
@@ -112,36 +110,6 @@ func (synchronizer *ProductionSynchronizer) loadSourceScanSnapshot(
 		return nil, fmt.Errorf("iterate preloaded local library sources: %w", err)
 	}
 	sourceRows.Close()
-
-	mappingRows, err := synchronizer.database.Query(ctx, `
-		SELECT mapping.source_id, mapping.track_id, mapping.cue_track_number,
-			mapping.cue_start_time_ms, mapping.cue_end_time_ms
-		FROM local_music_source_tracks mapping
-		JOIN local_music_sources source ON source.id = mapping.source_id
-		WHERE source.root_id = $1
-		  AND (mapping.cue_path IS NOT NULL OR mapping.cue_track_number IS NOT NULL
-		       OR mapping.cue_start_time_ms IS NOT NULL OR mapping.cue_end_time_ms IS NOT NULL)
-		ORDER BY mapping.source_id, mapping.cue_track_number NULLS FIRST`, rootID)
-	if err != nil {
-		return nil, fmt.Errorf("preload local library CUE mappings: %w", err)
-	}
-	for mappingRows.Next() {
-		var sourceID string
-		var mapping cueMapping
-		if scanErr := mappingRows.Scan(
-			&sourceID, &mapping.TrackID, &mapping.Number,
-			&mapping.StartMS, &mapping.EndMS,
-		); scanErr != nil {
-			mappingRows.Close()
-			return nil, fmt.Errorf("read preloaded local library CUE mapping: %w", scanErr)
-		}
-		snapshot.mappingsBySource[sourceID] = append(snapshot.mappingsBySource[sourceID], mapping)
-	}
-	if err := mappingRows.Err(); err != nil {
-		mappingRows.Close()
-		return nil, fmt.Errorf("iterate preloaded local library CUE mappings: %w", err)
-	}
-	mappingRows.Close()
 
 	lyricRows, err := synchronizer.database.Query(ctx, `
 		SELECT source.id
@@ -213,7 +181,6 @@ func (snapshot *sourceScanSnapshot) release() {
 	snapshot.sourcesByPath = nil
 	snapshot.assetsByID = nil
 	snapshot.renameCandidates = nil
-	snapshot.mappingsBySource = nil
 	snapshot.externalLyricsByID = nil
 	snapshot.missingArtworkTracks = nil
 	snapshot.missingArtworkSources = nil

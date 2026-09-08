@@ -72,7 +72,6 @@ type Runtime struct {
 	ready                     *dependencyReadiness
 	events                    *sse.Broadcaster
 	background                *backgroundGroup
-	playbackTranscoder        *playback.TranscodeSessionManager
 }
 
 type Options struct {
@@ -122,12 +121,8 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	var events *sse.Broadcaster
 	var background *backgroundGroup
 	var metrics *runtimemetrics.Collector
-	var playbackTranscoder *playback.TranscodeSessionManager
 	defer func() {
 		if failed {
-			if playbackTranscoder != nil {
-				playbackTranscoder.Close()
-			}
 			if background != nil {
 				closeContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				_ = background.Close(closeContext)
@@ -153,7 +148,7 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 		return nil, fmt.Errorf("ensure large-library indexes: %w", err)
 	}
 
-	localMedia, err := localmedia.NewStore(resolved.MediaStorage.AssetDirectory, resolved.MediaStorage.TranscodeDirectory, resolved.MediaStorage.MaxUploadBytes)
+	localMedia, err := localmedia.NewStore(resolved.MediaStorage.AssetDirectory, resolved.MediaStorage.MaxUploadBytes)
 	if err != nil {
 		return nil, fmt.Errorf("create local media store: %w", err)
 	}
@@ -369,28 +364,13 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	}
 
 	playbackResolver := playback.NewPlaybackSourceResolver(db.Pool, localMedia)
-	playbackSelector := playback.NewProfileSelector()
 	playbackSigner, err := playback.NewTicketSigner(resolved.Security.PlaybackTicketSecret)
 	if err != nil {
 		return nil, fmt.Errorf("create playback ticket signer: %w", err)
 	}
-	playbackTranscoder, err = playback.NewTranscodeSessionManager(
-		localMedia,
-		resolved.Media.FFmpegPath,
-		resolved.Media.FFmpegThreads,
-		resolved.MediaStorage.StreamMaxConcurrent,
-		time.Duration(resolved.MediaStorage.StreamIdleTimeoutSeconds)*time.Second,
-		time.Duration(resolved.MediaStorage.TranscodeTimeoutSeconds)*time.Second,
-		resolved.MediaStorage.TranscodeCacheMaxBytes,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("create playback transcode manager: %w", err)
-	}
 	playbackService, err := playback.NewService(
 		playbackResolver,
-		playbackSelector,
 		playbackSigner,
-		playbackTranscoder,
 		time.Duration(resolved.MediaStorage.StreamTTLSeconds)*time.Second,
 	)
 	if err != nil {
@@ -399,7 +379,6 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 	playbackRoutes, err := playback.NewRoutes(
 		playbackService,
 		playbackSigner,
-		playbackTranscoder,
 		&playbackIdentityAdapter{identity: identityService},
 	)
 	if err != nil {
@@ -678,8 +657,7 @@ func Bootstrap(ctx context.Context, raw config.Config, options Options) (*Runtim
 		AdminTagScraping: tagScrapingService, AdminTagBatches: tagBatchService,
 		AdminArtistArtworkBatches: artistArtworkBatchService,
 		Catalog:                   catalogService, Library: libraryService, Playback: playbackService,
-		playbackTranscoder: playbackTranscoder,
-		Playlist:           playlistService, Profile: profileService, Metrics: metrics, Handler: engine, ready: readiness,
+		Playlist: playlistService, Profile: profileService, Metrics: metrics, Handler: engine, ready: readiness,
 		events: events, background: background,
 	}, nil
 }
@@ -725,9 +703,6 @@ func (runtime *Runtime) CloseContext(ctx context.Context) error {
 	var closeErr error
 	if runtime.background != nil {
 		closeErr = runtime.background.Close(ctx)
-	}
-	if runtime.playbackTranscoder != nil {
-		runtime.playbackTranscoder.Close()
 	}
 	if runtime.AdminTagBatches != nil {
 		closeErr = errors.Join(closeErr, runtime.AdminTagBatches.Close(ctx))

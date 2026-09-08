@@ -102,7 +102,6 @@ type MetadataSourceRecord struct {
 	ScanActive     bool
 	TrackStatus    *string
 	MappingCount   int
-	Cue            bool
 }
 
 type WritebackStatus string

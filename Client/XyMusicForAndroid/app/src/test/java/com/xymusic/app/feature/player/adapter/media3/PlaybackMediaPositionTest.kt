@@ -18,6 +18,7 @@ class PlaybackMediaPositionTest {
 
         assertThat(item.playbackMetadataDurationMs()).isEqualTo(180_000L)
         assertThat(item.globalPlaybackDurationMs(0)).isEqualTo(180_000L)
+        assertThat(item.globalPlaybackPositionMs(12_000)).isEqualTo(12_000L)
     }
 
     @Test
@@ -40,18 +41,7 @@ class PlaybackMediaPositionTest {
         assertThat(item.globalPlaybackDurationMs(0)).isEqualTo(180_000L)
     }
 
-    @Test
-    fun sourceOffsetDoesNotShortenTheFullTrackDuration() {
-        val item = mediaItem(durationMs = 180_000, sourceOffsetMs = 90_000)
-
-        assertThat(item.globalPlaybackPositionMs(0)).isEqualTo(90_000L)
-        assertThat(item.globalPlaybackDurationMs(500)).isEqualTo(180_000L)
-    }
-
-    private fun mediaItem(durationMs: Long, sourceOffsetMs: Long = 0): MediaItem {
-        val extras = Bundle().apply {
-            putLong(PlaybackMediaMetadata.EXTRA_SOURCE_OFFSET_MS, sourceOffsetMs)
-        }
+    private fun mediaItem(durationMs: Long): MediaItem {
         return MediaItem
             .Builder()
             .setMediaId("queue-1")
@@ -59,7 +49,6 @@ class PlaybackMediaPositionTest {
                 MediaMetadata
                     .Builder()
                     .setDurationMs(durationMs)
-                    .setExtras(extras)
                     .build(),
             )
             .build()

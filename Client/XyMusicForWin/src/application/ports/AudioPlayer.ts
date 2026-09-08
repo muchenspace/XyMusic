@@ -1,5 +1,3 @@
-import type { StreamProtocol } from "../../domain/music";
-
 export interface AudioSnapshot {
   currentTime: number;
   duration: number;
@@ -9,13 +7,6 @@ export interface AudioSnapshot {
 export interface AudioSourceMetadata {
   bitrate?: number;
   duration?: number;
-  startOffset?: number;
-  streamProtocol?: StreamProtocol;
-}
-
-export interface AudioBandwidthSample {
-  bitsPerSecond: number;
-  durationMs: number;
 }
 
 export interface AudioPlayer {
@@ -32,7 +23,5 @@ export interface AudioPlayer {
   onUpdate(listener: (snapshot: AudioSnapshot) => void): () => void;
   onEnded(listener: () => void): () => void;
   onError(listener: (message: string) => void): () => void;
-  onBandwidthSample?(listener: (sample: AudioBandwidthSample) => void): () => void;
   onBuffering?(listener: () => void): () => void;
-  onNetworkChange?(listener: () => void): () => void;
 }

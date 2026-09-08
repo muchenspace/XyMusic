@@ -22,19 +22,13 @@ interface PlaybackApi {
 }
 
 @Serializable
-data class PlaybackRequestDto(
-    val preferredQuality: String,
-    val acceptedCodecs: List<String> = emptyList(),
-    val streamProtocol: String? = null,
-    val startPositionMs: Long? = null,
-)
+class PlaybackRequestDto
 
 @Serializable
 data class PlaybackGrantDto(
     val trackId: String,
-    val sessionId: String,
-    val selectedQuality: String,
     val streamUrl: String,
+    val durationMs: Long? = null,
     val expiresAt: String,
     val mimeType: String,
     val codec: String,
@@ -42,11 +36,6 @@ data class PlaybackGrantDto(
     val bitrate: Int,
     val sampleRate: Int? = null,
     val contentLength: Long? = null,
-    val checksumSha256: String? = null,
-    val cacheKey: String,
-    val streamProtocol: String? = null,
-    val durationMs: Long? = null,
-    val startPositionMs: Long = 0,
 )
 
 @Serializable

@@ -22,26 +22,20 @@ func configurationDocument(cfg config.Config) fingerprintDocument {
 	return fingerprintDocument{
 		Environment: cfg.Environment,
 		Paths: fingerprintPaths{
-			MigrationsDirectory:     cfg.Paths.MigrationsDirectory,
-			AdminWebDirectory:       cfg.Paths.AdminWebDirectory,
-			MediaToolsDirectory:     cfg.Paths.MediaToolsDirectory,
-			LocalMusicDirectory:     cfg.Paths.LocalMusicDirectory,
-			MediaAssetDirectory:     cfg.Paths.MediaAssetDirectory,
-			MediaTranscodeDirectory: cfg.Paths.MediaTranscodeDirectory,
+			MigrationsDirectory: cfg.Paths.MigrationsDirectory,
+			AdminWebDirectory:   cfg.Paths.AdminWebDirectory,
+			MediaToolsDirectory: cfg.Paths.MediaToolsDirectory,
+			LocalMusicDirectory: cfg.Paths.LocalMusicDirectory,
+			MediaAssetDirectory: cfg.Paths.MediaAssetDirectory,
 		},
 		Database: fingerprintDatabase{
 			URL: cfg.Database.URL, MaxConnections: cfg.Database.MaxConnections,
 		},
 		MediaStorage: fingerprintMediaStorage{
-			AssetDirectory:           cfg.MediaStorage.AssetDirectory,
-			TranscodeDirectory:       cfg.MediaStorage.TranscodeDirectory,
-			UploadTTLSeconds:         cfg.MediaStorage.UploadTTLSeconds,
-			StreamTTLSeconds:         cfg.MediaStorage.StreamTTLSeconds,
-			StreamMaxConcurrent:      cfg.MediaStorage.StreamMaxConcurrent,
-			StreamIdleTimeoutSeconds: cfg.MediaStorage.StreamIdleTimeoutSeconds,
-			TranscodeTimeoutSeconds:  cfg.MediaStorage.TranscodeTimeoutSeconds,
-			TranscodeCacheMaxBytes:   cfg.MediaStorage.TranscodeCacheMaxBytes,
-			MaxUploadBytes:           cfg.MediaStorage.MaxUploadBytes,
+			AssetDirectory:   cfg.MediaStorage.AssetDirectory,
+			UploadTTLSeconds: cfg.MediaStorage.UploadTTLSeconds,
+			StreamTTLSeconds: cfg.MediaStorage.StreamTTLSeconds,
+			MaxUploadBytes:   cfg.MediaStorage.MaxUploadBytes,
 		},
 		Media: fingerprintMedia{
 			Mode: cfg.Media.Mode, FFmpegPath: cfg.Media.FFmpegPath, FFprobePath: cfg.Media.FFprobePath,
@@ -72,12 +66,11 @@ type fingerprintDocument struct {
 }
 
 type fingerprintPaths struct {
-	MigrationsDirectory     string `json:"migrationsDirectory"`
-	AdminWebDirectory       string `json:"adminWebDirectory"`
-	MediaToolsDirectory     string `json:"mediaToolsDirectory"`
-	LocalMusicDirectory     string `json:"localMusicDirectory"`
-	MediaAssetDirectory     string `json:"mediaAssetDirectory"`
-	MediaTranscodeDirectory string `json:"mediaTranscodeDirectory"`
+	MigrationsDirectory string `json:"migrationsDirectory"`
+	AdminWebDirectory   string `json:"adminWebDirectory"`
+	MediaToolsDirectory string `json:"mediaToolsDirectory"`
+	LocalMusicDirectory string `json:"localMusicDirectory"`
+	MediaAssetDirectory string `json:"mediaAssetDirectory"`
 }
 
 type fingerprintDatabase struct {
@@ -86,15 +79,10 @@ type fingerprintDatabase struct {
 }
 
 type fingerprintMediaStorage struct {
-	AssetDirectory           string `json:"assetDirectory"`
-	TranscodeDirectory       string `json:"transcodeDirectory"`
-	UploadTTLSeconds         int    `json:"uploadTTLSeconds"`
-	StreamTTLSeconds         int    `json:"streamTTLSeconds"`
-	StreamMaxConcurrent      int    `json:"streamMaxConcurrent"`
-	StreamIdleTimeoutSeconds int    `json:"streamIdleTimeoutSeconds"`
-	TranscodeTimeoutSeconds  int    `json:"transcodeTimeoutSeconds"`
-	TranscodeCacheMaxBytes   int64  `json:"transcodeCacheMaxBytes"`
-	MaxUploadBytes           int64  `json:"maxUploadBytes"`
+	AssetDirectory   string `json:"assetDirectory"`
+	UploadTTLSeconds int    `json:"uploadTTLSeconds"`
+	StreamTTLSeconds int    `json:"streamTTLSeconds"`
+	MaxUploadBytes   int64  `json:"maxUploadBytes"`
 }
 
 type fingerprintMedia struct {

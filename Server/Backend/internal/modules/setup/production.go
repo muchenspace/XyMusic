@@ -362,20 +362,16 @@ func (connection *productionInstallationDatabase) Compensate(
 type ProductionMediaStorageFactory struct{}
 
 func (ProductionMediaStorageFactory) Open(cfg config.MediaStorage) (SetupMediaStorage, error) {
-	return &productionSetupMediaStorage{
-		assetDir:     cfg.AssetDirectory,
-		transcodeDir: cfg.TranscodeDirectory,
-	}, nil
+	return &productionSetupMediaStorage{assetDir: cfg.AssetDirectory}, nil
 }
 
 type productionSetupMediaStorage struct {
-	assetDir     string
-	transcodeDir string
+	assetDir string
 }
 
 func (storage *productionSetupMediaStorage) Probe(ctx context.Context) error {
-	if storage.assetDir == "" || storage.transcodeDir == "" {
-		return errors.New("media asset and transcode directories are required")
+	if storage.assetDir == "" {
+		return errors.New("media asset directory is required")
 	}
 	return nil
 }
@@ -384,10 +380,6 @@ func (storage *productionSetupMediaStorage) Inspect(ctx context.Context) (Storag
 	assetExists := false
 	if fi, err := os.Stat(storage.assetDir); err == nil && fi.IsDir() {
 		assetExists = true
-	}
-	transcodeExists := false
-	if fi, err := os.Stat(storage.transcodeDir); err == nil && fi.IsDir() {
-		transcodeExists = true
 	}
 	var assetCount int64
 	hasAssets := false
@@ -398,32 +390,16 @@ func (storage *productionSetupMediaStorage) Inspect(ctx context.Context) (Storag
 			hasAssets = assetCount > 0
 		}
 	}
-	var transcodeCount int64
-	hasTranscode := false
-	if transcodeExists {
-		entries, err := os.ReadDir(storage.transcodeDir)
-		if err == nil {
-			transcodeCount = int64(len(entries))
-			hasTranscode = transcodeCount > 0
-		}
-	}
 	return StorageInspection{
-		AssetDirectoryExists:     assetExists,
-		TranscodeDirectoryExists: transcodeExists,
-		HasAssets:                hasAssets,
-		AssetCount:               assetCount,
-		HasTranscode:             hasTranscode,
-		TranscodeCount:           transcodeCount,
+		AssetDirectoryExists: assetExists,
+		HasAssets:            hasAssets,
+		AssetCount:           assetCount,
 	}, nil
 }
-
 
 func (storage *productionSetupMediaStorage) EnsureDirectories(ctx context.Context) error {
 	if err := os.MkdirAll(storage.assetDir, 0755); err != nil {
 		return fmt.Errorf("create media asset directory: %w", err)
-	}
-	if err := os.MkdirAll(storage.transcodeDir, 0755); err != nil {
-		return fmt.Errorf("create media transcode directory: %w", err)
 	}
 	return nil
 }
@@ -437,20 +413,11 @@ func (storage *productionSetupMediaStorage) VerifyReadWrite(ctx context.Context)
 		return fmt.Errorf("verify write permission on asset directory: %w", err)
 	}
 	_ = os.Remove(probeFile)
-
-	probeTranscode := filepath.Join(storage.transcodeDir, ".xymusic-setup-probe")
-	if err := os.WriteFile(probeTranscode, []byte("probe"), 0644); err != nil {
-		return fmt.Errorf("verify write permission on transcode directory: %w", err)
-	}
-	_ = os.Remove(probeTranscode)
 	return nil
 }
 
 func (storage *productionSetupMediaStorage) Clear(ctx context.Context) error {
 	if err := os.RemoveAll(storage.assetDir); err != nil {
-		return err
-	}
-	if err := os.RemoveAll(storage.transcodeDir); err != nil {
 		return err
 	}
 	return storage.EnsureDirectories(ctx)

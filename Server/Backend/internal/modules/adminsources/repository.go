@@ -353,11 +353,9 @@ func (repository *Repository) ListFiles(
 		SELECT source.id,source.source_path,source.status,source.last_error,
 			source.size_bytes,source.modified_at,track.id,track.title,track.status::text,
 			(SELECT count(*)::int FROM local_music_source_tracks count_mapping
-			 WHERE count_mapping.source_id=source.id) AS track_count,
-			EXISTS(SELECT 1 FROM local_music_source_tracks cue_mapping
-			 WHERE cue_mapping.source_id=source.id AND cue_mapping.cue_path IS NOT NULL) AS cue
+			 WHERE count_mapping.source_id=source.id) AS track_count
 		FROM local_music_sources source
-		JOIN local_music_source_tracks mapping ON mapping.source_id=source.id AND mapping.segment_index=0
+		JOIN local_music_source_tracks mapping ON mapping.source_id=source.id
 		JOIN tracks track ON track.id=mapping.track_id
 		WHERE ` + where + `
 		ORDER BY source.source_path ASC, source.id ASC LIMIT $` + fmt.Sprint(limitPosition)
@@ -376,7 +374,7 @@ func (repository *Repository) ListFiles(
 		var file SourceFile
 		if err := rows.Scan(
 			&file.ID, &file.Path, &file.Status, &file.LastError, &file.SizeBytes, &file.ModifiedAt,
-			&file.TrackID, &file.TrackTitle, &file.TrackStatus, &file.TrackCount, &file.Cue,
+			&file.TrackID, &file.TrackTitle, &file.TrackStatus, &file.TrackCount,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan music source file: %w", err)
 		}
@@ -1101,7 +1099,7 @@ func (repository *Repository) rootCounts(ctx context.Context, rootIDs []string) 
 	}
 	rows.Close()
 	rows, err = repository.database.Query(ctx, `SELECT source.root_id,
-		count(*)::int,count(DISTINCT mapping.source_id) FILTER(WHERE mapping.cue_path IS NOT NULL)::int
+		count(*)::int
 		FROM local_music_source_tracks mapping JOIN local_music_sources source ON source.id=mapping.source_id
 		WHERE source.root_id = ANY($1::uuid[]) GROUP BY source.root_id`, rootIDs)
 	if err != nil {
@@ -1110,17 +1108,18 @@ func (repository *Repository) rootCounts(ctx context.Context, rootIDs []string) 
 	defer rows.Close()
 	for rows.Next() {
 		var rootID string
-		var tracks, cues int
-		if err := rows.Scan(&rootID, &tracks, &cues); err != nil {
+		var tracks int
+		if err := rows.Scan(&rootID, &tracks); err != nil {
 			return nil, fmt.Errorf("scan music source mapping counts: %w", err)
 		}
 		counts := result[rootID]
-		counts.TrackCount, counts.CueFileCount = tracks, cues
+		counts.TrackCount = tracks
 		result[rootID] = counts
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate music source mapping counts: %w", err)
 	}
+
 	return result, nil
 }
 
@@ -1130,11 +1129,8 @@ func rootCount(ctx context.Context, database repositoryDatabase, rootID string) 
 		(SELECT count(*)::int FROM local_music_sources WHERE root_id=$1),
 		(SELECT count(*)::int FROM local_music_sources WHERE root_id=$1 AND status='FAILED'),
 		(SELECT count(*)::int FROM local_music_source_tracks mapping
-		 JOIN local_music_sources source ON source.id=mapping.source_id WHERE source.root_id=$1),
-		(SELECT count(DISTINCT mapping.source_id)::int FROM local_music_source_tracks mapping
-		 JOIN local_music_sources source ON source.id=mapping.source_id
-		 WHERE source.root_id=$1 AND mapping.cue_path IS NOT NULL)`, rootID).Scan(
-		&counts.FileCount, &counts.FailedFileCount, &counts.TrackCount, &counts.CueFileCount,
+			 JOIN local_music_sources source ON source.id=mapping.source_id WHERE source.root_id=$1)`, rootID).Scan(
+		&counts.FileCount, &counts.FailedFileCount, &counts.TrackCount,
 	)
 	if err != nil {
 		return RootCounts{}, fmt.Errorf("count music source contents: %w", err)

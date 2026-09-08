@@ -501,7 +501,7 @@ internal fun LyricsContent(
                     val interactionSource = remember { MutableInteractionSource() }
                     val animatedScale = remember(lineEmphasis) {
                         derivedStateOf {
-                            // Keep the focus cue below the threshold at which repeated scale
+                            // Keep the focus marker below the threshold at which repeated scale
                             // changes become visually tiring, especially on 90/120 Hz panels.
                             // The actual line movement remains on the shared scroll clock.
                             1f + 0.012f * lineEmphasis.value

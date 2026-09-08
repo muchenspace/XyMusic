@@ -19,8 +19,6 @@ import (
 type ResolvedAudioSource struct {
 	TrackID        string
 	SourcePath     string
-	CueStartTimeMs *int64
-	CueEndTimeMs   *int64
 	DurationMs     int64
 	SizeBytes      int64
 	ChecksumSHA256 string
@@ -67,15 +65,13 @@ func (r *PlaybackSourceResolver) ResolveSource(ctx context.Context, trackID stri
 	var (
 		sourceRelPath string
 		rootPath      string
-		cueStart      *int64
-		cueEnd        *int64
 		checksum      string
 		expectedSize  int64
 		expectedMod   time.Time
 		durationMs    int64
 	)
 	scanErr := r.pool.QueryRow(ctx, `
-		SELECT s.source_path, r.path, st.cue_start_time_ms, st.cue_end_time_ms,
+		SELECT s.source_path, r.path,
 		       s.checksum_sha256, s.size_bytes, s.modified_at, t.duration_ms
 		FROM tracks t
 		JOIN local_music_source_tracks st ON st.track_id = t.id
@@ -86,8 +82,6 @@ func (r *PlaybackSourceResolver) ResolveSource(ctx context.Context, trackID stri
 		LIMIT 1`, trackID).Scan(
 		&sourceRelPath,
 		&rootPath,
-		&cueStart,
-		&cueEnd,
 		&checksum,
 		&expectedSize,
 		&expectedMod,
@@ -112,8 +106,6 @@ func (r *PlaybackSourceResolver) ResolveSource(ctx context.Context, trackID stri
 		return &ResolvedAudioSource{
 			TrackID:        trackID,
 			SourcePath:     realPath,
-			CueStartTimeMs: cueStart,
-			CueEndTimeMs:   cueEnd,
 			DurationMs:     durationMs,
 			SizeBytes:      expectedSize,
 			ChecksumSHA256: checksum,

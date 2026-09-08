@@ -50,13 +50,6 @@ enum class RepeatMode {
     ALL,
 }
 
-enum class PreferredQuality {
-    DATA_SAVER,
-    STANDARD,
-    HIGH,
-    LOSSLESS,
-}
-
 sealed interface PlayerFailure {
     data object ConnectionUnavailable : PlayerFailure
 

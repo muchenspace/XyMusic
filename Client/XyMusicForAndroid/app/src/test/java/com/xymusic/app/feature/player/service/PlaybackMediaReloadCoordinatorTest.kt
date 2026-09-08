@@ -10,16 +10,14 @@ import androidx.media3.common.util.UnstableApi
 import com.google.common.truth.Truth.assertThat
 import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaMetadata
 import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaUri
-import com.xymusic.app.feature.player.adapter.media3.globalPlaybackPositionMs
-import com.xymusic.app.feature.player.adapter.media3.playbackRequestedStartPositionMs
-import com.xymusic.app.feature.player.adapter.media3.playbackSourceOffsetMs
-import com.xymusic.app.feature.player.adapter.media3.playbackStreamProtocol
+import com.xymusic.app.feature.player.domain.PlaybackGrant
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
-import com.xymusic.app.feature.player.domain.PlaybackStreamProtocol
+import com.xymusic.app.feature.player.domain.PlayerResult
 import java.lang.reflect.Proxy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -48,8 +46,8 @@ class PlaybackMediaReloadCoordinatorTest {
     }
 
     @Test
-    fun hlsSeekRepreparesWithTheRequestedPositionAsTheImmediateSourceOffset() = runTest {
-        val player = RecordingHlsPlayer()
+    fun seekToDirectlySeeksOnPlayer() = runTest {
+        val player = RecordingPlayer()
         val coordinator =
             PlaybackMediaReloadCoordinator(
                 player = player.delegate,
@@ -59,80 +57,82 @@ class PlaybackMediaReloadCoordinatorTest {
 
         val result = coordinator.seekTo(QUEUE_ITEM_ID, TARGET_POSITION_MS)
         assertThat(result).isTrue()
+        assertThat(player.seekCount).isEqualTo(1)
+        assertThat(player.lastSeekIndex).isEqualTo(0)
+        assertThat(player.lastSeekPosition).isEqualTo(TARGET_POSITION_MS)
+    }
 
+    @Test
+    fun reloadCurrentWithForceRefreshInvalidatesGrantAndReprepares() = runTest {
+        val player = RecordingPlayer()
+        val grantRepository = RecordingGrantRepository()
+        val coordinator =
+            PlaybackMediaReloadCoordinator(
+                player = player.delegate,
+                grantRepository = grantRepository,
+                scope = this,
+            )
+
+        coordinator.reloadCurrent(
+            globalPositionMs = TARGET_POSITION_MS,
+            forceRefresh = true,
+            playWhenReady = true,
+        )
+        advanceUntilIdle()
+
+        assertThat(grantRepository.invalidatedTrackIds).containsExactly(TRACK_ID)
         assertThat(player.replacedItems).hasSize(1)
-        val requestItem = player.replacedItems.single()
-        assertThat(requestItem.playbackStreamProtocol()).isEqualTo(PlaybackStreamProtocol.HLS)
-        // The offset must be declared with the request so no consumer ever
-        // observes a transient global position of 0 during the resolve window.
-        assertThat(requestItem.playbackSourceOffsetMs()).isEqualTo(TARGET_POSITION_MS)
-        assertThat(requestItem.globalPlaybackPositionMs(0)).isEqualTo(TARGET_POSITION_MS)
-        assertThat(requestItem.playbackRequestedStartPositionMs()).isEqualTo(TARGET_POSITION_MS)
-        // player.stop() must NOT be called on reprepare to avoid dropping foreground status in background/screen-off state.
-        assertThat(player.stopCount).isEqualTo(0)
         assertThat(player.prepareCount).isEqualTo(1)
         assertThat(player.playWhenReady).isTrue()
+        assertThat(player.lastSeekPosition).isEqualTo(TARGET_POSITION_MS)
     }
 
     @Test
-    fun ensureHlsSeekPreservesPlayIntentDuringReprepare() = runTest {
-        val player = RecordingHlsPlayer()
-        player.playWhenReady = true
+    fun reloadCurrentWithoutForceRefreshJustSeeks() = runTest {
+        val player = RecordingPlayer()
+        val grantRepository = RecordingGrantRepository()
         val coordinator =
             PlaybackMediaReloadCoordinator(
                 player = player.delegate,
-                grantRepository = RecordingGrantRepository(),
+                grantRepository = grantRepository,
                 scope = this,
             )
 
-        coordinator.seekTo(QUEUE_ITEM_ID, TARGET_POSITION_MS)
+        coordinator.reloadCurrent(
+            globalPositionMs = TARGET_POSITION_MS,
+            forceRefresh = false,
+            playWhenReady = true,
+        )
+        advanceUntilIdle()
 
-        assertThat(player.playWhenReady).isTrue()
-    }
-
-    @Test
-    fun hlsReloadAtOrPastTheTrackEndClampsTheRequestedStartPosition() = runTest {
-        val player = RecordingHlsPlayer()
-        val coordinator =
-            PlaybackMediaReloadCoordinator(
-                player = player.delegate,
-                grantRepository = RecordingGrantRepository(),
-                scope = this,
-            )
-
-        val result = coordinator.seekTo(QUEUE_ITEM_ID, TRACK_DURATION_MS)
-        assertThat(result).isTrue()
-
-        val requestItem = player.replacedItems.single()
-        // The server rejects a directed start at or past durationMs; the clamp
-        // keeps the requested start inside the transcodeable window so a reload
-        // racing the end of the track cannot produce an empty timeline.
-        assertThat(requestItem.playbackSourceOffsetMs())
-            .isEqualTo(TRACK_DURATION_MS - RELOAD_TAIL_MARGIN_MS)
-        assertThat(requestItem.playbackRequestedStartPositionMs())
-            .isEqualTo(TRACK_DURATION_MS - RELOAD_TAIL_MARGIN_MS)
+        assertThat(grantRepository.invalidatedTrackIds).isEmpty()
+        assertThat(player.replacedItems).isEmpty()
+        assertThat(player.prepareCount).isEqualTo(0)
+        assertThat(player.lastSeekPosition).isEqualTo(TARGET_POSITION_MS)
     }
 
     private class RecordingGrantRepository : PlaybackGrantRepository {
+        val invalidatedTrackIds = mutableListOf<String>()
+
         override suspend fun get(
             trackId: String,
-            preferredQuality: com.xymusic.app.feature.player.domain.model.PreferredQuality,
-            acceptedCodecs: List<String>,
             forceRefresh: Boolean,
-            streamProtocol: PlaybackStreamProtocol?,
-            startPositionMs: Long,
-        ): com.xymusic.app.feature.player.domain.PlayerResult<com.xymusic.app.feature.player.domain.PlaybackGrant> =
-            error("Not used")
+        ): PlayerResult<PlaybackGrant> = error("Not used")
 
-        override fun invalidate(trackId: String) = Unit
+        override fun invalidate(trackId: String) {
+            invalidatedTrackIds += trackId
+        }
 
         override fun clear() = Unit
     }
 
-    private class RecordingHlsPlayer {
+    private class RecordingPlayer {
         val replacedItems = mutableListOf<MediaItem>()
         var stopCount = 0
         var prepareCount = 0
+        var seekCount = 0
+        var lastSeekIndex = -1
+        var lastSeekPosition = -1L
         var playWhenReady = true
         private var currentMediaItemIndex = 0
         private val mediaItems = mutableListOf(mediaItem(QUEUE_ITEM_ID))
@@ -161,12 +161,19 @@ class PlaybackMediaReloadCoordinatorTest {
                         replacedItems += args[1] as MediaItem
                         Unit
                     }
-                    "seekTo" -> Unit
+                    "seekTo" -> {
+                        seekCount += 1
+                        if (args != null && args.size == 2) {
+                            lastSeekIndex = args[0] as Int
+                            lastSeekPosition = args[1] as Long
+                        }
+                        Unit
+                    }
                     "prepare" -> {
                         prepareCount += 1
                         Unit
                     }
-                    "toString" -> "RecordingHlsPlayer"
+                    "toString" -> "RecordingPlayer"
                     "hashCode" -> System.identityHashCode(this)
                     "equals" -> args?.firstOrNull() === this
                     else -> defaultValue(method.returnType)
@@ -179,7 +186,6 @@ class PlaybackMediaReloadCoordinatorTest {
         const val TRACK_ID = "11111111-1111-1111-1111-111111111111"
         const val TARGET_POSITION_MS = 60_000L
         const val TRACK_DURATION_MS = 180_000L
-        const val RELOAD_TAIL_MARGIN_MS = 500L
 
         fun mediaItem(queueItemId: String): MediaItem = MediaItem
             .Builder()
@@ -191,7 +197,6 @@ class PlaybackMediaReloadCoordinatorTest {
                     .setExtras(
                         Bundle().apply {
                             putString(PlaybackMediaMetadata.EXTRA_TRACK_ID, TRACK_ID)
-                            putString(PlaybackMediaMetadata.EXTRA_STREAM_PROTOCOL, "HLS")
                             putLong(PlaybackMediaMetadata.EXTRA_DURATION_MS, TRACK_DURATION_MS)
                         },
                     ).build(),

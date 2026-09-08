@@ -142,11 +142,10 @@ func (service *Service) TestStorage(ctx context.Context, input StorageInput) (St
 		return StorageTestResponse{}, err
 	}
 	return StorageTestResponse{
-		OK:                       true,
-		Message:                  "Media storage directories are accessible",
-		AssetDirectoryExists:     true,
-		TranscodeDirectoryExists: true,
-		LatencyMS:                elapsedMilliseconds(service.now().Sub(started)),
+		OK:                   true,
+		Message:              "Media storage directories are accessible",
+		AssetDirectoryExists: true,
+		LatencyMS:            elapsedMilliseconds(service.now().Sub(started)),
 	}, nil
 }
 
@@ -424,7 +423,6 @@ func requireAdministrator(ctx context.Context, pool *database.Pool, actorID stri
 	}
 	return err
 }
-
 
 func migrationInformation(ctx context.Context, pool *database.Pool) string {
 	var count int

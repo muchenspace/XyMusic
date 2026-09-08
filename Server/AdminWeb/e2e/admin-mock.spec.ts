@@ -364,10 +364,9 @@ test.describe("administrator browser contract", () => {
     await inputs.nth(4).fill("secret");
     await page.getByRole("button", { name: "验证并继续" }).click();
 
-    await expect(page.getByRole("heading", { name: "配置本地资产与转码存储" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "配置本地资产存储" })).toBeVisible();
     inputs = page.locator("main input:visible");
     await inputs.nth(0).fill("assets");
-    await inputs.nth(1).fill("transcode");
     await page.getByRole("button", { name: "验证并继续" }).click();
 
     await expect(page.getByRole("heading", { name: "检测 FFmpeg" })).toBeVisible();
@@ -490,10 +489,9 @@ test.describe("administrator browser contract", () => {
     await inputs.nth(3).fill("admin");
     await inputs.nth(4).fill("secret");
     await page.getByRole("button", { name: "验证并继续" }).click();
-    await expect(page.getByRole("heading", { name: "配置本地资产与转码存储" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "配置本地资产存储" })).toBeVisible();
     inputs = page.locator("main input:visible");
     await inputs.nth(0).fill("assets");
-    await inputs.nth(1).fill("transcode");
     await page.getByRole("button", { name: "验证并继续" }).click();
     await expect(page.getByRole("heading", { name: "检测 FFmpeg" })).toBeVisible();
     await page.getByRole("button", { name: "验证并继续" }).click();
@@ -584,10 +582,9 @@ async function reachSetupDatabaseDecision(page: Page): Promise<void> {
 }
 
 async function advanceSetupFromStorageToAdministrator(page: Page): Promise<void> {
-  await expect(page.getByRole("heading", { name: "配置本地资产与转码存储" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "配置本地资产存储" })).toBeVisible();
   const inputs = page.locator("main input:visible");
   await inputs.nth(0).fill("assets");
-  await inputs.nth(1).fill("transcode");
   await page.getByRole("button", { name: "验证并继续" }).click();
 
   await expect(page.getByRole("heading", { name: "检测 FFmpeg" })).toBeVisible();
@@ -901,7 +898,7 @@ function settings() {
   return {
     version: 1, environment: "test", configurationSource: "managed", actualListener: { ipv4: { host: "127.0.0.1", port: 3000 }, ipv6: { host: "::1", port: 3000 } }, restartRequiredFields: [],
     database: { host: "db", port: 5432, database: "xymusic", username: "admin", sslMode: "prefer", maximumConnections: 10, passwordConfigured: true, lockedFields: [] },
-    storage: { assetDirectory: "assets", transcodeDirectory: "transcode", uploadTtlSeconds: 3600, streamTtlSeconds: 900, streamMaxConcurrent: 4, streamIdleTimeoutSeconds: 30, transcodeTimeoutSeconds: 30, maxUploadBytes: 1024, lockedFields: [] },
+    storage: { assetDirectory: "assets", uploadTtlSeconds: 3600, streamTtlSeconds: 900, maxUploadBytes: 1024, lockedFields: [] },
     mediaTools: { directory: "tools", ffmpegPath: "", ffprobePath: "", lockedFields: [] },
     localLibrary: { name: "Music", directory: "music", mode: "READ_ONLY", enabled: true, syncOnStartup: true, scanIntervalMinutes: null, includePatterns: [], excludePatterns: [], lockedFields: [] },
     registration: { enabled: false, lockedFields: [] }, security: { accessTokenTtlSeconds: 900, refreshTokenTtlSeconds: 86400, lockedFields: [] },

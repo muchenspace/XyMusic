@@ -318,7 +318,6 @@ func presentMetadata(record MetadataRecord) (MetadataDTO, error) {
 			HasSource: true, TrackStatus: trackStatus, RootMode: rootMode,
 			RootEnabled: rootEnabled, ScanActive: record.Source.ScanActive, SourceStatus: record.Source.Status,
 			SourcePath: record.Source.SourcePath, MappingCount: record.Source.MappingCount,
-			Cue: record.Source.Cue,
 		})
 		source = &MetadataSourceDTO{
 			ID: record.Source.ID, RootID: record.Source.RootID,

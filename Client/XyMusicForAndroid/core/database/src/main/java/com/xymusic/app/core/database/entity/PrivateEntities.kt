@@ -173,8 +173,6 @@ data class PlaybackQueueEntity(
     @ColumnInfo(name = "item_id") val itemId: String,
     @ColumnInfo(name = "position") val position: Int,
     @ColumnInfo(name = "track_id") val trackId: String,
-    @ColumnInfo(name = "variant_id") val variantId: String?,
-    @ColumnInfo(name = "stable_cache_key") val stableCacheKey: String?,
     @ColumnInfo(name = "resume_position_ms") val resumePositionMs: Long,
     @ColumnInfo(name = "is_current") val isCurrent: Boolean,
     @ColumnInfo(name = "enqueued_at_epoch_ms") val enqueuedAtEpochMs: Long,

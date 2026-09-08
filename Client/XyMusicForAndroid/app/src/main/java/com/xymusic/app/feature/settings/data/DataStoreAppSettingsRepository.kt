@@ -11,7 +11,6 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.xymusic.app.domain.settings.AppSettings
 import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.domain.settings.MobileDataPolicy
-import com.xymusic.app.domain.settings.StreamingQuality
 import com.xymusic.app.domain.settings.ThemePreference
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.IOException
@@ -52,7 +51,6 @@ constructor(@ApplicationContext context: Context) :
             val settings = transform(toSettings(values))
             values[Keys.THEME] = settings.theme.name
             values[Keys.DYNAMIC_COLOR_ENABLED] = settings.dynamicColorEnabled
-            values[Keys.STREAMING_QUALITY] = settings.streamingQuality.name
             values[Keys.MOBILE_DATA_POLICY] = settings.mobileDataPolicy.name
             values[Keys.CACHE_LIMIT_MIB] = settings.cacheLimitMiB
         }
@@ -65,7 +63,6 @@ constructor(@ApplicationContext context: Context) :
     private fun toSettings(values: Preferences): AppSettings = AppSettings(
         theme = values[Keys.THEME].enumOrDefault(ThemePreference.SYSTEM),
         dynamicColorEnabled = values[Keys.DYNAMIC_COLOR_ENABLED] ?: false,
-        streamingQuality = values[Keys.STREAMING_QUALITY].enumOrDefault(StreamingQuality.AUTO),
         mobileDataPolicy =
         values[Keys.MOBILE_DATA_POLICY].enumOrDefault(
             MobileDataPolicy.ALLOW_STREAMING,
@@ -83,7 +80,6 @@ constructor(@ApplicationContext context: Context) :
     private object Keys {
         val THEME = stringPreferencesKey("theme")
         val DYNAMIC_COLOR_ENABLED = booleanPreferencesKey("dynamic_color_enabled")
-        val STREAMING_QUALITY = stringPreferencesKey("streaming_quality")
         val MOBILE_DATA_POLICY = stringPreferencesKey("mobile_data_policy")
         val CACHE_LIMIT_MIB = intPreferencesKey("cache_limit_mib")
     }

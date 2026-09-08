@@ -17,7 +17,6 @@ import com.xymusic.app.feature.player.domain.OfflineTrackResult
 import com.xymusic.app.feature.player.domain.PlaybackGrant
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
 import com.xymusic.app.feature.player.domain.PlayerResult
-import com.xymusic.app.feature.player.domain.model.PreferredQuality
 import dagger.Lazy
 import java.time.Clock
 import java.time.Instant
@@ -143,7 +142,7 @@ class Media3OfflineTrackRepositoryTest {
     }
 
     @Test
-    fun twoTracksSharingCacheKeyCanDownloadConcurrentlyWithoutDeletingMedia() = runTest {
+    fun twoTracksCanDownloadConcurrentlyWithoutDeletingMedia() = runTest {
         database.seedTrack("a")
         database.seedTrack("b")
         val downloader = BarrierDownloader(cache, expectedDownloads = 2)
@@ -165,7 +164,8 @@ class Media3OfflineTrackRepositoryTest {
         )
         assertThat(database.offlineTrackDao().track("alice", "a")).isNotNull()
         assertThat(database.offlineTrackDao().track("alice", "b")).isNotNull()
-        assertThat(cache.cachedKeys).contains(CACHE_KEY)
+        assertThat(cache.cachedKeys).contains("track:a")
+        assertThat(cache.cachedKeys).contains("track:b")
         assertThat(cache.removedKeys).isEmpty()
     }
 
@@ -215,11 +215,7 @@ class Media3OfflineTrackRepositoryTest {
 
         override suspend fun get(
             trackId: String,
-            preferredQuality: PreferredQuality,
-            acceptedCodecs: List<String>,
             forceRefresh: Boolean,
-            streamProtocol: com.xymusic.app.feature.player.domain.PlaybackStreamProtocol?,
-            startPositionMs: Long,
         ): PlayerResult<PlaybackGrant> {
             requestStarted.complete(Unit)
             release.await()
@@ -234,11 +230,7 @@ class Media3OfflineTrackRepositoryTest {
     private class ImmediateGrantRepository : PlaybackGrantRepository {
         override suspend fun get(
             trackId: String,
-            preferredQuality: PreferredQuality,
-            acceptedCodecs: List<String>,
             forceRefresh: Boolean,
-            streamProtocol: com.xymusic.app.feature.player.domain.PlaybackStreamProtocol?,
-            startPositionMs: Long,
         ): PlayerResult<PlaybackGrant> = PlayerResult.Success(grant(trackId))
 
         override fun invalidate(trackId: String) = Unit
@@ -251,7 +243,7 @@ class Media3OfflineTrackRepositoryTest {
 
         override suspend fun download(grant: PlaybackGrant): Long? {
             downloadCount += 1
-            cache.cachedKeys += grant.cacheKey
+            cache.cachedKeys += "track:${grant.trackId}"
             return grant.contentLength ?: 128L
         }
     }
@@ -263,7 +255,7 @@ class Media3OfflineTrackRepositoryTest {
         override suspend fun download(grant: PlaybackGrant): Long? {
             downloadStarted.complete(Unit)
             release.await()
-            cache.cachedKeys += grant.cacheKey
+            cache.cachedKeys += "track:${grant.trackId}"
             return grant.contentLength ?: 128L
         }
     }
@@ -275,7 +267,7 @@ class Media3OfflineTrackRepositoryTest {
         override suspend fun download(grant: PlaybackGrant): Long? = withContext(NonCancellable) {
             downloadStarted.complete(Unit)
             release.await()
-            cache.cachedKeys += grant.cacheKey
+            cache.cachedKeys += "track:${grant.trackId}"
             grant.contentLength ?: 128L
         }
     }
@@ -290,7 +282,7 @@ class Media3OfflineTrackRepositoryTest {
                 allDownloadsStarted.complete(Unit)
             }
             allDownloadsStarted.await()
-            cache.cachedKeys += grant.cacheKey
+            cache.cachedKeys += "track:${grant.trackId}"
             return grant.contentLength ?: 128L
         }
     }
@@ -326,12 +318,10 @@ class Media3OfflineTrackRepositoryTest {
 
     private companion object {
         const val TRACK_ID = "track"
-        const val CACHE_KEY = "shared-cache"
+        const val CACHE_KEY = "track:$TRACK_ID"
 
         fun grant(trackId: String) = PlaybackGrant(
             trackId = trackId,
-            sessionId = "variant-$trackId",
-            selectedQuality = PreferredQuality.STANDARD,
             streamUrl = "https://media.example/$trackId",
             expiresAtEpochMillis = Long.MAX_VALUE,
             mimeType = "audio/mpeg",
@@ -340,8 +330,7 @@ class Media3OfflineTrackRepositoryTest {
             bitrate = 128_000,
             sampleRate = 44_100,
             contentLength = 128,
-            checksumSha256 = null,
-            cacheKey = CACHE_KEY,
+            durationMs = 180_000,
         )
     }
 }

@@ -2,7 +2,6 @@ package com.xymusic.app.feature.player.data.media
 
 import com.google.common.truth.Truth.assertThat
 import com.xymusic.app.feature.player.domain.PlaybackGrant
-import com.xymusic.app.feature.player.domain.model.PreferredQuality
 import org.junit.Test
 
 class InMemoryPlaybackGrantStoreTest {
@@ -25,14 +24,10 @@ class InMemoryPlaybackGrantStoreTest {
         sessionId = "session",
         serverGeneration = 0,
         trackId = "track-$index",
-        preferredQuality = PreferredQuality.STANDARD,
-        acceptedCodecs = emptyList(),
     )
 
     private fun grant(trackId: String) = PlaybackGrant(
         trackId = trackId,
-        sessionId = "variant-$trackId",
-        selectedQuality = PreferredQuality.STANDARD,
         streamUrl = "https://music.example/$trackId",
         expiresAtEpochMillis = Long.MAX_VALUE,
         mimeType = "audio/mp4",
@@ -41,7 +36,5 @@ class InMemoryPlaybackGrantStoreTest {
         bitrate = 256_000,
         sampleRate = 48_000,
         contentLength = 1_024,
-        checksumSha256 = null,
-        cacheKey = "cache-$trackId",
     )
 }

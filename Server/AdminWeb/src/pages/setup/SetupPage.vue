@@ -59,7 +59,7 @@ const form = reactive<SetupCompleteInput>({
   http: { ipv4Host: "0.0.0.0", ipv4Port: 3000, ipv6Host: "::", ipv6Port: 3000, trustedProxyAddresses: [] },
   paths: { migrationsDirectory: "migrations", adminWebDirectory: "admin" },
   database: { host: "", port: 5432, database: "", username: "", password: "", sslMode: "prefer", maxConnections: 10 },
-  storage: { assetDirectory: "assets", transcodeDirectory: "transcode", maxUploadBytes: 1_073_741_824, transcodeCacheMaxBytes: 10_737_418_240, uploadTtlSeconds: 3600, streamTtlSeconds: 900, streamMaxConcurrent: 4, streamIdleTimeoutSeconds: 30, transcodeTimeoutSeconds: 30 },
+  storage: { assetDirectory: "assets", maxUploadBytes: 1_073_741_824, uploadTtlSeconds: 3600, streamTtlSeconds: 900 },
   media: { mode: "DIRECTORY", directory: "", ffmpegPath: "", ffprobePath: "" },
   source: { name: "", directory: "music", mode: "READ_ONLY", enabled: true, syncOnStartup: true, scanIntervalMinutes: null, includePatterns: [], excludePatterns: [] },
   registration: { enabled: true },
@@ -237,7 +237,7 @@ async function validateCurrent(index: number): Promise<boolean> {
       result = await setup.testStorage(input);
       storageInspection.value = result.storageInspection;
       const hasFiles = Boolean(
-        result.storageInspection?.hasAssets || result.storageInspection?.hasTranscode
+        result.storageInspection?.hasAssets
       );
       if (!hasFiles) {
         form.storageAction = undefined;
@@ -525,13 +525,10 @@ const ReviewRow = defineComponent({
               </template>
 
               <template v-else-if="steps[current]?.key === 'storage'">
-                <StepTitle title="配置本地资产与转码存储" description="指定媒体资产存储路径与实时转码临时目录，音频与封面将直接保存在服务端本地磁盘。" />
+                <StepTitle title="配置本地资产存储" description="指定媒体资产存储路径，音频与封面将直接保存在服务端本地磁盘。" />
                 <div class="mt-8 grid gap-5 sm:grid-cols-2">
                   <FieldWrap class="sm:col-span-2" label="媒体资产目录" :error="errorFor('assetDirectory')" hint="用于存储上传的音频文件、封面图片及头像"><input v-model="form.storage.assetDirectory" class="ui-input font-mono" placeholder="assets" /></FieldWrap>
-                  <FieldWrap class="sm:col-span-2" label="转码临时目录" :error="errorFor('transcodeDirectory')" hint="用于存储即时转码的临时音频文件"><input v-model="form.storage.transcodeDirectory" class="ui-input font-mono" placeholder="transcode" /></FieldWrap>
                   <FieldWrap label="单文件最大上传字节数" :error="errorFor('maxUploadBytes')"><input v-model.number="form.storage.maxUploadBytes" class="ui-input" type="number" min="1" /></FieldWrap>
-                  <FieldWrap label="转码缓存上限（字节）" :error="errorFor('transcodeCacheMaxBytes')" hint="已完成的转码版本会保存在转码目录，超过上限后按最近最少使用清理"><input v-model.number="form.storage.transcodeCacheMaxBytes" class="ui-input" type="number" min="134217728" /></FieldWrap>
-                  <FieldWrap label="最大并发转码任务数" :error="errorFor('streamMaxConcurrent')"><input v-model.number="form.storage.streamMaxConcurrent" class="ui-input" type="number" min="1" max="100" /></FieldWrap>
                 </div>
               </template>
 
@@ -582,8 +579,8 @@ const ReviewRow = defineComponent({
                   <ReviewRow icon="source" label="数据库迁移" :value="form.paths.migrationsDirectory" />
                   <ReviewRow icon="source" label="管理端资源" :value="form.paths.adminWebDirectory" />
                   <ReviewRow icon="database" label="PostgreSQL" :value="`${form.database.host}:${form.database.port}/${form.database.database} · 最大 ${form.database.maxConnections} 个连接`" />
-                  <ReviewRow icon="storage" label="资产与转码" :value="`资产：${form.storage.assetDirectory} · 转码：${form.storage.transcodeDirectory}`" />
-                  <ReviewRow v-if="form.storageAction" icon="storage" label="存储处理" value="全部清空媒体资产与转码缓存目录" />
+                  <ReviewRow icon="storage" label="媒体资产" :value="form.storage.assetDirectory" />
+                  <ReviewRow v-if="form.storageAction" icon="storage" label="存储处理" value="清空媒体资产目录" />
 
                   <ReviewRow icon="tools" label="FFmpeg" :value="form.media.mode === 'DIRECTORY' ? `自动检测：${form.media.directory || '系统 PATH'}` : `${form.media.ffmpegPath || '系统 PATH'} · ${form.media.ffprobePath || '系统 PATH'}`" />
                   <ReviewRow icon="source" label="音乐音源" :value="`${form.source.name} · ${form.source.directory} · ${form.source.mode}`" />
@@ -635,14 +632,14 @@ const ReviewRow = defineComponent({
       </template>
     </BaseDialog>
 
-    <BaseDialog v-if="storageInspection && (storageInspection.hasAssets || storageInspection.hasTranscode)" v-model="storageDecisionOpen" title="检测到存储目录不为空" description="本项目不支持复用旧媒体资产或转码缓存，继续初始化将会完全清空目录中的所有现有文件。" prevent-close width="lg">
+    <BaseDialog v-if="storageInspection && storageInspection.hasAssets" v-model="storageDecisionOpen" title="检测到存储目录不为空" description="本项目不支持复用旧媒体资产，继续初始化将会完全清空目录中的所有现有文件。" prevent-close width="lg">
       <div class="min-w-0 space-y-6 overflow-x-hidden">
         <div class="flex min-w-0 items-start gap-3 border-b border-[var(--border)] pb-5">
           <span class="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-rose-500/10 text-[var(--danger)]"><HardDrive :size="18" /></span>
           <div class="min-w-0">
             <p class="font-semibold">存储目录包含历史文件</p>
             <p class="mt-1 break-words text-sm leading-6 text-[var(--muted)]">
-              媒体资产目录包含 {{ storageInspection.assetCount }} 个文件/条目，转码临时目录包含 {{ storageInspection.transcodeCount }} 个文件/条目。由于转码缓存和未嵌入音频原文件的旧封面无法在新实例中直接复用，继续操作将会彻底清空这两个目录。
+              媒体资产目录包含 {{ storageInspection.assetCount }} 个文件/条目。由于本项目不支持复用旧媒体资产，继续操作将会彻底清空该目录。
             </p>
           </div>
         </div>
@@ -650,7 +647,7 @@ const ReviewRow = defineComponent({
         <section class="rounded-md border border-rose-500/25 bg-rose-500/8 p-4">
           <h3 class="flex items-center gap-2 text-sm font-semibold text-[var(--danger)]"><Trash2 :size="16" />清空存储目录高危警告</h3>
           <p class="mt-2 text-sm leading-6 text-[var(--muted)]">
-            初始化时将<strong>清空媒体资产目录（{{ form.storage.assetDirectory }}）与转码缓存目录（{{ form.storage.transcodeDirectory }}）</strong>。注意：这<strong>不会</strong>影响您的音频源文件目录（{{ form.source.directory }}）。初始化完成后，系统将自动重新扫描音频并提取内嵌封面。
+            初始化时将<strong>清空媒体资产目录（{{ form.storage.assetDirectory }}）</strong>。注意：这<strong>不会</strong>影响您的音频源文件目录（{{ form.source.directory }}）。初始化完成后，系统将自动重新扫描音频并提取内嵌封面。
           </p>
         </section>
       </div>

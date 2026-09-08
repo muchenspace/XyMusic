@@ -197,7 +197,7 @@ class SettingsScreenComposeTest {
         composeRule.onNodeWithText("Lin Chen").assertIsDisplayed()
         composeRule.onNodeWithText(context.getString(R.string.settings_playback)).assertIsDisplayed()
         composeRule.onNodeWithTag(SettingsTestTags.page(SettingsPage.Playback)).performClick()
-        composeRule.onNodeWithTag(SettingsTestTags.LandscapeRight).performScrollToIndex(3)
+        composeRule.onNodeWithTag(SettingsTestTags.LandscapeRight).performScrollToIndex(2)
     }
 
     @Test

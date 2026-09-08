@@ -582,7 +582,7 @@ private class PerformanceFixtureDispatcher(private val server: MockWebServer) : 
             path.startsWith("/api/v1/tracks/") -> json(trackDetailResponse(path.substringAfterLast('/')))
             path.startsWith("/api/v1/albums/") -> json(albumDetailResponse(path.substringAfterLast('/')))
             path.startsWith("/api/v1/artists/") -> json(artistDetailResponse(path.substringAfterLast('/')))
-            path.startsWith("/audio/") -> MockResponse()
+            path.startsWith("/api/v1/playback/streams/") -> MockResponse()
                 .setResponseCode(200)
                 .setHeader("Content-Type", "audio/wav")
                 .setBody(Buffer().write(audioBytes))
@@ -735,14 +735,13 @@ private class PerformanceFixtureDispatcher(private val server: MockWebServer) : 
 
     private fun playbackGrantResponse(path: String): String {
         val trackId = path.removePrefix("/api/v1/tracks/").removeSuffix("/playback")
-        val sessionId = fixtureId(900)
-        val audioUrl = server.url("/audio/$trackId")
+        val audioUrl = server.url("/api/v1/playback/streams/$trackId?ticket=fixture-ticket")
         return """
-            {"trackId":"$trackId","sessionId":"$sessionId","selectedQuality":"STANDARD",
+            {"trackId":"$trackId",
             "streamUrl":"$audioUrl","expiresAt":"2030-01-01T00:00:00Z",
             "mimeType":"audio/wav","codec":"pcm_s16le","container":"wav",
             "bitrate":128000,"sampleRate":8000,"contentLength":${audioBytes.size},
-            "checksumSha256":null,"cacheKey":"perf-$trackId"}
+            "durationMs":180000}
         """.trimIndent()
     }
 

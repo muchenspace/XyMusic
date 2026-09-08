@@ -267,8 +267,8 @@ func TestArchiveAndPermanentDeleteCoordinateMetadataWritebacks(t *testing.T) {
 			t.Fatal(err)
 		}
 		if _, err := pool.Exec(ctx, `
-			INSERT INTO local_music_source_tracks(source_id,track_id,segment_index,start_ms)
-			VALUES($1,$2,0,0)`, sourceID, trackID); err != nil {
+			INSERT INTO local_music_source_tracks(source_id,track_id)
+			VALUES($1,$2)`, sourceID, trackID); err != nil {
 			t.Fatal(err)
 		}
 		return sourceFixture{id: sourceID, relative: relative, absolute: absolutePath}

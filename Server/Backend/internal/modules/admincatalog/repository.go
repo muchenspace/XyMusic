@@ -990,12 +990,6 @@ func (repository *Repository) enrichTrackSources(
 			         CASE WHEN source.id = metadata.source_id THEN 0 ELSE 1 END,
 			         CASE source.status WHEN 'READY' THEN 0 WHEN 'PROCESSING' THEN 1 WHEN 'FAILED' THEN 2 ELSE 3 END,
 			         source.updated_at DESC, source.id ASC
-		), mapping_stats AS (
-			SELECT mapping.source_id, count(*)::int AS mapping_count,
-			       COALESCE(bool_or(mapping.cue_path IS NOT NULL), false) AS cue
-			FROM local_music_source_tracks mapping
-			JOIN (SELECT DISTINCT source_id FROM chosen) selected ON selected.source_id = mapping.source_id
-			GROUP BY mapping.source_id
 		)
 		SELECT chosen.track_id, source.id, source.root_id, root.name, source.source_path,
 		       source.status, source.last_error, source.checksum_sha256, root.mode::text, root.enabled,
@@ -1003,11 +997,11 @@ func (repository *Repository) enrichTrackSources(
 		         SELECT 1 FROM library_scan_runs active_scan
 		         WHERE active_scan.root_id = root.id
 		           AND active_scan.status = 'RUNNING' AND active_scan.locked_until > now()
-		       ), COALESCE(mapping_stats.mapping_count, 0), COALESCE(mapping_stats.cue, false)
+		       ), (SELECT count(*)::int FROM local_music_source_tracks mapping_count
+		          WHERE mapping_count.source_id = source.id)
 		FROM chosen
 		JOIN local_music_sources source ON source.id = chosen.source_id
 		LEFT JOIN library_roots root ON root.id = source.root_id
-		LEFT JOIN mapping_stats ON mapping_stats.source_id = source.id
 		ORDER BY chosen.track_id
 	`, ids)
 	if err != nil {
@@ -1019,7 +1013,7 @@ func (repository *Repository) enrichTrackSources(
 		if err := sourceRows.Scan(
 			&trackID, &source.ID, &source.RootID, &source.RootName, &source.RelativePath,
 			&source.Status, &source.LastError, &source.ChecksumSHA256, &source.Mode, &source.RootEnabled,
-			&source.ScanActive, &source.MappingCount, &source.Cue,
+			&source.ScanActive, &source.MappingCount,
 		); err != nil {
 			sourceRows.Close()
 			return fmt.Errorf("scan admin track source: %w", err)

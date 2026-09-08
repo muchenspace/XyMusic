@@ -10,7 +10,6 @@ import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import com.xymusic.app.domain.settings.AppSettings
 import com.xymusic.app.domain.settings.MobileDataPolicy
-import com.xymusic.app.domain.settings.StreamingQuality
 import com.xymusic.app.domain.settings.ThemePreference
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -48,12 +47,6 @@ class DataStoreAppSettingsRepositoryTest {
             }
             assertThat(repository.settings.first().theme).isEqualTo(theme)
         }
-        StreamingQuality.entries.forEach { quality ->
-            repository.rawDataStore().edit { values ->
-                values[stringPreferencesKey("streaming_quality")] = quality.name
-            }
-            assertThat(repository.settings.first().streamingQuality).isEqualTo(quality)
-        }
         MobileDataPolicy.entries.forEach { policy ->
             repository.rawDataStore().edit { values ->
                 values[stringPreferencesKey("mobile_data_policy")] = policy.name
@@ -69,7 +62,6 @@ class DataStoreAppSettingsRepositoryTest {
             AppSettings(
                 theme = ThemePreference.TWILIGHT_PURPLE,
                 dynamicColorEnabled = true,
-                streamingQuality = StreamingQuality.LOSSLESS,
                 mobileDataPolicy = MobileDataPolicy.WIFI_ONLY,
                 cacheLimitMiB = 4_096,
             )
@@ -86,7 +78,6 @@ class DataStoreAppSettingsRepositoryTest {
             AppSettings(
                 theme = ThemePreference.OCEAN_BLUE,
                 dynamicColorEnabled = true,
-                streamingQuality = StreamingQuality.HIGH,
                 mobileDataPolicy = MobileDataPolicy.WIFI_ONLY,
                 cacheLimitMiB = 2_048,
             ),
@@ -102,7 +93,6 @@ class DataStoreAppSettingsRepositoryTest {
         val repository = repository().also { it.reset() }
         repository.rawDataStore().edit { values ->
             values[stringPreferencesKey("theme")] = "UNKNOWN_THEME"
-            values[stringPreferencesKey("streaming_quality")] = "ULTRA"
             values[stringPreferencesKey("mobile_data_policy")] = "CELLULAR_ONLY"
             values[intPreferencesKey("cache_limit_mib")] = Int.MIN_VALUE
         }

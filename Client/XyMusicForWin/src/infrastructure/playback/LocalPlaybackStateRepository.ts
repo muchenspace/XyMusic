@@ -39,7 +39,6 @@ function readSnapshot(key: string, ownerKey: string): PersistedPlaybackState | n
       shuffled: Boolean(value.shuffled),
       repeat: value.repeatMode === "one" || Boolean(value.repeat),
       repeatMode: isRepeatMode(value.repeatMode) ? value.repeatMode : Boolean(value.repeat) ? "one" : "off",
-      quality: isQuality(value.quality) ? value.quality : "AUTO",
       crossfadeSeconds: Math.min(5, finiteNonNegative(value.crossfadeSeconds)),
       savedAt: typeof value.savedAt === "string" ? value.savedAt : new Date(0).toISOString(),
     };
@@ -68,7 +67,6 @@ function encodeSnapshot(state: PersistedPlaybackState): CompactPlaybackState {
     p: state.position,
     s: state.shuffled,
     r: state.repeatMode,
-    y: state.quality,
     c: state.crossfadeSeconds,
     a: state.savedAt,
   };
@@ -97,7 +95,6 @@ function decodeSnapshot(value: CompactPlaybackState, ownerKey: string): Persiste
     shuffled: Boolean(value.s),
     repeat: repeatMode === "one",
     repeatMode,
-    quality: isQuality(value.y) ? value.y : "AUTO",
     crossfadeSeconds: Math.min(5, finiteNonNegative(value.c)),
     savedAt: typeof value.a === "string" ? value.a : new Date(0).toISOString(),
   };
@@ -156,10 +153,6 @@ function isTrack(value: unknown): value is PersistedPlaybackState["queue"][numbe
   return typeof track.id === "string" && typeof track.title === "string";
 }
 
-function isQuality(value: unknown): value is PersistedPlaybackState["quality"] {
-  return value === "AUTO" || value === "DATA_SAVER" || value === "STANDARD" || value === "HIGH" || value === "LOSSLESS";
-}
-
 function isRepeatMode(value: unknown): value is PersistedPlaybackState["repeatMode"] {
   return value === "off" || value === "all" || value === "one";
 }
@@ -183,7 +176,6 @@ interface CompactPlaybackState {
   p: number;
   s: boolean;
   r: PersistedPlaybackState["repeatMode"];
-  y: PersistedPlaybackState["quality"];
   c: number;
   a: string;
 }

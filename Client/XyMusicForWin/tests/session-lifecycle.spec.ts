@@ -3,7 +3,7 @@ import { createPinia } from "pinia";
 import { flushPromises } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApplicationServices } from "../src/application/services";
-import type { PlaybackQuality, Track } from "../src/domain/music";
+import type { Track } from "../src/domain/music";
 import { useSessionLifecycle } from "../src/presentation/composables/useSessionLifecycle";
 import { applicationServicesKey } from "../src/presentation/services";
 import { useHomeStore } from "../src/presentation/stores/homeStore";
@@ -24,7 +24,6 @@ describe("session workspace restoration", () => {
       shuffled: false,
       repeat: false,
       repeatMode: "off" as const,
-      quality: "AUTO" as const,
       crossfadeSeconds: 0,
       savedAt: "2026-07-17T00:00:00.000Z",
     }));
@@ -90,7 +89,6 @@ function createServices(restorePlayback: (ownerKey: string) => unknown): Applica
           position?: number;
           shuffled?: boolean;
           repeatMode?: "off" | "all" | "one";
-          quality?: PlaybackQuality;
           crossfadeSeconds?: number;
         } | null;
         if (!restored?.queue?.length || restored.currentIndex === undefined) return null;
@@ -104,7 +102,6 @@ function createServices(restorePlayback: (ownerKey: string) => unknown): Applica
           progress: currentTrack?.duration ? currentTime / currentTrack.duration * 100 : 0,
           shuffled: restored.shuffled ?? false,
           repeatMode: restored.repeatMode ?? "off",
-          quality: restored.quality ?? "AUTO",
           crossfadeSeconds: restored.crossfadeSeconds ?? 0,
         };
       },

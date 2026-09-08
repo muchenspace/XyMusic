@@ -67,7 +67,6 @@ type RootCounts struct {
 	FileCount       int
 	FailedFileCount int
 	TrackCount      int
-	CueFileCount    int
 }
 
 type RootView struct {
@@ -109,7 +108,6 @@ type SourceFile struct {
 	TrackTitle  string
 	TrackStatus string
 	TrackCount  int
-	Cue         bool
 }
 
 type ProcessingJob struct {

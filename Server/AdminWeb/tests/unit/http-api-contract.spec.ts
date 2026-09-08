@@ -146,7 +146,7 @@ describe("administrator HTTP API contract", () => {
     await expectRequest(() => adminApi.updateSettings(settingsUpdate), "/api/v1/admin/settings", { method: "PATCH", body: settingsUpdate });
     const database = { host: "db", port: 5432, database: "xymusic", username: "admin", sslMode: "prefer" as const, maximumConnections: 10 };
     await expectRequest(() => adminApi.testDatabase(database), "/api/v1/admin/settings/test/database", { method: "POST", body: database });
-    const storage = { assetDirectory: "assets", transcodeDirectory: "transcode", maxUploadBytes: 1024 };
+    const storage = { assetDirectory: "assets", maxUploadBytes: 1024 };
     await expectRequest(() => adminApi.testStorage(storage), "/api/v1/admin/settings/test/storage", { method: "POST", body: storage });
     await expectRequest(() => adminApi.testMediaTools({ directory: "tools" }), "/api/v1/admin/settings/test/media-tools", { method: "POST", body: { directory: "tools" } });
     await expectRequest(() => adminApi.testLocalLibrary("music"), "/api/v1/admin/settings/test/local-library", { method: "POST", body: { directory: "music" } });
@@ -227,7 +227,7 @@ function setupInput(): SetupCompleteInput {
     http: { ipv4Host: "127.0.0.1", ipv4Port: 3000, ipv6Host: "::1", ipv6Port: 3000, trustedProxyAddresses: [] },
     paths: { migrationsDirectory: "migrations", adminWebDirectory: "admin" },
     database: { host: "db", port: 5432, database: "xymusic", username: "admin", password: "secret", sslMode: "prefer", maxConnections: 10 },
-    storage: { assetDirectory: "assets", transcodeDirectory: "transcode", maxUploadBytes: 1024 },
+    storage: { assetDirectory: "assets", maxUploadBytes: 1024 },
     media: { mode: "ADVANCED", directory: "", ffmpegPath: "ffmpeg", ffprobePath: "ffprobe" },
     source: { name: "Music", directory: "music", mode: "READ_ONLY", enabled: true, syncOnStartup: true, scanIntervalMinutes: null, includePatterns: [], excludePatterns: [] },
     registration: { enabled: false },

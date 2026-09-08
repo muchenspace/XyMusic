@@ -16,6 +16,7 @@ import com.xymusic.app.feature.player.data.controller.Media3PlayerRepository
 import com.xymusic.app.feature.player.data.local.DataStorePlaybackModeStore
 import com.xymusic.app.feature.player.data.local.RoomPlaybackQueueStore
 import com.xymusic.app.feature.player.data.media.CacheOfflineMediaDownloader
+import com.xymusic.app.feature.player.data.media.GrantResolvingMediaSourceFactory
 import com.xymusic.app.feature.player.data.media.InMemoryPlaybackGrantStore
 import com.xymusic.app.feature.player.data.media.Media3OfflineTrackRepository
 import com.xymusic.app.feature.player.data.media.OfflineMediaCache
@@ -23,14 +24,10 @@ import com.xymusic.app.feature.player.data.media.OfflineMediaDownloader
 import com.xymusic.app.feature.player.data.media.OfflineMediaStore
 import com.xymusic.app.feature.player.data.media.PlaybackCache
 import com.xymusic.app.feature.player.data.media.PlaybackGrantRegistry
-import com.xymusic.app.feature.player.data.media.GrantResolvingMediaSourceFactory
 import com.xymusic.app.feature.player.data.media.PlaybackGrantStore
 import com.xymusic.app.feature.player.data.media.PlaybackNetworkPolicy
 import com.xymusic.app.feature.player.data.media.playbackDataSourceFactory
-import com.xymusic.app.feature.player.data.quality.AutomaticPlaybackQualityController
-import com.xymusic.app.feature.player.data.quality.AutomaticQualityTransferListener
 import com.xymusic.app.feature.player.data.remote.HttpPlaybackGrantRepository
-import com.xymusic.app.feature.player.domain.AutomaticPlaybackQualityPolicy
 import com.xymusic.app.feature.player.domain.LyricsSource
 import com.xymusic.app.feature.player.domain.OfflineTrackRepository
 import com.xymusic.app.feature.player.domain.PlaybackEventSink
@@ -49,12 +46,6 @@ import okhttp3.OkHttpClient
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class PlaybackBindingModule {
-    @Binds
-    @Singleton
-    abstract fun bindAutomaticPlaybackQualityPolicy(
-        implementation: AutomaticPlaybackQualityController,
-    ): AutomaticPlaybackQualityPolicy
-
     @Binds
     @Singleton
     abstract fun bindPlayerRepository(implementation: Media3PlayerRepository): PlayerRepository
@@ -100,6 +91,7 @@ abstract class PlaybackBindingModule {
 
     @Binds
     @Singleton
+    @UnstableApi
     abstract fun bindOfflineAccountDataCleaner(implementation: OfflineMediaStore): OfflineAccountDataCleaner
 }
 
@@ -116,14 +108,12 @@ object PlaybackProviderModule {
         grantRegistry: PlaybackGrantRegistry,
         networkPolicy: PlaybackNetworkPolicy,
         sessionIdentityProvider: SessionIdentityProvider,
-        automaticQualityTransferListener: AutomaticQualityTransferListener,
     ): DataSource.Factory = playbackDataSourceFactory(
         mediaHttpClient,
         playbackCache,
         grantRegistry,
         networkPolicy,
         sessionIdentityProvider,
-        automaticQualityTransferListener,
     )
 
     @Provides

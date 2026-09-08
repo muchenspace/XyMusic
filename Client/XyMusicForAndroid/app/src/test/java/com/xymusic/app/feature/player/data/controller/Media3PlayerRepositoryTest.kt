@@ -293,16 +293,6 @@ class Media3PlayerRepositoryTest {
         assertThat(isValidPlayerQueue(listOf(first), "first", -1)).isFalse()
     }
 
-    @Test
-    fun codecFallbackSessionCommandMapsToOneShotPlayerEvent() {
-        assertThat(
-            playerEventForCustomAction(
-                PlaybackSessionCommands.ACTION_CODEC_FALLBACK_APPLIED,
-            ),
-        ).isEqualTo(PlayerEvent.CompatibleCodecFallbackApplied)
-        assertThat(playerEventForCustomAction("unsupported")).isNull()
-    }
-
     private fun queueItem(queueItemId: String, trackId: String) = PlayerQueueItem(
         queueItemId = queueItemId,
         trackId = trackId,

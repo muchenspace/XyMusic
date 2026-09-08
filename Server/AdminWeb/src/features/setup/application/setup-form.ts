@@ -34,14 +34,9 @@ export const setupStepSchemas = {
   }),
   storage: z.object({
     assetDirectory: z.string().trim().min(1, "请输入媒体资产目录").max(4_000),
-    transcodeDirectory: z.string().trim().min(1, "请输入转码临时目录").max(4_000),
     maxUploadBytes: z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
-    transcodeCacheMaxBytes: z.coerce.number().int().min(134_217_728).max(1_099_511_627_776).optional(),
     uploadTtlSeconds: z.coerce.number().int().min(30).max(86_400).optional(),
     streamTtlSeconds: z.coerce.number().int().min(30).max(86_400).optional(),
-    streamMaxConcurrent: z.coerce.number().int().min(1).max(100).optional(),
-    streamIdleTimeoutSeconds: z.coerce.number().int().min(5).max(3_600).optional(),
-    transcodeTimeoutSeconds: z.coerce.number().int().min(5).max(3_600).optional(),
   }),
   media: z.object({
     mode: z.enum(["DIRECTORY", "ADVANCED"]),

@@ -28,7 +28,7 @@ func TestNewCleanerValidatesDependencies(t *testing.T) {
 		t.Fatal("expected cleaner dependency validation error")
 	}
 	tempDir := t.TempDir()
-	mediaStore, err := localmedia.NewStore(filepath.Join(tempDir, "assets"), filepath.Join(tempDir, "transcode"), 1)
+	mediaStore, err := localmedia.NewStore(filepath.Join(tempDir, "assets"), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,9 +41,8 @@ func TestServeAssetSuccess(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tempDir := t.TempDir()
 	assetDir := filepath.Join(tempDir, "assets")
-	transcodeDir := filepath.Join(tempDir, "transcode")
 
-	mediaStore, err := localmedia.NewStore(assetDir, transcodeDir, 10*1024*1024)
+	mediaStore, err := localmedia.NewStore(assetDir, 10*1024*1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +110,7 @@ func TestServeAssetSuccess(t *testing.T) {
 func TestServeAssetNotFoundOrMismatch(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tempDir := t.TempDir()
-	mediaStore, _ := localmedia.NewStore(filepath.Join(tempDir, "assets"), filepath.Join(tempDir, "transcode"), 10*1024*1024)
+	mediaStore, _ := localmedia.NewStore(filepath.Join(tempDir, "assets"), 10*1024*1024)
 
 	store := &mockStore{assets: map[string]*AssetRecord{}}
 	routes, _ := NewRoutes(store, mediaStore)

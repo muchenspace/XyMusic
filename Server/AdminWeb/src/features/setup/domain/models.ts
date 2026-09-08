@@ -36,14 +36,9 @@ export interface SetupPathConfig {
 
 export interface MediaStorageConfig {
   assetDirectory: string;
-  transcodeDirectory: string;
   maxUploadBytes: number;
-  transcodeCacheMaxBytes?: number;
   uploadTtlSeconds?: number;
   streamTtlSeconds?: number;
-  streamMaxConcurrent?: number;
-  streamIdleTimeoutSeconds?: number;
-  transcodeTimeoutSeconds?: number;
 }
 
 export type ObjectStorageConfig = MediaStorageConfig;
@@ -91,11 +86,8 @@ export interface SetupValidationResult {
   };
   storageInspection?: {
     assetDirectoryExists: boolean;
-    transcodeDirectoryExists: boolean;
     hasAssets: boolean;
     assetCount: number;
-    hasTranscode: boolean;
-    transcodeCount: number;
   };
 }
 

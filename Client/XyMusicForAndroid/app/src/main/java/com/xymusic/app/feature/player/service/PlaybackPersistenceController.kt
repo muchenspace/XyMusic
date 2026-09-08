@@ -255,8 +255,6 @@ internal class PlaybackPersistenceController(
                             queueItemId = mediaItem.mediaId,
                             position = size,
                             trackId = trackId,
-                            variantId = null,
-                            stableCacheKey = null,
                             resumePositionMs =
                             if (mediaItem.mediaId == currentQueueItemId) {
                                 currentPosition

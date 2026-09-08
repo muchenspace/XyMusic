@@ -31,26 +31,16 @@ internal fun StoredPlaybackQueueItem.toPlaybackMediaItem(): MediaItem = MediaIte
     .Builder()
     .setMediaId(queueItemId)
     .setUri(PlaybackMediaUri.forTrack(trackId))
-    .setMediaMetadata(toMediaMetadata(requestedStartPositionMs = resumePositionMs.coerceAtLeast(0)))
+    .setMediaMetadata(toMediaMetadata())
     .build()
 
-private fun StoredPlaybackQueueItem.toMediaMetadata(requestedStartPositionMs: Long): MediaMetadata {
+private fun StoredPlaybackQueueItem.toMediaMetadata(): MediaMetadata {
     val extras =
         Bundle().apply {
             putString(PlaybackMediaMetadata.EXTRA_TRACK_ID, trackId)
             putStringArrayList(PlaybackMediaMetadata.EXTRA_ARTISTS, ArrayList(artistNames))
             putString(PlaybackMediaMetadata.EXTRA_ARTWORK_CACHE_KEY, artworkCacheKey)
             putLong(PlaybackMediaMetadata.EXTRA_DURATION_MS, durationMs)
-            if (isCurrent && requestedStartPositionMs > 0) {
-                putLong(PlaybackMediaMetadata.EXTRA_REQUESTED_START_POSITION_MS, requestedStartPositionMs)
-                // The source offset is declared with the request, not with the
-                // resolution result. The served HLS transcode begins at the
-                // resume position, so the local timeline starts at zero while
-                // the global position is the resume position from the first
-                // sample. Readers (lyrics clock, persistence, progress) never
-                // observe a transient 0 while the media source resolves.
-                putLong(PlaybackMediaMetadata.EXTRA_SOURCE_OFFSET_MS, requestedStartPositionMs)
-            }
         }
     return MediaMetadata
         .Builder()

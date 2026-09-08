@@ -1,35 +1,18 @@
 package com.xymusic.app.feature.player.domain
 
-import com.xymusic.app.feature.player.domain.model.PreferredQuality
-
 interface PlaybackGrantRepository {
     suspend fun get(
         trackId: String,
-        preferredQuality: PreferredQuality = PreferredQuality.STANDARD,
-        acceptedCodecs: List<String> = emptyList(),
         forceRefresh: Boolean = false,
-        streamProtocol: PlaybackStreamProtocol? = null,
-        startPositionMs: Long = 0,
     ): PlayerResult<PlaybackGrant>
 
     fun invalidate(trackId: String)
 
-    fun enableCompatibleCodecFallback(trackId: String): Boolean = false
-
-    fun isCompatibleCodecFallbackEnabled(trackId: String): Boolean = false
-
     fun clear()
-}
-
-enum class PlaybackStreamProtocol {
-    PROGRESSIVE,
-    HLS,
 }
 
 class PlaybackGrant(
     val trackId: String,
-    val sessionId: String,
-    val selectedQuality: PreferredQuality,
     val streamUrl: String,
     val expiresAtEpochMillis: Long,
     val mimeType: String,
@@ -38,11 +21,7 @@ class PlaybackGrant(
     val bitrate: Int,
     val sampleRate: Int?,
     val contentLength: Long?,
-    val checksumSha256: String?,
-    val cacheKey: String,
-    val streamProtocol: PlaybackStreamProtocol = PlaybackStreamProtocol.PROGRESSIVE,
     val durationMs: Long? = null,
-    val startPositionMs: Long = 0,
 ) {
-    override fun toString(): String = "PlaybackGrant(trackId=$trackId, sessionId=$sessionId, streamUrl=[REDACTED])"
+    override fun toString(): String = "PlaybackGrant(trackId=$trackId, streamUrl=[REDACTED])"
 }

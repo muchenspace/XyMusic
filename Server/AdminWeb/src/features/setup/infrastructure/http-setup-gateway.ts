@@ -14,7 +14,6 @@ export function normalizeObjectStorageConfig(input: ObjectStorageConfig): Object
   return {
     ...input,
     assetDirectory: input.assetDirectory.trim(),
-    transcodeDirectory: input.transcodeDirectory.trim(),
   };
 }
 

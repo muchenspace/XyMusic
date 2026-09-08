@@ -1,4 +1,4 @@
-import type { AudioBandwidthSample, AudioSnapshot, AudioPlayer } from "../ports/AudioPlayer";
+import type { AudioSnapshot, AudioPlayer } from "../ports/AudioPlayer";
 import type { DesktopWindow } from "../ports/DesktopWindow";
 import type { Diagnostics } from "../ports/Diagnostics";
 import type { Notifier } from "../ports/Notifier";
@@ -13,9 +13,7 @@ import type {
 import type { SessionIdGenerator } from "../ports/SessionIdGenerator";
 import type { TaskScheduler } from "../ports/TaskScheduler";
 import type {
-  ConcretePlaybackQuality,
   PlaybackGrant,
-  PlaybackQuality,
   ReadonlyTrack,
   Track,
 } from "../../domain/music";
@@ -27,10 +25,8 @@ import {
   type PlayMode,
 } from "../../domain/playbackState";
 import {
-  keepCurrentTrack,
   nextTrackIndex,
   previousTrackIndex,
-  removeTrackAtIndex,
   removeTrackFromQueue,
   selectTrack,
 } from "../../domain/playbackQueue";
@@ -40,7 +36,6 @@ import type { PlaybackGrantCache } from "./PlaybackGrantCache";
 import type { PlaybackDesktopIntegration, PlaybackDesktopStatus } from "./PlaybackDesktopIntegration";
 import type { PlaybackPreferences } from "./PlaybackPreferences";
 import type { PlaybackStatePersistence } from "./PlaybackStatePersistence";
-import { AutomaticQualityController } from "./AutomaticQualityController";
 
 interface CapturedPlaybackSession {
   track: ReadonlyTrack;
@@ -59,9 +54,6 @@ export class PlaybackSession implements PlaybackSessionPort {
   private readonly removeAudioUpdate: () => void;
   private readonly removeAudioEnded: () => void;
   private readonly removeAudioError: () => void;
-  private readonly removeAudioBandwidthSample: () => void;
-  private readonly removeAudioBuffering: () => void;
-  private readonly removeAudioNetworkChange: () => void;
   private readonly removePageHide: () => void;
   private readonly hasStoredCrossfade: boolean;
   private stateValue: PlaybackSessionState;
@@ -88,19 +80,13 @@ export class PlaybackSession implements PlaybackSessionPort {
   private miniModeRequestActive = false;
   private disposed = false;
   private mediaErrorRecovery: Promise<void> | null = null;
-  // A browser can report a media error after play() has been requested but
-  // before the first non-paused snapshot. Keep that explicit resume intent so
-  // an expired server grant is retried instead of being mistaken for a
-  // background error on an intentionally paused track.
   private resumeAttemptActive = false;
-  private activeRequestQuality: ConcretePlaybackQuality = "STANDARD";
-  private activeSelectedQuality: ConcretePlaybackQuality = "STANDARD";
-  private prefetchedRequestQuality: ConcretePlaybackQuality | null = null;
-  private prefetchedSelectedQuality: ConcretePlaybackQuality | null = null;
   private prefetchedGrant: PlaybackGrant | null = null;
   private activeGrant: PlaybackGrant | null = null;
-  private qualitySwitchInProgress = false;
-  private suppressBufferingUntil = 0;
+
+  getActiveGrant(): PlaybackGrant | null {
+    return this.activeGrant;
+  }
 
   constructor(
     private readonly audio: AudioPlayer,
@@ -115,7 +101,6 @@ export class PlaybackSession implements PlaybackSessionPort {
     private readonly scheduler: TaskScheduler,
     pageLifecycle: PageLifecycle,
     private readonly sessionIds: SessionIdGenerator,
-    private readonly automaticQuality = new AutomaticQualityController(),
   ) {
     const preferences = playbackPreferences.read();
     this.hasStoredCrossfade = preferences.hasCrossfadePreference;
@@ -133,7 +118,6 @@ export class PlaybackSession implements PlaybackSessionPort {
       volume: playbackPreferences.initializeVolume(preferences.volume),
       shuffled: false,
       repeatMode: "off",
-      quality: preferences.quality,
       crossfadeSeconds: preferences.crossfadeSeconds,
       notificationsEnabled: preferences.notificationsEnabled,
       miniMode: false,
@@ -143,9 +127,6 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.removeAudioUpdate = audio.onUpdate((snapshot) => this.handleAudioUpdate(snapshot));
     this.removeAudioEnded = audio.onEnded(() => { void this.handleEnded(); });
     this.removeAudioError = audio.onError((message) => this.handleAudioError(message));
-    this.removeAudioBandwidthSample = audio.onBandwidthSample?.((sample) => this.handleBandwidthSample(sample)) ?? (() => undefined);
-    this.removeAudioBuffering = audio.onBuffering?.(() => { void this.handleNetworkBuffering(); }) ?? (() => undefined);
-    this.removeAudioNetworkChange = audio.onNetworkChange?.(() => this.handleNetworkChange()) ?? (() => undefined);
     this.desktopPlayback.connect({
       play: () => this.handleDesktopPlay(),
       pause: () => { if (this.stateValue.isPlaying) void this.toggle(); },
@@ -202,7 +183,6 @@ export class PlaybackSession implements PlaybackSessionPort {
     const crossfadeSeconds = this.hasStoredCrossfade
       ? this.stateValue.crossfadeSeconds
       : this.playbackPreferences.setCrossfadeSeconds(restored.crossfadeSeconds);
-    this.playbackPreferences.setQuality(restored.quality);
     this.pendingResumeTrackId = track.id;
     this.pendingResumePosition = restoredPosition;
     this.pendingResumeWasExplicitSeek = false;
@@ -218,7 +198,6 @@ export class PlaybackSession implements PlaybackSessionPort {
       duration: track.duration,
       shuffled: restored.shuffled,
       repeatMode: restored.repeatMode,
-      quality: restored.quality,
       crossfadeSeconds,
       error: "",
     });
@@ -304,25 +283,13 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.resumeAttemptActive = true;
     this.updateState({ loading: true, error: "" });
     try {
-      let resolution = await this.playbackGrants.getForResume(
+      const resolution = await this.playbackGrants.getForResume(
         track.id,
-        this.activeRequestQuality,
         controller.signal,
       );
-      const needsDirectedResume = resolution.refreshed
-        && this.activeGrant?.streamProtocol === "HLS"
-        && resumePosition > 0;
-      if (needsDirectedResume) {
-        resolution = await this.playbackGrants.getForResume(
-          track.id,
-          this.activeRequestQuality,
-          controller.signal,
-          Math.round(resumePosition * 1000),
-        );
-      }
       if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
       if (resolution.refreshed) {
-        this.applyActiveGrant(resolution.grant, this.activeRequestQuality);
+        this.activeGrant = resolution.grant;
         await this.loadAudioGrant(resolution.grant, controller.signal);
         if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
       }
@@ -412,18 +379,12 @@ export class PlaybackSession implements PlaybackSessionPort {
       : this.audio.snapshot().currentTime;
     const positionChanged = playbackPositionMilliseconds(previousPosition)
       !== playbackPositionMilliseconds(normalized);
-    this.suppressBufferingUntil = Date.now() + BUFFERING_AFTER_SEEK_SUPPRESSION_MS;
     if (seekingPendingResume) {
       this.pendingResumePosition = normalized;
       this.pendingResumeWasExplicitSeek = true;
     } else if (seekingWhileLoading) {
       this.pendingSeekTrackId = track.id;
       this.pendingSeekSeconds = normalized;
-    } else if (this.activeGrant?.streamProtocol === "HLS"
-      && Math.abs(normalized - (this.activeGrant.startPositionMs ?? 0) / 1000) > HLS_SEEK_EPSILON_SECONDS) {
-      this.pendingSeekTrackId = track.id;
-      this.pendingSeekSeconds = normalized;
-      void this.commitHlsSeek(track, normalized, this.stateValue.isPlaying, previousPosition);
     } else {
       this.audio.seek(normalized);
     }
@@ -452,51 +413,38 @@ export class PlaybackSession implements PlaybackSessionPort {
       currentIndex: selection.currentIndex,
     });
     this.schedulePersistState();
+    if (!selection.tracks.length) {
+      this.stopPlayback(null);
+      return;
+    }
     this.refreshPrefetch();
   }
 
   removeFromQueueAt(index: number): void {
-    if (this.disposed) return;
-    const selection = removeTrackAtIndex(this.stateValue.queue, this.stateValue.currentIndex, index);
-    if (selection.tracks.length === this.stateValue.queue.length) return;
-    this.updateState({
-      queue: this.ownQueue(selection.tracks),
-      queueVersion: this.advanceQueueRevision(),
-      currentIndex: selection.currentIndex,
-    });
-    this.schedulePersistState();
-    this.refreshPrefetch();
+    if (this.disposed || !Number.isInteger(index) || index < 0 || index >= this.stateValue.queue.length) return;
+    const target = this.stateValue.queue[index];
+    if (target) this.removeFromQueue(target.id);
   }
 
   clearQueue(): void {
     if (this.disposed) return;
-    const selection = keepCurrentTrack(this.stateValue.queue, this.stateValue.currentIndex);
-    if (selection.tracks.length === this.stateValue.queue.length && selection.currentIndex === this.stateValue.currentIndex) return;
     this.updateState({
-      queue: this.ownQueue(selection.tracks),
+      queue: this.ownQueue([]),
       queueVersion: this.advanceQueueRevision(),
-      currentIndex: selection.currentIndex,
+      currentIndex: -1,
     });
-    this.schedulePersistState();
-    this.refreshPrefetch();
+    this.stopPlayback(null);
   }
 
   stopPlayback(terminalEvent: PlaybackTerminalEvent | null = "PAUSED"): void {
     if (this.disposed) return;
-    this.resumeAttemptActive = false;
-    const currentTrack = this.currentTrack;
-    const stoppingPendingResume = currentTrack?.id === this.pendingResumeTrackId;
-    const previousPosition = stoppingPendingResume
-      ? this.stateValue.currentTime
-      : this.audio.snapshot().currentTime;
-    const positionChanged = playbackPositionMilliseconds(previousPosition) !== 0;
-    this.resumeWhenQueueExtends = false;
-    this.finishPlaybackSession(this.capturePlaybackSession(), terminalEvent);
-    this.automaticQuality.finishTrack();
+    const previousSession = this.capturePlaybackSession();
     this.loadRequest += 1;
     this.loadController?.abort();
     this.loadController = null;
     this.clearPrefetch();
+    this.finishPlaybackSession(previousSession, terminalEvent);
+    const positionChanged = playbackPositionMilliseconds(this.stateValue.currentTime) !== 0;
     this.pendingResumeTrackId = "";
     this.pendingResumePosition = 0;
     this.pendingResumeWasExplicitSeek = false;
@@ -522,7 +470,6 @@ export class PlaybackSession implements PlaybackSessionPort {
     if (this.disposed) return;
     this.resumeAttemptActive = false;
     this.finishPlaybackSession(this.capturePlaybackSession(), "PAUSED");
-    this.resetAutomaticQualitySession();
     this.loadRequest += 1;
     this.loadController?.abort();
     this.loadController = null;
@@ -590,19 +537,6 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.updateState({ volume: this.playbackPreferences.setVolume(value) });
   }
 
-  setQuality(value: PlaybackQuality): void {
-    if (this.disposed) return;
-    const previous = this.stateValue.quality;
-    if (previous === "AUTO" && value !== "AUTO") this.automaticQuality.finishTrack();
-    if (previous !== "AUTO" && value === "AUTO" && this.currentTrack) {
-      this.automaticQuality.beginTrack(this.activeSelectedQuality, true);
-    }
-    this.playbackPreferences.setQuality(value);
-    this.updateState({ quality: value });
-    this.schedulePersistState();
-    this.refreshPrefetch();
-  }
-
   setCrossfadeSeconds(value: number): void {
     if (this.disposed) return;
     this.updateState({ crossfadeSeconds: this.playbackPreferences.setCrossfadeSeconds(value) });
@@ -656,12 +590,8 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.removeAudioUpdate();
     this.removeAudioEnded();
     this.removeAudioError();
-    this.removeAudioBandwidthSample();
-    this.removeAudioBuffering();
-    this.removeAudioNetworkChange();
     this.loadController?.abort();
     this.clearPrefetch();
-    this.automaticQuality.finishTrack();
     this.audio.stop();
     this.desktopPlayback.dispose();
     this.playbackPersistence.dispose();
@@ -692,19 +622,10 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.clearPrefetch();
     this.updateState({ loading: true });
     this.finishPlaybackSession(this.capturePlaybackSession(), "PAUSED");
-    this.resetAutomaticQualitySession();
     this.audio.stop();
     this.desktopPlayback.clear();
     this.pendingResumeTrackId = "";
     this.pendingResumePosition = 0;
-  }
-
-  private resetAutomaticQualitySession(): void {
-    this.automaticQuality.resetSession();
-    this.activeRequestQuality = "STANDARD";
-    this.activeSelectedQuality = "STANDARD";
-    this.qualitySwitchInProgress = false;
-    this.suppressBufferingUntil = 0;
   }
 
   private clearPlaybackAfterRestoreFailure(): void {
@@ -736,9 +657,6 @@ export class PlaybackSession implements PlaybackSessionPort {
   private handleAudioUpdate(snapshot: AudioSnapshot): void {
     if (this.disposed) return;
     const currentTrack = this.currentTrack;
-    // A restored track is represented by session state until its audio source is loaded. Late
-    // events from the empty or previously stopped element must not overwrite a lyric seek made
-    // during that window; playSelection applies pendingResumePosition after loading the source.
     if (currentTrack?.id === this.pendingResumeTrackId) return;
     const duration = Number.isFinite(snapshot.duration) && snapshot.duration > 0
       ? snapshot.duration
@@ -771,90 +689,6 @@ export class PlaybackSession implements PlaybackSessionPort {
       && !this.transitioning
       && !snapshot.paused) {
       void this.activatePrefetched(this.stateValue.crossfadeSeconds, "COMPLETED");
-    }
-  }
-
-  private handleBandwidthSample(sample: AudioBandwidthSample): void {
-    if (this.disposed) return;
-    const wasReliable = this.automaticQuality.hasReliableEstimate();
-    this.automaticQuality.observe(sample);
-    if (wasReliable || !this.automaticQuality.hasReliableEstimate()) return;
-    if (this.stateValue.quality === "AUTO"
-      && this.currentTrack
-      && this.prefetchedIndex < 0
-      && this.prefetchController === null
-      && !this.transitioning) {
-      void this.prepareNext();
-    }
-  }
-
-  private handleNetworkChange(): void {
-    if (this.disposed) return;
-    this.automaticQuality.resetNetworkEstimate();
-    if (this.stateValue.quality === "AUTO") this.clearPrefetch();
-  }
-
-  private async handleNetworkBuffering(): Promise<void> {
-    if (this.disposed
-      || this.stateValue.quality !== "AUTO"
-      || !this.currentTrack
-      || !this.stateValue.isPlaying
-      || this.stateValue.loading
-      || this.transitioning
-      || this.qualitySwitchInProgress
-      || Date.now() < this.suppressBufferingUntil) return;
-    const target = this.automaticQuality.handleRebuffer(Date.now());
-    if (!target || target === this.activeSelectedQuality) return;
-    await this.switchCurrentTrackQuality(target);
-  }
-
-  private async switchCurrentTrackQuality(target: ConcretePlaybackQuality): Promise<void> {
-    const track = this.currentTrack;
-    if (!track) return;
-    const request = ++this.loadRequest;
-    this.loadController?.abort();
-    this.clearPrefetch();
-    const controller = new AbortController();
-    this.loadController = controller;
-    this.qualitySwitchInProgress = true;
-    const position = this.audio.snapshot().currentTime;
-    const shouldResume = this.stateValue.isPlaying;
-    const previousRequestQuality = this.activeRequestQuality;
-    this.playbackGrants.invalidate(track.id, previousRequestQuality);
-    this.activeRequestQuality = target;
-    this.suppressBufferingUntil = Date.now() + BUFFERING_AFTER_SWITCH_SUPPRESSION_MS;
-    this.updateState({ loading: true, error: "" });
-    try {
-      const directedStart = target !== "LOSSLESS" && position > 0 ? position : 0;
-      const grant = directedStart > 0
-        ? await this.playbackGrants.get(track.id, target, controller.signal, true, directedStart * 1000)
-        : await this.playbackGrants.get(track.id, target, controller.signal, true);
-      if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
-      this.applyActiveGrant(grant, target);
-      await this.loadAudioGrant(grant, controller.signal);
-      if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
-      const pendingPosition = this.takePendingSeekPosition(track.id);
-      this.restoreResumePosition(track, pendingPosition ?? position, pendingPosition !== null);
-      if (shouldResume) {
-        await this.audio.play();
-        if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
-      }
-      this.diagnostics.info("playback", `Automatic quality changed to ${this.activeSelectedQuality}`);
-    } catch (cause) {
-      if (request === this.loadRequest && !controller.signal.aborted && !isAbortError(cause) && this.currentTrack === track) {
-        const message = errorMessage(cause, "Unable to lower playback quality");
-        this.lastNativeStatus = "stopped";
-        this.updateState({ error: message, isPlaying: false });
-        this.desktopPlayback.setPlayback("stopped", position, this.stateValue.duration);
-        this.diagnostics.error("playback", `${track.title}: ${message}`);
-      }
-    } finally {
-      this.qualitySwitchInProgress = false;
-      if (this.loadController === controller) {
-        this.loadController = null;
-        this.updateState({ loading: false });
-        if (this.stateValue.quality !== "AUTO" || this.automaticQuality.hasReliableEstimate()) void this.prepareNext();
-      }
     }
   }
 
@@ -904,79 +738,6 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.pendingSeekSeconds = null;
   }
 
-  private async commitHlsSeek(
-    track: ReadonlyTrack,
-    targetPosition: number,
-    shouldResume: boolean,
-    fallbackPosition: number,
-  ): Promise<void> {
-    const request = ++this.loadRequest;
-    this.loadController?.abort();
-    this.clearPrefetch();
-    const controller = new AbortController();
-    this.loadController = controller;
-    const requestedQuality = this.activeRequestQuality;
-    const sessionId = this.playbackSessionId;
-    this.updateState({ loading: true, error: "" });
-    try {
-      let desiredPosition = targetPosition;
-      await this.loadTrackWithRetry(
-        track,
-        controller,
-        request,
-        requestedQuality,
-        desiredPosition,
-      );
-      if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
-      const latestPendingPosition = this.takePendingSeekPosition(track.id);
-      if (latestPendingPosition !== null) desiredPosition = latestPendingPosition;
-      if (latestPendingPosition !== null
-        && Math.abs(desiredPosition - (this.activeGrant?.startPositionMs ?? 0) / 1000) > HLS_SEEK_EPSILON_SECONDS) {
-        await this.loadTrackWithRetry(
-          track,
-          controller,
-          request,
-          requestedQuality,
-          desiredPosition,
-        );
-      }
-      if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
-      this.restoreResumePosition(track, desiredPosition, true);
-      this.clearPendingSeek();
-      if (shouldResume) {
-        await this.audio.play();
-        if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
-        this.markPlaybackStarted(track, sessionId);
-      }
-    } catch (cause) {
-      if (request !== this.loadRequest || controller.signal.aborted || isAbortError(cause) || this.currentTrack !== track) return;
-      this.clearPendingSeek();
-      this.audio.stop();
-      this.activeGrant = null;
-      this.lastNativeStatus = shouldResume ? "stopped" : "paused";
-      this.updateState({
-        loading: false,
-        isPlaying: false,
-        currentTime: fallbackPosition,
-        progress: this.stateValue.duration > 0 ? fallbackPosition / this.stateValue.duration * 100 : 0,
-        error: errorMessage(cause, "跳转播放位置失败"),
-      });
-      this.diagnostics.warn("playback", `${track.title}: seek failed`);
-    } finally {
-      if (this.loadController === controller) {
-        this.loadController = null;
-        this.updateState({ loading: false });
-      }
-    }
-  }
-
-  private applyActiveGrant(grant: PlaybackGrant, requestedQuality: ConcretePlaybackQuality): void {
-    this.activeRequestQuality = requestedQuality;
-    this.activeSelectedQuality = grant.selectedQuality;
-    this.activeGrant = grant;
-    this.automaticQuality.applySelectedQuality(grant.selectedQuality);
-  }
-
   private markPlaybackStarted(track: ReadonlyTrack, sessionId: string): void {
     const shouldRecordStart = !this.playbackSessionStarted;
     this.updateState({ error: "" });
@@ -991,11 +752,8 @@ export class PlaybackSession implements PlaybackSessionPort {
     controller: AbortController,
     request: number,
   ): Promise<void> {
-    this.playbackGrants.invalidate(track.id, this.activeRequestQuality);
-    const directedStart = this.activeGrant?.streamProtocol === "HLS" && position > 0
-      ? position
-      : 0;
-    await this.loadTrackWithRetry(track, controller, request, this.activeRequestQuality, directedStart);
+    this.playbackGrants.invalidate(track.id);
+    await this.loadTrackWithRetry(track, controller, request);
     if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
     const pendingPosition = this.takePendingSeekPosition(track.id);
     this.restoreResumePosition(track, pendingPosition ?? position, pendingPosition !== null);
@@ -1050,11 +808,8 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.clearPrefetch();
     const controller = new AbortController();
     this.loadController = controller;
-    // HtmlAudioPlayer.stop() emits synchronously; mark the replacement active
-    // first so that stopped old-track updates cannot checkpoint position zero.
     this.updateState({ loading: true, error: "" });
     this.finishPlaybackSession(previousSession, terminalEvent);
-    this.automaticQuality.finishTrack();
     this.audio.stop();
     this.activeGrant = null;
     const selectedTrack = tracks[selectedIndex]!;
@@ -1083,15 +838,8 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.lastNativeStatus = "paused";
     this.lastNativePosition = initialPosition;
     this.desktopPlayback.setPlayback("paused", initialPosition, selectedTrack.duration);
-    const requestedQuality = this.automaticQuality.selectTrackQuality(this.stateValue.quality);
-    this.activeRequestQuality = requestedQuality;
-    this.activeSelectedQuality = requestedQuality;
-    this.automaticQuality.beginTrack(requestedQuality, this.stateValue.quality === "AUTO");
     try {
-      const directedStart = requestedQuality !== "LOSSLESS" && initialPosition > 0
-        ? initialPosition
-        : 0;
-      await this.loadTrackWithRetry(selectedTrack, controller, request, requestedQuality, directedStart);
+      await this.loadTrackWithRetry(selectedTrack, controller, request);
       if (request !== this.loadRequest || controller.signal.aborted) return false;
       const pendingSeekPosition = this.takePendingSeekPosition(selectedTrack.id);
       const targetPosition = pendingSeekPosition ?? initialPosition;
@@ -1114,7 +862,7 @@ export class PlaybackSession implements PlaybackSessionPort {
       void this.recordPlayback(selectedTrack, selectedSessionId, startedAt, "STARTED");
       this.announceTrack(selectedTrack);
       this.schedulePersistState();
-      if (this.stateValue.quality !== "AUTO" || this.automaticQuality.hasReliableEstimate()) void this.prepareNext();
+      void this.prepareNext();
       return true;
     } catch (cause) {
       if (request === this.loadRequest && !controller.signal.aborted && !isAbortError(cause)) {
@@ -1213,8 +961,6 @@ export class PlaybackSession implements PlaybackSessionPort {
     track: ReadonlyTrack,
     controller: AbortController,
     request: number,
-    requestedQuality: ConcretePlaybackQuality,
-    startPosition = 0,
   ): Promise<void> {
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -1222,19 +968,17 @@ export class PlaybackSession implements PlaybackSessionPort {
       try {
         const grant = await this.playbackGrants.get(
           track.id,
-          requestedQuality,
           controller.signal,
           attempt > 0,
-          startPosition * 1000,
         );
-        this.applyActiveGrant(grant, requestedQuality);
+        this.activeGrant = grant;
         await this.loadAudioGrant(grant, controller.signal);
         return;
       } catch (cause) {
         if (controller.signal.aborted || isAbortError(cause)) throw cause;
         lastError = cause;
         this.diagnostics.warn("playback", `${track.title}: playback attempt ${attempt + 1} failed`);
-        this.playbackGrants.invalidate(track.id, requestedQuality);
+        this.playbackGrants.invalidate(track.id);
         if (attempt < 2) await this.retryDelay(RETRY_DELAYS[attempt]!, controller.signal);
       }
     }
@@ -1243,7 +987,6 @@ export class PlaybackSession implements PlaybackSessionPort {
 
   private async prepareNext(): Promise<void> {
     if (!this.audio.preload || !this.stateValue.queue.length) return;
-    if (this.stateValue.quality === "AUTO" && !this.automaticQuality.hasReliableEstimate()) return;
     this.clearPrefetch();
     if (!this.stateValue.shuffled
       && this.stateValue.repeatMode === "off"
@@ -1255,15 +998,11 @@ export class PlaybackSession implements PlaybackSessionPort {
     if (!track) return;
     const controller = new AbortController();
     this.prefetchController = controller;
-    const requestedQuality = this.automaticQuality.selectTrackQuality(this.stateValue.quality);
     try {
-      const grant = await this.playbackGrants.get(track.id, requestedQuality, controller.signal);
-      if (grant.streamProtocol === "HLS") return;
+      const grant = await this.playbackGrants.get(track.id, controller.signal);
       await this.preloadAudioGrant(grant, controller.signal);
       if (!controller.signal.aborted && this.prefetchController === controller) {
         this.prefetchedIndex = index;
-        this.prefetchedRequestQuality = requestedQuality;
-        this.prefetchedSelectedQuality = grant.selectedQuality;
         this.prefetchedGrant = grant;
       }
     } catch {
@@ -1278,8 +1017,6 @@ export class PlaybackSession implements PlaybackSessionPort {
     const previousSession = this.capturePlaybackSession();
     const request = ++this.loadRequest;
     const index = this.prefetchedIndex;
-    const requestQuality = this.prefetchedRequestQuality;
-    const selectedQuality = this.prefetchedSelectedQuality;
     const prefetchedGrant = this.prefetchedGrant;
     const track = this.stateValue.queue[index];
     if (!track) {
@@ -1292,8 +1029,6 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.transitionActivated = false;
     this.endedDuringTransition = false;
     this.prefetchedIndex = -1;
-    this.prefetchedRequestQuality = null;
-    this.prefetchedSelectedQuality = null;
     this.prefetchedGrant = null;
     const commitActivation = () => {
       if (switched || request !== this.loadRequest) return;
@@ -1301,13 +1036,7 @@ export class PlaybackSession implements PlaybackSessionPort {
       this.transitionActivated = true;
       const snapshot = this.audio.snapshot();
       this.finishPlaybackSession(previousSession, terminalEvent);
-      this.automaticQuality.finishTrack();
-      const effectiveRequestQuality = requestQuality ?? this.automaticQuality.selectTrackQuality(this.stateValue.quality);
-      const effectiveSelectedQuality = selectedQuality ?? effectiveRequestQuality;
-      this.activeRequestQuality = effectiveRequestQuality;
-      this.activeSelectedQuality = effectiveSelectedQuality;
       this.activeGrant = prefetchedGrant;
-      this.automaticQuality.beginTrack(effectiveSelectedQuality, this.stateValue.quality === "AUTO");
       const duration = snapshot.duration || track.duration;
       this.playbackSessionId = nextSessionId;
       this.playbackSessionStarted = true;
@@ -1324,29 +1053,20 @@ export class PlaybackSession implements PlaybackSessionPort {
         error: "",
       });
       this.desktopPlayback.setTrack(track);
-      void this.recordPlayback(track, nextSessionId, snapshot.currentTime, "STARTED");
-      this.announceTrack(track);
       this.desktopPlayback.setPlayback("playing", snapshot.currentTime, duration);
+      this.announceTrack(track);
+      void this.recordPlayback(track, nextSessionId, snapshot.currentTime, "STARTED");
       this.schedulePersistState();
     };
+
     try {
       const activated = await this.audio.activatePreloaded?.(fadeSeconds, commitActivation);
-      if (request !== this.loadRequest) return;
-      if (!activated) {
-        const fallbackIndex = this.stateValue.queue.indexOf(track);
-        if (fallbackIndex >= 0) await this.playQueueIndex(fallbackIndex, terminalEvent);
+      if (!activated && !switched && request === this.loadRequest) {
+        await this.playQueueIndex(index, terminalEvent);
         return;
       }
-      commitActivation();
-      if (!this.endedDuringTransition) void this.prepareNext();
-    } catch (cause) {
-      if (request !== this.loadRequest) return;
-      const message = errorMessage(cause, "切换下一首失败");
-      this.updateState({ error: message });
-      this.diagnostics.error("playback", `${track.title}: ${message}`);
-      if (!switched) {
-        const fallbackIndex = this.stateValue.queue.indexOf(track);
-        if (fallbackIndex >= 0) await this.playQueueIndex(fallbackIndex, terminalEvent);
+      if (switched && request === this.loadRequest) {
+        void this.prepareNext();
       }
     } finally {
       this.transitioning = false;
@@ -1361,8 +1081,6 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.prefetchController?.abort();
     this.prefetchController = null;
     this.prefetchedIndex = -1;
-    this.prefetchedRequestQuality = null;
-    this.prefetchedSelectedQuality = null;
     this.prefetchedGrant = null;
     this.audio.clearPreloaded?.();
   }
@@ -1372,8 +1090,6 @@ export class PlaybackSession implements PlaybackSessionPort {
     const metadata = {
       ...(bitrate ? { bitrate } : {}),
       ...(validDuration(grant.durationMs) ? { duration: grant.durationMs! / 1000 } : {}),
-      ...(validStartPosition(grant.startPositionMs) ? { startOffset: grant.startPositionMs! / 1000 } : {}),
-      ...(grant.streamProtocol ? { streamProtocol: grant.streamProtocol } : {}),
     };
     return Object.keys(metadata).length
       ? this.audio.load(grant.streamUrl, signal, metadata)
@@ -1387,8 +1103,6 @@ export class PlaybackSession implements PlaybackSessionPort {
     const metadata = {
       ...(bitrate ? { bitrate } : {}),
       ...(validDuration(grant.durationMs) ? { duration: grant.durationMs! / 1000 } : {}),
-      ...(validStartPosition(grant.startPositionMs) ? { startOffset: grant.startPositionMs! / 1000 } : {}),
-      ...(grant.streamProtocol ? { streamProtocol: grant.streamProtocol } : {}),
     };
     return Object.keys(metadata).length
       ? preload.call(this.audio, grant.streamUrl, signal, metadata)
@@ -1445,7 +1159,6 @@ export class PlaybackSession implements PlaybackSessionPort {
       shuffled: this.stateValue.shuffled,
       repeat: this.stateValue.repeatMode === "one",
       repeatMode: this.stateValue.repeatMode,
-      quality: this.stateValue.quality,
       crossfadeSeconds: this.stateValue.crossfadeSeconds,
     };
   }
@@ -1536,10 +1249,6 @@ function validDuration(value: number | undefined): value is number {
   return Number.isFinite(value) && Number(value) > 0;
 }
 
-function validStartPosition(value: number | undefined): value is number {
-  return Number.isFinite(value) && Number(value) > 0;
-}
-
 function playbackPositionMilliseconds(seconds: number): number {
   return Math.round((Number.isFinite(seconds) ? Math.max(0, seconds) : 0) * 1_000);
 }
@@ -1553,6 +1262,3 @@ function clampPlaybackPosition(position: number, duration: number): number {
 const RETRY_DELAYS = [300, 900];
 const NATIVE_POSITION_INTERVAL_SECONDS = 3;
 const PERSIST_POSITION_INTERVAL_SECONDS = 15;
-const BUFFERING_AFTER_SEEK_SUPPRESSION_MS = 1_500;
-const BUFFERING_AFTER_SWITCH_SUPPRESSION_MS = 3_000;
-const HLS_SEEK_EPSILON_SECONDS = 0.25;

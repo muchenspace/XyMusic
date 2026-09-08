@@ -18,7 +18,6 @@ import com.xymusic.app.feature.player.adapter.media3.PlaybackSessionCommands
 import com.xymusic.app.feature.player.adapter.media3.globalPlaybackDurationMs
 import com.xymusic.app.feature.player.adapter.media3.globalPlaybackPositionMs
 import com.xymusic.app.feature.player.adapter.media3.playbackMetadataDurationMs
-import com.xymusic.app.feature.player.adapter.media3.playbackSourceOffsetMs
 import com.xymusic.app.feature.player.domain.PlayerEvent
 import com.xymusic.app.feature.player.domain.PlayerRepository
 import com.xymusic.app.feature.player.domain.PlayerResult
@@ -444,7 +443,7 @@ constructor(
                 queueItemId = player.currentMediaItem?.mediaId,
             ) ?: return null
         val mediaItem = player.currentMediaItem ?: return null
-        val localPositionMs = positionMs - mediaItem.playbackSourceOffsetMs()
+        val localPositionMs = positionMs
         if (player.currentPosition.coerceAtLeast(0) == localPositionMs) return null
         player.seekTo(localPositionMs.coerceAtLeast(0))
         return positionMs
@@ -763,11 +762,7 @@ internal class PendingRestoredMediaItemSeek {
     private data class Request(val expectedQueueItemId: String?, val positionMs: Long)
 }
 
-internal fun playerEventForCustomAction(customAction: String): PlayerEvent? = when (customAction) {
-    PlaybackSessionCommands.ACTION_CODEC_FALLBACK_APPLIED ->
-        PlayerEvent.CompatibleCodecFallbackApplied
-    else -> null
-}
+internal fun playerEventForCustomAction(customAction: String): PlayerEvent? = null
 
 internal fun shouldSamplePlaybackPosition(isPlaying: Boolean, hasCurrentMediaItem: Boolean): Boolean =
     isPlaying && hasCurrentMediaItem

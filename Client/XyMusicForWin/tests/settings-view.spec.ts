@@ -12,7 +12,6 @@ const props = {
     version: 1,
   },
   serverConfig: { protocol: "https" as const, host: "music.example.com", port: "443" },
-  quality: "AUTO" as const,
   crossfadeSeconds: 0,
   notificationsEnabled: false,
   theme: "dark" as const,

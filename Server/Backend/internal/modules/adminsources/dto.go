@@ -181,7 +181,6 @@ type RootDTO struct {
 	FileCount           int         `json:"fileCount"`
 	FailedFileCount     int         `json:"failedFileCount"`
 	TrackCount          int         `json:"trackCount"`
-	CueFileCount        int         `json:"cueFileCount"`
 	LatestRun           *ScanRunDTO `json:"latestRun"`
 	Version             int         `json:"version"`
 	CreatedAt           string      `json:"createdAt"`
@@ -212,7 +211,6 @@ type SourceFileDTO struct {
 	ModifiedAt string           `json:"modifiedAt"`
 	Track      TrackSummaryDTO  `json:"track"`
 	TrackCount int              `json:"trackCount"`
-	Cue        bool             `json:"cue"`
 }
 
 type SourceFilePageDTO struct {

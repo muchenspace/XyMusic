@@ -51,7 +51,7 @@ func TestDevelopmentDefaultsAreCompatible(t *testing.T) {
 	if cfg.LocalLibrary.ScanCommitWorkers < 1 || cfg.LocalLibrary.ScanCommitBatchSize < 1 || cfg.LocalLibrary.ScanProbeWorkers < 1 {
 		t.Fatalf("unexpected scan stage defaults: %#v", cfg.LocalLibrary)
 	}
-	if cfg.Paths.MediaAssetDirectory != DefaultMediaAssetDirectory || cfg.Paths.MediaTranscodeDirectory != DefaultMediaTranscodeDirectory {
+	if cfg.Paths.MediaAssetDirectory != DefaultMediaAssetDirectory {
 		t.Fatalf("unexpected media directory defaults: %#v", cfg.Paths)
 	}
 }
@@ -222,8 +222,7 @@ func TestStoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Database.URL != cfg.Database.URL || loaded.Paths.MediaAssetDirectory != cfg.Paths.MediaAssetDirectory ||
-		loaded.Paths.MediaTranscodeDirectory != cfg.Paths.MediaTranscodeDirectory {
+	if loaded.Database.URL != cfg.Database.URL || loaded.Paths.MediaAssetDirectory != cfg.Paths.MediaAssetDirectory {
 		t.Fatalf("round trip mismatch: %#v", loaded)
 	}
 }

@@ -70,8 +70,8 @@ internal class PlaybackArtworkBitmapLoader(
     }
 
     private fun loadArtwork(uri: Uri, cacheKey: String?): ListenableFuture<Bitmap> {
-        val stableCacheKey = cacheKey?.takeIf(String::isNotBlank)
-        val requestIdentity = "${stableCacheKey.orEmpty()}\u0000$uri"
+        val artworkCacheKey = cacheKey?.takeIf(String::isNotBlank)
+        val requestIdentity = "${artworkCacheKey.orEmpty()}\u0000$uri"
         return synchronized(requestLock) {
             val failedRequest = lastFailedRequest
             if (
@@ -81,13 +81,13 @@ internal class PlaybackArtworkBitmapLoader(
                 return@synchronized Futures.immediateFuture(fallbackBitmap)
             }
             inFlightRequests[requestIdentity]?.let { return@synchronized it }
-            startArtworkLoad(uri, stableCacheKey, requestIdentity)
+            startArtworkLoad(uri, artworkCacheKey, requestIdentity)
         }
     }
 
     private fun startArtworkLoad(
         uri: Uri,
-        stableCacheKey: String?,
+        artworkCacheKey: String?,
         requestIdentity: String,
     ): ListenableFuture<Bitmap> {
         val future = SettableFuture.create<Bitmap>()
@@ -101,7 +101,7 @@ internal class PlaybackArtworkBitmapLoader(
                             .data(uri.toString())
                             .size(ARTWORK_REQUEST_SIZE_PX)
                             .allowHardware(false)
-                            .applyStableArtworkCacheKey(stableCacheKey)
+                            .applyArtworkCacheKey(artworkCacheKey)
                             .build()
                     val result = executeImageRequest(request)
                     val bitmap = (result as? SuccessResult)?.image?.toBitmap()
@@ -168,10 +168,10 @@ internal class PlaybackArtworkBitmapLoader(
     }
 }
 
-private fun ImageRequest.Builder.applyStableArtworkCacheKey(cacheKey: String?): ImageRequest.Builder = apply {
-    cacheKey?.let { stableKey ->
-        memoryCacheKey(stableKey)
-        diskCacheKey(stableKey)
+private fun ImageRequest.Builder.applyArtworkCacheKey(cacheKey: String?): ImageRequest.Builder = apply {
+    cacheKey?.let { artworkKey ->
+        memoryCacheKey(artworkKey)
+        diskCacheKey(artworkKey)
     }
 }
 

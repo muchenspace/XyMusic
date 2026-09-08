@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AudioBandwidthSample, AudioPlayer, AudioSnapshot } from "../src/application/ports/AudioPlayer";
+import type { AudioPlayer, AudioSnapshot } from "../src/application/ports/AudioPlayer";
 import type { DesktopWindow } from "../src/application/ports/DesktopWindow";
 import type { Diagnostics } from "../src/application/ports/Diagnostics";
 import type { Notifier } from "../src/application/ports/Notifier";
 import type { PageLifecycle } from "../src/application/ports/PageLifecycle";
 import type { SessionIdGenerator } from "../src/application/ports/SessionIdGenerator";
 import type { TaskScheduler } from "../src/application/ports/TaskScheduler";
-import type { ConcretePlaybackQuality, PlaybackGrant, Track } from "../src/domain/music";
+import type { PlaybackGrant, Track } from "../src/domain/music";
 import type { PlaybackUseCases } from "../src/application/use-cases/PlaybackUseCases";
 import type { PlaybackGrantCache } from "../src/application/services/PlaybackGrantCache";
 import type { PlaybackDesktopIntegration } from "../src/application/services/PlaybackDesktopIntegration";
@@ -25,7 +25,6 @@ describe("playback session", () => {
         shuffled: true,
         repeat: true,
         repeatMode: "one" as const,
-        quality: "AUTO" as const,
         crossfadeSeconds: 0,
         savedAt: new Date(0).toISOString(),
       }),
@@ -103,55 +102,18 @@ describe("playback session", () => {
     harness.audio.setPlaybackPosition(42);
     await harness.session.toggle();
     harness.grants.getForResume.mockResolvedValueOnce({
-      grant: { streamUrl: "https://example.test/one-refreshed.mp3", expiresAt: "", selectedQuality: "STANDARD" },
+      grant: { streamUrl: "https://example.test/one-refreshed.mp3", expiresAt: "" },
       refreshed: true,
     });
 
     await harness.session.toggle();
 
-    expect(harness.grants.getForResume).toHaveBeenCalledWith("one", "STANDARD", expect.any(AbortSignal));
+    expect(harness.grants.getForResume).toHaveBeenCalledWith("one", expect.any(AbortSignal));
     expect(harness.audio.load).toHaveBeenNthCalledWith(2, "https://example.test/one-refreshed.mp3", expect.any(AbortSignal));
     expect(harness.audio.seek).toHaveBeenLastCalledWith(42);
     expect(harness.audio.play).toHaveBeenCalledTimes(2);
     expect(harness.session.state()).toMatchObject({ currentTime: 42, isPlaying: true, loading: false });
 
-    harness.session.dispose();
-  });
-
-  it("requests a directed HLS grant when a refreshed HLS source resumes from the current position", async () => {
-    const harness = createHarness();
-    harness.grants.get.mockImplementation(async (trackId: string, quality: ConcretePlaybackQuality) => ({
-      streamUrl: `https://example.test/${trackId}.m3u8`,
-      expiresAt: "",
-      selectedQuality: quality,
-      streamProtocol: "HLS",
-      durationMs: 180_000,
-      startPositionMs: 0,
-      bitrate: 128_000,
-    } as PlaybackGrant));
-    await harness.session.startQueue([track("one")], 0)?.playback;
-
-    harness.audio.setPlaybackPosition(42);
-    await harness.session.toggle();
-    harness.grants.getForResume.mockImplementation(async (trackId: string) => ({
-      grant: {
-        streamUrl: `https://example.test/${trackId}.m3u8`,
-        expiresAt: "",
-        selectedQuality: "STANDARD",
-        streamProtocol: "HLS",
-        durationMs: 180_000,
-        startPositionMs: 42_000,
-        bitrate: 128_000,
-      } as PlaybackGrant,
-      refreshed: true,
-    }));
-
-    await harness.session.toggle();
-
-    expect(harness.grants.getForResume).toHaveBeenCalledTimes(2);
-    expect(harness.grants.getForResume).toHaveBeenNthCalledWith(1, "one", "STANDARD", expect.any(AbortSignal));
-    expect(harness.grants.getForResume).toHaveBeenNthCalledWith(2, "one", "STANDARD", expect.any(AbortSignal), 42_000);
-    expect(harness.audio.seek).toHaveBeenLastCalledWith(42);
     harness.session.dispose();
   });
 
@@ -163,155 +125,23 @@ describe("playback session", () => {
     harness.audio.setPlaybackPosition(42);
     await harness.session.toggle();
     harness.grants.getForResume.mockResolvedValueOnce({
-      grant: { streamUrl: "https://example.test/one.mp3", expiresAt: "", selectedQuality: "STANDARD" },
+      grant: { streamUrl: "https://example.test/one.mp3", expiresAt: "" },
       refreshed: false,
     });
     harness.grants.get.mockResolvedValueOnce({
       streamUrl: "https://example.test/one-recovered.mp3",
       expiresAt: "",
-      selectedQuality: "STANDARD",
     });
     harness.audio.play.mockRejectedValueOnce(new Error("expired media URL"));
 
     await harness.session.toggle();
 
-    expect(harness.grants.invalidate).toHaveBeenCalledWith("one", "STANDARD");
+    expect(harness.grants.invalidate).toHaveBeenCalledWith("one");
     expect(harness.audio.load).toHaveBeenNthCalledWith(2, "https://example.test/one-recovered.mp3", expect.any(AbortSignal));
     expect(harness.audio.seek).toHaveBeenLastCalledWith(42);
     expect(harness.audio.play).toHaveBeenCalledTimes(3);
     expect(harness.session.state()).toMatchObject({ currentTime: 42, isPlaying: true, loading: false, error: "" });
 
-    harness.session.dispose();
-  });
-
-  it("keeps AUTO on the client and requests a concrete downgrade after rebuffering", async () => {
-    const harness = createHarness();
-    await harness.session.startQueue([track("one")], 0)?.playback;
-
-    expect(harness.session.state().quality).toBe("AUTO");
-    expect(harness.grants.get).toHaveBeenNthCalledWith(1, "one", "STANDARD", expect.any(AbortSignal), false, 0);
-
-    harness.audio.setPlaybackPosition(30);
-    harness.audio.emitBuffering();
-
-    await vi.waitFor(() => {
-      expect(harness.grants.get).toHaveBeenCalledWith(
-        "one",
-        "DATA_SAVER",
-        expect.any(Object),
-        true,
-        30_000,
-      );
-    });
-    expect(harness.session.state().quality).toBe("AUTO");
-    harness.session.dispose();
-  });
-
-  it("clears an interrupted quality switch before handling later rebuffering", async () => {
-    const harness = createHarness();
-    await harness.session.startQueue([track("one"), track("two")], 0)?.playback;
-    let resolveDowngrade!: (grant: PlaybackGrant) => void;
-    const pendingDowngrade = new Promise<PlaybackGrant>((resolve) => { resolveDowngrade = resolve; });
-    harness.grants.get.mockImplementationOnce(async () => await pendingDowngrade);
-    const now = vi.spyOn(Date, "now").mockReturnValue(20_000);
-
-    try {
-      harness.audio.setPlaybackPosition(30);
-      harness.audio.emitBuffering();
-      await vi.waitFor(() => expect(harness.grants.get).toHaveBeenCalledTimes(2));
-
-      await harness.session.next();
-      resolveDowngrade({
-        streamUrl: "https://example.test/one-low.mp3",
-        expiresAt: "",
-        selectedQuality: "DATA_SAVER",
-      });
-      await Promise.resolve();
-      await Promise.resolve();
-
-      now.mockReturnValue(40_000);
-      harness.audio.setPlaybackPosition(30);
-      harness.audio.emitBuffering();
-
-      await vi.waitFor(() => {
-        expect(harness.grants.get).toHaveBeenCalledWith(
-          "two",
-          "DATA_SAVER",
-          expect.any(Object),
-          true,
-          30_000,
-        );
-      });
-    } finally {
-      now.mockRestore();
-      harness.session.dispose();
-    }
-  });
-
-  it("drops the previous bandwidth estimate when the active network changes", async () => {
-    const harness = createHarness();
-    await harness.session.startQueue(
-      [track("one"), track("two"), track("three"), track("four")],
-      0,
-    )?.playback;
-
-    harness.audio.emitBandwidthSample({ bitsPerSecond: 1_000_000, durationMs: 500 });
-    harness.audio.emitBandwidthSample({ bitsPerSecond: 1_000_000, durationMs: 500 });
-    await harness.session.next();
-    harness.audio.emitBandwidthSample({ bitsPerSecond: 1_000_000, durationMs: 500 });
-    await harness.session.next();
-
-    expect(harness.grants.get).toHaveBeenNthCalledWith(
-      3,
-      "three",
-      "HIGH",
-      expect.any(AbortSignal),
-      false,
-      0,
-    );
-
-    harness.audio.emitNetworkChange();
-    await harness.session.next();
-
-    expect(harness.grants.get).toHaveBeenNthCalledWith(
-      4,
-      "four",
-      "STANDARD",
-      expect.any(AbortSignal),
-      false,
-      0,
-    );
-    harness.session.dispose();
-  });
-
-  it("starts automatic quality from standard after the playback session resets", async () => {
-    const harness = createHarness();
-    await harness.session.startQueue([track("one"), track("two"), track("three")], 0)?.playback;
-    harness.audio.emitBandwidthSample({ bitsPerSecond: 1_000_000, durationMs: 500 });
-    harness.audio.emitBandwidthSample({ bitsPerSecond: 1_000_000, durationMs: 500 });
-    await harness.session.next();
-    harness.audio.emitBandwidthSample({ bitsPerSecond: 1_000_000, durationMs: 500 });
-    await harness.session.next();
-    expect(harness.grants.get).toHaveBeenNthCalledWith(
-      3,
-      "three",
-      "HIGH",
-      expect.any(AbortSignal),
-      false,
-      0,
-    );
-
-    harness.session.reset();
-    await harness.session.startQueue([track("new-session")], 0)?.playback;
-
-    expect(harness.grants.get).toHaveBeenNthCalledWith(
-      4,
-      "new-session",
-      "STANDARD",
-      expect.any(AbortSignal),
-      false,
-      0,
-    );
     harness.session.dispose();
   });
 
@@ -323,7 +153,6 @@ describe("playback session", () => {
     harness.grants.get.mockResolvedValueOnce({
       streamUrl: "https://example.test/one-recovered.mp3",
       expiresAt: "",
-      selectedQuality: "STANDARD",
     });
 
     harness.audio.emitError("expired media URL");
@@ -351,7 +180,6 @@ describe("playback session", () => {
     harness.grants.get.mockResolvedValueOnce({
       streamUrl: "https://example.test/one-recovered-after-pause.mp3",
       expiresAt: "",
-      selectedQuality: "STANDARD",
     });
     // The native play promise resolves before the browser emits its media
     // error. No non-paused snapshot is delivered, so recovery must use the
@@ -362,7 +190,7 @@ describe("playback session", () => {
     harness.audio.emitError("expired media URL after pause");
 
     await vi.waitFor(() => expect(harness.session.state()).toMatchObject({ currentTime: 42, isPlaying: true, loading: false }));
-    expect(harness.grants.invalidate).toHaveBeenCalledWith("one", "STANDARD");
+    expect(harness.grants.invalidate).toHaveBeenCalledWith("one");
     expect(harness.audio.load).toHaveBeenNthCalledWith(2, "https://example.test/one-recovered-after-pause.mp3", expect.any(AbortSignal));
     expect(harness.audio.play).toHaveBeenCalledTimes(3);
 
@@ -404,7 +232,6 @@ describe("playback session", () => {
         shuffled: false,
         repeat: false,
         repeatMode: "off",
-        quality: "AUTO",
         crossfadeSeconds: 0,
         savedAt: "2026-08-01T00:00:00.000Z",
       }),
@@ -428,7 +255,6 @@ describe("playback session", () => {
         shuffled: false,
         repeat: false,
         repeatMode: "off",
-        quality: "AUTO",
         crossfadeSeconds: 0,
         savedAt: "2026-08-01T00:00:00.000Z",
       }),
@@ -458,7 +284,6 @@ describe("playback session", () => {
         shuffled: false,
         repeat: false,
         repeatMode: "off",
-        quality: "AUTO",
         crossfadeSeconds: 0,
         savedAt: "2026-08-01T00:00:00.000Z",
       }),
@@ -516,7 +341,6 @@ describe("playback session", () => {
         shuffled: false,
         repeat: false,
         repeatMode: "off",
-        quality: "AUTO",
         crossfadeSeconds: 0,
         savedAt: "2026-08-01T00:00:00.000Z",
       }),
@@ -570,7 +394,6 @@ describe("playback session", () => {
         shuffled: false,
         repeat: false,
         repeatMode: "off",
-        quality: "AUTO",
         crossfadeSeconds: 0,
         savedAt: "2026-08-01T00:00:00.000Z",
       }),
@@ -707,10 +530,9 @@ function createHarness(options: {
   const audio = new FakeAudioPlayer();
   const lifecycle = new FakePageLifecycle();
   const preferences = {
-    read: vi.fn(() => ({ volume: 72, quality: "AUTO" as const, crossfadeSeconds: 0, notificationsEnabled: false, hasCrossfadePreference: true })),
+    read: vi.fn(() => ({ volume: 72, crossfadeSeconds: 0, notificationsEnabled: false, hasCrossfadePreference: true })),
     initializeVolume: vi.fn((value: number) => value),
     setVolume: vi.fn((value: number) => value),
-    setQuality: vi.fn(),
     setCrossfadeSeconds: vi.fn((value: number) => value),
     setNotificationsEnabled: vi.fn(),
     flush: vi.fn(),
@@ -732,13 +554,12 @@ function createHarness(options: {
     scheduleCheckpoint: ReturnType<typeof vi.fn>;
   };
   const grants = {
-    get: vi.fn(async (trackId: string, quality: ConcretePlaybackQuality) => ({
+    get: vi.fn(async (trackId: string) => ({
       streamUrl: `https://example.test/${trackId}.mp3`,
       expiresAt: "",
-      selectedQuality: quality,
     })),
     getForResume: vi.fn(async (trackId: string) => ({
-      grant: { streamUrl: `https://example.test/${trackId}.mp3`, expiresAt: "", selectedQuality: "STANDARD" },
+      grant: { streamUrl: `https://example.test/${trackId}.mp3`, expiresAt: "" },
       refreshed: false,
     })),
     invalidate: vi.fn(),
@@ -777,9 +598,6 @@ class FakeAudioPlayer implements AudioPlayer {
   private readonly updateListeners = new Set<(snapshot: AudioSnapshot) => void>();
   private readonly endedListeners = new Set<() => void>();
   private readonly errorListeners = new Set<(message: string) => void>();
-  private readonly bandwidthListeners = new Set<(sample: AudioBandwidthSample) => void>();
-  private readonly bufferingListeners = new Set<() => void>();
-  private readonly networkChangeListeners = new Set<() => void>();
   readonly load = vi.fn(async () => this.loadResult);
   readonly play = vi.fn(async () => {
     this.snapshotValue = { ...this.snapshotValue, paused: false };
@@ -812,18 +630,6 @@ class FakeAudioPlayer implements AudioPlayer {
     this.errorListeners.add(listener);
     return () => this.errorListeners.delete(listener);
   }
-  onBandwidthSample(listener: (sample: AudioBandwidthSample) => void): () => void {
-    this.bandwidthListeners.add(listener);
-    return () => this.bandwidthListeners.delete(listener);
-  }
-  onBuffering(listener: () => void): () => void {
-    this.bufferingListeners.add(listener);
-    return () => this.bufferingListeners.delete(listener);
-  }
-  onNetworkChange(listener: () => void): () => void {
-    this.networkChangeListeners.add(listener);
-    return () => this.networkChangeListeners.delete(listener);
-  }
 
   setPlaybackPosition(currentTime: number): void {
     this.snapshotValue = { ...this.snapshotValue, currentTime };
@@ -840,18 +646,6 @@ class FakeAudioPlayer implements AudioPlayer {
 
   emitError(message: string): void {
     for (const listener of this.errorListeners) listener(message);
-  }
-
-  emitBandwidthSample(sample: AudioBandwidthSample): void {
-    for (const listener of this.bandwidthListeners) listener(sample);
-  }
-
-  emitBuffering(): void {
-    for (const listener of this.bufferingListeners) listener();
-  }
-
-  emitNetworkChange(): void {
-    for (const listener of this.networkChangeListeners) listener();
   }
 
   private emitUpdate(): void {

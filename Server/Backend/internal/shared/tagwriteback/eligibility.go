@@ -15,7 +15,7 @@ const (
 	BlockNone              BlockReason = ""
 	BlockNoSource          BlockReason = "NO_SOURCE"
 	BlockTrackArchived     BlockReason = "TRACK_ARCHIVED"
-	BlockCueOrSharedSource BlockReason = "CUE_OR_SHARED_SOURCE"
+	BlockSharedSource      BlockReason = "SHARED_SOURCE"
 	BlockReadOnly          BlockReason = "READ_ONLY"
 	BlockRootDisabled      BlockReason = "ROOT_DISABLED"
 	BlockScanActive        BlockReason = "SCAN_ACTIVE"
@@ -32,7 +32,6 @@ type SourceContext struct {
 	SourceStatus string
 	SourcePath   string
 	MappingCount int
-	Cue          bool
 }
 
 type Decision struct {
@@ -46,8 +45,8 @@ func Evaluate(source SourceContext) Decision {
 		return blocked(BlockNoSource)
 	case source.TrackStatus == "ARCHIVED":
 		return blocked(BlockTrackArchived)
-	case source.MappingCount > 1 || source.Cue:
-		return blocked(BlockCueOrSharedSource)
+	case source.MappingCount > 1:
+		return blocked(BlockSharedSource)
 	case source.RootMode != "READ_WRITE":
 		return blocked(BlockReadOnly)
 	case !source.RootEnabled:
@@ -78,8 +77,8 @@ func (decision Decision) Message() string {
 		return "A writable local source for this track was not found"
 	case BlockTrackArchived:
 		return "Archived tracks cannot start Tag writeback"
-	case BlockCueOrSharedSource:
-		return "Tag writeback is unavailable for CUE or shared physical sources"
+	case BlockSharedSource:
+		return "Tag writeback is unavailable for shared physical sources"
 	case BlockReadOnly:
 		return "The music source is read-only"
 	case BlockRootDisabled:
@@ -116,7 +115,7 @@ func (decision Decision) Error(trackID string) error {
 		return apperror.New(apperror.CodeResourceNotFound, decision.Message(), apperror.WithMetadata(metadata))
 	case BlockReadOnly:
 		return apperror.New(apperror.CodeForbidden, decision.Message(), apperror.WithMetadata(metadata))
-	case BlockCueOrSharedSource, BlockUnsupportedFormat:
+	case BlockSharedSource, BlockUnsupportedFormat:
 		return apperror.New(apperror.CodeValidationError, decision.Message(), apperror.WithMetadata(metadata))
 	default:
 		return apperror.New(apperror.CodeInvalidStateTransition, decision.Message(), apperror.WithMetadata(metadata))

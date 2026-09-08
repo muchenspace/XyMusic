@@ -67,7 +67,7 @@ func runCreate(arguments []string) (resultErr error) {
 	flags := flag.NewFlagSet("create", flag.ContinueOnError)
 	sourcePath := flags.String("source", "", "source .env path")
 	outputDirectory := flags.String("output", "", "isolated runtime directory")
-	port := flags.Int("port", 3101, "legacy test server port")
+	port := flags.Int("port", 3101, "isolated test server port")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
@@ -151,7 +151,6 @@ func runCreate(arguments []string) (resultErr error) {
 	isolated.Database.URL = databaseURL
 	isolated.Database.MaxConnections = min(isolated.Database.MaxConnections, 10)
 	isolated.MediaStorage.AssetDirectory = filepath.Join(output, "assets")
-	isolated.MediaStorage.TranscodeDirectory = filepath.Join(output, "transcode")
 	isolated.Media = resolved.Media
 	isolated.Scraping = resolved.Scraping
 	isolated.LocalLibrary.Name = "Isolated integration library"
@@ -178,9 +177,6 @@ func runCreate(arguments []string) (resultErr error) {
 		return err
 	}
 	if err := os.MkdirAll(isolated.MediaStorage.AssetDirectory, 0o755); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(isolated.MediaStorage.TranscodeDirectory, 0o755); err != nil {
 		return err
 	}
 
@@ -212,18 +208,12 @@ func runCreate(arguments []string) (resultErr error) {
 	if err := writeTestCredentials(credentialsPath, credentialsDocument); err != nil {
 		return err
 	}
-	legacyExecutable := filepath.Join(sourceRoot, "xymusic.exe")
-	if info, statErr := os.Stat(legacyExecutable); statErr == nil && !info.IsDir() {
-		if err := copyFile(legacyExecutable, filepath.Join(output, "xymusic.exe"), 0o755); err != nil {
-			return err
-		}
-	}
-	databaseCreated = false
+		databaseCreated = false
 	createdDirectory = false
 	fmt.Println(environmentPath)
 	fmt.Println("database=" + databaseName)
 	fmt.Println("assets=" + isolated.MediaStorage.AssetDirectory)
-	fmt.Println("legacy=http://127.0.0.1:" + strconv.Itoa(*port))
+	fmt.Println("base=http://127.0.0.1:" + strconv.Itoa(*port))
 	fmt.Println("credentials=" + credentialsPath)
 	return nil
 }

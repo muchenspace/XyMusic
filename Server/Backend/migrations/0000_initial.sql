@@ -399,14 +399,6 @@ CREATE INDEX local_music_sources_status_index ON local_music_sources(status, upd
 CREATE TABLE local_music_source_tracks (
   source_id uuid NOT NULL REFERENCES local_music_sources(id) ON DELETE CASCADE,
   track_id uuid NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
-  cue_track_number integer CHECK (cue_track_number IS NULL OR cue_track_number > 0),
-  cue_start_time_ms bigint CHECK (cue_start_time_ms IS NULL OR cue_start_time_ms >= 0),
-  cue_end_time_ms bigint CHECK (cue_end_time_ms IS NULL OR cue_end_time_ms >= 0),
-  segment_index integer NOT NULL DEFAULT 0 CHECK (segment_index >= 0),
-  start_ms integer NOT NULL DEFAULT 0 CHECK (start_ms >= 0),
-  end_ms integer CHECK (end_ms IS NULL OR end_ms > start_ms),
-  cue_path varchar(1000),
-  cue_checksum_sha256 varchar(64),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (source_id, track_id)

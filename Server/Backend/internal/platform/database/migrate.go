@@ -127,7 +127,7 @@ func cleanupEmptyMigrationJournal(ctx context.Context, connection *pgxpool.Conn)
 }
 
 // CheckMigrationCompatibility is read-only and is used before activating a
-// candidate runtime or running production parity tests.
+// candidate runtime or running production tests.
 func CheckMigrationCompatibility(ctx context.Context, pool *pgxpool.Pool, directory string) error {
 	available, err := ReadMigrations(directory)
 	if err != nil {

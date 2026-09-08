@@ -14,16 +14,13 @@ import (
 	"time"
 )
 
-func TestFilesystemScannerDiscoversPatternsCUEAndRecordsFailures(t *testing.T) {
+func TestFilesystemScannerDiscoversSupportedAudioFilesOnly(t *testing.T) {
 	root := t.TempDir()
-	outside := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-outside.flac")
 	for path, content := range map[string]string{
 		filepath.Join(root, "album", "song.flac"): "flac",
 		filepath.Join(root, "skip.mp3"):           "mp3",
 		filepath.Join(root, "disc.wav"):           "wav",
-		filepath.Join(root, "disc.cue"):           `FILE "disc.wav" WAVE`,
-		filepath.Join(root, "bad.cue"):            `FILE "../` + filepath.Base(outside) + `" WAVE`,
-		outside:                                   "outside",
+		filepath.Join(root, "disc.txt"):           "metadata",
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -32,7 +29,6 @@ func TestFilesystemScannerDiscoversPatternsCUEAndRecordsFailures(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	t.Cleanup(func() { _ = os.Remove(outside) })
 	synchronizer := &fileSynchronizerStub{archived: 2}
 	scanner, err := NewFilesystemScanner(synchronizer)
 	if err != nil {
@@ -50,22 +46,28 @@ func TestFilesystemScannerDiscoversPatternsCUEAndRecordsFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.DiscoveredFiles != 3 || result.ProcessedFiles != 3 || result.FailedFiles != 1 || result.ArchivedFiles != 2 {
+	if result.DiscoveredFiles != 2 || result.ProcessedFiles != 2 || result.FailedFiles != 0 || result.ArchivedFiles != 2 {
 		t.Fatalf("result=%+v", result)
 	}
-	if len(progress) != 4 || progress[0] != (ScanProgress{}) || progress[len(progress)-1].ProcessedFiles != 3 {
+	if len(progress) != 3 || progress[0] != (ScanProgress{}) || progress[len(progress)-1].ProcessedFiles != 2 {
 		t.Fatalf("progress=%+v", progress)
 	}
 	paths := make([]string, 0, len(synchronizer.files))
-	var cue, failure bool
 	for _, file := range synchronizer.files {
 		paths = append(paths, file.RelativePath)
-		cue = cue || file.CuePath != ""
-		failure = failure || file.ScanError != nil
+		if file.ScanError != nil {
+			t.Fatalf("unexpected scan error for %q: %v", file.RelativePath, file.ScanError)
+		}
 	}
 	sort.Strings(paths)
-	if !cue || !failure {
-		t.Fatalf("files=%+v", synchronizer.files)
+	want := []string{"album/song.flac", "disc.wav"}
+	if len(paths) != len(want) {
+		t.Fatalf("discovered paths=%v want=%v", paths, want)
+	}
+	for index := range want {
+		if paths[index] != want[index] {
+			t.Fatalf("discovered paths=%v want=%v", paths, want)
+		}
 	}
 	for _, scanRunID := range synchronizer.scanRunIDs {
 		if scanRunID != testRunID {

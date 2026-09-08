@@ -1,4 +1,4 @@
-import type { PlaybackQuality, Track } from "./music";
+import type { Track } from "./music";
 
 export type RepeatMode = "off" | "all" | "one";
 
@@ -41,7 +41,6 @@ export interface PersistedPlaybackState {
   shuffled: boolean;
   repeat: boolean;
   repeatMode: RepeatMode;
-  quality: PlaybackQuality;
   crossfadeSeconds: number;
   savedAt: string;
 }

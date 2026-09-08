@@ -63,7 +63,6 @@ function setupInput(): SetupCompleteInput {
     },
     storage: {
       assetDirectory: "assets",
-      transcodeDirectory: "transcode",
       maxUploadBytes: 1024,
     },
     media: {

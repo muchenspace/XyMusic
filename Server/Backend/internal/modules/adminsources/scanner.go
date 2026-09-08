@@ -1,7 +1,6 @@
 package adminsources
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -35,7 +34,6 @@ const (
 type DiscoveredFile struct {
 	AudioPath    string
 	RelativePath string
-	CuePath      string
 	FileInfo     os.FileInfo
 	ScanError    error
 }
@@ -808,10 +806,9 @@ func discoverLibraryFiles(root string, include, exclude []*regexp.Regexp) ([]Dis
 	return files, nil
 }
 
-// discoverLibraryFilesStream parses CUE ownership in a lightweight first
-// pass, then emits audio files during a second directory walk. Only CUE
-// ownership and error records are retained; ordinary audio paths and file
-// metadata flow directly to the bounded scanner queue.
+// discoverLibraryFilesStream walks the library once and emits supported audio
+// files directly to the bounded scanner queue. Files with unsupported
+// extensions, including metadata/control files, are ignored.
 func discoverLibraryFilesStream(
 	ctx context.Context,
 	root string,
@@ -821,81 +818,8 @@ func discoverLibraryFilesStream(
 	if emit == nil {
 		return 0, errors.New("library discovery emit function is required")
 	}
-	ownedByTarget := make(map[string]DiscoveredFile)
-	errorsByCue := make(map[string][]DiscoveredFile)
-	cueError := func(cuePath string, err error) {
-		key := normalizePlatformPath(cuePath)
-		errorsByCue[key] = append(errorsByCue[key], DiscoveredFile{
-			AudioPath: cuePath, RelativePath: relativeLibraryPath(root, cuePath),
-			CuePath: cuePath, ScanError: err,
-		})
-	}
-	walk := func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if entry.IsDir() || strings.ToLower(filepath.Ext(entry.Name())) != ".cue" {
-			return nil
-		}
-		cuePath := path
-		references, parseErr := cueReferences(cuePath)
-		if parseErr != nil {
-			cueError(cuePath, parseErr)
-			return nil
-		}
-		for _, reference := range references {
-			target, resolveErr := resolveFileWithinRoot(root, filepath.Join(filepath.Dir(cuePath), reference))
-			if resolveErr == nil {
-				if _, supported := supportedAudioExtensions[strings.ToLower(filepath.Ext(target))]; !supported {
-					resolveErr = errors.New("CUE referenced an unsupported audio container")
-				}
-			}
-			if resolveErr != nil {
-				cueError(cuePath, resolveErr)
-				continue
-			}
-			rawRelative := relativeLibraryPath(root, target)
-			relative := normalizePlatformPath(rawRelative)
-			if !matchesPatterns(relative, include, exclude) {
-				continue
-			}
-			normalizedTarget := normalizePlatformPath(target)
-			if previous, exists := ownedByTarget[normalizedTarget]; exists && previous.CuePath != cuePath {
-				cueError(cuePath, errors.New("multiple CUE files reference the same audio source"))
-				continue
-			}
-			ownedByTarget[normalizedTarget] = DiscoveredFile{
-				AudioPath: target, RelativePath: rawRelative, CuePath: cuePath,
-			}
-		}
-		return nil
-	}
-	if err := filepath.WalkDir(root, walk); err != nil {
-		return 0, err
-	}
-
 	count := 0
-	emitFile := func(file DiscoveredFile) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := emit(file); err != nil {
-			return err
-		}
-		count++
-		return nil
-	}
-	seenCueErrors := make(map[string]struct{}, len(errorsByCue))
-	secondWalk := func(path string, entry os.DirEntry, walkErr error) error {
+	walk := func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -912,18 +836,6 @@ func discoverLibraryFilesStream(
 			return nil
 		}
 		extension := strings.ToLower(filepath.Ext(entry.Name()))
-		if extension == ".cue" {
-			key := normalizePlatformPath(path)
-			if records, exists := errorsByCue[key]; exists {
-				for _, record := range records {
-					if err := emitFile(record); err != nil {
-						return err
-					}
-				}
-				seenCueErrors[key] = struct{}{}
-			}
-			return nil
-		}
 		if _, supported := supportedAudioExtensions[extension]; !supported {
 			return nil
 		}
@@ -932,94 +844,21 @@ func discoverLibraryFilesStream(
 		if !matchesPatterns(relative, include, exclude) {
 			return nil
 		}
-		normalizedPath := normalizePlatformPath(path)
-		if cueFile, owned := ownedByTarget[normalizedPath]; owned {
-			if info, infoErr := entry.Info(); infoErr == nil {
-				cueFile.FileInfo = info
-			}
-			if err := emitFile(cueFile); err != nil {
-				return err
-			}
-			delete(ownedByTarget, normalizedPath)
-			return nil
-		}
 		file := DiscoveredFile{AudioPath: path, RelativePath: relativePath}
 		if info, infoErr := entry.Info(); infoErr == nil {
 			file.FileInfo = info
 		}
-		return emitFile(file)
+		if err := emit(file); err != nil {
+			return err
+		}
+		count++
+		return nil
 	}
-	if err := filepath.WalkDir(root, secondWalk); err != nil {
+	if err := filepath.WalkDir(root, walk); err != nil {
 		return count, err
-	}
-
-	remaining := make([]DiscoveredFile, 0, len(ownedByTarget))
-	for _, file := range ownedByTarget {
-		remaining = append(remaining, file)
-	}
-	sort.SliceStable(remaining, func(i, j int) bool { return remaining[i].RelativePath < remaining[j].RelativePath })
-	for _, file := range remaining {
-		if err := emitFile(file); err != nil {
-			return count, err
-		}
-	}
-	remainingErrors := make([]DiscoveredFile, 0)
-	for key, records := range errorsByCue {
-		if _, seen := seenCueErrors[key]; seen {
-			continue
-		}
-		remainingErrors = append(remainingErrors, records...)
-	}
-	sort.SliceStable(remainingErrors, func(i, j int) bool { return remainingErrors[i].RelativePath < remainingErrors[j].RelativePath })
-	for _, file := range remainingErrors {
-		if err := emitFile(file); err != nil {
-			return count, err
-		}
 	}
 	return count, nil
 }
-
-func cueReferences(path string) ([]string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	seen := make(map[string]struct{})
-	result := make([]string, 0)
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimPrefix(scanner.Text(), "\ufeff")
-		match := cueQuotedReferencePattern.FindStringSubmatch(line)
-		if len(match) == 0 {
-			match = cueUnquotedReferencePattern.FindStringSubmatch(line)
-		}
-		if len(match) < 2 {
-			continue
-		}
-		value := strings.TrimSpace(match[1])
-		if value == "" {
-			return nil, errors.New("CUE file reference is empty")
-		}
-		if _, exists := seen[value]; !exists {
-			seen[value] = struct{}{}
-			result = append(result, value)
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	if len(result) == 0 {
-		return nil, errors.New("CUE sheet contains no audio files")
-	}
-	return result, nil
-}
-
-var (
-	cueQuotedReferencePattern   = regexp.MustCompile(`(?i)^\s*FILE\s+"([^"]+)"\s+\S+`)
-	cueUnquotedReferencePattern = regexp.MustCompile(`(?i)^\s*FILE\s+(.+?)\s+\S+\s*$`)
-)
 
 func compilePatterns(values []string) ([]*regexp.Regexp, error) {
 	patterns := make([]*regexp.Regexp, 0, len(values))
@@ -1080,11 +919,4 @@ func normalizePlatformPath(path string) string {
 		return strings.ToLower(value)
 	}
 	return value
-}
-
-func (file DiscoveredFile) String() string {
-	if file.CuePath == "" {
-		return file.RelativePath
-	}
-	return fmt.Sprintf("%s (CUE %s)", file.RelativePath, file.CuePath)
 }

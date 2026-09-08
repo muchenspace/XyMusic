@@ -1,16 +1,5 @@
-import type { ConcretePlaybackQuality, PlaybackGrant, StreamProtocol } from "../../domain/music";
+import type { PlaybackGrant } from "../../domain/music";
 import type { PlaybackUseCases } from "../use-cases/PlaybackUseCases";
-
-interface CachedGrant {
-  streamUrl: string;
-  expiresAt: string;
-  selectedQuality: ConcretePlaybackQuality;
-  streamProtocol?: StreamProtocol;
-  durationMs?: number;
-  startPositionMs?: number;
-  bitrate?: number;
-  contentLength?: number;
-}
 
 export interface PlaybackGrantResolution {
   grant: PlaybackGrant;
@@ -18,7 +7,7 @@ export interface PlaybackGrantResolution {
 }
 
 export class PlaybackGrantCache {
-  private readonly grants = new Map<string, CachedGrant>();
+  private readonly grants = new Map<string, PlaybackGrant>();
   private generation = 0;
 
   constructor(
@@ -30,38 +19,32 @@ export class PlaybackGrantCache {
 
   async get(
     trackId: string,
-    quality: ConcretePlaybackQuality,
     signal?: AbortSignal,
     force = false,
-    startPositionMs = 0,
-  ): Promise<CachedGrant> {
-    return (await this.resolve(trackId, quality, signal, force, startPositionMs)).grant;
+  ): Promise<PlaybackGrant> {
+    return (await this.resolve(trackId, signal, force)).grant;
   }
 
-  async getForResume(trackId: string, quality: ConcretePlaybackQuality, signal?: AbortSignal, startPositionMs = 0): Promise<PlaybackGrantResolution> {
-    return this.resolve(trackId, quality, signal, false, startPositionMs);
+  async getForResume(trackId: string, signal?: AbortSignal): Promise<PlaybackGrantResolution> {
+    return this.resolve(trackId, signal, false);
   }
 
   private async resolve(
     trackId: string,
-    quality: ConcretePlaybackQuality,
     signal?: AbortSignal,
     force = false,
-    startPositionMs = 0,
   ): Promise<PlaybackGrantResolution> {
     const generation = this.generation;
-    const normalizedStartPositionMs = normalizeStartPosition(startPositionMs);
-    const key = cacheKey(trackId, quality);
-    const cached = this.grants.get(key);
-    if (!normalizedStartPositionMs && !force && cached && remainsValid(cached.expiresAt)) {
-      this.grants.delete(key);
-      this.grants.set(key, cached);
+    const cached = this.grants.get(trackId);
+    if (!force && cached && remainsValid(cached.expiresAt)) {
+      this.grants.delete(trackId);
+      this.grants.set(trackId, cached);
       return { grant: cached, refreshed: false };
     }
-    if (!normalizedStartPositionMs && cached) this.grants.delete(key);
-    const grant = await this.playback.grant(trackId, quality, signal, normalizedStartPositionMs);
+    if (cached) this.grants.delete(trackId);
+    const grant = await this.playback.grant(trackId, signal);
     if (generation !== this.generation || signal?.aborted) return { grant, refreshed: true };
-    if (!normalizedStartPositionMs) this.grants.set(key, grant);
+    this.grants.set(trackId, grant);
     while (this.grants.size > this.maxEntries) {
       const oldest = this.grants.keys().next().value as string | undefined;
       if (!oldest) break;
@@ -70,8 +53,8 @@ export class PlaybackGrantCache {
     return { grant, refreshed: true };
   }
 
-  invalidate(trackId: string, quality: ConcretePlaybackQuality): void {
-    this.grants.delete(cacheKey(trackId, quality));
+  invalidate(trackId: string): void {
+    this.grants.delete(trackId);
   }
 
   clear(): void {
@@ -80,22 +63,10 @@ export class PlaybackGrantCache {
   }
 }
 
-function cacheKey(trackId: string, quality: ConcretePlaybackQuality): string {
-  return `${trackId}:${quality}:${streamProtocolForQuality(quality)}`;
-}
-
-function streamProtocolForQuality(quality: ConcretePlaybackQuality): StreamProtocol {
-  return quality === "LOSSLESS" ? "PROGRESSIVE" : "HLS";
-}
-
 function remainsValid(expiresAt: string): boolean {
   if (!expiresAt.trim()) return true;
   const expires = Date.parse(expiresAt);
   return Number.isFinite(expires) && expires - Date.now() > 30_000;
-}
-
-function normalizeStartPosition(value: number): number {
-  return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
 }
 
 const DEFAULT_MAX_ENTRIES = 64;

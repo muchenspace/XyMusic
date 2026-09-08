@@ -39,7 +39,6 @@ func TestInspectorAudioSuccess(t *testing.T) {
 	tempDir := t.TempDir()
 	mediaStore, err := localmedia.NewStore(
 		filepath.Join(tempDir, "assets"),
-		filepath.Join(tempDir, "transcode"),
 		1024*1024*1024,
 	)
 	if err != nil {

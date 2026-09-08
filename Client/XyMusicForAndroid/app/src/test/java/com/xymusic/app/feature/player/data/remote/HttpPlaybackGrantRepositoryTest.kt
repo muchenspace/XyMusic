@@ -7,15 +7,10 @@ import com.xymusic.app.core.network.ServerSynchronizedClock
 import com.xymusic.app.core.session.ActiveSessionIdentity
 import com.xymusic.app.core.session.SessionIdentityProvider
 import com.xymusic.app.data.network.ProblemResponseParser
-import com.xymusic.app.domain.settings.AppSettings
-import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.feature.player.data.media.InMemoryPlaybackGrantStore
-import com.xymusic.app.feature.player.data.media.PlaybackGrantRegistry
 import com.xymusic.app.feature.player.data.media.PlaybackGrantKey
-import com.xymusic.app.feature.player.data.quality.AutomaticPlaybackQualityController
-import com.xymusic.app.feature.player.domain.PlaybackStreamProtocol
+import com.xymusic.app.feature.player.data.media.PlaybackGrantRegistry
 import com.xymusic.app.feature.player.domain.PlayerResult
-import com.xymusic.app.feature.player.domain.model.PreferredQuality
 import com.xymusic.app.support.InMemoryServerConfigRepository
 import java.time.Clock
 import java.time.Instant
@@ -23,8 +18,6 @@ import java.time.ZoneOffset
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -37,191 +30,46 @@ import retrofit2.Response
 @OptIn(ExperimentalCoroutinesApi::class)
 class HttpPlaybackGrantRepositoryTest {
     @Test
-    fun defaultAutoQualityUsesStandardForTheFirstGrantRequest() = runTest {
-        val api = RecordingPlaybackApi()
-
-        val result =
-            repository(api).get(
-                "00000000-0000-0000-0000-000000000001",
-                PreferredQuality.LOSSLESS,
-                emptyList(),
-                forceRefresh = true,
-            )
-
-        assertThat(result).isInstanceOf(PlayerResult.Success::class.java)
-        assertThat(api.lastRequest?.preferredQuality).isEqualTo(PreferredQuality.STANDARD.name)
-    }
-
-    @Test
-    fun configuredStreamingQualityOverridesCallerPreferenceInGrantRequest() = runTest {
-        val api = RecordingPlaybackApi()
-        val settings = FakeAppSettingsRepository().apply {
-            update(
-                AppSettings(streamingQuality = com.xymusic.app.domain.settings.StreamingQuality.LOSSLESS),
-            )
-        }
-        val result = repository(api, settingsRepository = settings).get(
-            "00000000-0000-0000-0000-000000000001",
-            PreferredQuality.STANDARD,
-            emptyList(),
-            forceRefresh = true,
-        )
-        assertThat(result).isInstanceOf(PlayerResult.Success::class.java)
-        assertThat(api.lastRequest?.preferredQuality).isEqualTo(PreferredQuality.LOSSLESS.name)
-    }
-
-    @Test
-    fun compatibleCodecFallbackInvalidatesCachedGrantAndOverridesRequestedCodecs() = runTest {
+    fun getRetrievesAndCachesPlaybackGrant() = runTest {
         val trackId = "00000000-0000-0000-0000-000000000001"
         val api = RecordingPlaybackApi()
         val repository = repository(api)
 
-        assertThat(
-            repository.get(
-                trackId,
-                PreferredQuality.LOSSLESS,
-                acceptedCodecs = listOf("flac"),
-                forceRefresh = false,
-            ),
-        ).isInstanceOf(PlayerResult.Success::class.java)
-        assertThat(
-            repository.get(
-                trackId,
-                PreferredQuality.LOSSLESS,
-                acceptedCodecs = listOf("flac"),
-                forceRefresh = false,
-            ),
-        ).isInstanceOf(PlayerResult.Success::class.java)
+        val first = repository.get(trackId)
+        assertThat(first).isInstanceOf(PlayerResult.Success::class.java)
         assertThat(api.requests).hasSize(1)
 
-        assertThat(repository.enableCompatibleCodecFallback(trackId)).isTrue()
-        assertThat(repository.isCompatibleCodecFallbackEnabled(trackId)).isTrue()
-        assertThat(
-            repository.get(
-                trackId,
-                PreferredQuality.LOSSLESS,
-                acceptedCodecs = listOf("flac"),
-                forceRefresh = false,
-            ),
-        ).isInstanceOf(PlayerResult.Success::class.java)
-
-        assertThat(api.requests).hasSize(2)
-        assertThat(api.requests.last().acceptedCodecs).containsExactly("aac", "mp3", "opus").inOrder()
-        assertThat(repository.enableCompatibleCodecFallback(trackId)).isFalse()
-        assertThat(repository.get(trackId)).isInstanceOf(PlayerResult.Success::class.java)
-        assertThat(api.requests).hasSize(2)
-    }
-
-    @Test
-    fun clearRemovesCompatibleCodecFallbackPolicy() = runTest {
-        val trackId = "00000000-0000-0000-0000-000000000001"
-        val api = RecordingPlaybackApi()
-        val repository = repository(api)
-
-        assertThat(repository.enableCompatibleCodecFallback(trackId)).isTrue()
-        assertThat(repository.get(trackId)).isInstanceOf(PlayerResult.Success::class.java)
-        repository.clear()
-        assertThat(repository.isCompatibleCodecFallbackEnabled(trackId)).isFalse()
-        assertThat(repository.get(trackId)).isInstanceOf(PlayerResult.Success::class.java)
-
-        assertThat(api.requests).hasSize(2)
-        assertThat(api.requests.first().acceptedCodecs).containsExactly("aac", "mp3", "opus").inOrder()
-        assertThat(api.requests.last().acceptedCodecs).isEmpty()
-    }
-
-    @Test
-    fun directedHlsGrantCarriesStartPositionAndIsNeverReusedAsAnUndirectedCacheEntry() = runTest {
-        val trackId = "00000000-0000-0000-0000-000000000001"
-        val api = RecordingPlaybackApi()
-        val repository = repository(api)
-
-        val first = repository.get(
-            trackId = trackId,
-            preferredQuality = PreferredQuality.STANDARD,
-            acceptedCodecs = listOf("aac"),
-            forceRefresh = false,
-            streamProtocol = PlaybackStreamProtocol.HLS,
-            startPositionMs = 42_000,
-        )
-        val second = repository.get(
-            trackId = trackId,
-            preferredQuality = PreferredQuality.STANDARD,
-            acceptedCodecs = listOf("aac"),
-            forceRefresh = false,
-            streamProtocol = PlaybackStreamProtocol.HLS,
-            startPositionMs = 84_000,
-        )
-
-        assertThat(first).isInstanceOf(PlayerResult.Success::class.java)
+        val second = repository.get(trackId)
         assertThat(second).isInstanceOf(PlayerResult.Success::class.java)
-        assertThat(api.requests).hasSize(2)
-        assertThat(api.requests[0].streamProtocol).isEqualTo(PlaybackStreamProtocol.HLS.name)
-        assertThat(api.requests[0].startPositionMs).isEqualTo(42_000)
-        assertThat(api.requests[1].startPositionMs).isEqualTo(84_000)
-        val firstGrant = (first as PlayerResult.Success).value
-        assertThat(firstGrant.streamProtocol)
-            .isEqualTo(PlaybackStreamProtocol.HLS)
-        assertThat(firstGrant.startPositionMs).isEqualTo(42_000)
+        assertThat(api.requests).hasSize(1)
     }
 
     @Test
-    fun directedStartPositionIsRejectedForProgressivePlayback() = runTest {
-        val api = RecordingPlaybackApi()
-
-        val result = repository(api).get(
-            trackId = "00000000-0000-0000-0000-000000000001",
-            preferredQuality = PreferredQuality.LOSSLESS,
-            acceptedCodecs = emptyList(),
-            forceRefresh = false,
-            streamProtocol = PlaybackStreamProtocol.PROGRESSIVE,
-            startPositionMs = 1_000,
-        )
-
-        assertThat(result).isInstanceOf(PlayerResult.Failure::class.java)
-        assertThat(api.requests).isEmpty()
-    }
-
-    @Test
-    fun sessionChangeRemovesCompatibleCodecFallbackPolicy() = runTest {
+    fun getWithForceRefreshBypassesCache() = runTest {
         val trackId = "00000000-0000-0000-0000-000000000001"
         val api = RecordingPlaybackApi()
-        val identities = MutableSessionIdentityProvider(TEST_IDENTITY)
-        val repository = repository(api, sessionIdentityProvider = identities)
-
-        assertThat(repository.get(trackId)).isInstanceOf(PlayerResult.Success::class.java)
-        assertThat(repository.enableCompatibleCodecFallback(trackId)).isTrue()
-        assertThat(repository.get(trackId)).isInstanceOf(PlayerResult.Success::class.java)
-        identities.identity =
-            TEST_IDENTITY.copy(
-                sessionId = "30000000-0000-0000-0000-000000000002",
-            )
-        assertThat(repository.get(trackId)).isInstanceOf(PlayerResult.Success::class.java)
-        assertThat(repository.isCompatibleCodecFallbackEnabled(trackId)).isFalse()
-
-        assertThat(api.requests).hasSize(3)
-        assertThat(api.requests[1].acceptedCodecs).containsExactly("aac", "mp3", "opus").inOrder()
-        assertThat(api.requests.last().acceptedCodecs).isEmpty()
-    }
-
-    @Test
-    fun enablingFallbackRejectsAnInFlightNonCompatibleGrant() = runTest {
-        val trackId = "00000000-0000-0000-0000-000000000001"
-        val api = BlockingPlaybackApi()
         val repository = repository(api)
-        val request =
-            async {
-                repository.get(trackId, forceRefresh = true)
-            }
-        runCurrent()
 
-        assertThat(repository.enableCompatibleCodecFallback(trackId)).isTrue()
-        api.allowResponses.complete(Unit)
+        assertThat(repository.get(trackId)).isInstanceOf(PlayerResult.Success::class.java)
+        assertThat(api.requests).hasSize(1)
 
-        assertThat(request.await()).isInstanceOf(PlayerResult.Failure::class.java)
+        assertThat(repository.get(trackId, forceRefresh = true)).isInstanceOf(PlayerResult.Success::class.java)
+        assertThat(api.requests).hasSize(2)
+    }
+
+    @Test
+    fun invalidateTrackRemovesCachedGrant() = runTest {
+        val trackId = "00000000-0000-0000-0000-000000000001"
+        val api = RecordingPlaybackApi()
+        val repository = repository(api)
+
+        assertThat(repository.get(trackId)).isInstanceOf(PlayerResult.Success::class.java)
+        assertThat(api.requests).hasSize(1)
+
+        repository.invalidate(trackId)
+
         assertThat(repository.get(trackId)).isInstanceOf(PlayerResult.Success::class.java)
         assertThat(api.requests).hasSize(2)
-        assertThat(api.requests.first().acceptedCodecs).isEmpty()
-        assertThat(api.requests.last().acceptedCodecs).containsExactly("aac", "mp3", "opus").inOrder()
     }
 
     @Test
@@ -232,14 +80,8 @@ class HttpPlaybackGrantRepositoryTest {
         val api = BlockingPlaybackApi()
         val repository = repository(api)
 
-        val first =
-            async {
-                repository.get(firstTrackId, PreferredQuality.STANDARD, emptyList(), forceRefresh = true)
-            }
-        val second =
-            async {
-                repository.get(secondTrackId, PreferredQuality.STANDARD, emptyList(), forceRefresh = true)
-            }
+        val first = async { repository.get(firstTrackId, forceRefresh = true) }
+        val second = async { repository.get(secondTrackId, forceRefresh = true) }
         runCurrent()
 
         assertThat(api.startedTrackIds).containsExactly(firstTrackId, secondTrackId)
@@ -254,10 +96,7 @@ class HttpPlaybackGrantRepositoryTest {
         val api = BlockingPlaybackApi()
         val store = InMemoryPlaybackGrantStore()
         val repository = repository(api, store)
-        val request =
-            async {
-                repository.get(trackId, PreferredQuality.STANDARD, emptyList(), forceRefresh = true)
-            }
+        val request = async { repository.get(trackId, forceRefresh = true) }
         runCurrent()
         assertThat(api.startedTrackIds).containsExactly(trackId)
 
@@ -265,13 +104,7 @@ class HttpPlaybackGrantRepositoryTest {
         api.allowResponses.complete(Unit)
 
         assertThat(request.await()).isInstanceOf(PlayerResult.Failure::class.java)
-        val retry =
-            repository.get(
-                trackId,
-                PreferredQuality.STANDARD,
-                emptyList(),
-                forceRefresh = false,
-            )
+        val retry = repository.get(trackId, forceRefresh = false)
         assertThat(retry).isInstanceOf(PlayerResult.Success::class.java)
         assertThat(api.startedTrackIds).containsExactly(trackId, trackId).inOrder()
     }
@@ -281,14 +114,7 @@ class HttpPlaybackGrantRepositoryTest {
         val api = BlockingPlaybackApi(grantUrlScheme = "http")
         api.allowResponses.complete(Unit)
 
-        val result =
-            repository(api).get(
-                "00000000-0000-0000-0000-000000000001",
-                PreferredQuality.STANDARD,
-                emptyList(),
-                forceRefresh = true,
-            )
-
+        val result = repository(api).get("00000000-0000-0000-0000-000000000001", forceRefresh = true)
         assertThat(result).isInstanceOf(PlayerResult.Failure::class.java)
     }
 
@@ -297,14 +123,10 @@ class HttpPlaybackGrantRepositoryTest {
         val api = BlockingPlaybackApi(grantUrlScheme = "http")
         api.allowResponses.complete(Unit)
 
-        val result =
-            repository(api, serverBaseUrl = "http://music.example/").get(
-                "00000000-0000-0000-0000-000000000001",
-                PreferredQuality.STANDARD,
-                emptyList(),
-                forceRefresh = true,
-            )
-
+        val result = repository(api, serverBaseUrl = "http://music.example/").get(
+            "00000000-0000-0000-0000-000000000001",
+            forceRefresh = true,
+        )
         assertThat(result).isInstanceOf(PlayerResult.Success::class.java)
     }
 
@@ -312,18 +134,16 @@ class HttpPlaybackGrantRepositoryTest {
     fun fastDeviceClockUsesServerDateForGrantLifetime() = runTest {
         val deviceNow = Instant.parse("2026-01-01T00:07:34Z")
         val clock = ServerSynchronizedClock(Clock.fixed(deviceNow, ZoneOffset.UTC))
-        val api =
-            BlockingPlaybackApi(
-                serverDate = "Thu, 1 Jan 2026 00:00:00 GMT",
-                grantExpiresAt = "2026-01-01T00:05:00Z",
-            )
+        val api = BlockingPlaybackApi(
+            serverDate = "Thu, 1 Jan 2026 00:00:00 GMT",
+            grantExpiresAt = "2026-01-01T00:05:00Z",
+        )
         api.allowResponses.complete(Unit)
 
-        val result =
-            repository(api, clock = clock).get(
-                "00000000-0000-0000-0000-000000000001",
-                forceRefresh = true,
-            )
+        val result = repository(api, clock = clock).get(
+            "00000000-0000-0000-0000-000000000001",
+            forceRefresh = true,
+        )
 
         val grant = (result as PlayerResult.Success).value
         assertThat(clock.millis()).isEqualTo(Instant.parse("2026-01-01T00:00:00Z").toEpochMilli())
@@ -335,18 +155,16 @@ class HttpPlaybackGrantRepositoryTest {
     fun slowDeviceClockUsesServerDateForGrantLifetime() = runTest {
         val deviceNow = Instant.parse("2025-12-31T23:52:26Z")
         val clock = ServerSynchronizedClock(Clock.fixed(deviceNow, ZoneOffset.UTC))
-        val api =
-            BlockingPlaybackApi(
-                serverDate = "Thu, 1 Jan 2026 00:00:00 GMT",
-                grantExpiresAt = "2026-01-01T00:05:00Z",
-            )
+        val api = BlockingPlaybackApi(
+            serverDate = "Thu, 1 Jan 2026 00:00:00 GMT",
+            grantExpiresAt = "2026-01-01T00:05:00Z",
+        )
         api.allowResponses.complete(Unit)
 
-        val result =
-            repository(api, clock = clock).get(
-                "00000000-0000-0000-0000-000000000001",
-                forceRefresh = true,
-            )
+        val result = repository(api, clock = clock).get(
+            "00000000-0000-0000-0000-000000000001",
+            forceRefresh = true,
+        )
 
         val grant = (result as PlayerResult.Success).value
         assertThat(clock.millis()).isEqualTo(Instant.parse("2026-01-01T00:00:00Z").toEpochMilli())
@@ -356,24 +174,21 @@ class HttpPlaybackGrantRepositoryTest {
 
     @Test
     fun serverLifetimeBelowMinimumIsRejectedDespiteDeviceClockSkew() = runTest {
-        val api =
-            BlockingPlaybackApi(
-                serverDate = "Thu, 1 Jan 2026 00:00:00 GMT",
-                grantExpiresAt = "2026-01-01T00:00:04Z",
-            )
+        val api = BlockingPlaybackApi(
+            serverDate = "Thu, 1 Jan 2026 00:00:00 GMT",
+            grantExpiresAt = "2026-01-01T00:00:04Z",
+        )
         api.allowResponses.complete(Unit)
 
-        val result =
-            repository(
-                api,
-                clock =
-                ServerSynchronizedClock(
-                    Clock.fixed(Instant.parse("2025-12-31T23:00:00Z"), ZoneOffset.UTC),
-                ),
-            ).get(
-                "00000000-0000-0000-0000-000000000001",
-                forceRefresh = true,
-            )
+        val result = repository(
+            api,
+            clock = ServerSynchronizedClock(
+                Clock.fixed(Instant.parse("2025-12-31T23:00:00Z"), ZoneOffset.UTC),
+            ),
+        ).get(
+            "00000000-0000-0000-0000-000000000001",
+            forceRefresh = true,
+        )
 
         assertThat(result).isInstanceOf(PlayerResult.Failure::class.java)
     }
@@ -384,22 +199,14 @@ class HttpPlaybackGrantRepositoryTest {
         val api = BlockingPlaybackApi()
         val identities = MutableSessionIdentityProvider(TEST_IDENTITY)
         val repository = repository(api, sessionIdentityProvider = identities)
-        val request =
-            async {
-                repository.get(trackId, PreferredQuality.STANDARD, emptyList(), forceRefresh = true)
-            }
+        val request = async { repository.get(trackId, forceRefresh = true) }
         runCurrent()
 
-        identities.identity =
-            TEST_IDENTITY.copy(
-                sessionId = "30000000-0000-0000-0000-000000000002",
-            )
+        identities.identity = TEST_IDENTITY.copy(sessionId = "30000000-0000-0000-0000-000000000002")
         api.allowResponses.complete(Unit)
 
         assertThat(request.await()).isInstanceOf(PlayerResult.Failure::class.java)
-        assertThat(
-            repository.get(trackId, PreferredQuality.STANDARD, emptyList(), forceRefresh = false),
-        ).isInstanceOf(PlayerResult.Success::class.java)
+        assertThat(repository.get(trackId, forceRefresh = false)).isInstanceOf(PlayerResult.Success::class.java)
         assertThat(api.startedTrackIds).containsExactly(trackId, trackId).inOrder()
     }
 
@@ -412,20 +219,17 @@ class HttpPlaybackGrantRepositoryTest {
             ServerSynchronizedClock(
                 Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC),
             ),
-        settingsRepository: AppSettingsRepository = FakeAppSettingsRepository(),
         grantRegistry: PlaybackGrantRegistry = PlaybackGrantRegistry(),
     ) = HttpPlaybackGrantRepository(
         api = api,
         store = store,
         problemResponseParser = ProblemResponseParser(Json, ProblemMapper()),
-        settingsRepository = settingsRepository,
         serverConfigRepository =
-        InMemoryServerConfigRepository.from(
-            serverBaseUrl.toHttpUrl(),
-        ),
+            InMemoryServerConfigRepository.from(
+                serverBaseUrl.toHttpUrl(),
+            ),
         sessionIdentityProvider = sessionIdentityProvider,
         clock = clock,
-        automaticQualityController = AutomaticPlaybackQualityController(),
         grantRegistry = grantRegistry,
     )
 
@@ -436,8 +240,6 @@ class HttpPlaybackGrantRepositoryTest {
                 sessionId = TEST_IDENTITY.sessionId,
                 serverGeneration = TEST_IDENTITY.serverGeneration.value,
                 trackId = trackId,
-                preferredQuality = PreferredQuality.STANDARD,
-                acceptedCodecs = emptyList(),
             )
         return (key.hashCode() and Int.MAX_VALUE) % 32
     }
@@ -453,23 +255,13 @@ class HttpPlaybackGrantRepositoryTest {
 }
 
 private class RecordingPlaybackApi : PlaybackApi {
-    var lastRequest: PlaybackRequestDto? = null
     val requests = mutableListOf<PlaybackRequestDto>()
     override suspend fun grant(trackId: String, request: PlaybackRequestDto): Response<PlaybackGrantDto> {
-        lastRequest = request
         requests += request
-        val sessionId = "10000000-0000-0000-0000-000000000001"
-        val isHls = request.streamProtocol.equals("HLS", ignoreCase = true)
         return Response.success(
             PlaybackGrantDto(
                 trackId = trackId,
-                sessionId = sessionId,
-                selectedQuality = request.preferredQuality,
-                streamUrl = if (isHls) {
-                    "https://music.example/api/v1/playback/streams/$sessionId/index.m3u8?ticket=ticket"
-                } else {
-                    "https://music.example/api/v1/playback/streams/$sessionId?ticket=ticket"
-                },
+                streamUrl = "https://music.example/api/v1/playback/streams/$trackId?ticket=ticket",
                 expiresAt = "2026-01-01T00:10:00Z",
                 mimeType = "audio/mp4",
                 codec = "aac",
@@ -477,10 +269,7 @@ private class RecordingPlaybackApi : PlaybackApi {
                 bitrate = 256_000,
                 sampleRate = 48_000,
                 contentLength = 1_024,
-                cacheKey = "track-$trackId",
-                streamProtocol = request.streamProtocol,
                 durationMs = 180_000,
-                startPositionMs = request.startPositionMs ?: 0,
             ),
         )
     }
@@ -509,23 +298,10 @@ private class BlockingPlaybackApi(
         startedTrackIds += trackId
         requests += request
         allowResponses.await()
-        val sessionId =
-            if (trackId.endsWith("1")) {
-                "10000000-0000-0000-0000-000000000001"
-            } else {
-                "10000000-0000-0000-0000-000000000002"
-            }
-        val isHls = request.streamProtocol.equals("HLS", ignoreCase = true)
         val body =
             PlaybackGrantDto(
                 trackId = trackId,
-                sessionId = sessionId,
-                selectedQuality = request.preferredQuality,
-                streamUrl = if (isHls) {
-                    "$grantUrlScheme://music.example/api/v1/playback/streams/$sessionId/index.m3u8?ticket=ticket"
-                } else {
-                    "$grantUrlScheme://music.example/api/v1/playback/streams/$sessionId?ticket=ticket"
-                },
+                streamUrl = "$grantUrlScheme://music.example/api/v1/playback/streams/$trackId?ticket=ticket",
                 expiresAt = grantExpiresAt,
                 mimeType = "audio/mp4",
                 codec = "aac",
@@ -533,11 +309,7 @@ private class BlockingPlaybackApi(
                 bitrate = 256_000,
                 sampleRate = 48_000,
                 contentLength = 1_024,
-                checksumSha256 = null,
-                cacheKey = "track-$trackId",
-                streamProtocol = request.streamProtocol,
                 durationMs = 180_000,
-                startPositionMs = request.startPositionMs ?: 0,
             )
         return if (serverDate == null) {
             Response.success(body)
@@ -554,21 +326,4 @@ private class BlockingPlaybackApi(
         idempotencyKey: String,
         request: RecordPlaybackRequestDto,
     ): Response<ResponseBody> = error("Not used")
-}
-
-private class FakeAppSettingsRepository : AppSettingsRepository {
-    private val mutableSettings = MutableStateFlow(AppSettings())
-    override val settings: Flow<AppSettings> = mutableSettings
-
-    override suspend fun update(settings: AppSettings) {
-        mutableSettings.value = settings
-    }
-
-    override suspend fun mutate(transform: (AppSettings) -> AppSettings) {
-        mutableSettings.value = transform(mutableSettings.value)
-    }
-
-    override suspend fun reset() {
-        mutableSettings.value = AppSettings()
-    }
 }

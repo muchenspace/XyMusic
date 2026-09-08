@@ -38,7 +38,6 @@ export interface LibrarySource {
   fileCount: number;
   failedFileCount: number;
   trackCount: number;
-  cueFileCount: number;
   lastScanAt?: string | null;
   lastError?: string | null;
   latestRun?: SourceScan | null;

@@ -327,7 +327,7 @@ func presentSourceFiles(files []SourceFile) []SourceFileDTO {
 			LastError: userFacingOperationalError(file.LastError, nil), SizeBytes: file.SizeBytes,
 			ModifiedAt: formatTimestamp(file.ModifiedAt),
 			Track:      TrackSummaryDTO{ID: file.TrackID, Title: file.TrackTitle, Status: file.TrackStatus},
-			TrackCount: file.TrackCount, Cue: file.Cue,
+			TrackCount: file.TrackCount,
 		})
 	}
 	return items
@@ -467,7 +467,7 @@ func presentRoot(view RootView) RootDTO {
 		Status: root.Status, LastScanAt: formatOptionalTimestamp(root.LastScanAt),
 		LastError: userFacingOperationalError(root.LastError, nil),
 		FileCount: view.Counts.FileCount, FailedFileCount: view.Counts.FailedFileCount,
-		TrackCount: view.Counts.TrackCount, CueFileCount: view.Counts.CueFileCount,
+		TrackCount: view.Counts.TrackCount,
 		LatestRun: latest, Version: root.Version,
 		CreatedAt: formatTimestamp(root.CreatedAt), UpdatedAt: formatTimestamp(root.UpdatedAt),
 	}

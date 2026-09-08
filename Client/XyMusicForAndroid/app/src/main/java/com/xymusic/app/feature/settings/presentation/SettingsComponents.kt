@@ -49,7 +49,6 @@ import androidx.compose.ui.unit.dp
 import com.xymusic.app.R
 import com.xymusic.app.core.ui.component.MediaArtwork
 import com.xymusic.app.core.ui.component.XySlider
-import com.xymusic.app.domain.settings.StreamingQuality
 import com.xymusic.app.domain.settings.ThemePreference
 import com.xymusic.app.feature.settings.domain.model.UserProfile
 import kotlin.math.roundToInt
@@ -450,12 +449,4 @@ internal fun ThemePreference.labelRes(): Int = when (this) {
     ThemePreference.PEACH_PINK -> R.string.settings_theme_peach
     ThemePreference.OCEAN_BLUE -> R.string.settings_theme_ocean
     ThemePreference.TWILIGHT_PURPLE -> R.string.settings_theme_twilight
-}
-
-internal fun StreamingQuality.labelRes(): Int = when (this) {
-    StreamingQuality.AUTO -> R.string.settings_quality_auto
-    StreamingQuality.DATA_SAVER -> R.string.settings_quality_data_saver
-    StreamingQuality.STANDARD -> R.string.settings_quality_standard
-    StreamingQuality.HIGH -> R.string.settings_quality_high
-    StreamingQuality.LOSSLESS -> R.string.settings_quality_lossless
 }

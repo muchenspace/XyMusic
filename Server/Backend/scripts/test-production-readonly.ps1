@@ -11,10 +11,9 @@ Push-Location $ProjectRoot
 try {
 	$env:XYMUSIC_INTEGRATION_ENV = $ResolvedEnvironment
 	Remove-Item Env:XYMUSIC_ALLOW_WRITE_INTEGRATION -ErrorAction SilentlyContinue
-	$env:XYMUSIC_REQUIRE_FULL_API_PARITY = '1'
 
-	& (Join-Path $PSScriptRoot 'go.ps1') test '-v' ./tests/integration `
-		-run '^(TestProductionDependenciesAreCompatible|TestGinRoutesCoverEveryLegacyAPI)$' -count=1
+	& (Join-Path $PSScriptRoot 'go.ps1') test '-v' ./... `
+		-run '^TestProductionDependencies$' -count=1
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     & (Join-Path $PSScriptRoot 'go.ps1') test '-v' `

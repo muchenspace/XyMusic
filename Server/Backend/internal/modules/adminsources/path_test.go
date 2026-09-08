@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
-	"strings"
 	"testing"
 )
 
@@ -79,34 +77,5 @@ func TestLibraryGlobMatchesLegacyDoubleStarSemantics(t *testing.T) {
 				t.Errorf("%q should reject %q", item.pattern, value)
 			}
 		}
-	}
-}
-
-func TestResolveLibraryFileRejectsTraversalAndSymlinkEscape(t *testing.T) {
-	root := t.TempDir()
-	inside := filepath.Join(root, "inside.flac")
-	outside := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-outside.flac")
-	if err := os.WriteFile(inside, []byte("inside"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Remove(outside) })
-	if _, err := resolveFileWithinRoot(root, inside); err != nil {
-		t.Fatalf("inside path rejected: %v", err)
-	}
-	if _, err := resolveFileWithinRoot(root, outside); err == nil || !strings.Contains(err.Error(), "outside") {
-		t.Fatalf("outside path err=%v", err)
-	}
-	link := filepath.Join(root, "link.flac")
-	if err := os.Symlink(outside, link); err != nil {
-		if runtime.GOOS == "windows" {
-			t.Skip("Windows symlink creation is unavailable")
-		}
-		t.Fatal(err)
-	}
-	if _, err := resolveFileWithinRoot(root, link); err == nil || !strings.Contains(err.Error(), "outside") {
-		t.Fatalf("symlink escape err=%v", err)
 	}
 }

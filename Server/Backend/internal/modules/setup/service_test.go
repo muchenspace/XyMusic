@@ -362,8 +362,8 @@ func TestDatabaseProbeReportsExistingInstallation(t *testing.T) {
 	}
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
-		Databases:     &fakeDatabaseFactory{database: &fakeDatabase{inspection: inspection}},
-		MediaStorage:  &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
+		Databases:    &fakeDatabaseFactory{database: &fakeDatabase{inspection: inspection}},
+		MediaStorage: &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	input := validSetupInput()
@@ -381,8 +381,8 @@ func TestDatabaseProbeReportsExistingInstallation(t *testing.T) {
 func TestDatabaseProbeClassifiesMissingDatabase(t *testing.T) {
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
-		Databases:     &fakeDatabaseFactory{openErr: &pgconn.PgError{Code: "3D000"}},
-		MediaStorage:  &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
+		Databases:    &fakeDatabaseFactory{openErr: &pgconn.PgError{Code: "3D000"}},
+		MediaStorage: &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	input := validSetupInput()
@@ -405,8 +405,8 @@ func TestDatabaseProbeClassifiesMissingDatabase(t *testing.T) {
 func TestCompletePreservesSpecificDatabaseFailureAndSetupStage(t *testing.T) {
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
-		Databases:     &fakeDatabaseFactory{openErr: &pgconn.PgError{Code: "28P01"}},
-		MediaStorage:  &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
+		Databases:    &fakeDatabaseFactory{openErr: &pgconn.PgError{Code: "28P01"}},
+		MediaStorage: &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	_, err := service.Complete(context.Background(), validSetupInput())
@@ -463,8 +463,8 @@ func TestStorageProbeReportsExistingObjects(t *testing.T) {
 	inspection := StorageInspection{AssetDirectoryExists: true, HasAssets: true, AssetCount: 42, CountLimited: true}
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
-		Databases:     &fakeDatabaseFactory{database: &fakeDatabase{}},
-		MediaStorage:  &fakeStorageFactory{storage: &fakeStorage{inspection: inspection}}, MediaTool: &fakeMediaTool{},
+		Databases:    &fakeDatabaseFactory{database: &fakeDatabase{}},
+		MediaStorage: &fakeStorageFactory{storage: &fakeStorage{inspection: inspection}}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	result, err := service.TestStorage(context.Background(), validSetupInput().Storage)
@@ -484,8 +484,8 @@ func TestCompleteRequiresExistingDataDecisionWhenAdministratorExists(t *testing.
 	}}
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
-		Databases:     &fakeDatabaseFactory{database: db},
-		MediaStorage:  &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
+		Databases:    &fakeDatabaseFactory{database: db},
+		MediaStorage: &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	_, err := service.Complete(context.Background(), validSetupInput())
@@ -506,8 +506,8 @@ func TestCompleteRejectsDatabaseReuseAndRequiresReset(t *testing.T) {
 	}}
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
-		Databases:     &fakeDatabaseFactory{database: db},
-		MediaStorage:  &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
+		Databases:    &fakeDatabaseFactory{database: db},
+		MediaStorage: &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	input := validSetupInput()
@@ -527,8 +527,6 @@ func TestCompleteRejectsDatabaseReuseAndRequiresReset(t *testing.T) {
 	}
 }
 
-
-
 func TestDatabaseResetDoesNotClearObjectStorage(t *testing.T) {
 	db := &fakeDatabase{inspection: InstallationInspection{
 		State:   DatabaseStateComplete,
@@ -537,8 +535,8 @@ func TestDatabaseResetDoesNotClearObjectStorage(t *testing.T) {
 	objects := &fakeStorage{}
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
-		Databases:     &fakeDatabaseFactory{database: db},
-		MediaStorage:  &fakeStorageFactory{storage: objects}, MediaTool: &fakeMediaTool{},
+		Databases:    &fakeDatabaseFactory{database: db},
+		MediaStorage: &fakeStorageFactory{storage: objects}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	input := validSetupInput()
@@ -558,8 +556,8 @@ func TestCompleteRequiresIndependentStorageDecision(t *testing.T) {
 	}}
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
-		Databases:     &fakeDatabaseFactory{database: db},
-		MediaStorage:  &fakeStorageFactory{storage: objects}, MediaTool: &fakeMediaTool{},
+		Databases:    &fakeDatabaseFactory{database: db},
+		MediaStorage: &fakeStorageFactory{storage: objects}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	_, err := service.Complete(context.Background(), validSetupInput())
@@ -579,8 +577,8 @@ func TestStorageResetDoesNotClearDatabase(t *testing.T) {
 	}}
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
-		Databases:     &fakeDatabaseFactory{database: db},
-		MediaStorage:  &fakeStorageFactory{storage: objects}, MediaTool: &fakeMediaTool{},
+		Databases:    &fakeDatabaseFactory{database: db},
+		MediaStorage: &fakeStorageFactory{storage: objects}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	input := validSetupInput()
@@ -593,58 +591,20 @@ func TestStorageResetDoesNotClearDatabase(t *testing.T) {
 	}
 }
 
-func TestCompleteRejectsStorageReuseAndRequiresResetWhenTranscodeOrAssetsExist(t *testing.T) {
-	db := &fakeDatabase{}
-	objects := &fakeStorage{inspection: StorageInspection{
-		TranscodeDirectoryExists: true, HasTranscode: true, TranscodeCount: 2,
-	}}
-	service := mustService(t, Options{
-		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
-		Databases:     &fakeDatabaseFactory{database: db},
-		MediaStorage:  &fakeStorageFactory{storage: objects}, MediaTool: &fakeMediaTool{},
-		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
-	})
-	// 1. Without storage action
-	_, err := service.Complete(context.Background(), validSetupInput())
-	applicationError, ok := err.(*apperror.Error)
-	if !ok || applicationError.Code != apperror.CodeSetupDecisionRequired || applicationError.Metadata["decisionResource"] != "storage" {
-		t.Fatalf("nonempty transcode storage did not require an independent decision: %#v", err)
-	}
-
-	// 2. Reject "reuse"
-	input := validSetupInput()
-	input.StorageAction = "reuse"
-	_, err = service.Complete(context.Background(), input)
-	if err == nil {
-		t.Fatal("expected validation error when storageAction is reuse")
-	}
-
-	// 3. Accept "reset"
-	input.StorageAction = storageActionReset
-	if _, err := service.Complete(context.Background(), input); err != nil {
-		t.Fatalf("storage reset failed: %v", err)
-	}
-	if !slices.Contains(objects.calls, "clear") {
-		t.Fatalf("storage reset did not call clear: %#v", objects.calls)
-	}
-}
-
-
 func TestStorageConfigurationResolvesDirectories(t *testing.T) {
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
-		Databases:     &fakeDatabaseFactory{database: &fakeDatabase{}},
-		MediaStorage:  &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
+		Databases:    &fakeDatabaseFactory{database: &fakeDatabase{}},
+		MediaStorage: &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	input := validSetupInput().Storage
 	input.AssetDirectory = "my-assets"
-	input.TranscodeDirectory = "my-transcode"
 	cfg, err := service.storageConfig(input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(cfg.AssetDirectory, "my-assets") || !strings.HasSuffix(cfg.TranscodeDirectory, "my-transcode") {
+	if !strings.HasSuffix(cfg.AssetDirectory, "my-assets") {
 		t.Fatalf("unexpected resolved storage config: %#v", cfg)
 	}
 }
@@ -652,8 +612,8 @@ func TestStorageConfigurationResolvesDirectories(t *testing.T) {
 func TestMediaPathsUseSystemPathWheneverSelectedValuesAreBlank(t *testing.T) {
 	service := mustService(t, Options{
 		RootDirectory: prepareSetupRoot(t), Runtime: newFakeRuntime(), Store: &fakeStore{},
-		Databases:     &fakeDatabaseFactory{database: &fakeDatabase{}},
-		MediaStorage:  &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
+		Databases:    &fakeDatabaseFactory{database: &fakeDatabase{}},
+		MediaStorage: &fakeStorageFactory{storage: &fakeStorage{}}, MediaTool: &fakeMediaTool{},
 		ListenerProbe: &fakeListener{}, Passwords: fakePasswords{}, SecretGenerator: fixedSecret,
 	})
 	empty := ""
@@ -716,8 +676,7 @@ func validSetupInput() SetupInput {
 			Password: "database-password", SSLMode: "disable", MaxConnections: 10,
 		},
 		Storage: StorageInput{
-			AssetDirectory:     "assets",
-			TranscodeDirectory: "transcode",
+			AssetDirectory: "assets",
 		},
 		Media: MediaInput{FFmpegPath: &ffmpeg, FFprobePath: &ffprobe},
 		Source: SourceInput{

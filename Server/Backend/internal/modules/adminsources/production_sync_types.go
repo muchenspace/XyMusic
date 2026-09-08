@@ -43,7 +43,6 @@ type standardFileMutation struct {
 	Checksum            string
 	Existing            localSourceRecord
 	ExistingFound       bool
-	PreserveCueMappings bool
 	Lyrics              []scannedLyric
 	Artwork             *stagedArtwork
 	CatalogCache        *scanCatalogCache

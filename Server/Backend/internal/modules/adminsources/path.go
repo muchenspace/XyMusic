@@ -195,37 +195,3 @@ func normalizeRootPath(path string) string {
 	}
 	return portable
 }
-
-func resolveFileWithinRoot(rootPath, candidatePath string) (string, error) {
-	root, err := filepath.Abs(rootPath)
-	if err != nil {
-		return "", err
-	}
-	candidate, err := filepath.Abs(candidatePath)
-	if err != nil {
-		return "", err
-	}
-	if !pathWithinRoot(root, candidate) {
-		return "", errors.New("CUE referenced audio outside the configured library root")
-	}
-	realRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return "", err
-	}
-	realCandidate, err := filepath.EvalSymlinks(candidate)
-	if err != nil {
-		return "", err
-	}
-	if !pathWithinRoot(realRoot, realCandidate) {
-		return "", errors.New("CUE referenced audio outside the configured library root")
-	}
-	return candidate, nil
-}
-
-func pathWithinRoot(root, candidate string) bool {
-	relative, err := filepath.Rel(root, candidate)
-	if err != nil || relative == "." || relative == ".." || filepath.IsAbs(relative) {
-		return false
-	}
-	return !strings.HasPrefix(relative, ".."+string(filepath.Separator))
-}

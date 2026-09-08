@@ -101,15 +101,13 @@ func (repository *Repository) FindMetadata(ctx context.Context, trackID string) 
 				WHERE active_scan.root_id = root.id
 				  AND active_scan.status = 'RUNNING' AND active_scan.locked_until > now()
 			),
-			track.status::text, coalesce(mapping_stats.mapping_count, 0),
-			coalesce(mapping_stats.cue, false)
+			track.status::text, coalesce(mapping_stats.mapping_count, 0)
 		from track_metadata metadata
 		left join local_music_sources source on source.id = metadata.source_id
 		left join library_roots root on root.id = source.root_id
 		left join tracks track on track.id = metadata.track_id
 		left join lateral (
-			select count(*)::int as mapping_count,
-				coalesce(bool_or(mapping.cue_path is not null), false) as cue
+			select count(*)::int as mapping_count
 			from local_music_source_tracks mapping where mapping.source_id = source.id
 		) mapping_stats on true
 		where metadata.track_id = $1`, trackID), true)
@@ -310,10 +308,9 @@ func (repository *Repository) EnqueueWriteback(
 		)
 	}
 	var mappingCount int
-	var cue bool
 	if err := tx.QueryRow(ctx, `
-		select count(*)::int, coalesce(bool_or(cue_path is not null), false)
-		from local_music_source_tracks where source_id = $1`, source.ID).Scan(&mappingCount, &cue); err != nil {
+		select count(*)::int
+		from local_music_source_tracks where source_id = $1`, source.ID).Scan(&mappingCount); err != nil {
 		return WritebackJob{}, fmt.Errorf("inspect metadata source mappings: %w", err)
 	}
 	if metadata.Version != input.ExpectedVersion {
@@ -322,7 +319,7 @@ func (repository *Repository) EnqueueWriteback(
 	if err := tagwriteback.Evaluate(tagwriteback.SourceContext{
 		HasSource: true, TrackStatus: trackStatus, RootMode: rootMode,
 		RootEnabled: rootEnabled, ScanActive: scanActive, SourceStatus: source.Status,
-		SourcePath: source.SourcePath, MappingCount: mappingCount, Cue: cue,
+		SourcePath: source.SourcePath, MappingCount: mappingCount,
 	}).Error(trackID); err != nil {
 		return WritebackJob{}, err
 	}
@@ -601,16 +598,15 @@ func (repository *Repository) RetryWriteback(
 		)
 	}
 	var mappingCount int
-	var cue bool
 	if err := tx.QueryRow(ctx, `
-		select count(*)::int, coalesce(bool_or(cue_path is not null), false)
-		from local_music_source_tracks where source_id = $1`, source.ID).Scan(&mappingCount, &cue); err != nil {
+		select count(*)::int
+		from local_music_source_tracks where source_id = $1`, source.ID).Scan(&mappingCount); err != nil {
 		return WritebackJob{}, fmt.Errorf("inspect retried metadata source mappings: %w", err)
 	}
 	if err := tagwriteback.Evaluate(tagwriteback.SourceContext{
 		HasSource: true, TrackStatus: trackStatus, RootMode: rootMode,
 		RootEnabled: rootEnabled, ScanActive: scanActive, SourceStatus: source.Status,
-		SourcePath: source.SourcePath, MappingCount: mappingCount, Cue: cue,
+		SourcePath: source.SourcePath, MappingCount: mappingCount,
 	}).Error(job.TrackID); err != nil {
 		return WritebackJob{}, err
 	}
@@ -1215,12 +1211,11 @@ func scanMetadata(row scanRow, withSource bool) (MetadataRecord, error) {
 	var rootEnabled *bool
 	var scanActive bool
 	var mappingCount int
-	var cue bool
 	if withSource {
 		destinations = append(destinations,
 			&sourceID, &rootID, &sourcePath, &sourceStatus, &checksum,
 			&rootPath, &rootMode, &rootEnabled, &scanActive, &trackStatus,
-			&mappingCount, &cue,
+			&mappingCount,
 		)
 	}
 	if err := row.Scan(destinations...); err != nil {
@@ -1231,7 +1226,7 @@ func scanMetadata(row scanRow, withSource bool) (MetadataRecord, error) {
 			ID: *sourceID, RootID: rootID, SourcePath: *sourcePath, Status: *sourceStatus,
 			ChecksumSHA256: *checksum, RootPath: rootPath, RootMode: rootMode,
 			RootEnabled: rootEnabled, ScanActive: scanActive, TrackStatus: trackStatus,
-			MappingCount: mappingCount, Cue: cue,
+			MappingCount: mappingCount,
 		}
 	}
 	return record, nil

@@ -357,8 +357,6 @@ class XyMusicDatabaseTest {
             itemId = id,
             position = position,
             trackId = trackId,
-            variantId = "variant-$trackId",
-            stableCacheKey = "cache-$trackId-v1",
             resumePositionMs = 0,
             isCurrent = isCurrent,
             enqueuedAtEpochMs = 1_000,

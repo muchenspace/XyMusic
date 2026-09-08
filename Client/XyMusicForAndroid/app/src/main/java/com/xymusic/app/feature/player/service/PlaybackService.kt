@@ -22,7 +22,6 @@ import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.domain.server.ServerConfigRepository
 import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaSourceFactory
 import com.xymusic.app.feature.player.adapter.media3.PlaybackSessionCommands
-import com.xymusic.app.feature.player.domain.AutomaticPlaybackQualityPolicy
 import com.xymusic.app.feature.player.domain.PlaybackEventSink
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
 import com.xymusic.app.feature.player.domain.PlaybackModeStore
@@ -66,9 +65,6 @@ class PlaybackService : MediaSessionService() {
     @Inject
     lateinit var clock: Clock
 
-    @Inject
-    lateinit var automaticQualityController: AutomaticPlaybackQualityPolicy
-
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val initialSessionReady = CompletableDeferred<Unit>()
 
@@ -77,9 +73,7 @@ class PlaybackService : MediaSessionService() {
     private lateinit var mediaReloadCoordinator: PlaybackMediaReloadCoordinator
     private lateinit var persistenceController: PlaybackPersistenceController
     private lateinit var sleepTimerController: PlaybackSleepTimerController
-    private lateinit var codecFallbackController: PlaybackCodecFallbackController
     private lateinit var grantRecoveryController: PlaybackGrantRecoveryController
-    private lateinit var automaticQualityPlaybackController: AutomaticQualityPlaybackController
     private lateinit var artworkBitmapLoader: PlaybackArtworkBitmapLoader
 
     override fun onCreate() {
@@ -127,18 +121,6 @@ class PlaybackService : MediaSessionService() {
                     mediaReloadCoordinator = mediaReloadCoordinator,
                 ),
             )
-        codecFallbackController =
-            PlaybackCodecFallbackController(
-                player = player,
-                grantRepository = grantRepository,
-                onFallbackApplied = {
-                    mediaSession.broadcastCustomCommand(
-                        PlaybackSessionCommands.CODEC_FALLBACK_APPLIED,
-                        Bundle.EMPTY,
-                    )
-                },
-            )
-        player.addListener(codecFallbackController)
         grantRecoveryController =
             PlaybackGrantRecoveryController(
                 player = player,
@@ -146,14 +128,6 @@ class PlaybackService : MediaSessionService() {
                 mediaReloadCoordinator = mediaReloadCoordinator,
             )
         player.addListener(grantRecoveryController)
-        automaticQualityPlaybackController =
-            AutomaticQualityPlaybackController(
-                player = player,
-                grantRepository = grantRepository,
-                qualityController = automaticQualityController,
-                mediaReloadCoordinator = mediaReloadCoordinator,
-            )
-        player.addListener(automaticQualityPlaybackController)
 
         ensureNotificationChannel()
         setMediaNotificationProvider(
@@ -207,12 +181,6 @@ class PlaybackService : MediaSessionService() {
         if (::mediaReloadCoordinator.isInitialized && ::player.isInitialized) {
             player.removeListener(mediaReloadCoordinator)
         }
-        if (::codecFallbackController.isInitialized && ::player.isInitialized) {
-            player.removeListener(codecFallbackController)
-        }
-        if (::automaticQualityPlaybackController.isInitialized && ::player.isInitialized) {
-            player.removeListener(automaticQualityPlaybackController)
-        }
         if (::mediaSession.isInitialized) mediaSession.release()
         if (::player.isInitialized) player.release()
         super.onDestroy()
@@ -256,16 +224,12 @@ class PlaybackService : MediaSessionService() {
         when (state) {
             AppSessionState.Loading -> Unit
             AppSessionState.SignedOut -> {
-                codecFallbackController.resetForAccountChange()
                 grantRecoveryController.resetForAccountChange()
-                automaticQualityPlaybackController.resetForAccountChange()
                 persistenceController.clearForAccountChange(null)
             }
             is AppSessionState.SignedIn -> {
                 if (persistenceController.isActiveUser(state.userId)) return
-                codecFallbackController.resetForAccountChange()
                 grantRecoveryController.resetForAccountChange()
-                automaticQualityPlaybackController.resetForAccountChange()
                 persistenceController.clearForAccountChange(state.userId)
                 persistenceController.restoreQueue()
             }

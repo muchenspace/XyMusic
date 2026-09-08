@@ -986,7 +986,7 @@
       },
       {
         "tableName": "playback_queue",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`owner_user_id` TEXT NOT NULL, `item_id` TEXT NOT NULL, `position` INTEGER NOT NULL, `track_id` TEXT NOT NULL, `variant_id` TEXT, `stable_cache_key` TEXT, `resume_position_ms` INTEGER NOT NULL, `is_current` INTEGER NOT NULL, `enqueued_at_epoch_ms` INTEGER NOT NULL, `title` TEXT NOT NULL DEFAULT '', `artist_names_json` TEXT NOT NULL DEFAULT '[]', `album_title` TEXT, `artwork_url` TEXT, `artwork_cache_key` TEXT, `duration_ms` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`owner_user_id`, `item_id`), FOREIGN KEY(`track_id`) REFERENCES `tracks`(`id`) ON UPDATE CASCADE ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`owner_user_id` TEXT NOT NULL, `item_id` TEXT NOT NULL, `position` INTEGER NOT NULL, `track_id` TEXT NOT NULL, `resume_position_ms` INTEGER NOT NULL, `is_current` INTEGER NOT NULL, `enqueued_at_epoch_ms` INTEGER NOT NULL, `title` TEXT NOT NULL DEFAULT '', `artist_names_json` TEXT NOT NULL DEFAULT '[]', `album_title` TEXT, `artwork_url` TEXT, `artwork_cache_key` TEXT, `duration_ms` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`owner_user_id`, `item_id`), FOREIGN KEY(`track_id`) REFERENCES `tracks`(`id`) ON UPDATE CASCADE ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "ownerUserId",
@@ -1011,16 +1011,6 @@
             "columnName": "track_id",
             "affinity": "TEXT",
             "notNull": true
-          },
-          {
-            "fieldPath": "variantId",
-            "columnName": "variant_id",
-            "affinity": "TEXT"
-          },
-          {
-            "fieldPath": "stableCacheKey",
-            "columnName": "stable_cache_key",
-            "affinity": "TEXT"
           },
           {
             "fieldPath": "resumePositionMs",

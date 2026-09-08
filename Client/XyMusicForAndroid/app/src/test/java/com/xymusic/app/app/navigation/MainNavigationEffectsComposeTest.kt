@@ -43,7 +43,7 @@ class MainNavigationEffectsComposeTest {
         composeRule.runOnIdle {
             assertThat(
                 effects.tryEmit(
-                    PlayerUiEffect.ShowMessage(R.string.player_codec_fallback_applied),
+                    PlayerUiEffect.ShowMessage(R.string.player_command_failed),
                 ),
             ).isTrue()
         }
@@ -52,7 +52,7 @@ class MainNavigationEffectsComposeTest {
             .onNodeWithText(
                 RuntimeEnvironment
                     .getApplication()
-                    .getString(R.string.player_codec_fallback_applied),
+                    .getString(R.string.player_command_failed),
             ).assertIsDisplayed()
     }
 }

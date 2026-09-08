@@ -9,8 +9,7 @@ import (
 
 // querySourceTrackIDs returns every catalog track touched by the supplied
 // source rows. The source table keeps a primary track for ordinary files while
-// local_music_source_tracks also contains all CUE segments, so both columns
-// must be considered.
+// Both the source-level and mapping-level track references must be considered.
 func querySourceTrackIDs(ctx context.Context, transaction pgx.Tx, sourceIDs []string) ([]string, error) {
 	if len(sourceIDs) == 0 {
 		return nil, nil

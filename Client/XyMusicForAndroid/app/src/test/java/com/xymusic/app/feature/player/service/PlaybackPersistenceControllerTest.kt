@@ -38,8 +38,7 @@ class PlaybackPersistenceControllerTest {
         val firstController = controller(firstPlayer, store)
         firstController.clearForAccountChange(USER_ID)
         firstController.restoreQueue()
-        firstPlayer.setSourceOffset(10_000)
-        firstPlayer.currentPositionMs = 2_750
+        firstPlayer.currentPositionMs = 12_750
         var flushed = false
 
         firstController.flushForTaskRemoval(stopAfterFlush = true) {
@@ -66,7 +65,7 @@ class PlaybackPersistenceControllerTest {
     }
 
     @Test
-    fun checkpointsUseGlobalPositionForAResolvedOffsetMediaItem() = runTest {
+    fun checkpointsUseGlobalPosition() = runTest {
         val store = InMemoryPlaybackQueueStore(initialItems = storedQueue(resumePositionMs = 0))
         val player = RecordingPlayer()
         val checkpoints = mutableListOf<com.xymusic.app.feature.player.domain.PlaybackCheckpoint>()
@@ -77,8 +76,7 @@ class PlaybackPersistenceControllerTest {
         )
         controller.clearForAccountChange(USER_ID)
         controller.restoreQueue()
-        player.setSourceOffset(10_000)
-        player.currentPositionMs = 2_000
+        player.currentPositionMs = 12_000
         player.isPlaying = true
         player.listeners.forEach { it.onIsPlayingChanged(true) }
         player.isPlaying = false
@@ -275,21 +273,6 @@ class PlaybackPersistenceControllerTest {
                     else -> defaultValue(method.returnType)
                 }
             } as Player
-
-        fun setSourceOffset(offsetMs: Long) {
-            val index = currentMediaItemIndex
-            val item = mediaItems[index]
-            val extras = Bundle(item.mediaMetadata.extras ?: Bundle()).apply {
-                putLong(PlaybackMediaMetadata.EXTRA_SOURCE_OFFSET_MS, offsetMs)
-            }
-            durationMs = (30_000L - offsetMs).coerceAtLeast(0)
-            mediaItems[index] = item
-                .buildUpon()
-                .setMediaMetadata(
-                    item.mediaMetadata.buildUpon().setExtras(extras).build(),
-                )
-                .build()
-        }
     }
 
     private companion object {
@@ -312,8 +295,6 @@ class PlaybackPersistenceControllerTest {
             queueItemId = queueItemId,
             position = position,
             trackId = trackId,
-            variantId = null,
-            stableCacheKey = null,
             resumePositionMs = resumePositionMs,
             isCurrent = isCurrent,
             enqueuedAtEpochMillis = 1_000L + position,

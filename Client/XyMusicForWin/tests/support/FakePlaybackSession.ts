@@ -4,7 +4,7 @@ import type {
   PlaybackTerminalEvent,
   QueueStart,
 } from "../../src/application/ports/PlaybackSession";
-import type { PlaybackQuality, Track } from "../../src/domain/music";
+import type { Track } from "../../src/domain/music";
 import type { PlayMode } from "../../src/domain/playbackState";
 import { splitPlayMode } from "../../src/domain/playbackState";
 
@@ -43,7 +43,6 @@ export class FakePlaybackSession implements PlaybackSession {
       volume: 72,
       shuffled: false,
       repeatMode: "off",
-      quality: "AUTO",
       crossfadeSeconds: 0,
       notificationsEnabled: false,
       miniMode: false,
@@ -169,7 +168,6 @@ export class FakePlaybackSession implements PlaybackSession {
     this.update({ volume: normalized });
   }
 
-  setQuality(value: PlaybackQuality): void { this.update({ quality: value }); }
   setCrossfadeSeconds(value: number): void { this.update({ crossfadeSeconds: value }); }
   setNotificationsEnabled(value: boolean): void { this.update({ notificationsEnabled: value }); }
   dispose(): void { this.listeners.clear(); }

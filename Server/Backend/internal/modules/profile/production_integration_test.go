@@ -50,7 +50,7 @@ func TestProfileProductionAvatarLifecycle(t *testing.T) {
 	}
 	defer pool.Close()
 
-	localMedia, err := localmedia.NewStore(cfg.Paths.MediaAssetDirectory, cfg.Paths.MediaTranscodeDirectory, cfg.MediaStorage.MaxUploadBytes)
+	localMedia, err := localmedia.NewStore(cfg.Paths.MediaAssetDirectory, cfg.MediaStorage.MaxUploadBytes)
 	if err != nil {
 		t.Fatal(err)
 	}

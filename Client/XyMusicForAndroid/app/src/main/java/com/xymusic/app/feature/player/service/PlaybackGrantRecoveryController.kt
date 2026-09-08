@@ -7,6 +7,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
 import com.xymusic.app.feature.player.adapter.media3.globalPlaybackPositionMs
+import com.xymusic.app.feature.player.adapter.media3.playbackTrackId
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
 
 /**
@@ -107,7 +108,7 @@ internal class PlaybackGrantRecoveryController(
 internal fun isExpiredPlaybackGrantError(error: PlaybackException): Boolean {
     // Only explicit authorization/resolution responses signal an expired (or
     // invalidated) grant. A generic HTTP status failure must NOT be treated as
-    // expiry: a 5xx from a server transcode failure would then force a grant
+    // expiry: a 5xx from a server failure would then force a grant
     // reload loop instead of surfacing the real playback error.
     return generateSequence<Throwable>(error) { it.cause }
         .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()

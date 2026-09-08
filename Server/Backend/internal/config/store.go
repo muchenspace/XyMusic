@@ -124,13 +124,12 @@ func (s *Store) Save(cfg Config) error {
 	values := ToEnvironment(cfg)
 	keys := []string{
 		"NODE_ENV", "MIGRATIONS_DIRECTORY", "ADMIN_WEB_DIRECTORY", "MEDIA_TOOLS_DIRECTORY",
-		"MEDIA_TOOLS_MODE", "LOCAL_MUSIC_DIRECTORY", "MEDIA_ASSET_DIRECTORY", "MEDIA_TRANSCODE_DIRECTORY",
+		"MEDIA_TOOLS_MODE", "LOCAL_MUSIC_DIRECTORY", "MEDIA_ASSET_DIRECTORY",
 		"HTTP_HOST", "HTTP_PORT", "HTTP_IPV4_HOST", "HTTP_IPV4_PORT", "HTTP_IPV6_HOST", "HTTP_IPV6_PORT",
 		"HTTP_TRUSTED_PROXY_ADDRESSES", "DATABASE_URL", "DATABASE_MAX_CONNECTIONS",
 		"ACCESS_TOKEN_SECRET", "IDEMPOTENCY_ENCRYPTION_SECRET", "CURSOR_SIGNING_SECRET", "PLAYBACK_TICKET_SECRET",
 		"ACCESS_TOKEN_TTL_SECONDS", "REFRESH_TOKEN_TTL_SECONDS",
-		"MEDIA_UPLOAD_TTL_SECONDS", "MEDIA_STREAM_TTL_SECONDS", "MEDIA_STREAM_MAX_CONCURRENT",
-		"MEDIA_STREAM_IDLE_TIMEOUT_SECONDS", "MEDIA_TRANSCODE_TIMEOUT_SECONDS", "MEDIA_TRANSCODE_CACHE_MAX_BYTES", "MEDIA_MAX_UPLOAD_BYTES",
+		"MEDIA_UPLOAD_TTL_SECONDS", "MEDIA_STREAM_TTL_SECONDS", "MEDIA_MAX_UPLOAD_BYTES",
 		"FFMPEG_PATH", "FFPROBE_PATH", "MEDIA_FFMPEG_THREADS",
 		"LOCAL_MUSIC_SOURCE_NAME", "LOCAL_MUSIC_SOURCE_MODE", "LOCAL_MUSIC_SOURCE_ENABLED",
 		"LOCAL_MUSIC_SYNC_ON_STARTUP", "LOCAL_MUSIC_SCAN_INTERVAL_MINUTES",
@@ -214,22 +213,6 @@ func ToEnvironment(cfg Config) map[string]string {
 	if streamTTL <= 0 {
 		streamTTL = 900
 	}
-	streamMaxConcurrent := cfg.MediaStorage.StreamMaxConcurrent
-	if streamMaxConcurrent <= 0 {
-		streamMaxConcurrent = 8
-	}
-	streamIdleTimeout := cfg.MediaStorage.StreamIdleTimeoutSeconds
-	if streamIdleTimeout <= 0 {
-		streamIdleTimeout = 60
-	}
-	transcodeTimeout := cfg.MediaStorage.TranscodeTimeoutSeconds
-	if transcodeTimeout <= 0 {
-		transcodeTimeout = 120
-	}
-	transcodeCacheMaxBytes := cfg.MediaStorage.TranscodeCacheMaxBytes
-	if transcodeCacheMaxBytes <= 0 {
-		transcodeCacheMaxBytes = DefaultMediaTranscodeCacheMaxBytes
-	}
 	include, _ := jsonStringArray(cfg.LocalLibrary.IncludePatterns)
 	exclude, _ := jsonStringArray(cfg.LocalLibrary.ExcludePatterns)
 	return map[string]string{
@@ -240,7 +223,6 @@ func ToEnvironment(cfg Config) map[string]string {
 		"MEDIA_TOOLS_MODE":                   cfg.Media.Mode,
 		"LOCAL_MUSIC_DIRECTORY":              cfg.Paths.LocalMusicDirectory,
 		"MEDIA_ASSET_DIRECTORY":              cfg.Paths.MediaAssetDirectory,
-		"MEDIA_TRANSCODE_DIRECTORY":          cfg.Paths.MediaTranscodeDirectory,
 		"HTTP_HOST":                          cfg.HTTP.IPv4Host,
 		"HTTP_PORT":                          strconv.Itoa(cfg.HTTP.IPv4Port),
 		"HTTP_IPV4_HOST":                     cfg.HTTP.IPv4Host,
@@ -258,10 +240,6 @@ func ToEnvironment(cfg Config) map[string]string {
 		"REFRESH_TOKEN_TTL_SECONDS":          strconv.Itoa(cfg.Security.RefreshTokenTTLSeconds),
 		"MEDIA_UPLOAD_TTL_SECONDS":           strconv.Itoa(uploadTTL),
 		"MEDIA_STREAM_TTL_SECONDS":           strconv.Itoa(streamTTL),
-		"MEDIA_STREAM_MAX_CONCURRENT":        strconv.Itoa(streamMaxConcurrent),
-		"MEDIA_STREAM_IDLE_TIMEOUT_SECONDS":  strconv.Itoa(streamIdleTimeout),
-		"MEDIA_TRANSCODE_TIMEOUT_SECONDS":    strconv.Itoa(transcodeTimeout),
-		"MEDIA_TRANSCODE_CACHE_MAX_BYTES":    strconv.FormatInt(transcodeCacheMaxBytes, 10),
 		"MEDIA_MAX_UPLOAD_BYTES":             strconv.FormatInt(cfg.MediaStorage.MaxUploadBytes, 10),
 		"FFMPEG_PATH":                        cfg.Media.FFmpegPath,
 		"FFPROBE_PATH":                       cfg.Media.FFprobePath,

@@ -18,15 +18,11 @@ const (
 	MaxServerRequestBodyBytes     int64 = 1024 * 1024 * 1024
 	MaxStructuredRequestBodyBytes int64 = 2 * 1024 * 1024
 
-	DefaultMigrationsDirectory               = "migrations"
-	DefaultAdminWebDirectory                 = "admin"
-	DefaultMediaToolsDirectory               = "tools"
-	DefaultLocalMusicDirectory               = "music"
-	DefaultMediaAssetDirectory               = "assets"
-	DefaultMediaTranscodeDirectory           = "transcode"
-	DefaultMediaTranscodeCacheMaxBytes int64 = 10 * 1024 * 1024 * 1024
-	MinMediaTranscodeCacheMaxBytes     int64 = 128 * 1024 * 1024
-	MaxMediaTranscodeCacheMaxBytes     int64 = 1024 * 1024 * 1024 * 1024
+	DefaultMigrationsDirectory = "migrations"
+	DefaultAdminWebDirectory   = "admin"
+	DefaultMediaToolsDirectory = "tools"
+	DefaultLocalMusicDirectory = "music"
+	DefaultMediaAssetDirectory = "assets"
 )
 
 type Environment string
@@ -51,12 +47,11 @@ type Config struct {
 }
 
 type Paths struct {
-	MigrationsDirectory     string
-	AdminWebDirectory       string
-	MediaToolsDirectory     string
-	LocalMusicDirectory     string
-	MediaAssetDirectory     string
-	MediaTranscodeDirectory string
+	MigrationsDirectory string
+	AdminWebDirectory   string
+	MediaToolsDirectory string
+	LocalMusicDirectory string
+	MediaAssetDirectory string
 }
 
 type HTTP struct {
@@ -84,15 +79,10 @@ type Security struct {
 }
 
 type MediaStorage struct {
-	AssetDirectory           string
-	TranscodeDirectory       string
-	UploadTTLSeconds         int
-	StreamTTLSeconds         int
-	StreamMaxConcurrent      int
-	StreamIdleTimeoutSeconds int
-	TranscodeTimeoutSeconds  int
-	TranscodeCacheMaxBytes   int64
-	MaxUploadBytes           int64
+	AssetDirectory   string
+	UploadTTLSeconds int
+	StreamTTLSeconds int
+	MaxUploadBytes   int64
 }
 
 type Media struct {
@@ -138,20 +128,18 @@ func Parse(env map[string]string) (Config, error) {
 	production := environment == Production
 
 	paths := Paths{
-		MigrationsDirectory:     value(env, "MIGRATIONS_DIRECTORY", DefaultMigrationsDirectory),
-		AdminWebDirectory:       value(env, "ADMIN_WEB_DIRECTORY", DefaultAdminWebDirectory),
-		MediaToolsDirectory:     value(env, "MEDIA_TOOLS_DIRECTORY", DefaultMediaToolsDirectory),
-		LocalMusicDirectory:     value(env, "LOCAL_MUSIC_DIRECTORY", DefaultLocalMusicDirectory),
-		MediaAssetDirectory:     value(env, "MEDIA_ASSET_DIRECTORY", DefaultMediaAssetDirectory),
-		MediaTranscodeDirectory: value(env, "MEDIA_TRANSCODE_DIRECTORY", DefaultMediaTranscodeDirectory),
+		MigrationsDirectory: value(env, "MIGRATIONS_DIRECTORY", DefaultMigrationsDirectory),
+		AdminWebDirectory:   value(env, "ADMIN_WEB_DIRECTORY", DefaultAdminWebDirectory),
+		MediaToolsDirectory: value(env, "MEDIA_TOOLS_DIRECTORY", DefaultMediaToolsDirectory),
+		LocalMusicDirectory: value(env, "LOCAL_MUSIC_DIRECTORY", DefaultLocalMusicDirectory),
+		MediaAssetDirectory: value(env, "MEDIA_ASSET_DIRECTORY", DefaultMediaAssetDirectory),
 	}
 	for name, candidate := range map[string]string{
-		"MIGRATIONS_DIRECTORY":      paths.MigrationsDirectory,
-		"ADMIN_WEB_DIRECTORY":       paths.AdminWebDirectory,
-		"MEDIA_TOOLS_DIRECTORY":     paths.MediaToolsDirectory,
-		"LOCAL_MUSIC_DIRECTORY":     paths.LocalMusicDirectory,
-		"MEDIA_ASSET_DIRECTORY":     paths.MediaAssetDirectory,
-		"MEDIA_TRANSCODE_DIRECTORY": paths.MediaTranscodeDirectory,
+		"MIGRATIONS_DIRECTORY":  paths.MigrationsDirectory,
+		"ADMIN_WEB_DIRECTORY":   paths.AdminWebDirectory,
+		"MEDIA_TOOLS_DIRECTORY": paths.MediaToolsDirectory,
+		"LOCAL_MUSIC_DIRECTORY": paths.LocalMusicDirectory,
+		"MEDIA_ASSET_DIRECTORY": paths.MediaAssetDirectory,
 	} {
 		if err := validatePath(candidate, name); err != nil {
 			return Config{}, err
@@ -190,22 +178,6 @@ func Parse(env map[string]string) (Config, error) {
 		return Config{}, err
 	}
 	streamTTL, err := integer(env, "MEDIA_STREAM_TTL_SECONDS", 900, 30, 86400)
-	if err != nil {
-		return Config{}, err
-	}
-	streamMaxConcurrent, err := integer(env, "MEDIA_STREAM_MAX_CONCURRENT", 8, 1, 128)
-	if err != nil {
-		return Config{}, err
-	}
-	streamIdleTimeout, err := integer(env, "MEDIA_STREAM_IDLE_TIMEOUT_SECONDS", 300, 5, 3600)
-	if err != nil {
-		return Config{}, err
-	}
-	transcodeTimeout, err := integer(env, "MEDIA_TRANSCODE_TIMEOUT_SECONDS", 120, 10, 3600)
-	if err != nil {
-		return Config{}, err
-	}
-	transcodeCacheMaxBytes, err := integer64(env, "MEDIA_TRANSCODE_CACHE_MAX_BYTES", DefaultMediaTranscodeCacheMaxBytes, MinMediaTranscodeCacheMaxBytes, MaxMediaTranscodeCacheMaxBytes)
 	if err != nil {
 		return Config{}, err
 	}
@@ -374,15 +346,10 @@ func Parse(env map[string]string) (Config, error) {
 			RefreshTokenTTLSeconds:      refreshTTL,
 		},
 		MediaStorage: MediaStorage{
-			AssetDirectory:           paths.MediaAssetDirectory,
-			TranscodeDirectory:       paths.MediaTranscodeDirectory,
-			UploadTTLSeconds:         uploadTTL,
-			StreamTTLSeconds:         streamTTL,
-			StreamMaxConcurrent:      streamMaxConcurrent,
-			StreamIdleTimeoutSeconds: streamIdleTimeout,
-			TranscodeTimeoutSeconds:  transcodeTimeout,
-			TranscodeCacheMaxBytes:   transcodeCacheMaxBytes,
-			MaxUploadBytes:           maxUploadBytes,
+			AssetDirectory:   paths.MediaAssetDirectory,
+			UploadTTLSeconds: uploadTTL,
+			StreamTTLSeconds: streamTTL,
+			MaxUploadBytes:   maxUploadBytes,
 		},
 		Media: Media{
 			Mode:          mediaMode,
@@ -480,9 +447,6 @@ func ResolveRuntime(cfg Config, root string) (Config, error) {
 	if cfg.Paths.MediaAssetDirectory, err = resolve(cfg.Paths.MediaAssetDirectory, "MEDIA_ASSET_DIRECTORY"); err != nil {
 		return Config{}, err
 	}
-	if cfg.Paths.MediaTranscodeDirectory, err = resolve(cfg.Paths.MediaTranscodeDirectory, "MEDIA_TRANSCODE_DIRECTORY"); err != nil {
-		return Config{}, err
-	}
 	if cfg.Media.FFmpegPath, err = resolveExecutable(cfg.Media.FFmpegPath, "FFMPEG_PATH"); err != nil {
 		return Config{}, err
 	}
@@ -491,7 +455,6 @@ func ResolveRuntime(cfg Config, root string) (Config, error) {
 	}
 	cfg.LocalLibrary.Directory = cfg.Paths.LocalMusicDirectory
 	cfg.MediaStorage.AssetDirectory = cfg.Paths.MediaAssetDirectory
-	cfg.MediaStorage.TranscodeDirectory = cfg.Paths.MediaTranscodeDirectory
 	return cfg, nil
 }
 

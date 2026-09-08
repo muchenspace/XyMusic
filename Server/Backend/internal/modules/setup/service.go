@@ -30,8 +30,6 @@ const (
 	storageActionReset  = "reset"
 )
 
-
-
 type Options struct {
 	RootDirectory       string
 	ConfigurationPath   string
@@ -442,7 +440,6 @@ func (s *Service) complete(ctx context.Context, input SetupInput) (CompletionRes
 		})
 	}
 
-
 	var candidate config.Config
 	var source ValidatedSource
 	if err := runSetupStage("configuration_validation", func() error {
@@ -533,17 +530,15 @@ func (s *Service) complete(ctx context.Context, input SetupInput) (CompletionRes
 			if err != nil {
 				return storageFailure("Media storage contents could not be inspected", err)
 			}
-			hasExistingFiles := storageInspection.HasAssets || storageInspection.HasTranscode
+			hasExistingFiles := storageInspection.HasAssets
 			if hasExistingFiles && input.StorageAction != storageActionReset {
 				return apperror.New(
 					apperror.CodeSetupDecisionRequired,
-					"检测到媒体资产或转码缓存目录中已存在文件，本项目不支持复用旧文件，必须确认清空目录后继续。",
+					"检测到媒体资产目录中已存在文件，本项目不支持复用旧文件，必须确认清空目录后继续。",
 					apperror.WithMetadata(map[string]any{
 						"decisionResource": "storage",
 						"hasAssets":        storageInspection.HasAssets,
 						"assetCount":       storageInspection.AssetCount,
-						"hasTranscode":     storageInspection.HasTranscode,
-						"transcodeCount":   storageInspection.TranscodeCount,
 					}),
 				)
 			}
@@ -582,7 +577,7 @@ func (s *Service) complete(ctx context.Context, input SetupInput) (CompletionRes
 				return err
 			}
 		}
-		hasExistingStorageFiles := storageInspection.HasAssets || storageInspection.HasTranscode
+		hasExistingStorageFiles := storageInspection.HasAssets
 		if hasExistingStorageFiles && input.StorageAction == storageActionReset {
 			destructiveStageStarted = true
 			if err := runSetupStage("storage_clear", func() error { return mediaStorage.Clear(ctx) }); err != nil {
@@ -759,12 +754,11 @@ func (s *Service) buildConfig(input SetupInput) (config.Config, error) {
 	candidate := config.Config{
 		Environment: config.Production,
 		Paths: config.Paths{
-			MigrationsDirectory:     strings.TrimSpace(input.Paths.MigrationsDirectory),
-			AdminWebDirectory:       strings.TrimSpace(input.Paths.AdminWebDirectory),
-			MediaToolsDirectory:     mediaDirectory,
-			LocalMusicDirectory:     strings.TrimSpace(input.Source.Directory),
-			MediaAssetDirectory:     storageValue.AssetDirectory,
-			MediaTranscodeDirectory: storageValue.TranscodeDirectory,
+			MigrationsDirectory: strings.TrimSpace(input.Paths.MigrationsDirectory),
+			AdminWebDirectory:   strings.TrimSpace(input.Paths.AdminWebDirectory),
+			MediaToolsDirectory: mediaDirectory,
+			LocalMusicDirectory: strings.TrimSpace(input.Source.Directory),
+			MediaAssetDirectory: storageValue.AssetDirectory,
 		},
 		HTTP: config.HTTP{
 			IPv4Host:              ipv4Listener.Host,
@@ -976,15 +970,7 @@ func (s *Service) storageConfig(input StorageInput) (config.MediaStorage, error)
 	if assetDir == "" {
 		assetDir = config.DefaultMediaAssetDirectory
 	}
-	transcodeDir := strings.TrimSpace(input.TranscodeDirectory)
-	if transcodeDir == "" {
-		transcodeDir = config.DefaultMediaTranscodeDirectory
-	}
 	resolvedAsset, err := s.resolvePath(assetDir, "storage.assetDirectory")
-	if err != nil {
-		return config.MediaStorage{}, err
-	}
-	resolvedTranscode, err := s.resolvePath(transcodeDir, "storage.transcodeDirectory")
 	if err != nil {
 		return config.MediaStorage{}, err
 	}
@@ -996,39 +982,15 @@ func (s *Service) storageConfig(input StorageInput) (config.MediaStorage, error)
 	if input.StreamTTLSeconds != nil {
 		streamTTL = *input.StreamTTLSeconds
 	}
-	maxConcurrent := 4
-	if input.StreamMaxConcurrent != nil {
-		maxConcurrent = *input.StreamMaxConcurrent
-	}
-	idleTimeout := 120
-	if input.StreamIdleTimeoutSeconds != nil {
-		idleTimeout = *input.StreamIdleTimeoutSeconds
-	}
-	transcodeTimeout := 300
-	if input.TranscodeTimeoutSeconds != nil {
-		transcodeTimeout = *input.TranscodeTimeoutSeconds
-	}
-	transcodeCacheMaxBytes := config.DefaultMediaTranscodeCacheMaxBytes
-	if input.TranscodeCacheMaxBytes != nil {
-		transcodeCacheMaxBytes = *input.TranscodeCacheMaxBytes
-	}
 	maxUploadBytes := int64(config.MaxServerRequestBodyBytes)
 	if input.MaxUploadBytes != nil {
 		maxUploadBytes = *input.MaxUploadBytes
 	}
-	if transcodeCacheMaxBytes < config.MinMediaTranscodeCacheMaxBytes || transcodeCacheMaxBytes > config.MaxMediaTranscodeCacheMaxBytes {
-		return config.MediaStorage{}, apperror.Validation("storage.transcodeCacheMaxBytes is invalid")
-	}
 	return config.MediaStorage{
-		AssetDirectory:           resolvedAsset,
-		TranscodeDirectory:       resolvedTranscode,
-		UploadTTLSeconds:         uploadTTL,
-		StreamTTLSeconds:         streamTTL,
-		StreamMaxConcurrent:      maxConcurrent,
-		StreamIdleTimeoutSeconds: idleTimeout,
-		TranscodeTimeoutSeconds:  transcodeTimeout,
-		TranscodeCacheMaxBytes:   transcodeCacheMaxBytes,
-		MaxUploadBytes:           maxUploadBytes,
+		AssetDirectory:   resolvedAsset,
+		UploadTTLSeconds: uploadTTL,
+		StreamTTLSeconds: streamTTL,
+		MaxUploadBytes:   maxUploadBytes,
 	}, nil
 }
 
@@ -1319,7 +1281,6 @@ func validateDatabaseDecision(inspection InstallationInspection, action string) 
 		return apperror.New(apperror.CodeSetupFailed, "无法识别数据库配置状态，请检查迁移记录后重试。")
 	}
 }
-
 
 func setupErrorStage(err error) string {
 	if applicationError, ok := apperror.As(err); ok {

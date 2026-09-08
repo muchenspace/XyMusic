@@ -8,7 +8,6 @@ import com.xymusic.app.core.common.runCatchingPreservingCancellation
 import com.xymusic.app.domain.settings.AppSettings
 import com.xymusic.app.domain.settings.AppSettingsUseCases
 import com.xymusic.app.domain.settings.MobileDataPolicy
-import com.xymusic.app.domain.settings.StreamingQuality
 import com.xymusic.app.domain.settings.ThemePreference
 import com.xymusic.app.feature.auth.domain.AuthResult
 import com.xymusic.app.feature.auth.domain.AuthUseCases
@@ -142,8 +141,6 @@ constructor(
     }
 
     fun setTheme(theme: ThemePreference) = updateSettings { copy(theme = theme) }
-
-    fun setStreamingQuality(quality: StreamingQuality) = updateSettings { copy(streamingQuality = quality) }
 
     fun setWifiOnly(wifiOnly: Boolean) = updateSettings {
         copy(

@@ -21,9 +21,6 @@ var (
 type TicketClaims struct {
 	UserID    string `json:"u"`
 	TrackID   string `json:"t"`
-	SessionID string `json:"s"`
-	Quality   string `json:"q"`
-	Codec     string `json:"c"`
 	ExpiresAt int64  `json:"e"`
 }
 
@@ -80,9 +77,7 @@ func (s *TicketSigner) Verify(token string) (*TicketClaims, error) {
 	}
 
 	now := s.now().UTC().Unix()
-	if strings.TrimSpace(claims.UserID) == "" || strings.TrimSpace(claims.TrackID) == "" ||
-		strings.TrimSpace(claims.SessionID) == "" || strings.TrimSpace(claims.Quality) == "" ||
-		strings.TrimSpace(claims.Codec) == "" {
+	if strings.TrimSpace(claims.UserID) == "" || strings.TrimSpace(claims.TrackID) == "" {
 		return nil, ErrInvalidTicket
 	}
 	if claims.ExpiresAt <= now {

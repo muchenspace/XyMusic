@@ -272,8 +272,7 @@ func settingsTestConfig(t *testing.T) config.Config {
 		"CURSOR_SIGNING_SECRET":         "32345678901234567890123456789012",
 		"PLAYBACK_TICKET_SECRET":        "42345678901234567890123456789012",
 		"MEDIA_ASSET_DIRECTORY":         "assets",
-		"MEDIA_TRANSCODE_DIRECTORY":     "transcode",
-		"HTTP_HOST": "0.0.0.0", "HTTP_PORT": "3000", "LOCAL_MUSIC_DIRECTORY": "music",
+		"HTTP_HOST":                     "0.0.0.0", "HTTP_PORT": "3000", "LOCAL_MUSIC_DIRECTORY": "music",
 	})
 	if err != nil {
 		t.Fatal(err)

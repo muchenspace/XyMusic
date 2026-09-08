@@ -22,47 +22,31 @@ var (
 
 type Store struct {
 	assetDir       string
-	transcodeDir   string
 	maxUploadBytes int64
 }
 
-func NewStore(assetDir, transcodeDir string, maxUploadBytes int64) (*Store, error) {
+func NewStore(assetDir string, maxUploadBytes int64) (*Store, error) {
 	if strings.TrimSpace(assetDir) == "" {
 		return nil, errors.New("media asset directory is required")
-	}
-	if strings.TrimSpace(transcodeDir) == "" {
-		return nil, errors.New("media transcode directory is required")
 	}
 	absAssetDir, err := filepath.Abs(assetDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve asset directory: %w", err)
 	}
-	absTranscodeDir, err := filepath.Abs(transcodeDir)
-	if err != nil {
-		return nil, fmt.Errorf("resolve transcode directory: %w", err)
-	}
 	if err := os.MkdirAll(absAssetDir, 0o755); err != nil {
 		return nil, fmt.Errorf("initialize asset directory: %w", err)
-	}
-	if err := os.MkdirAll(absTranscodeDir, 0o755); err != nil {
-		return nil, fmt.Errorf("initialize transcode directory: %w", err)
 	}
 	if maxUploadBytes <= 0 {
 		maxUploadBytes = 1024 * 1024 * 1024
 	}
 	return &Store{
 		assetDir:       filepath.Clean(absAssetDir),
-		transcodeDir:   filepath.Clean(absTranscodeDir),
 		maxUploadBytes: maxUploadBytes,
 	}, nil
 }
 
 func (s *Store) AssetDirectory() string {
 	return s.assetDir
-}
-
-func (s *Store) TranscodeDirectory() string {
-	return s.transcodeDir
 }
 
 func (s *Store) Ping(ctx context.Context) error {
@@ -75,21 +59,11 @@ func (s *Store) Ping(ctx context.Context) error {
 	}
 	_ = os.Remove(testFile)
 
-	testTranscode := filepath.Join(s.transcodeDir, ".ping_"+uuid.NewString())
-	if err := os.WriteFile(testTranscode, []byte("ok"), 0o600); err != nil {
-		return fmt.Errorf("verify transcode directory writeability: %w", err)
-	}
-	_ = os.Remove(testTranscode)
-
 	return nil
 }
 
 func (s *Store) ResolveAssetPath(relativePath string) (string, error) {
 	return resolveSecurePath(s.assetDir, relativePath)
-}
-
-func (s *Store) ResolveTranscodePath(relativePath string) (string, error) {
-	return resolveSecurePath(s.transcodeDir, relativePath)
 }
 
 func resolveSecurePath(baseDir, relativePath string) (string, error) {
@@ -271,18 +245,6 @@ func (s *Store) StatAsset(relativePath string) (os.FileInfo, error) {
 
 func (s *Store) DeleteAsset(relativePath string) error {
 	fullPath, err := s.ResolveAssetPath(relativePath)
-	if err != nil {
-		return err
-	}
-	err = os.Remove(fullPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	return err
-}
-
-func (s *Store) DeleteTranscodeFile(relativePath string) error {
-	fullPath, err := s.ResolveTranscodePath(relativePath)
 	if err != nil {
 		return err
 	}

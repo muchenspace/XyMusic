@@ -239,22 +239,13 @@ class RetrofitApiContractTest {
             request {
                 playbackApi.grant(
                     trackId = "track-1",
-                    request = PlaybackRequestDto(preferredQuality = "LOSSLESS", acceptedCodecs = listOf("flac", "aac")),
+                    request = PlaybackRequestDto(),
                 )
             }
         assertProtectedRequest(grant, method = "POST", path = "/api/v1/tracks/track-1/playback")
         assertJsonBody(
             grant,
-            buildJsonObject {
-                put("preferredQuality", "LOSSLESS")
-                put(
-                    "acceptedCodecs",
-                    buildJsonArray {
-                        add(JsonPrimitive("flac"))
-                        add(JsonPrimitive("aac"))
-                    },
-                )
-            },
+            buildJsonObject {},
         )
 
         val history =

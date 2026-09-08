@@ -45,7 +45,7 @@ func attachAlbumArtwork(
 			mime_type = EXCLUDED.mime_type, size_bytes = EXCLUDED.size_bytes,
 			checksum_sha256 = EXCLUDED.checksum_sha256, status = 'READY', updated_at = now()
 		RETURNING id`,
-		artwork.StoragePath, firstNonEmptyString(artwork.MIMEType, "image/jpeg"), artwork.SizeBytes, artwork.Checksum,
+		artwork.StoragePath, firstNonEmpty(artwork.MIMEType, "image/jpeg"), artwork.SizeBytes, artwork.Checksum,
 	).Scan(&assetID)
 	if err != nil {
 		return false, fmt.Errorf("store scanned artwork asset: %w", err)
@@ -64,6 +64,15 @@ func attachAlbumArtwork(
 			  AND NOT EXISTS (SELECT 1 FROM user_profiles WHERE avatar_asset_id = asset.id)`, *current)
 	}
 	return true, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 type stagedArtwork struct {

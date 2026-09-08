@@ -16,24 +16,22 @@ describe("playback grant cache resume freshness", () => {
         .mockResolvedValueOnce({
           streamUrl: "https://example.test/valid.mp3",
           expiresAt: new Date(now.getTime() + 60_000).toISOString(),
-          selectedQuality: "STANDARD",
         })
         .mockResolvedValueOnce({
           streamUrl: "https://example.test/refreshed.mp3",
           expiresAt: new Date(now.getTime() + 300_000).toISOString(),
-          selectedQuality: "STANDARD",
         }),
     } as unknown as PlaybackUseCases;
     const cache = new PlaybackGrantCache(playback);
 
-    await cache.get("track-1", "STANDARD");
-    const valid = await cache.getForResume("track-1", "STANDARD");
+    await cache.get("track-1");
+    const valid = await cache.getForResume("track-1");
 
     expect(valid).toMatchObject({ refreshed: false, grant: { streamUrl: "https://example.test/valid.mp3" } });
     expect(playback.grant).toHaveBeenCalledOnce();
 
     vi.setSystemTime(new Date(now.getTime() + 35_000));
-    const refreshed = await cache.getForResume("track-1", "STANDARD");
+    const refreshed = await cache.getForResume("track-1");
 
     expect(refreshed).toMatchObject({ refreshed: true, grant: { streamUrl: "https://example.test/refreshed.mp3" } });
     expect(playback.grant).toHaveBeenCalledTimes(2);

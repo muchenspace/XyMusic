@@ -411,26 +411,6 @@ class PlayerViewModelTest {
     }
 
     @Test
-    fun compatibleCodecFallbackPublishesDedicatedMessage() = runTest {
-        val player = FakePlayerRepository(PlayerState())
-        val viewModel =
-            PlayerViewModel(
-                PlayerUseCases(player),
-                lyricsSource(RefreshingCatalogRepository()),
-                PlaybackQueueUseCases(EmptyPlaybackQueueStore),
-                mainDispatcherRule.dispatcher,
-            )
-
-        viewModel.effects.test {
-            runCurrent()
-            player.emit(PlayerEvent.CompatibleCodecFallbackApplied)
-
-            assertThat(awaitItem())
-                .isEqualTo(PlayerUiEffect.ShowMessage(R.string.player_codec_fallback_applied))
-        }
-    }
-
-    @Test
     fun recoveredTransientFailureDoesNotPublishAStaleErrorMessage() = runTest {
         val player = FakePlayerRepository(PlayerState())
         val viewModel =

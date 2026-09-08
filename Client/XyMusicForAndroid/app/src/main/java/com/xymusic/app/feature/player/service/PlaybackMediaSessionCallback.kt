@@ -41,7 +41,6 @@ internal class PlaybackMediaSessionCallback(
                     .buildUpon()
                     .add(PlaybackSessionCommands.SET_SLEEP_TIMER)
                     .add(PlaybackSessionCommands.GET_SLEEP_TIMER)
-                    .add(PlaybackSessionCommands.CODEC_FALLBACK_APPLIED)
                     .add(PlaybackSessionCommands.SEEK_TO_GLOBAL_POSITION)
                     .build(),
                 Player.Commands

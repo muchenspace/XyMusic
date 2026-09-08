@@ -255,7 +255,7 @@ function connectScan(sourceId: string, scanId: string): void {
       if (scanSubmission.value?.sourceId === sourceId) scanSubmission.value = undefined;
       scanEvents?.close(); scanEvents = undefined; scanEventSourceId = undefined;
       void refreshCatalog();
-      if (scan.status === "COMPLETED") ui.notify("success", "扫描完成", "新曲目会立即显示；播放时才会按客户端能力即时转码。");
+      if (scan.status === "COMPLETED") ui.notify("success", "扫描完成", "新曲目会立即显示；播放时直接提供已发布的源音频。");
     }
   }, () => {
     scanEvents?.close(); scanEvents = undefined; scanEventSourceId = undefined;
@@ -379,7 +379,7 @@ const ToggleSource = defineComponent({ inheritAttrs: false, props: { modelValue:
             <div class="min-w-0 flex-1"><div class="flex items-center gap-2"><h3 class="truncate font-bold">{{ source.name }}</h3><StatusBadge :status="sourceSubmitting(source.id) ? 'PENDING' : source.status" :label="sourceSubmitting(source.id) ? '正在提交' : undefined" dot /></div><p class="mt-1 truncate font-mono text-xs text-[var(--muted)]" :title="source.path">{{ source.path }}</p></div>
             <button class="btn btn-ghost btn-icon" type="button" :aria-label="`编辑音源：${source.name}`" @click="openEdit(source)"><Pencil :size="15" /></button>
           </div>
-          <div class="mt-5 grid grid-cols-4 divide-x divide-[var(--border)] rounded-xl bg-[var(--surface-muted)] py-3 text-center"><div><p class="font-bold">{{ source.fileCount }}</p><p class="text-[10px] text-[var(--muted)]">物理文件</p></div><div><p class="font-bold">{{ source.trackCount }}</p><p class="text-[10px] text-[var(--muted)]">曲目</p></div><div><p class="font-bold">{{ source.cueFileCount }}</p><p class="text-[10px] text-[var(--muted)]">CUE</p></div><div><p class="font-bold" :class="source.failedFileCount > 0 ? 'text-[var(--danger)]' : undefined">{{ source.failedFileCount }}</p><p class="text-[10px] text-[var(--muted)]">失败</p></div></div>
+          <div class="mt-5 grid grid-cols-3 divide-x divide-[var(--border)] rounded-xl bg-[var(--surface-muted)] py-3 text-center"><div><p class="font-bold">{{ source.fileCount }}</p><p class="text-[10px] text-[var(--muted)]">物理文件</p></div><div><p class="font-bold">{{ source.trackCount }}</p><p class="text-[10px] text-[var(--muted)]">曲目</p></div><div><p class="font-bold" :class="source.failedFileCount > 0 ? 'text-[var(--danger)]' : undefined">{{ source.failedFileCount }}</p><p class="text-[10px] text-[var(--muted)]">失败</p></div></div>
           <p v-if="source.lastError" class="mt-4 flex gap-2 rounded-xl bg-rose-500/8 p-3 text-xs text-[var(--danger)]"><AlertTriangle :size="15" />{{ source.lastError }}</p>
           <div class="mt-5 flex items-center justify-between"><span class="flex items-center gap-1.5 text-xs text-[var(--muted)]"><Clock3 :size="13" />{{ source.lastScanAt ? formatRelative(source.lastScanAt) : '尚未扫描' }}</span><div class="flex gap-1"><button class="btn btn-ghost btn-icon" type="button" :aria-label="`删除音源：${source.name}`" @click="askDelete(source)"><Trash2 :size="15" /></button><AppButton variant="primary" :disabled="!source.enabled || source.status === 'SCANNING' || scanMutation.isPending.value || !workerCanScan" :title="!workerCanScan ? '后台 Worker 不可用，暂时不能扫描' : scanMutation.isPending.value && !sourceSubmitting(source.id) ? '正在提交另一个音源的扫描任务' : undefined" :loading="sourceSubmitting(source.id)" @click="scanMutation.mutate(source)"><template #icon><Play :size="14" /></template>扫描</AppButton></div></div>
         </article>
@@ -392,7 +392,7 @@ const ToggleSource = defineComponent({ inheritAttrs: false, props: { modelValue:
       <div class="flex flex-col gap-3 border-b border-[var(--border)] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div class="flex flex-wrap items-center gap-2"><h2 class="font-bold">扫描状态</h2><StatusBadge status="LOCAL" label="仅处理音源基础信息" dot /></div>
-          <p class="mt-1 text-xs text-[var(--muted)]">扫描只读取音源元数据、侧车歌词和封面信息，不会预先生成转码文件；播放时才按客户端能力即时转码。</p>
+          <p class="mt-1 text-xs text-[var(--muted)]">扫描只读取音源元数据、侧车歌词和封面信息，不会生成播放中间文件。</p>
         </div>
         <div class="flex gap-2"><select v-model="historySourceId" class="ui-select min-w-48" @change="resetScanPaging()"><option v-for="source in sourcesQuery.data.value?.items" :key="source.id" :value="source.id">{{ source.name }}</option></select><AppButton icon-only :loading="scansQuery.isFetching.value" @click="scansQuery.refetch()"><template #icon><RefreshCw :size="16" /></template>刷新</AppButton></div>
       </div>
@@ -412,7 +412,7 @@ const ToggleSource = defineComponent({ inheritAttrs: false, props: { modelValue:
           </div>
         </div>
         <div class="p-5">
-          <div class="flex items-start gap-3 rounded-xl bg-[var(--primary-soft)] p-4 text-sm text-[var(--primary)]"><RefreshCw :size="18" class="mt-0.5 shrink-0" /><div><p class="font-bold">播放时动态转码</p><p class="mt-1 text-xs leading-5">扫描结束后不会继续排队媒体处理任务。服务端仅保存音源路径和基础信息，客户端开始播放时才生成临时输出并在过期后自动清理。</p></div></div>
+          <div class="flex items-start gap-3 rounded-xl bg-[var(--primary-soft)] p-4 text-sm text-[var(--primary)]"><RefreshCw :size="18" class="mt-0.5 shrink-0" /><div><p class="font-bold">源文件直出</p><p class="mt-1 text-xs leading-5">扫描结束后不会继续排队播放处理任务。服务端保存音源路径和基础信息，客户端播放时直接读取已发布的源文件。</p></div></div>
         </div>
       </template>
     </section>

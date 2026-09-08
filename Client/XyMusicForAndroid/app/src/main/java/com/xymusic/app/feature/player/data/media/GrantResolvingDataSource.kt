@@ -79,19 +79,11 @@ private class GrantResolvingDataSource(
         dataSpec: DataSpec,
         identity: ActiveSessionIdentity,
         resource: PlaybackResource,
-    ): Long {
-        val factory = when (resource.kind) {
-            PlaybackResourceKind.HLS_PLAYLIST -> networkFactory
-            PlaybackResourceKind.PROGRESSIVE,
-            PlaybackResourceKind.HLS_SEGMENT,
-            -> onlineFactory
-        }
-        return openUpstreamForIdentity(
-            dataSpec.buildUpon().setKey(resource.cacheKey).build(),
-            identity,
-            factory,
-        )
-    }
+    ): Long = openUpstreamForIdentity(
+        dataSpec.buildUpon().setKey(resource.cacheKey).build(),
+        identity,
+        onlineFactory,
+    )
 
     private fun openOfflineResource(
         dataSpec: DataSpec,

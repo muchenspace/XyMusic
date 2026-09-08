@@ -29,9 +29,6 @@ abstract class PlaybackQueueDao {
         require(items.all { it.resumePositionMs >= 0 && it.enqueuedAtEpochMs >= 0 }) {
             "Queue timestamps and resume positions must not be negative"
         }
-        require(items.none { it.stableCacheKey.looksLikeNetworkUrl() }) {
-            "Queue snapshots must not persist playback URLs"
-        }
         items.sortedBy(PlaybackQueueEntity::position).forEachIndexed { index, item ->
             require(item.position == index) { "Queue positions must be contiguous from zero" }
         }
@@ -102,10 +99,5 @@ abstract class PlaybackQueueDao {
         check(setCurrentIfPresent(ownerUserId, itemId, resumePositionMs) == 1) {
             "Queue item does not exist for the requested owner"
         }
-    }
-
-    private fun String?.looksLikeNetworkUrl(): Boolean {
-        val normalized = this?.trim()?.lowercase() ?: return false
-        return normalized.startsWith("http://") || normalized.startsWith("https://")
     }
 }

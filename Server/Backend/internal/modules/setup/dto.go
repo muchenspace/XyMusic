@@ -53,15 +53,10 @@ type DatabaseTestInput struct {
 }
 
 type StorageInput struct {
-	AssetDirectory           string `json:"assetDirectory,omitempty"`
-	TranscodeDirectory       string `json:"transcodeDirectory,omitempty"`
-	UploadTTLSeconds         *int   `json:"uploadTtlSeconds,omitempty"`
-	StreamTTLSeconds         *int   `json:"streamTtlSeconds,omitempty"`
-	StreamMaxConcurrent      *int   `json:"streamMaxConcurrent,omitempty"`
-	StreamIdleTimeoutSeconds *int   `json:"streamIdleTimeoutSeconds,omitempty"`
-	TranscodeTimeoutSeconds  *int   `json:"transcodeTimeoutSeconds,omitempty"`
-	TranscodeCacheMaxBytes   *int64 `json:"transcodeCacheMaxBytes,omitempty"`
-	MaxUploadBytes           *int64 `json:"maxUploadBytes,omitempty"`
+	AssetDirectory   string `json:"assetDirectory,omitempty"`
+	UploadTTLSeconds *int   `json:"uploadTtlSeconds,omitempty"`
+	StreamTTLSeconds *int   `json:"streamTtlSeconds,omitempty"`
+	MaxUploadBytes   *int64 `json:"maxUploadBytes,omitempty"`
 }
 
 type MediaInput struct {
@@ -142,15 +137,11 @@ type StorageTestResponse struct {
 }
 
 type StorageInspection struct {
-	AssetDirectoryExists     bool  `json:"assetDirectoryExists"`
-	TranscodeDirectoryExists bool  `json:"transcodeDirectoryExists"`
-	HasAssets                bool  `json:"hasAssets"`
-	AssetCount               int64 `json:"assetCount"`
-	HasTranscode             bool  `json:"hasTranscode"`
-	TranscodeCount           int64 `json:"transcodeCount"`
-	CountLimited             bool  `json:"countLimited"`
+	AssetDirectoryExists bool  `json:"assetDirectoryExists"`
+	HasAssets            bool  `json:"hasAssets"`
+	AssetCount           int64 `json:"assetCount"`
+	CountLimited         bool  `json:"countLimited"`
 }
-
 
 type MediaTestResponse struct {
 	OK      bool               `json:"ok"`

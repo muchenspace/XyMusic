@@ -12,13 +12,8 @@ export interface DatabaseSettingsInput {
 
 export interface StorageSettingsInput {
   assetDirectory?: string;
-  transcodeDirectory?: string;
   uploadTtlSeconds?: number;
   streamTtlSeconds?: number;
-  streamMaxConcurrent?: number;
-  streamIdleTimeoutSeconds?: number;
-  transcodeTimeoutSeconds?: number;
-  transcodeCacheMaxBytes?: number;
   maxUploadBytes?: number;
 }
 
@@ -34,13 +29,8 @@ export interface RuntimeSettings {
   database: DatabaseSettingsInput & { passwordConfigured: boolean; lockedFields: string[] };
   storage: {
     assetDirectory: string;
-    transcodeDirectory: string;
     uploadTtlSeconds: number;
     streamTtlSeconds: number;
-    streamMaxConcurrent: number;
-    streamIdleTimeoutSeconds: number;
-    transcodeTimeoutSeconds: number;
-    transcodeCacheMaxBytes: number;
     maxUploadBytes: number;
     lockedFields: string[];
   };

@@ -57,15 +57,10 @@ type DatabaseInput struct {
 }
 
 type StorageInput struct {
-	AssetDirectory           *string `json:"assetDirectory,omitempty"`
-	TranscodeDirectory       *string `json:"transcodeDirectory,omitempty"`
-	UploadTTLSeconds         *int    `json:"uploadTtlSeconds,omitempty"`
-	StreamTTLSeconds         *int    `json:"streamTtlSeconds,omitempty"`
-	StreamMaxConcurrent      *int    `json:"streamMaxConcurrent,omitempty"`
-	StreamIdleTimeoutSeconds *int    `json:"streamIdleTimeoutSeconds,omitempty"`
-	TranscodeTimeoutSeconds  *int    `json:"transcodeTimeoutSeconds,omitempty"`
-	TranscodeCacheMaxBytes   *int64  `json:"transcodeCacheMaxBytes,omitempty"`
-	MaxUploadBytes           *int64  `json:"maxUploadBytes,omitempty"`
+	AssetDirectory   *string `json:"assetDirectory,omitempty"`
+	UploadTTLSeconds *int    `json:"uploadTtlSeconds,omitempty"`
+	StreamTTLSeconds *int    `json:"streamTtlSeconds,omitempty"`
+	MaxUploadBytes   *int64  `json:"maxUploadBytes,omitempty"`
 }
 
 type MediaToolsInput struct {
@@ -124,11 +119,10 @@ type TestResponse struct {
 }
 
 type StorageTestResponse struct {
-	OK                       bool   `json:"ok"`
-	Message                  string `json:"message"`
-	AssetDirectoryExists     bool   `json:"assetDirectoryExists"`
-	TranscodeDirectoryExists bool   `json:"transcodeDirectoryExists"`
-	LatencyMS                int64  `json:"latencyMs"`
+	OK                   bool   `json:"ok"`
+	Message              string `json:"message"`
+	AssetDirectoryExists bool   `json:"assetDirectoryExists"`
+	LatencyMS            int64  `json:"latencyMs"`
 }
 
 type LocalLibraryTestResponse struct {
@@ -175,16 +169,11 @@ type DatabaseDTO struct {
 }
 
 type StorageDTO struct {
-	AssetDirectory           string   `json:"assetDirectory"`
-	TranscodeDirectory       string   `json:"transcodeDirectory"`
-	UploadTTLSeconds         int      `json:"uploadTtlSeconds"`
-	StreamTTLSeconds         int      `json:"streamTtlSeconds"`
-	StreamMaxConcurrent      int      `json:"streamMaxConcurrent"`
-	StreamIdleTimeoutSeconds int      `json:"streamIdleTimeoutSeconds"`
-	TranscodeTimeoutSeconds  int      `json:"transcodeTimeoutSeconds"`
-	TranscodeCacheMaxBytes   int64    `json:"transcodeCacheMaxBytes"`
-	MaxUploadBytes           int64    `json:"maxUploadBytes"`
-	LockedFields             []string `json:"lockedFields"`
+	AssetDirectory   string   `json:"assetDirectory"`
+	UploadTTLSeconds int      `json:"uploadTtlSeconds"`
+	StreamTTLSeconds int      `json:"streamTtlSeconds"`
+	MaxUploadBytes   int64    `json:"maxUploadBytes"`
+	LockedFields     []string `json:"lockedFields"`
 }
 
 type MediaToolsDTO struct {

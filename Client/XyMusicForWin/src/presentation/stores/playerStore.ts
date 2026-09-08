@@ -1,6 +1,6 @@
 import { computed, onScopeDispose, ref, shallowReactive, toRef } from "vue";
 import { defineStore } from "pinia";
-import type { PlaybackQuality, Track } from "../../domain/music";
+import type { Track } from "../../domain/music";
 import { derivePlayMode, type PlayMode } from "../../domain/playbackState";
 import type { PlaybackQueue, PlaybackTerminalEvent } from "../../application/ports/PlaybackSession";
 import { useApplicationServices } from "../services";
@@ -35,10 +35,6 @@ export const usePlayerStore = defineStore("player", () => {
   const volume = computed({
     get: () => playbackState.volume,
     set: (value: number) => session.setVolume(value),
-  });
-  const quality = computed({
-    get: () => playbackState.quality,
-    set: (value: PlaybackQuality) => session.setQuality(value),
   });
   const crossfadeSeconds = computed({
     get: () => playbackState.crossfadeSeconds,
@@ -134,7 +130,6 @@ export const usePlayerStore = defineStore("player", () => {
     shuffled,
     repeatMode,
     playMode,
-    quality,
     crossfadeSeconds,
     notificationsEnabled,
     miniMode,

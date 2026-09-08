@@ -17,14 +17,10 @@ func TestSourceScanSnapshotServesReadOnlyLookups(t *testing.T) {
 		Checksum: checksum, SizeBytes: 100, LastSeenAt: time.Now().Add(-time.Hour),
 		Status: SourceFileReady, TrackID: &trackID,
 	}
-	num := 1
-	start := int64(0)
-	mappings := []cueMapping{{TrackID: "track", Number: &num, StartMS: &start}}
 	snapshot := &sourceScanSnapshot{
 		rootPath:           `C:\Music`,
 		sourcesByPath:      map[string]*localSourceRecord{source.NormalizedPath: &source},
 		renameCandidates:   map[string][]*localSourceRecord{checksum: {&source}},
-		mappingsBySource:   map[string][]cueMapping{source.ID: mappings},
 		externalLyricsByID: map[string]struct{}{source.ID: {}},
 		seenSourceIDs:      make(map[string]struct{}),
 		renameClaimedIDs:   make(map[string]struct{}),
@@ -45,10 +41,6 @@ func TestSourceScanSnapshotServesReadOnlyLookups(t *testing.T) {
 	}
 	if external, err := synchronizer.sourceHasExternalLyrics(ctx, source.ID); err != nil || !external {
 		t.Fatalf("external lyrics = %v/%v", external, err)
-	}
-	gotMappings, err := synchronizer.sourceMappings(ctx, source.ID, false)
-	if err != nil || len(gotMappings) != 1 || gotMappings[0].TrackID != "track" {
-		t.Fatalf("source mappings = %+v/%v", gotMappings, err)
 	}
 }
 
@@ -120,7 +112,7 @@ func TestSourceScanSnapshotIndexesSidecarDirectoryOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(first) != 2 || len(second) != 2 || containsString(first, "cover.jpg") || containsString(second, "cover.jpg") {
+	if len(first) != 2 || len(second) != 2 || first[0] == "cover.jpg" || first[1] == "cover.jpg" || second[0] == "cover.jpg" || second[1] == "cover.jpg" {
 		t.Fatalf("sidecar names = %#v/%#v", first, second)
 	}
 }
