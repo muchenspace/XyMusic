@@ -9,11 +9,8 @@ import (
 
 	"xymusic/server/internal/app"
 	"xymusic/server/internal/config"
-	"xymusic/server/internal/platform/database"
 	"xymusic/server/internal/platform/workerstatus"
 )
-
-const permanentWorkerFailureExitCode = 78
 
 func runWorkerProcess(
 	ctx context.Context,
@@ -73,9 +70,6 @@ func runWorkerProcess(
 					if runtime == nil {
 						logger.Error("worker runtime initialization failed", "error", buildErr)
 						_ = writeWorkerDocument(ctx, statusPath, "CONFIGURATION_ERROR", "")
-						if database.IsPermanentMigrationError(buildErr) {
-							return permanentWorkerFailureExitCode
-						}
 						return 1
 					}
 					logger.Warn("worker runtime candidate rejected", "error", buildErr)

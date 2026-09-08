@@ -313,9 +313,6 @@ func (s *Service) testDatabase(ctx context.Context, input DatabaseTestInput) (Da
 	if !canCreate {
 		return DatabaseTestResponse{}, databasePermissionDenied(nil)
 	}
-	if err := connection.CheckMigrationCompatibility(ctx, migrationsDirectory); err != nil {
-		return DatabaseTestResponse{}, databaseMigrationCompatibilityFailure(err)
-	}
 	inspection, err := connection.Inspect(ctx, migrationsDirectory)
 	if err != nil {
 		return DatabaseTestResponse{}, databaseInspectionFailure(err)

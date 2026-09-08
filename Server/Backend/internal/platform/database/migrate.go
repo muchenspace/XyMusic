@@ -2,8 +2,6 @@ package database
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,7 +11,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -25,35 +22,7 @@ const (
 type Migration struct {
 	Tag       string
 	CreatedAt int64
-	Hash      string
 	SQL       []string
-}
-
-type AppliedMigration struct {
-	Hash      string
-	CreatedAt int64
-}
-
-type CompatibilityErrorKind string
-
-const (
-	CompatibilityNewerSchema    CompatibilityErrorKind = "NEWER_SCHEMA"
-	CompatibilityHistoryForked  CompatibilityErrorKind = "HISTORY_FORKED"
-	CompatibilityHashMismatch   CompatibilityErrorKind = "HASH_MISMATCH"
-	CompatibilityHistoryInvalid CompatibilityErrorKind = "HISTORY_INVALID"
-)
-
-type CompatibilityError struct {
-	Kind      CompatibilityErrorKind
-	Message   string
-	Migration int64
-}
-
-func (e *CompatibilityError) Error() string { return e.Message }
-
-func IsPermanentMigrationError(err error) bool {
-	var compatibility *CompatibilityError
-	return errors.As(err, &compatibility)
 }
 
 func RunMigrations(ctx context.Context, pool *pgxpool.Pool, directory string) error {
@@ -76,11 +45,8 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool, directory string) er
 		_, _ = connection.Exec(cleanupContext, "select pg_advisory_unlock(hashtextextended($1, 0))", migrationLockName)
 	}()
 
-	applied, err := readAppliedMigrations(ctx, connection)
+	applied, err := readAppliedMigrationTimes(ctx, connection)
 	if err != nil {
-		return err
-	}
-	if err := AssertCompatible(available, applied); err != nil {
 		return err
 	}
 	if _, err := connection.Exec(ctx, "create schema if not exists drizzle"); err != nil {
@@ -89,24 +55,29 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool, directory string) er
 	if _, err := connection.Exec(ctx, `
 		create table if not exists drizzle.__drizzle_migrations (
 			id serial primary key,
-			hash text not null,
 			created_at bigint
 		)`); err != nil {
 		return fmt.Errorf("create migration journal: %w", err)
 	}
+	// Drop the legacy journal column left by older releases.
+	if _, err := connection.Exec(ctx, "alter table drizzle.__drizzle_migrations drop column if exists hash"); err != nil {
+		return fmt.Errorf("remove legacy migration metadata: %w", err)
+	}
 
-	appliedCount := len(applied)
-	for _, migration := range available[appliedCount:] {
+	for _, migration := range available {
+		if _, exists := applied[migration.CreatedAt]; exists {
+			continue
+		}
 		if err := applyMigration(ctx, connection, migration); err != nil {
 			// A failed first migration leaves only the journal relation because
 			// the migration itself is transactional. Remove that empty marker so
 			// a fresh installation remains retryable without manual journal edits.
-			if appliedCount == 0 {
+			if len(applied) == 0 {
 				cleanupEmptyMigrationJournal(ctx, connection)
 			}
 			return err
 		}
-		appliedCount++
+		applied[migration.CreatedAt] = struct{}{}
 	}
 	return nil
 }
@@ -124,25 +95,6 @@ func cleanupEmptyMigrationJournal(ctx context.Context, connection *pgxpool.Conn)
 	// application-owned schema, leaving that schema is safer than dropping it.
 	_, _ = connection.Exec(cleanupContext, "DROP TABLE IF EXISTS drizzle.__drizzle_migrations")
 	_, _ = connection.Exec(cleanupContext, "DROP SCHEMA IF EXISTS drizzle")
-}
-
-// CheckMigrationCompatibility is read-only and is used before activating a
-// candidate runtime or running production tests.
-func CheckMigrationCompatibility(ctx context.Context, pool *pgxpool.Pool, directory string) error {
-	available, err := ReadMigrations(directory)
-	if err != nil {
-		return err
-	}
-	connection, err := pool.Acquire(ctx)
-	if err != nil {
-		return fmt.Errorf("acquire migration compatibility connection: %w", err)
-	}
-	defer connection.Release()
-	applied, err := readAppliedMigrations(ctx, connection)
-	if err != nil {
-		return err
-	}
-	return AssertCompatible(available, applied)
 }
 
 func ReadMigrations(directory string) ([]Migration, error) {
@@ -172,76 +124,38 @@ func ReadMigrations(directory string) ([]Migration, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read migration %s: %w", entry.Tag, err)
 		}
-		digest := sha256.Sum256(contents)
 		migrations = append(migrations, Migration{
 			Tag:       entry.Tag,
 			CreatedAt: entry.When,
-			Hash:      hex.EncodeToString(digest[:]),
 			SQL:       strings.Split(string(contents), "--> statement-breakpoint"),
 		})
 	}
 	return migrations, nil
 }
 
-func AssertCompatible(available []Migration, applied []AppliedMigration) error {
-	if len(applied) > len(available) {
-		return &CompatibilityError{
-			Kind:    CompatibilityNewerSchema,
-			Message: "The database schema was migrated by a newer XyMusic version",
-		}
-	}
-	for index, actual := range applied {
-		expected := available[index]
-		if expected.CreatedAt != actual.CreatedAt {
-			return &CompatibilityError{
-				Kind:      CompatibilityHistoryForked,
-				Message:   "The database migration history is not a prefix of this XyMusic release",
-				Migration: actual.CreatedAt,
-			}
-		}
-		if expected.Hash != actual.Hash {
-			return &CompatibilityError{
-				Kind:      CompatibilityHashMismatch,
-				Message:   fmt.Sprintf("Database migration %d does not match this XyMusic release", actual.CreatedAt),
-				Migration: actual.CreatedAt,
-			}
-		}
-	}
-	return nil
-}
-
-func readAppliedMigrations(ctx context.Context, connection *pgxpool.Conn) ([]AppliedMigration, error) {
+func readAppliedMigrationTimes(ctx context.Context, connection *pgxpool.Conn) (map[int64]struct{}, error) {
 	var relation *string
 	if err := connection.QueryRow(ctx, "select to_regclass('drizzle.__drizzle_migrations')::text").Scan(&relation); err != nil {
 		return nil, fmt.Errorf("inspect migration journal: %w", err)
 	}
 	if relation == nil {
-		return []AppliedMigration{}, nil
+		return map[int64]struct{}{}, nil
 	}
-	rows, err := connection.Query(ctx, `
-		select hash, created_at
-		from drizzle.__drizzle_migrations
-		order by created_at asc, id asc`)
+	rows, err := connection.Query(ctx, "select created_at from drizzle.__drizzle_migrations where created_at is not null")
 	if err != nil {
-		if postgresErrorCode(err) == "42703" {
-			return nil, &CompatibilityError{Kind: CompatibilityHistoryInvalid, Message: "The database migration history is invalid"}
-		}
-		return nil, fmt.Errorf("read migration history: %w", err)
+		return nil, fmt.Errorf("read migration journal: %w", err)
 	}
 	defer rows.Close()
-	result := make([]AppliedMigration, 0)
+	result := make(map[int64]struct{})
 	for rows.Next() {
-		var migration AppliedMigration
-		if err := rows.Scan(&migration.Hash, &migration.CreatedAt); err != nil {
-			return nil, &CompatibilityError{Kind: CompatibilityHistoryInvalid, Message: "The database migration history is invalid"}
+		var createdAt int64
+		if err := rows.Scan(&createdAt); err != nil {
+			return nil, fmt.Errorf("read migration journal entry: %w", err)
 		}
-		if migration.Hash == "" || migration.CreatedAt < 1 {
-			return nil, &CompatibilityError{Kind: CompatibilityHistoryInvalid, Message: "The database migration history is invalid"}
-		}
-		result = append(result, migration)
+		result[createdAt] = struct{}{}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read migration history: %w", err)
+		return nil, fmt.Errorf("read migration journal: %w", err)
 	}
 	return result, nil
 }
@@ -265,8 +179,8 @@ func applyMigration(ctx context.Context, connection *pgxpool.Conn, migration Mig
 		}
 	}
 	if _, err := tx.Exec(ctx,
-		"insert into drizzle.__drizzle_migrations (hash, created_at) values ($1, $2)",
-		migration.Hash, migration.CreatedAt,
+		"insert into drizzle.__drizzle_migrations (created_at) values ($1)",
+		migration.CreatedAt,
 	); err != nil {
 		return fmt.Errorf("record migration %s: %w", migration.Tag, err)
 	}
@@ -274,12 +188,4 @@ func applyMigration(ctx context.Context, connection *pgxpool.Conn, migration Mig
 		return fmt.Errorf("commit migration %s: %w", migration.Tag, err)
 	}
 	return nil
-}
-
-func postgresErrorCode(err error) string {
-	var pgError *pgconn.PgError
-	if errors.As(err, &pgError) {
-		return pgError.Code
-	}
-	return ""
 }

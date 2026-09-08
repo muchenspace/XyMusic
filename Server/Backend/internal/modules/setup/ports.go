@@ -39,7 +39,6 @@ type DatabaseFactory interface {
 type InstallationDatabase interface {
 	Ping(context.Context) error
 	CanCreateInCurrentSchema(context.Context) (bool, error)
-	CheckMigrationCompatibility(context.Context, string) error
 	RunMigrations(context.Context, string) error
 	Inspect(context.Context, string) (InstallationInspection, error)
 	Reset(context.Context) error

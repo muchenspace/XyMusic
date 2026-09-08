@@ -12,7 +12,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"xymusic/server/internal/platform/database"
 	"xymusic/server/internal/shared/apperror"
 )
 
@@ -63,37 +62,7 @@ func databaseInspectionFailure(cause error) error {
 	)
 }
 
-func databaseMigrationCompatibilityFailure(cause error) error {
-	var compatibility *database.CompatibilityError
-	if errors.As(cause, &compatibility) {
-		return newDatabaseFailure(
-			apperror.CodeDatabaseMigrationIncompatible,
-			databaseCompatibilityDetail(compatibility.Kind),
-			cause,
-			nil,
-		)
-	}
-	if classified := classifyKnownDatabaseFailure(cause); classified != nil {
-		return classified
-	}
-	return newDatabaseFailure(
-		apperror.CodeDatabaseMigrationFailed,
-		"检查数据库迁移兼容性时失败，请检查迁移目录和 PostgreSQL 日志。",
-		cause,
-		nil,
-	)
-}
-
 func databaseMigrationFailure(cause error) error {
-	var compatibility *database.CompatibilityError
-	if errors.As(cause, &compatibility) {
-		return newDatabaseFailure(
-			apperror.CodeDatabaseMigrationIncompatible,
-			databaseCompatibilityDetail(compatibility.Kind),
-			cause,
-			nil,
-		)
-	}
 	if classified := classifyKnownDatabaseFailure(cause); classified != nil {
 		return classified
 	}
@@ -271,21 +240,6 @@ func isDatabaseTLSError(cause error) bool {
 		strings.Contains(diagnostic, "server refused tls") ||
 		strings.Contains(diagnostic, "certificate") ||
 		strings.Contains(diagnostic, "x509:")
-}
-
-func databaseCompatibilityDetail(kind database.CompatibilityErrorKind) string {
-	switch kind {
-	case database.CompatibilityNewerSchema:
-		return "当前数据库由更高版本的 XyMusic 迁移，不能使用此版本继续初始化。"
-	case database.CompatibilityHistoryForked:
-		return "数据库迁移历史与当前 XyMusic 版本不是同一条升级链，不能自动迁移。"
-	case database.CompatibilityHashMismatch:
-		return "数据库迁移记录的校验值与当前 XyMusic 版本不一致，不能自动迁移。"
-	case database.CompatibilityHistoryInvalid:
-		return "数据库迁移历史已损坏或格式无效，不能自动迁移。"
-	default:
-		return "数据库迁移历史与当前 XyMusic 版本不兼容，不能自动迁移。"
-	}
 }
 
 func newDatabaseFailure(

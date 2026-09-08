@@ -75,10 +75,6 @@ func (connection *productionInstallationDatabase) CanCreateInCurrentSchema(ctx c
 	return allowed, err
 }
 
-func (connection *productionInstallationDatabase) CheckMigrationCompatibility(ctx context.Context, directory string) error {
-	return database.CheckMigrationCompatibility(ctx, connection.Pool.Pool, directory)
-}
-
 func (connection *productionInstallationDatabase) RunMigrations(ctx context.Context, directory string) error {
 	return database.RunMigrations(ctx, connection.Pool.Pool, directory)
 }

@@ -1,7 +1,6 @@
 package database
 
 import (
-	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,7 +17,7 @@ func TestMigrationsCanBeRead(t *testing.T) {
 	if migrations[0].Tag != "0000_initial" {
 		t.Fatalf("unexpected migration tag: %s", migrations[0].Tag)
 	}
-	if len(migrations[0].SQL) < 2 || len(migrations[0].Hash) != 64 {
+	if len(migrations[0].SQL) < 2 {
 		t.Fatalf("migration parsing is incompatible: %#v", migrations[0])
 	}
 	sql := strings.ToUpper(strings.Join(migrations[0].SQL, "\n"))
@@ -50,43 +49,13 @@ func TestMigrationsCanBeRead(t *testing.T) {
 			t.Fatalf("baseline migration contains forbidden legacy element %q", forbidden)
 		}
 	}
-	if migrations[1].Tag != "0001_remove_tag_scraping_batch_limit" || len(migrations[1].Hash) != 64 {
+	if migrations[1].Tag != "0001_remove_tag_scraping_batch_limit" {
 		t.Fatalf("unexpected tag scraping batch migration: %#v", migrations[1])
 	}
 	batchSQL := strings.ToUpper(strings.Join(migrations[1].SQL, "\n"))
 	if !strings.Contains(batchSQL, "DROP CONSTRAINT IF EXISTS TAG_SCRAPING_JOBS_TOTAL_CHECK") ||
 		!strings.Contains(batchSQL, "CHECK (TOTAL >= 1)") {
 		t.Fatalf("tag scraping batch migration does not remove the upper bound: %s", batchSQL)
-	}
-}
-
-func TestMigrationCompatibilityRequiresExactPrefix(t *testing.T) {
-	available := []Migration{{CreatedAt: 1, Hash: "a"}, {CreatedAt: 2, Hash: "b"}}
-	if err := AssertCompatible(available, []AppliedMigration{{CreatedAt: 1, Hash: "a"}}); err != nil {
-		t.Fatal(err)
-	}
-	assertCompatibilityKind(t,
-		AssertCompatible(available, []AppliedMigration{{CreatedAt: 1, Hash: "changed"}}),
-		CompatibilityHashMismatch,
-	)
-	assertCompatibilityKind(t,
-		AssertCompatible(available, []AppliedMigration{{CreatedAt: 2, Hash: "b"}}),
-		CompatibilityHistoryForked,
-	)
-	assertCompatibilityKind(t,
-		AssertCompatible(available, []AppliedMigration{{CreatedAt: 1, Hash: "a"}, {CreatedAt: 2, Hash: "b"}, {CreatedAt: 3, Hash: "c"}}),
-		CompatibilityNewerSchema,
-	)
-}
-
-func assertCompatibilityKind(t *testing.T, err error, expected CompatibilityErrorKind) {
-	t.Helper()
-	if !IsPermanentMigrationError(err) {
-		t.Fatalf("expected permanent migration error, got %v", err)
-	}
-	var compatibility *CompatibilityError
-	if !errors.As(err, &compatibility) || compatibility.Kind != expected {
-		t.Fatalf("compatibility kind = %q, want %q", compatibility.Kind, expected)
 	}
 }
 

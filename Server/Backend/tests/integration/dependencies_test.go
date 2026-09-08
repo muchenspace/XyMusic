@@ -46,10 +46,6 @@ func TestProductionDependencies(t *testing.T) {
 	}
 	defer pool.Close()
 
-	migrations := filepath.Join(projectRoot(t), "migrations")
-	if err := database.CheckMigrationCompatibility(ctx, pool.Pool, migrations); err != nil {
-		t.Fatalf("PostgreSQL migration compatibility failed: %v", err)
-	}
 	rows, err := pool.Query(ctx, "select password_hash from users limit 10")
 	if err != nil {
 		t.Fatalf("read password hash formats: %v", err)
@@ -159,13 +155,4 @@ func TestGoRuntimeHealthWithProductionDependencies(t *testing.T) {
 	if metricsAfter.Total != metricsBefore+3 || metricsAfter.InFlight != 0 {
 		t.Fatalf("production runtime metrics after probes = %+v, before total=%d", metricsAfter, metricsBefore)
 	}
-}
-
-func projectRoot(t *testing.T) string {
-	t.Helper()
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return root
 }

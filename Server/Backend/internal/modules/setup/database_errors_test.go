@@ -11,7 +11,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"xymusic/server/internal/platform/database"
 	"xymusic/server/internal/shared/apperror"
 )
 
@@ -105,35 +104,6 @@ func TestUnknownDatabaseFailureUsesSafeControlledDetail(t *testing.T) {
 	}
 	if !errors.Is(applicationError, cause) {
 		t.Fatal("unknown connection error did not preserve its cause")
-	}
-}
-
-func TestDatabaseMigrationCompatibilityKindsHaveSpecificDetails(t *testing.T) {
-	tests := []struct {
-		kind   database.CompatibilityErrorKind
-		detail string
-	}{
-		{database.CompatibilityNewerSchema, "当前数据库由更高版本的 XyMusic 迁移，不能使用此版本继续初始化。"},
-		{database.CompatibilityHistoryForked, "数据库迁移历史与当前 XyMusic 版本不是同一条升级链，不能自动迁移。"},
-		{database.CompatibilityHashMismatch, "数据库迁移记录的校验值与当前 XyMusic 版本不一致，不能自动迁移。"},
-		{database.CompatibilityHistoryInvalid, "数据库迁移历史已损坏或格式无效，不能自动迁移。"},
-	}
-	for _, test := range tests {
-		t.Run(string(test.kind), func(t *testing.T) {
-			cause := &database.CompatibilityError{Kind: test.kind, Message: "internal migration diagnostic"}
-			err := databaseMigrationCompatibilityFailure(cause)
-			applicationError, ok := apperror.As(err)
-			if !ok {
-				t.Fatalf("expected application error, got %T", err)
-			}
-			assertDatabaseApplicationError(
-				t,
-				applicationError,
-				apperror.CodeDatabaseMigrationIncompatible,
-				test.detail,
-				nil,
-			)
-		})
 	}
 }
 

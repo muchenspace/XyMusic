@@ -25,7 +25,7 @@ func TestBaselineMigrationDirectoryIsSelfContained(t *testing.T) {
 		t.Fatalf("baseline migration count = %d, want at least 1", len(migrations))
 	}
 	migration := migrations[0]
-	if migration.Tag != "0000_initial" || migration.CreatedAt < 1 || migration.Hash == "" || len(migration.SQL) == 0 {
+	if migration.Tag != "0000_initial" || migration.CreatedAt < 1 || len(migration.SQL) == 0 {
 		t.Fatalf("invalid baseline migration: %+v", migration)
 	}
 	for _, marker := range []string{

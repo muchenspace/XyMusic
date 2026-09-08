@@ -118,7 +118,6 @@ func TestDatabaseProblemCodesHaveStableHTTPContracts(t *testing.T) {
 		{apperror.CodeDatabaseConnectionLimit, http.StatusServiceUnavailable},
 		{apperror.CodeDatabaseConnectionFailed, http.StatusServiceUnavailable},
 		{apperror.CodeDatabaseMigrationFailed, http.StatusInternalServerError},
-		{apperror.CodeDatabaseMigrationIncompatible, http.StatusConflict},
 	}
 	for _, test := range tests {
 		t.Run(string(test.code), func(t *testing.T) {

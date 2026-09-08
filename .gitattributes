@@ -5,7 +5,6 @@
 *.bat text eol=crlf
 *.cmd text eol=crlf
 
-# Migration hashes are calculated from file bytes and must be reproducible.
 /Server/Backend/migrations/*.sql text eol=lf
 /Server/Backend/migrations/meta/*.json text eol=lf
 

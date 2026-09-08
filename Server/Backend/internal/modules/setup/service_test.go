@@ -200,7 +200,7 @@ func TestCompleteRunsProbesMigrationsProvisioningRuntimeAndAtomicConfiguration(t
 	}
 	assertEventOrder(t, events.snapshot(), []string{
 		"listener.check",
-		"database.open", "database.ping", "database.permission", "database.compatibility", "database.inspect", "database.close",
+		"database.open", "database.ping", "database.permission", "database.inspect", "database.close",
 		"storage.open", "storage.ensure", "storage.verify", "storage.inspect", "storage.close",
 		"media.ffmpeg", "media.ffprobe",
 		"store.load",
@@ -847,12 +847,6 @@ func (database *fakeDatabase) Ping(context.Context) error {
 func (database *fakeDatabase) CanCreateInCurrentSchema(context.Context) (bool, error) {
 	database.events.add("database.permission")
 	return true, nil
-}
-
-func (database *fakeDatabase) CheckMigrationCompatibility(_ context.Context, directory string) error {
-	database.events.add("database.compatibility")
-	database.migrationsDirectory = directory
-	return nil
 }
 
 func (database *fakeDatabase) RunMigrations(_ context.Context, directory string) error {

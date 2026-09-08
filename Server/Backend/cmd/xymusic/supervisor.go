@@ -65,13 +65,6 @@ func runSupervisorProcess(
 			return normalizedExitCode(result.exitCode)
 		case result := <-workerDone:
 			worker = nil
-			if result.exitCode == permanentWorkerFailureExitCode {
-				logger.Error("worker stopped after permanent migration failure", "exitCode", result.exitCode)
-				_ = workerstatus.WriteDocument(context.Background(), workerStatusPath, workerstatus.Document{
-					State: "CONFIGURATION_ERROR", UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
-				})
-				continue
-			}
 			restartAttempt++
 			delay := workerRestartDelay(restartAttempt)
 			logger.Warn("worker process will restart", "attempt", restartAttempt, "delay", delay, "exitCode", result.exitCode, "error", result.err)
