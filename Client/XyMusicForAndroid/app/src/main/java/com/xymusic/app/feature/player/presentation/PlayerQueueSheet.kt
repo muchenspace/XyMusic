@@ -348,7 +348,7 @@ private fun QueueItem(
             contentDescription = stringResource(R.string.player_reorder_queue_item),
             modifier =
             Modifier
-                .size(42.dp)
+                .size(48.dp)
                 .semantics { customActions = accessibilityActions }
                 .pointerInput(item.queueItemId, index, lastIndex) {
                     detectDragGesturesAfterLongPress(
@@ -357,7 +357,7 @@ private fun QueueItem(
                     ) { change, amount ->
                         change.consume()
                         dragDistance += amount.y
-                        if (abs(dragDistance) >= 42.dp.toPx()) {
+                        if (abs(dragDistance) >= 48.dp.toPx()) {
                             val direction = if (dragDistance > 0) 1 else -1
                             if ((direction < 0 && index > 0) || (direction > 0 && index < lastIndex)) {
                                 onMove(direction)
@@ -369,7 +369,7 @@ private fun QueueItem(
             tint = PlayerSecondaryContent,
         )
         Box {
-            IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(40.dp)) {
+            IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(48.dp)) {
                 Icon(
                     Icons.Default.MoreVert,
                     contentDescription = stringResource(R.string.common_more_actions),

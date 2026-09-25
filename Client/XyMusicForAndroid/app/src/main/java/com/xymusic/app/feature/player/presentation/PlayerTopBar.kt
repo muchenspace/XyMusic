@@ -42,6 +42,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.xymusic.app.R
 import com.xymusic.app.core.ui.component.MediaArtwork
@@ -59,12 +60,13 @@ internal fun PlayerTopBar(
     sleepTimerRemainingMs: Long?,
     onShowSpeed: () -> Unit,
     onShowSleepTimer: () -> Unit,
+    layoutSpec: PlayerLayoutSpec,
 ) {
     Box(
         modifier =
         Modifier
             .fillMaxWidth()
-            .height(88.dp)
+            .height(layoutSpec.topBarHeight)
             .padding(horizontal = 8.dp)
             .testTag(PlayerTestTags.TopBar),
         contentAlignment = Alignment.Center,
@@ -73,7 +75,7 @@ internal fun PlayerTopBar(
             onClick = onDismiss,
             modifier = Modifier.align(Alignment.CenterStart),
         )
-        PlayerTopBarTrackInfo(item = item, visible = showTrackInfo)
+        PlayerTopBarTrackInfo(item = item, visible = showTrackInfo, artworkSize = layoutSpec.topBarArtworkSize)
         PlayerTopBarActions(
             isFavorite = isFavorite,
             onToggleFavorite = onToggleFavorite,
@@ -82,6 +84,7 @@ internal fun PlayerTopBar(
             sleepTimerRemainingMs = sleepTimerRemainingMs,
             onShowSpeed = onShowSpeed,
             onShowSleepTimer = onShowSleepTimer,
+            spacing = layoutSpec.topBarActionSpacing,
             modifier = Modifier.align(Alignment.CenterEnd),
         )
     }
@@ -91,7 +94,7 @@ internal fun PlayerTopBar(
 private fun PlayerDismissButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     IconButton(
         onClick = onClick,
-        modifier = modifier.size(44.dp),
+        modifier = modifier.size(48.dp),
     ) {
         Icon(
             imageVector = Icons.Default.KeyboardArrowDown,
@@ -103,7 +106,7 @@ private fun PlayerDismissButton(onClick: () -> Unit, modifier: Modifier = Modifi
 }
 
 @Composable
-private fun PlayerTopBarTrackInfo(item: PlayerQueueItem?, visible: Boolean) {
+private fun PlayerTopBarTrackInfo(item: PlayerQueueItem?, visible: Boolean, artworkSize: Dp) {
     if (!visible) return
     if (item == null) {
         Text(
@@ -128,7 +131,7 @@ private fun PlayerTopBarTrackInfo(item: PlayerQueueItem?, visible: Boolean) {
             cacheKey = item.artworkCacheKey,
             contentDescription = null,
             fallbackImageRes = R.drawable.xymusic_compact,
-            modifier = Modifier.size(56.dp),
+            modifier = Modifier.size(artworkSize),
             shape = PlayerTopBarArtworkShape,
         )
         Spacer(modifier = Modifier.width(10.dp))
@@ -159,12 +162,13 @@ private fun PlayerTopBarActions(
     sleepTimerRemainingMs: Long?,
     onShowSpeed: () -> Unit,
     onShowSleepTimer: () -> Unit,
+    spacing: Dp,
     modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     Row(
         modifier = modifier.padding(end = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(spacing),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         PlayerFavoriteButton(isFavorite = isFavorite, onClick = onToggleFavorite)
@@ -203,7 +207,7 @@ private fun PlayerFavoriteButton(isFavorite: Boolean, onClick: () -> Unit) {
         onClick = onClick,
         modifier =
         Modifier
-            .size(42.dp)
+            .size(48.dp)
             .clip(CircleShape)
             .background(PlayerPrimaryContent.copy(alpha = 0.15f))
             .testTag(PlayerTestTags.Favorite),
@@ -226,7 +230,7 @@ private fun PlayerOverflowButton(onClick: () -> Unit) {
         onClick = onClick,
         modifier =
         Modifier
-            .size(42.dp)
+            .size(48.dp)
             .clip(CircleShape)
             .background(PlayerPrimaryContent.copy(alpha = 0.15f)),
     ) {

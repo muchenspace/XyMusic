@@ -32,7 +32,7 @@ internal fun LandscapeTransportControls(
     onNext: () -> Unit,
     modifier: Modifier = Modifier,
     playbackPosition: State<Float>? = null,
-    compact: Boolean = false,
+    layoutSpec: PlayerLayoutSpec,
 ) {
     val interactionPosition =
         if (playbackPosition != null) {
@@ -41,11 +41,11 @@ internal fun LandscapeTransportControls(
             null
         }
     val availability = rememberPlaybackControlAvailability(player, interactionPosition)
-    val controlHeight = if (compact) 52.dp else 60.dp
-    val playButtonSize = if (compact) 52.dp else 60.dp
-    val secondaryIconSize = if (compact) 28.dp else 30.dp
-    val playIconSize = if (compact) 40.dp else 44.dp
-    val bufferingSize = if (compact) 30.dp else 32.dp
+    val controlHeight = layoutSpec.landscapeTransportHeight
+    val playButtonSize = layoutSpec.landscapePlayButtonSize
+    val secondaryIconSize = layoutSpec.landscapeSecondaryIconSize
+    val playIconSize = layoutSpec.landscapePlayIconSize
+    val bufferingSize = layoutSpec.landscapeBufferingSize
     Row(
         modifier =
         modifier

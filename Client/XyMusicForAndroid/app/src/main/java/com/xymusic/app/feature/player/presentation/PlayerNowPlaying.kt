@@ -149,7 +149,7 @@ private fun ArtworkDetails(
                 onClick = onAddToPlaylist,
                 modifier =
                 Modifier
-                    .size(44.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
                     .background(PlayerSubtleContent),
             ) {

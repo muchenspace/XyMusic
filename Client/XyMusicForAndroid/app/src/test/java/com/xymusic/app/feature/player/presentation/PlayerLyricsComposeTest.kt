@@ -60,7 +60,6 @@ class PlayerLyricsComposeTest {
                     LyricsContent(
                         uiState = uiState.value,
                         onSeek = {},
-                        compact = true,
                         centerActiveLine = true,
                     )
                 }
@@ -132,7 +131,6 @@ class PlayerLyricsComposeTest {
                     LyricsContent(
                         uiState = uiState.value,
                         onSeek = {},
-                        compact = false,
                         centerActiveLine = true,
                     )
                 }
@@ -199,7 +197,6 @@ class PlayerLyricsComposeTest {
                     LyricsContent(
                         uiState = uiState,
                         onSeek = {},
-                        compact = false,
                         centerActiveLine = true,
                     )
                 }
@@ -251,7 +248,6 @@ class PlayerLyricsComposeTest {
                     LyricsContent(
                         uiState = uiState.value,
                         onSeek = {},
-                        compact = false,
                         centerActiveLine = true,
                     )
                 }
@@ -314,7 +310,6 @@ class PlayerLyricsComposeTest {
                     LyricsContent(
                         uiState = uiState.value,
                         onSeek = {},
-                        compact = true,
                         centerActiveLine = true,
                         playbackPosition = playbackPosition,
                     )
@@ -371,7 +366,6 @@ class PlayerLyricsComposeTest {
                     LyricsContent(
                         uiState = uiState.value,
                         onSeek = {},
-                        compact = false,
                         centerActiveLine = true,
                     )
                 }
@@ -423,7 +417,6 @@ class PlayerLyricsComposeTest {
                     LyricsContent(
                         uiState = uiState.value,
                         onSeek = {},
-                        compact = true,
                         centerActiveLine = true,
                     )
                 }
@@ -479,7 +472,6 @@ class PlayerLyricsComposeTest {
                         uiState = uiState.value,
                         onSeek = {},
                         playbackPosition = playbackPosition,
-                        compact = false,
                         centerActiveLine = true,
                     )
                 }
@@ -551,7 +543,6 @@ class PlayerLyricsComposeTest {
                                 player = uiState.value.player.copy(positionMs = position),
                             )
                         },
-                        compact = true,
                         centerActiveLine = false,
                     )
                 }
@@ -633,7 +624,6 @@ class PlayerLyricsComposeTest {
                     LyricsContent(
                         uiState = uiState.value,
                         onSeek = { position -> requestedPositionMs = position },
-                        compact = true,
                         centerActiveLine = true,
                     )
                 }
@@ -720,7 +710,6 @@ class PlayerLyricsComposeTest {
                     LyricsContent(
                         uiState = uiState.value,
                         onSeek = {},
-                        compact = true,
                         centerActiveLine = true,
                     )
                 }
@@ -780,7 +769,6 @@ class PlayerLyricsComposeTest {
                                 player = uiState.value.player.copy(positionMs = position),
                             )
                         },
-                        compact = true,
                     )
                 }
             }
@@ -828,7 +816,6 @@ class PlayerLyricsComposeTest {
                     LyricsContent(
                         uiState = uiState.value,
                         onSeek = {},
-                        compact = true,
                     )
                 }
             }
@@ -869,7 +856,6 @@ class PlayerLyricsComposeTest {
                         uiState = uiState,
                         onSeek = {},
                         playbackPosition = playbackPosition,
-                        compact = true,
                     )
                 }
             }

@@ -46,7 +46,7 @@ internal fun PlayerPlaybackModeButton(
         Row(
             modifier =
             modifier
-                .height(42.dp)
+                .height(48.dp)
                 .widthIn(min = 112.dp)
                 .clip(RoundedCornerShape(21.dp))
                 .background(PlayerSubtleContent)
@@ -79,7 +79,7 @@ internal fun PlayerPlaybackModeButton(
             },
             modifier =
             modifier
-                .size(44.dp)
+                .size(48.dp)
                 .semantics {
                     contentDescription = actionDescription
                     stateDescription = modeDescription

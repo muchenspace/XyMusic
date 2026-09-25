@@ -100,7 +100,8 @@ fun PlayerScreen(
         ) {
             onBack()
         }
-        val isLandscape = maxWidth > maxHeight
+        val windowLayoutSpec = playerLayoutSpec(maxWidth, maxHeight)
+        val isLandscape = windowLayoutSpec.usesLandscapePlayerLayout
         // Landscape immersion (status bar hidden) is applied app-wide by
         // AppLandscapeSystemBarsEffect at the root. Keeping it here too would
         // fight the root effect on dispose (it re-shows the bar while the root
@@ -216,25 +217,43 @@ fun PlayerScreen(
                         .fillMaxSize()
                         .windowInsetsPadding(WindowInsets.systemBars),
                 ) {
-                    PlayerTopBar(
-                        item = current,
-                        showTrackInfo = portraitPagerState.currentPage != PlayerContentTab.Artwork.ordinal,
-                        isFavorite = isFavorite,
-                        onDismiss = onBack,
-                        onToggleFavorite = onToggleFavorite,
-                        onAddToPlaylist = onAddToPlaylist,
-                        playbackSpeed = uiState.player.playbackSpeed,
-                        sleepTimerRemainingMs = uiState.sleepTimerRemainingMs,
-                        onShowSpeed = { showSpeedDialog = true },
-                        onShowSleepTimer = { showSleepTimerDialog = true },
-                    )
                     if (current == null) {
+                        PlayerTopBar(
+                            item = null,
+                            showTrackInfo = false,
+                            isFavorite = isFavorite,
+                            onDismiss = onBack,
+                            onToggleFavorite = onToggleFavorite,
+                            onAddToPlaylist = onAddToPlaylist,
+                            playbackSpeed = uiState.player.playbackSpeed,
+                            sleepTimerRemainingMs = uiState.sleepTimerRemainingMs,
+                            onShowSpeed = { showSpeedDialog = true },
+                            onShowSleepTimer = { showSleepTimerDialog = true },
+                            layoutSpec = windowLayoutSpec,
+                        )
                         EmptyPlayer(modifier = Modifier.weight(1f))
                     } else {
                         BoxWithConstraints(modifier = Modifier.weight(1f)) {
-                            val wideLayout = maxWidth >= 700.dp || maxWidth > maxHeight
-                            val compactControls = wideLayout || maxHeight < 560.dp
+                            val windowSpec = playerLayoutSpec(maxWidth, maxHeight)
+                            val contentSpec = playerLayoutSpec(
+                                width = maxWidth,
+                                height = (maxHeight - windowSpec.topBarHeight).coerceAtLeast(0.dp),
+                            )
+                            val wideLayout = contentSpec.usesWideArtworkLayout
                             Column(modifier = Modifier.fillMaxSize()) {
+                                PlayerTopBar(
+                                    item = current,
+                                    showTrackInfo = portraitPagerState.currentPage != PlayerContentTab.Artwork.ordinal,
+                                    isFavorite = isFavorite,
+                                    onDismiss = onBack,
+                                    onToggleFavorite = onToggleFavorite,
+                                    onAddToPlaylist = onAddToPlaylist,
+                                    playbackSpeed = uiState.player.playbackSpeed,
+                                    sleepTimerRemainingMs = uiState.sleepTimerRemainingMs,
+                                    onShowSpeed = { showSpeedDialog = true },
+                                    onShowSleepTimer = { showSleepTimerDialog = true },
+                                    layoutSpec = windowSpec,
+                                )
                                 HorizontalPager(
                                     state = portraitPagerState,
                                     modifier =
@@ -290,7 +309,7 @@ fun PlayerScreen(
                                     onTogglePlayback = onTogglePlayback,
                                     onPrevious = onPrevious,
                                     onNext = onNext,
-                                    compact = compactControls,
+                                    layoutSpec = contentSpec,
                                 )
                             }
                         }

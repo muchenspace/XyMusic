@@ -41,7 +41,7 @@ internal fun PlaybackControls(
     onTogglePlayback: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    compact: Boolean = false,
+    layoutSpec: PlayerLayoutSpec,
     playbackPosition: State<Float>? = null,
 ) {
     val interactionPosition =
@@ -51,27 +51,27 @@ internal fun PlaybackControls(
             null
         }
     val availability = rememberPlaybackControlAvailability(uiState.player, interactionPosition)
-    val horizontalPadding = if (compact) 22.dp else 30.dp
-    val skipSize = if (compact) 58.dp else 68.dp
-    val playSize = if (compact) 70.dp else 82.dp
+    val horizontalPadding = layoutSpec.controlsHorizontalPadding
+    val skipSize = layoutSpec.skipButtonSize
+    val playSize = layoutSpec.playButtonSize
 
     Column(
         modifier =
         Modifier
             .fillMaxWidth()
             .padding(horizontal = horizontalPadding)
-            .padding(top = 8.dp, bottom = if (compact) 4.dp else 10.dp),
+            .padding(top = layoutSpec.controlsTopPadding, bottom = layoutSpec.controlsBottomPadding),
     ) {
         PlaybackTimeline(
             player = uiState.player,
             draggedPosition = draggedPosition,
             onPositionChange = onPositionChange,
             onPositionChangeFinished = onPositionChangeFinished,
-            compact = compact,
+            compact = layoutSpec.compactControls,
             playbackPosition = playbackPosition,
             interactionPosition = interactionPosition,
         )
-        Spacer(modifier = Modifier.height(if (compact) 8.dp else 14.dp))
+        Spacer(modifier = Modifier.height(layoutSpec.controlsSectionSpacing))
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -93,7 +93,7 @@ internal fun PlaybackControls(
                     Icon(
                         imageVector = Icons.Default.SkipPrevious,
                         contentDescription = stringResource(R.string.player_previous),
-                        modifier = Modifier.size(if (compact) 35.dp else 42.dp),
+                        modifier = Modifier.size(layoutSpec.skipIconSize),
                     )
                 }
             }
@@ -108,7 +108,7 @@ internal fun PlaybackControls(
                 ) {
                     if (uiState.player.playbackState == PlaybackState.BUFFERING) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(if (compact) 32.dp else 38.dp),
+                            modifier = Modifier.size(layoutSpec.bufferingSize),
                             color = PlayerPrimaryContent,
                             strokeWidth = 3.dp,
                         )
@@ -119,7 +119,7 @@ internal fun PlaybackControls(
                             contentDescription = stringResource(
                                 if (uiState.player.isPlaying) R.string.player_pause else R.string.player_play,
                             ),
-                            modifier = Modifier.size(if (compact) 46.dp else 56.dp),
+                            modifier = Modifier.size(layoutSpec.playIconSize),
                             tint = PlayerPrimaryContent,
                         )
                     }
@@ -142,7 +142,7 @@ internal fun PlaybackControls(
                     Icon(
                         imageVector = Icons.Default.SkipNext,
                         contentDescription = stringResource(R.string.player_next),
-                        modifier = Modifier.size(if (compact) 35.dp else 42.dp),
+                        modifier = Modifier.size(layoutSpec.skipIconSize),
                     )
                 }
             }

@@ -17,9 +17,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -63,7 +65,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xymusic.app.R
@@ -79,7 +80,6 @@ internal fun LyricsContent(
     uiState: PlayerUiState,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
-    compact: Boolean = false,
     centerActiveLine: Boolean = false,
     playbackPosition: State<Float>? = null,
 ) {
@@ -126,16 +126,6 @@ internal fun LyricsContent(
         uiState.player.currentItem?.trackId,
         uiState.player.currentQueueItemId,
     ) { mutableStateOf(true) }
-    val lyricLineStyle = lyricLineStyle(compact)
-    val lineTextStyle =
-        LocalTextStyle.current.merge(
-            TextStyle(
-                fontSize = lyricLineStyle.fontSize,
-                lineHeight = lyricLineStyle.lineHeight,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.sp,
-            ),
-        )
     val wordTimed = uiState.lyricsTiming == LyricsTiming.WORD
     val emphasisPhase = remember(
         uiState.player.currentQueueItemId,
@@ -180,6 +170,16 @@ internal fun LyricsContent(
         if (pendingLyricSeek == request) pendingLyricSeek = null
     }
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val lyricMetrics = playerLyricMetrics(maxWidth, maxHeight)
+        val lineTextStyle =
+            LocalTextStyle.current.merge(
+                TextStyle(
+                    fontSize = lyricMetrics.fontSizeSp.sp,
+                    lineHeight = lyricMetrics.lineHeightSp.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.sp,
+                ),
+            )
         LaunchedEffect(
             uiState.synchronizedLyrics,
             uiState.player.currentItem?.trackId,
@@ -468,20 +468,22 @@ internal fun LyricsContent(
             LazyColumn(
                 state = listState,
                 modifier = Modifier
-                    .fillMaxSize()
+                    .widthIn(max = lyricMetrics.maxContentWidth)
+                    .fillMaxWidth()
+                    .fillMaxHeight()
                     .clipToBounds()
+                    .align(Alignment.Center)
                     .testTag(PlayerTestTags.LyricsList),
                 contentPadding =
                 PaddingValues(
-                    horizontal = if (compact) 8.dp else 16.dp,
+                    horizontal = lyricMetrics.horizontalPadding,
                     vertical =
                     when {
                         centerActiveLine -> maxHeight / 2
-                        compact -> 24.dp
-                        else -> 46.dp
+                        else -> lyricMetrics.verticalPadding
                     },
                 ),
-                verticalArrangement = Arrangement.spacedBy(if (compact) 14.dp else 20.dp),
+                verticalArrangement = Arrangement.spacedBy(lyricMetrics.lineSpacing),
             ) {
                 itemsIndexed(
                     items = uiState.lyrics,
@@ -591,7 +593,7 @@ internal fun LyricsContent(
                 modifier =
                 Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(if (compact) 8.dp else 12.dp),
+                    .padding(lyricMetrics.resumeFollowButtonPadding),
                 colors =
                 ButtonDefaults.filledTonalButtonColors(
                     containerColor = PlayerPrimaryContent.copy(alpha = 0.16f),
@@ -862,18 +864,6 @@ private suspend fun LazyListState.correctLyricLineAlignment(
     }
 }
 
-private fun lyricLineStyle(compact: Boolean): LyricLineStyle = if (compact) {
-    LyricLineStyle(
-        fontSize = 30.sp,
-        lineHeight = 42.sp,
-    )
-} else {
-    LyricLineStyle(
-        fontSize = 36.sp,
-        lineHeight = 50.sp,
-    )
-}
-
 /** Returns only the target and preserved interruption weights; skipped lines remain dark. */
 internal fun lyricLineTransitionEmphasis(
     emphasisPhase: Float,
@@ -1035,8 +1025,6 @@ private class LyricLineDrawCache {
         }
     }
 }
-
-private data class LyricLineStyle(val fontSize: TextUnit, val lineHeight: TextUnit)
 
 private object LyricAnimationConstants {
     const val TRANSITION_MIN_DURATION_MILLIS = 300

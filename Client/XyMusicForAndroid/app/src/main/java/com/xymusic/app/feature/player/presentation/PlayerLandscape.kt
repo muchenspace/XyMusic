@@ -48,9 +48,9 @@ internal fun LandscapeNowPlayingContent(
                     .then(leftPaneModifier),
                 contentAlignment = Alignment.CenterStart,
             ) {
-                val compactLayout = maxHeight < 360.dp
-                val controlsHeight = if (compactLayout) 52.dp else 60.dp
-                val sectionSpacing = if (compactLayout) 8.dp else 10.dp
+                val layoutSpec = playerLayoutSpec(maxWidth, maxHeight)
+                val controlsHeight = layoutSpec.landscapeTransportHeight
+                val sectionSpacing = layoutSpec.landscapeSectionSpacing
                 val availableArtworkHeight =
                     (maxHeight - controlsHeight - sectionSpacing)
                         .coerceAtLeast(0.dp)
@@ -70,7 +70,7 @@ internal fun LandscapeNowPlayingContent(
                         onTogglePlayback = onTogglePlayback,
                         onPrevious = onPrevious,
                         onNext = onNext,
-                        compact = compactLayout,
+                        layoutSpec = layoutSpec,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -86,7 +86,6 @@ internal fun LandscapeNowPlayingContent(
                     uiState = uiState,
                     onSeek = onSeek,
                     playbackPosition = playbackPosition,
-                    compact = true,
                     centerActiveLine = true,
                     modifier = Modifier.fillMaxSize(),
                 )
