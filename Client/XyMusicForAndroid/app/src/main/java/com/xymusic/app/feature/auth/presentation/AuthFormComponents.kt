@@ -1,5 +1,6 @@
 package com.xymusic.app.feature.auth.presentation
 
+import android.content.res.Configuration
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -48,6 +49,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -58,8 +60,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.xymusic.app.R
+import com.xymusic.app.core.ui.layout.WideLandscapeMinWidth
 import com.xymusic.app.core.ui.layout.isCompactLandscape
-import com.xymusic.app.core.ui.layout.isWideLandscape
 import com.xymusic.app.ui.theme.spacing
 
 internal val LocalAuthBrandPainter = staticCompositionLocalOf<Painter?> { null }
@@ -74,14 +76,18 @@ internal fun AuthFormScaffold(
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val brandPainter = LocalAuthBrandPainter.current ?: painterResource(R.drawable.xymusic_compact)
+    val configuration = LocalConfiguration.current
     BoxWithConstraints(
         modifier =
         modifier
             .fillMaxSize()
-            .background(colorScheme.background)
-            .imePadding(),
+            .background(colorScheme.background),
     ) {
-        val wideLandscape = isWideLandscape(maxWidth, maxHeight)
+        // Use the stable window configuration for this structural decision. IME padding below
+        // reduces the form's available area without switching and recreating the focused field.
+        val wideLandscape =
+            configuration.orientation == Configuration.ORIENTATION_LANDSCAPE &&
+                configuration.screenWidthDp.dp >= WideLandscapeMinWidth
         val compactLandscape = isCompactLandscape(maxWidth, maxHeight)
         if (wideLandscape) {
             if (onBack != null) {
@@ -103,6 +109,7 @@ internal fun AuthFormScaffold(
                 modifier =
                 Modifier
                     .align(Alignment.Center)
+                    .imePadding()
                     .widthIn(max = 960.dp)
                     .fillMaxWidth()
                     .fillMaxHeight()
@@ -156,6 +163,7 @@ internal fun AuthFormScaffold(
                 modifier =
                 Modifier
                     .fillMaxSize()
+                    .imePadding()
                     .verticalScroll(rememberScrollState()),
             ) {
                 if (onBack != null) {

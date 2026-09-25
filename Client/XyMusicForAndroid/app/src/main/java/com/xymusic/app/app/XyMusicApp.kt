@@ -1,6 +1,6 @@
 package com.xymusic.app.app
 
-import android.view.ViewTreeObserver
+import android.content.res.Configuration
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -10,20 +10,21 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.xymusic.app.R
 import com.xymusic.app.app.navigation.AuthNavigation
 import com.xymusic.app.app.navigation.MainNavigation
@@ -126,35 +127,27 @@ private fun ServerSetupContent(onSave: (ServerEndpoint) -> Unit) {
 private fun AppLandscapeSystemBarsEffect() {
     val view = LocalView.current
     val activity = LocalContext.current as? androidx.activity.ComponentActivity
+    val orientation = LocalConfiguration.current.orientation
     DisposableEffect(view, activity) {
         val window = activity?.window
         val controller = window?.let { WindowCompat.getInsetsController(it, view) }
         val previousBehavior = controller?.systemBarsBehavior
-        val makeController = controller
-        fun applyForCurrentLayout() {
-            // Landscape = width greater than height. Ignore the configuration
-            // value; window size is the source of truth for layout orientation.
-            if (view.width > view.height) {
-                makeController?.systemBarsBehavior =
-                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                makeController?.hide(WindowInsetsCompat.Type.statusBars())
-            } else {
-                makeController?.show(WindowInsetsCompat.Type.statusBars())
-            }
-        }
-        applyForCurrentLayout()
-        val listener = object : ViewTreeObserver.OnGlobalLayoutListener {
-            override fun onGlobalLayout() {
-                applyForCurrentLayout()
-            }
-        }
-        view.viewTreeObserver.addOnGlobalLayoutListener(listener)
         onDispose {
-            view.viewTreeObserver.removeOnGlobalLayoutListener(listener)
-            makeController?.show(WindowInsetsCompat.Type.statusBars())
+            controller?.show(WindowInsetsCompat.Type.statusBars())
             if (previousBehavior != null) {
-                makeController?.systemBarsBehavior = previousBehavior
+                controller.systemBarsBehavior = previousBehavior
             }
+        }
+    }
+    LaunchedEffect(view, activity, orientation) {
+        val window = activity?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+        if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            controller?.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller?.hide(WindowInsetsCompat.Type.statusBars())
+        } else {
+            controller?.show(WindowInsetsCompat.Type.statusBars())
         }
     }
 }

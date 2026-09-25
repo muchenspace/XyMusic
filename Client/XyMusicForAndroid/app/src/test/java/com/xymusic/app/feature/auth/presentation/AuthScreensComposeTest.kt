@@ -1,9 +1,16 @@
 package com.xymusic.app.feature.auth.presentation
 
 import android.app.Application
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -11,6 +18,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import com.xymusic.app.R
@@ -236,6 +244,27 @@ class AuthScreensComposeTest {
         assertThat(brandBounds.right).isLessThan(formBounds.left)
         composeRule.onNodeWithTag(AuthTestTags.ConfirmPassword).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag(AuthTestTags.Submit).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    @Config(qualifiers = "w800dp-h1000dp-port")
+    fun portraitTabletKeepsAuthLayoutWhenImeShrinksAvailableHeight() {
+        var imeVisible by mutableStateOf(false)
+        composeRule.setAuthContent {
+            SignInScreen(
+                uiState = AuthUiState(),
+                onBack = {},
+                onSubmit = { _, _ -> },
+                onFieldChanged = {},
+                modifier = if (imeVisible) Modifier.height(300.dp) else Modifier.fillMaxSize(),
+            )
+        }
+
+        assertThat(composeRule.onAllNodesWithTag(AuthTestTags.FormBrand).fetchSemanticsNodes()).isEmpty()
+        composeRule.runOnIdle { imeVisible = true }
+
+        assertThat(composeRule.onAllNodesWithTag(AuthTestTags.FormBrand).fetchSemanticsNodes()).isEmpty()
+        assertThat(composeRule.onAllNodesWithTag(AuthTestTags.Username).fetchSemanticsNodes()).hasSize(1)
     }
 
     private fun androidx.compose.ui.test.junit4.ComposeContentTestRule.setAuthContent(
