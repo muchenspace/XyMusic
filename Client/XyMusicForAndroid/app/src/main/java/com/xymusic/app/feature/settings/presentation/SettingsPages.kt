@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.Cached
+import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.MaterialTheme
@@ -24,6 +25,7 @@ internal data class SettingsActions(
     val onEditProfile: () -> Unit,
     val onAvatarClick: () -> Unit,
     val onEditServer: () -> Unit,
+    val onEditDns: () -> Unit = {},
     val onReset: () -> Unit,
     val onLogoutAll: () -> Unit,
     val onLogout: () -> Unit,
@@ -47,7 +49,7 @@ internal fun SettingsPageContent(
             ProfileSettingsPage(uiState, actions, modifier, showHeading, compact)
 
         SettingsPage.Server ->
-            ServerSettingsPage(serverEndpoint, actions, modifier, showHeading, compact)
+            ServerSettingsPage(serverEndpoint, uiState, actions, modifier, showHeading, compact)
 
         SettingsPage.Appearance ->
             AppearanceSettingsPage(
@@ -90,6 +92,7 @@ private fun ProfileSettingsPage(
 @Composable
 private fun ServerSettingsPage(
     serverEndpoint: ServerEndpoint,
+    uiState: SettingsUiState,
     actions: SettingsActions,
     modifier: Modifier,
     showHeading: Boolean,
@@ -101,8 +104,27 @@ private fun ServerSettingsPage(
                 icon = Icons.Outlined.Wifi,
                 title = stringResource(R.string.settings_server_endpoint),
                 summary = serverEndpoint.displayValue,
-                position = SettingsRowPosition.Single,
+                position = SettingsRowPosition.First,
                 onClick = actions.onEditServer,
+            )
+        }
+        item(key = "dns-settings") {
+            val dns = uiState.settings.dnsSettings
+            val summaryText = if (dns.customDnsEnabled) {
+                if (dns.dohEnabled) {
+                    "DoH (${dns.dohUrl})"
+                } else {
+                    "自定义 DNS (${dns.dnsServer})"
+                }
+            } else {
+                "系统默认"
+            }
+            SettingsActionItem(
+                icon = Icons.Outlined.Dns,
+                title = stringResource(R.string.dns_settings_title),
+                summary = summaryText,
+                position = SettingsRowPosition.Last,
+                onClick = actions.onEditDns,
             )
         }
     }

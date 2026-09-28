@@ -20,7 +20,9 @@ import com.xymusic.app.data.network.SessionRequestContextCallFactory
 import com.xymusic.app.data.network.SessionRequestContextInterceptor
 import com.xymusic.app.data.network.SessionRequestContextValidationInterceptor
 import com.xymusic.app.data.network.auth.RefreshingAuthenticator
+import com.xymusic.app.data.network.dns.AppDns
 import com.xymusic.app.domain.server.ServerConfigRepository
+import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.feature.auth.data.remote.PublicAuthApi
 import com.xymusic.app.feature.auth.data.remote.SessionAuthApi
 import com.xymusic.app.feature.catalog.data.remote.CatalogApi
@@ -38,6 +40,7 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 import kotlinx.serialization.json.Json
 import okhttp3.Call
+import okhttp3.Dns
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -80,6 +83,11 @@ object NetworkModule {
 
     @Provides
     @Singleton
+    fun provideAppDns(appSettingsRepository: AppSettingsRepository): AppDns =
+        AppDns(appSettingsRepository)
+
+    @Provides
+    @Singleton
     @AuthHttpClient
     fun provideAuthHttpClient(
         serverEndpointInterceptor: ServerEndpointInterceptor,
@@ -87,7 +95,8 @@ object NetworkModule {
         metadataInterceptor: ClientMetadataInterceptor,
         removeAuthorizationInterceptor: RemoveAuthorizationInterceptor,
         loggingInterceptor: SafeNetworkLoggingInterceptor,
-    ): OkHttpClient = baseClientBuilder()
+        dns: AppDns,
+    ): OkHttpClient = baseClientBuilder(dns)
         .addInterceptor(serverEndpointInterceptor)
         .addInterceptor(serverResourceUrlInterceptor)
         .addInterceptor(metadataInterceptor)
@@ -109,7 +118,8 @@ object NetworkModule {
         sessionRequestContextValidationInterceptor: SessionRequestContextValidationInterceptor,
         loggingInterceptor: SafeNetworkLoggingInterceptor,
         authenticator: RefreshingAuthenticator,
-    ): OkHttpClient = baseClientBuilder()
+        dns: AppDns,
+    ): OkHttpClient = baseClientBuilder(dns)
         .addInterceptor(sessionRequestContextInterceptor)
         .addInterceptor(serverEndpointInterceptor)
         .addInterceptor(serverResourceUrlInterceptor)
@@ -132,8 +142,11 @@ object NetworkModule {
     @Provides
     @Singleton
     @MediaHttpClient
-    fun provideMediaHttpClient(removeAuthorizationInterceptor: RemoveAuthorizationInterceptor): OkHttpClient =
-        baseClientBuilder()
+    fun provideMediaHttpClient(
+        removeAuthorizationInterceptor: RemoveAuthorizationInterceptor,
+        dns: AppDns? = null,
+    ): OkHttpClient =
+        baseClientBuilder(dns)
             .addInterceptor(removeAuthorizationInterceptor)
             .readTimeout(MEDIA_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .callTimeout(0, TimeUnit.SECONDS)
@@ -210,8 +223,9 @@ object NetworkModule {
         .addConverterFactory(json.asConverterFactory(JSON_MEDIA_TYPE))
         .build()
 
-    private fun baseClientBuilder(): OkHttpClient.Builder = OkHttpClient
+    private fun baseClientBuilder(dns: Dns? = null): OkHttpClient.Builder = OkHttpClient
         .Builder()
+        .apply { if (dns != null) dns(dns) }
         .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .readTimeout(API_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .writeTimeout(WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS)

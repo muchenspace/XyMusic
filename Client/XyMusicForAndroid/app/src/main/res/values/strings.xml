@@ -308,4 +308,24 @@
     <string name="library_favorite">收藏</string>
     <string name="playback_notification_channel_name">音乐播放控制</string>
     <string name="playback_notification_channel_description">显示当前正在播放的音乐及播放控制通知</string>
+
+    <!-- DNS Settings -->
+    <string name="dns_settings_title">网络与 DNS 设置</string>
+    <string name="dns_settings_custom_dns">自定义 DNS</string>
+    <string name="dns_settings_custom_dns_summary">启用后优先通过指定的 DNS 服务器解析域名</string>
+    <string name="dns_settings_server_label">DNS 服务器</string>
+    <string name="dns_settings_server_placeholder">例如 223.5.5.5</string>
+    <string name="dns_settings_server_supporting">默认使用阿里云公共 DNS（223.5.5.5）</string>
+    <string name="dns_settings_doh">DNS over HTTPS (DoH)</string>
+    <string name="dns_settings_doh_summary">通过加密 HTTPS 协议解析域名，防止 DNS 劫持和嗅探</string>
+    <string name="dns_settings_doh_url_label">DoH 服务器地址</string>
+    <string name="dns_settings_doh_url_placeholder">例如 https://dns.alidns.com/dns-query</string>
+    <string name="dns_settings_doh_url_supporting">默认使用阿里云 DoH（https://dns.alidns.com/dns-query）</string>
+    <string name="dns_settings_disable_cache">禁用 DNS 缓存</string>
+    <string name="dns_settings_disable_cache_summary">开启后禁用客户端 DNS 缓存，每次网络请求均实时解析</string>
+    <string name="dns_settings_reset">恢复默认</string>
+    <string name="dns_settings_saved">DNS 设置已保存</string>
+    <string name="dns_settings_save_failed">保存 DNS 设置失败</string>
+    <string name="dns_settings_error_invalid_dns">请输入有效的 IPv4 或 IPv6 DNS 服务器地址</string>
+    <string name="dns_settings_error_invalid_doh">DoH 地址必须是以 https:// 开头的有效网址</string>
 </resources>

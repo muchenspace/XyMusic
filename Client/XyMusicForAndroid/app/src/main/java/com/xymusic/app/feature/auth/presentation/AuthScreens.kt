@@ -18,9 +18,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Login
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -55,6 +57,7 @@ internal object AuthTestTags {
     const val SwitchToRegister = "auth_switch_to_register"
     const val FormBrand = "auth_form_brand"
     const val FormFields = "auth_form_fields"
+    const val Settings = "auth_settings"
 }
 
 @Composable
@@ -64,6 +67,7 @@ fun AuthEntryScreen(
     modifier: Modifier = Modifier,
     serverAddress: String? = null,
     onEditServer: () -> Unit = {},
+    onSettingsClick: (() -> Unit)? = null,
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val brandPainter = LocalAuthBrandPainter.current ?: painterResource(R.drawable.xymusic_compact)
@@ -73,6 +77,21 @@ fun AuthEntryScreen(
             .fillMaxSize()
             .background(colorScheme.background),
     ) {
+        if (onSettingsClick != null) {
+            IconButton(
+                onClick = onSettingsClick,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(MaterialTheme.spacing.small)
+                    .testTag(AuthTestTags.Settings),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = stringResource(R.string.dns_settings_title),
+                    tint = colorScheme.onSurface,
+                )
+            }
+        }
         val wideLandscape = isWideLandscape(maxWidth, maxHeight)
         val compactLandscape = isCompactLandscape(maxWidth, maxHeight)
         if (wideLandscape) {

@@ -5,6 +5,7 @@ data class AppSettings(
     val dynamicColorEnabled: Boolean = false,
     val mobileDataPolicy: MobileDataPolicy = MobileDataPolicy.ALLOW_STREAMING,
     val cacheLimitMiB: Int = 512,
+    val dnsSettings: DnsSettings = DnsSettings(),
 ) {
     init {
         require(cacheLimitMiB in 128..4_096) { "cacheLimitMiB must be between 128 and 4096" }

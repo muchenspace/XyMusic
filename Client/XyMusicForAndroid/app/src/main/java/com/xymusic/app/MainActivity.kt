@@ -73,6 +73,7 @@ class MainActivity : ComponentActivity() {
                     effects = viewModel.effects,
                     onDynamicColorChanged = viewModel::setDynamicColorEnabled,
                     onServerEndpointChanged = viewModel::setServerEndpoint,
+                    onDnsSettingsChanged = viewModel::updateDnsSettings,
                 )
             }
         }

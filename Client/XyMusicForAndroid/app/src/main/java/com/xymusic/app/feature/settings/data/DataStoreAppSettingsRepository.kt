@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.xymusic.app.domain.settings.AppSettings
 import com.xymusic.app.domain.settings.AppSettingsRepository
+import com.xymusic.app.domain.settings.DnsSettings
 import com.xymusic.app.domain.settings.MobileDataPolicy
 import com.xymusic.app.domain.settings.ThemePreference
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -53,6 +54,11 @@ constructor(@ApplicationContext context: Context) :
             values[Keys.DYNAMIC_COLOR_ENABLED] = settings.dynamicColorEnabled
             values[Keys.MOBILE_DATA_POLICY] = settings.mobileDataPolicy.name
             values[Keys.CACHE_LIMIT_MIB] = settings.cacheLimitMiB
+            values[Keys.CUSTOM_DNS_ENABLED] = settings.dnsSettings.customDnsEnabled
+            values[Keys.DNS_SERVER] = settings.dnsSettings.dnsServer
+            values[Keys.DOH_ENABLED] = settings.dnsSettings.dohEnabled
+            values[Keys.DOH_URL] = settings.dnsSettings.dohUrl
+            values[Keys.DISABLE_DNS_CACHE] = settings.dnsSettings.disableDnsCache
         }
     }
 
@@ -72,6 +78,13 @@ constructor(@ApplicationContext context: Context) :
             MIN_CACHE_LIMIT_MIB,
             MAX_CACHE_LIMIT_MIB,
         ),
+        dnsSettings = DnsSettings(
+            customDnsEnabled = values[Keys.CUSTOM_DNS_ENABLED] ?: true,
+            dnsServer = values[Keys.DNS_SERVER] ?: DnsSettings.DEFAULT_DNS_SERVER,
+            dohEnabled = values[Keys.DOH_ENABLED] ?: true,
+            dohUrl = values[Keys.DOH_URL] ?: DnsSettings.DEFAULT_DOH_URL,
+            disableDnsCache = values[Keys.DISABLE_DNS_CACHE] ?: false,
+        ),
     )
 
     private inline fun <reified T : Enum<T>> String?.enumOrDefault(default: T): T =
@@ -82,6 +95,11 @@ constructor(@ApplicationContext context: Context) :
         val DYNAMIC_COLOR_ENABLED = booleanPreferencesKey("dynamic_color_enabled")
         val MOBILE_DATA_POLICY = stringPreferencesKey("mobile_data_policy")
         val CACHE_LIMIT_MIB = intPreferencesKey("cache_limit_mib")
+        val CUSTOM_DNS_ENABLED = booleanPreferencesKey("custom_dns_enabled")
+        val DNS_SERVER = stringPreferencesKey("dns_server")
+        val DOH_ENABLED = booleanPreferencesKey("doh_enabled")
+        val DOH_URL = stringPreferencesKey("doh_url")
+        val DISABLE_DNS_CACHE = booleanPreferencesKey("disable_dns_cache")
     }
 
     private companion object {

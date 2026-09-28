@@ -59,6 +59,8 @@ private data class SettingsDialogState(
     val profile: UserProfile?,
     val editServer: Boolean,
     val serverEndpoint: ServerEndpoint,
+    val editDns: Boolean,
+    val dnsSettings: com.xymusic.app.domain.settings.DnsSettings,
     val confirmReset: Boolean,
     val confirmLogout: Boolean,
     val confirmLogoutAll: Boolean,
@@ -69,6 +71,8 @@ private data class SettingsDialogActions(
     val onSaveProfile: (String, String?) -> Unit,
     val onDismissServer: () -> Unit,
     val onSaveServer: (ServerEndpoint) -> Unit,
+    val onDismissDns: () -> Unit,
+    val onSaveDns: (com.xymusic.app.domain.settings.DnsSettings) -> Unit,
     val onDismissReset: () -> Unit,
     val onConfirmReset: () -> Unit,
     val onDismissLogout: () -> Unit,
@@ -98,6 +102,7 @@ fun SettingsScreen(
     var confirmLogout by remember { mutableStateOf(false) }
     var confirmLogoutAll by remember { mutableStateOf(false) }
     var editServer by remember { mutableStateOf(false) }
+    var editDns by remember { mutableStateOf(false) }
     val avatarPicker =
         rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
             uri?.let { selectedUri ->
@@ -122,6 +127,8 @@ fun SettingsScreen(
             profile = uiState.profile,
             editServer = editServer,
             serverEndpoint = serverEndpoint,
+            editDns = editDns,
+            dnsSettings = uiState.settings.dnsSettings,
             confirmReset = confirmReset,
             confirmLogout = confirmLogout,
             confirmLogoutAll = confirmLogoutAll,
@@ -137,6 +144,11 @@ fun SettingsScreen(
             onSaveServer = { endpoint ->
                 editServer = false
                 if (endpoint != serverEndpoint) onServerEndpointChanged(endpoint)
+            },
+            onDismissDns = { editDns = false },
+            onSaveDns = { updatedDns ->
+                editDns = false
+                viewModel.updateDnsSettings(updatedDns)
             },
             onDismissReset = { confirmReset = false },
             onConfirmReset = {
@@ -177,6 +189,7 @@ fun SettingsScreen(
                     )
                 },
                 onEditServer = { editServer = true },
+                onEditDns = { editDns = true },
                 onReset = { confirmReset = true },
                 onLogoutAll = { confirmLogoutAll = true },
                 onLogout = { confirmLogout = true },
@@ -387,6 +400,13 @@ private fun SettingsDialogs(state: SettingsDialogState, actions: SettingsDialogA
             currentEndpoint = state.serverEndpoint,
             onDismiss = actions.onDismissServer,
             onSave = actions.onSaveServer,
+        )
+    }
+    if (state.editDns) {
+        com.xymusic.app.core.ui.dns.DnsSettingsDialog(
+            currentSettings = state.dnsSettings,
+            onDismiss = actions.onDismissDns,
+            onSave = actions.onSaveDns,
         )
     }
     if (state.confirmReset) {

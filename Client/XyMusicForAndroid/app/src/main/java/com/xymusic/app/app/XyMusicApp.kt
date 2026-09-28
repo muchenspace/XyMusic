@@ -32,6 +32,7 @@ import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.ui.component.LoadingState
 import com.xymusic.app.core.ui.server.ServerSetupScreen
 import com.xymusic.app.domain.server.ServerEndpoint
+import com.xymusic.app.domain.settings.DnsSettings
 import com.xymusic.app.ui.theme.XyMusicTheme
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
@@ -42,6 +43,7 @@ fun XyMusicApp(
     effects: Flow<AppUiEffect>,
     onDynamicColorChanged: (Boolean) -> Unit,
     onServerEndpointChanged: (ServerEndpoint) -> Unit,
+    onDnsSettingsChanged: (DnsSettings) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
@@ -86,6 +88,8 @@ fun XyMusicApp(
                         snackbarHostState = snackbarHostState,
                         serverEndpoint = serverEndpoint,
                         onServerEndpointChanged = onServerEndpointChanged,
+                        dnsSettings = uiState.dnsSettings,
+                        onDnsSettingsChanged = onDnsSettingsChanged,
                     )
                 uiState.sessionState is AppSessionState.SignedIn ->
                     MainContent(
@@ -157,11 +161,15 @@ private fun AuthContent(
     snackbarHostState: SnackbarHostState,
     serverEndpoint: ServerEndpoint,
     onServerEndpointChanged: (ServerEndpoint) -> Unit,
+    dnsSettings: com.xymusic.app.domain.settings.DnsSettings,
+    onDnsSettingsChanged: (com.xymusic.app.domain.settings.DnsSettings) -> Unit,
 ) {
     AuthNavigation(
         snackbarHostState = snackbarHostState,
         serverEndpoint = serverEndpoint,
         onServerEndpointChanged = onServerEndpointChanged,
+        dnsSettings = dnsSettings,
+        onDnsSettingsChanged = onDnsSettingsChanged,
     )
 }
 

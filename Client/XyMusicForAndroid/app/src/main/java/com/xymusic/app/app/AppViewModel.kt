@@ -72,6 +72,7 @@ constructor(
                         themePreference = appSettings.theme,
                         serverEndpoint = serverEndpoint,
                         serverSwitchState = serverSwitchState,
+                        dnsSettings = appSettings.dnsSettings,
                     )
                 }.collect { state -> mutableUiState.value = state }
             }
@@ -83,6 +84,25 @@ constructor(
                 dependencies.session.restoreSession()
                 yield()
             }
+        }
+    }
+
+    fun updateDnsSettings(dnsSettings: com.xymusic.app.domain.settings.DnsSettings) {
+        viewModelScope.launch {
+            runCatchingPreservingCancellation {
+                withContext(defaultDispatcher) {
+                    appSettingsUseCases.get().mutate { settings ->
+                        settings.copy(dnsSettings = dnsSettings)
+                    }
+                }
+            }.fold(
+                onSuccess = {
+                    mutableEffects.emit(AppUiEffect.ShowMessage(R.string.dns_settings_saved))
+                },
+                onFailure = {
+                    mutableEffects.emit(AppUiEffect.ShowMessage(R.string.dns_settings_save_failed))
+                },
+            )
         }
     }
 

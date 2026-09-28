@@ -209,6 +209,10 @@ constructor(
         }
     }
 
+    fun updateDnsSettings(dnsSettings: com.xymusic.app.domain.settings.DnsSettings) {
+        updateSettings { copy(dnsSettings = dnsSettings) }
+    }
+
     private fun updateSettings(transform: AppSettings.() -> AppSettings) {
         viewModelScope.launch {
             runCatchingPreservingCancellation {

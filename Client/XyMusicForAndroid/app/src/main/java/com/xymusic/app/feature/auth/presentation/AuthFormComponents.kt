@@ -5,6 +5,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -72,6 +73,7 @@ internal fun AuthFormScaffold(
     onBack: (() -> Unit)?,
     modifier: Modifier = Modifier,
     description: String? = null,
+    actions: @Composable (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colorScheme = MaterialTheme.colorScheme
@@ -105,6 +107,16 @@ internal fun AuthFormScaffold(
                     )
                 }
             }
+            if (actions != null) {
+                Box(
+                    modifier =
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(MaterialTheme.spacing.small),
+                ) {
+                    actions()
+                }
+            }
             Row(
                 modifier =
                 Modifier
@@ -115,7 +127,7 @@ internal fun AuthFormScaffold(
                     .fillMaxHeight()
                     .padding(
                         start = if (onBack == null) MaterialTheme.spacing.large else 64.dp,
-                        end = MaterialTheme.spacing.large,
+                        end = if (actions == null) MaterialTheme.spacing.large else 64.dp,
                         top = if (compactLandscape) MaterialTheme.spacing.compact else MaterialTheme.spacing.large,
                         bottom =
                         if (compactLandscape) {
@@ -166,20 +178,30 @@ internal fun AuthFormScaffold(
                     .imePadding()
                     .verticalScroll(rememberScrollState()),
             ) {
-                if (onBack != null) {
+                if (onBack != null || actions != null) {
                     Row(
                         modifier =
                         Modifier
                             .fillMaxWidth()
                             .padding(MaterialTheme.spacing.small),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        IconButton(onClick = onBack) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = stringResource(R.string.common_back),
-                                tint = colorScheme.onSurface,
-                            )
+                        if (onBack != null) {
+                            IconButton(onClick = onBack) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = stringResource(R.string.common_back),
+                                    tint = colorScheme.onSurface,
+                                )
+                            }
+                        } else {
+                            Spacer(modifier = Modifier.size(48.dp))
+                        }
+                        if (actions != null) {
+                            actions()
+                        } else {
+                            Spacer(modifier = Modifier.size(48.dp))
                         }
                     }
                 }
@@ -191,7 +213,7 @@ internal fun AuthFormScaffold(
                         .padding(horizontal = MaterialTheme.spacing.large),
                     verticalArrangement = Arrangement.spacedBy(MaterialTheme.spacing.compact),
                 ) {
-                    Spacer(modifier = Modifier.height(if (onBack == null) 40.dp else 8.dp))
+                    Spacer(modifier = Modifier.height(if (onBack == null && actions == null) 40.dp else 8.dp))
                     Image(
                         painter = brandPainter,
                         contentDescription = null,

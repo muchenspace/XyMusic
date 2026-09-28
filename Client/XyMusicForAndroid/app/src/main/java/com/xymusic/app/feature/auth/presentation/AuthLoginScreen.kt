@@ -8,7 +8,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -33,6 +35,7 @@ fun SignInScreen(
     onFieldChanged: (AuthField) -> Unit,
     modifier: Modifier = Modifier,
     onRegister: () -> Unit = {},
+    onSettingsClick: (() -> Unit)? = null,
 ) {
     var username by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
@@ -41,6 +44,20 @@ fun SignInScreen(
         title = stringResource(R.string.auth_sign_in_title),
         description = stringResource(R.string.app_tagline),
         onBack = onBack,
+        actions = onSettingsClick?.let { onClick ->
+            {
+                IconButton(
+                    onClick = onClick,
+                    modifier = Modifier.testTag(AuthTestTags.Settings),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = stringResource(R.string.dns_settings_title),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+        },
         modifier = modifier,
     ) {
         AuthTextField(

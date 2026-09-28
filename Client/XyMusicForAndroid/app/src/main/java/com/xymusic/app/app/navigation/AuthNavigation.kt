@@ -22,8 +22,10 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navigation
+import com.xymusic.app.core.ui.dns.DnsSettingsDialog
 import com.xymusic.app.core.ui.server.ServerEndpointDialog
 import com.xymusic.app.domain.server.ServerEndpoint
+import com.xymusic.app.domain.settings.DnsSettings
 import com.xymusic.app.feature.auth.presentation.AuthEffect
 import com.xymusic.app.feature.auth.presentation.AuthEntryScreen
 import com.xymusic.app.feature.auth.presentation.AuthField
@@ -42,9 +44,12 @@ fun AuthNavigation(
     serverEndpoint: ServerEndpoint,
     onServerEndpointChanged: (ServerEndpoint) -> Unit,
     modifier: Modifier = Modifier,
+    dnsSettings: DnsSettings = DnsSettings(),
+    onDnsSettingsChanged: (DnsSettings) -> Unit = {},
 ) {
     val navController = rememberNavController()
     var editServer by rememberSaveable { mutableStateOf(false) }
+    var editDns by rememberSaveable { mutableStateOf(false) }
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val graphBackStackEntry =
         remember(currentBackStackEntry) {
@@ -68,6 +73,16 @@ fun AuthNavigation(
             onSave = { endpoint ->
                 editServer = false
                 if (endpoint != serverEndpoint) onServerEndpointChanged(endpoint)
+            },
+        )
+    }
+    if (editDns) {
+        DnsSettingsDialog(
+            currentSettings = dnsSettings,
+            onDismiss = { editDns = false },
+            onSave = { updatedSettings ->
+                editDns = false
+                onDnsSettingsChanged(updatedSettings)
             },
         )
     }
@@ -98,6 +113,7 @@ fun AuthNavigation(
                     AuthEntryScreen(
                         serverAddress = serverEndpoint.displayValue,
                         onEditServer = { editServer = true },
+                        onSettingsClick = { editDns = true },
                         onSignIn = {
                             viewModel.clearErrors(AuthField.Username, AuthField.Password)
                             navController.navigate(AuthDestination.SignIn.route)
@@ -128,6 +144,7 @@ fun AuthNavigation(
                             navController.navigate(AuthDestination.Register.route)
                         },
                         onFieldChanged = viewModel::clearFieldError,
+                        onSettingsClick = { editDns = true },
                     )
                 }
                 composable(AuthDestination.Register.route) { backStackEntry ->
