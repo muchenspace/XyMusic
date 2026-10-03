@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -103,6 +104,10 @@ private fun MobileSearchOverview(
     actions: SearchOverviewActions,
     modifier: Modifier = Modifier,
 ) {
+    // Sliced once per list instance: a new List on every recomposition would
+    // invalidate the LazyRow item providers and rebuild all visible children.
+    val visibleArtists = remember(artists) { artists.take(8) }
+    val visibleAlbums = remember(albums) { albums.take(8) }
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 32.dp),
@@ -146,7 +151,7 @@ private fun MobileSearchOverview(
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     items(
-                        items = artists.take(8),
+                        items = visibleArtists,
                         key = { it.id },
                         contentType = { "artist" },
                     ) { artist ->
@@ -171,7 +176,7 @@ private fun MobileSearchOverview(
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     items(
-                        items = albums.take(8),
+                        items = visibleAlbums,
                         key = { it.id },
                         contentType = { "album" },
                     ) { album ->
@@ -209,6 +214,8 @@ private fun LandscapeSearchOverview(
     actions: SearchOverviewActions,
     modifier: Modifier = Modifier,
 ) {
+    val visibleArtists = remember(artists) { artists.take(8) }
+    val visibleAlbums = remember(albums) { albums.take(8) }
     if (tracks.isEmpty() && artists.isEmpty() && albums.isEmpty()) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             EmptyState(
@@ -281,7 +288,7 @@ private fun LandscapeSearchOverview(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         items(
-                            items = artists.take(8),
+                            items = visibleArtists,
                             key = { it.id },
                             contentType = { "artist" },
                         ) { artist ->
@@ -307,7 +314,7 @@ private fun LandscapeSearchOverview(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         items(
-                            items = albums.take(8),
+                            items = visibleAlbums,
                             key = { it.id },
                             contentType = { "album" },
                         ) { album ->

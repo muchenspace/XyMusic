@@ -575,9 +575,14 @@ constructor(
                 sleepTimerDeadlineElapsedRealtimeMs,
                 SystemClock.elapsedRealtime(),
             )
+        // The countdown is rendered at minute granularity, so publishing a 1 Hz
+        // value would make the whole player tree recompose every second for a
+        // label that only changes once a minute. Quantize upward so the displayed
+        // minutes stay identical while structural emissions drop to 1/min.
+        val publishedMs = remainingMs?.let(::quantizeSleepTimerRemainingMs)
         val previous = mutableState.value
-        if (previous.sleepTimerRemainingMs != remainingMs) {
-            mutableState.value = previous.copy(sleepTimerRemainingMs = remainingMs)
+        if (previous.sleepTimerRemainingMs != publishedMs) {
+            mutableState.value = previous.copy(sleepTimerRemainingMs = publishedMs)
         }
         return remainingMs
     }
@@ -771,6 +776,19 @@ internal fun remainingSleepTimerMs(deadlineElapsedRealtimeMs: Long?, nowElapsedR
     deadlineElapsedRealtimeMs
         ?.takeIf { it > nowElapsedRealtimeMs }
         ?.minus(nowElapsedRealtimeMs)
+
+/**
+ * Rounds up to the next whole minute. The sleep timer label renders
+ * `(remaining + 59_999) / 60_000` minutes, so quantizing upward keeps the
+ * displayed value identical while collapsing 1 Hz emissions into 1/min.
+ */
+internal fun quantizeSleepTimerRemainingMs(remainingMs: Long): Long {
+    if (remainingMs <= 0L) return 0L
+    val minutes = (remainingMs - 1L) / SLEEP_TIMER_MINUTE_MS + 1L
+    return minutes * SLEEP_TIMER_MINUTE_MS
+}
+
+private const val SLEEP_TIMER_MINUTE_MS = 60_000L
 
 internal fun playerStateWithProgressSample(
     previous: PlayerState,

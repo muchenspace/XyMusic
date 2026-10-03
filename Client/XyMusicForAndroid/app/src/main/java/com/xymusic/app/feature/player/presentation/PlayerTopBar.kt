@@ -117,8 +117,7 @@ private fun PlayerTopBarTrackInfo(item: PlayerQueueItem?, visible: Boolean, artw
         return
     }
 
-    val artistNames = remember(item.queueItemId, item.artistNames) { item.artistNames.joinToString(" / ") }
-    val artistLine = artistNames.ifBlank { stringResource(R.string.catalog_unknown_artist) }
+    val artistLine = item.artistLine.ifBlank { stringResource(R.string.catalog_unknown_artist) }
     Row(
         modifier =
         Modifier

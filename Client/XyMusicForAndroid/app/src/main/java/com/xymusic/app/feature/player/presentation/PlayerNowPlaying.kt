@@ -114,7 +114,7 @@ private fun ArtworkDetails(
 ) {
     Column(modifier = modifier, horizontalAlignment = if (centered) Alignment.CenterHorizontally else Alignment.Start) {
         Text(
-            text = item.artistNames.joinToString(" / ").ifBlank {
+            text = item.artistLine.ifBlank {
                 stringResource(R.string.catalog_unknown_artist)
             },
             maxLines = 1,

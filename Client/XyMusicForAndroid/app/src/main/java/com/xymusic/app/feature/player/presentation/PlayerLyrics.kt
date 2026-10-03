@@ -171,6 +171,9 @@ internal fun LyricsContent(
     }
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val lyricMetrics = playerLyricMetrics(maxWidth, maxHeight)
+        // Precomputed so item keys stay stable when lines shift and no string is
+        // allocated per item per recomposition.
+        val lyricKeys = remember(uiState.lyrics) { lyricLineKeys(uiState.lyrics) }
         val lineTextStyle =
             LocalTextStyle.current.merge(
                 TextStyle(
@@ -487,7 +490,7 @@ internal fun LyricsContent(
             ) {
                 itemsIndexed(
                     items = uiState.lyrics,
-                    key = { index, line -> "${line.timeMs ?: "plain"}:$index" },
+                    key = { index, _ -> lyricKeys[index] },
                     contentType = { _, _ -> "lyric-line" },
                 ) { index, line ->
                     val active = uiState.synchronizedLyrics && index == currentLyricIndex
@@ -501,28 +504,20 @@ internal fun LyricsContent(
                         }
                     }
                     val interactionSource = remember { MutableInteractionSource() }
-                    val animatedScale = remember(lineEmphasis) {
-                        derivedStateOf {
-                            // Keep the focus marker below the threshold at which repeated scale
-                            // changes become visually tiring, especially on 90/120 Hz panels.
-                            // The actual line movement remains on the shared scroll clock.
-                            1f + 0.012f * lineEmphasis.value
-                        }
-                    }
-                    val animatedAlpha = remember(uiState.synchronizedLyrics) {
-                        derivedStateOf {
-                            if (uiState.synchronizedLyrics) 1f else 0.88f
-                        }
-                    }
+                    // The focus marker stays below the threshold at which repeated scale
+                    // changes become visually tiring, especially on 90/120 Hz panels.
+                    // The actual line movement remains on the shared scroll clock.
+                    val animatedAlpha = if (uiState.synchronizedLyrics) 1f else 0.88f
                     val lineModifier =
                         Modifier
                             .fillMaxWidth()
                             .testTag(PlayerTestTags.lyricLine(index))
                             .graphicsLayer {
                                 transformOrigin = TransformOrigin(0f, 0.5f)
-                                scaleX = animatedScale.value
-                                scaleY = animatedScale.value
-                                alpha = animatedAlpha.value
+                                val emphasis = lineEmphasis.value
+                                scaleX = 1f + 0.012f * emphasis
+                                scaleY = 1f + 0.012f * emphasis
+                                alpha = animatedAlpha
                             }
                             .clickable(
                                 interactionSource = interactionSource,
@@ -978,6 +973,20 @@ internal fun lyricSeekBaselineIndex(sourceIndex: Int, targetIndex: Int, currentI
 internal fun canonicalLyricTargetIndex(lines: List<PlayerLyricLineUi>, requestedIndex: Int): Int {
     val requestedTime = lines.getOrNull(requestedIndex)?.timeMs ?: return requestedIndex
     return lines.indexOfLast { line -> line.timeMs == requestedTime }.takeIf { it >= 0 } ?: requestedIndex
+}
+
+/**
+ * Stable identity per lyric line, computed once per list. Keys are derived from
+ * the timestamp so they survive list edits, with a running counter to keep
+ * duplicate or missing timestamps unique (LazyColumn requires unique keys).
+ */
+internal fun lyricLineKeys(lines: List<PlayerLyricLineUi>): List<String> {
+    val seenTimestamps = HashMap<Long?, Int>()
+    return lines.map { line ->
+        val occurrence = seenTimestamps.getOrPut(line.timeMs) { 0 }
+        seenTimestamps[line.timeMs] = occurrence + 1
+        "${line.timeMs ?: "plain"}#$occurrence"
+    }
 }
 
 @Composable

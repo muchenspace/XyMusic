@@ -360,5 +360,8 @@ private fun String.toScope(): SearchScope = SearchScope.entries
 
 private fun normalizedLength(value: String): Int = value
     .trim()
-    .replace(Regex("\\s+"), " ")
+    .replace(WHITESPACE_REGEX, " ")
     .length
+
+// Compiled once instead of on every keystroke.
+private val WHITESPACE_REGEX = Regex("\\s+")

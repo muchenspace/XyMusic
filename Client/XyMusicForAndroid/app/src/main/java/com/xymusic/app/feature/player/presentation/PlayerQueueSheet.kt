@@ -259,22 +259,24 @@ private fun QueueItem(
     val moveDownLabel = stringResource(R.string.player_move_down)
     val currentDescription = stringResource(R.string.player_queue_current)
     val accessibilityActions =
-        buildList {
-            if (index > 0) {
-                add(
-                    CustomAccessibilityAction(moveUpLabel) {
-                        onMove(-1)
-                        true
-                    },
-                )
-            }
-            if (index < lastIndex) {
-                add(
-                    CustomAccessibilityAction(moveDownLabel) {
-                        onMove(1)
-                        true
-                    },
-                )
+        remember(index, lastIndex, moveUpLabel, moveDownLabel) {
+            buildList {
+                if (index > 0) {
+                    add(
+                        CustomAccessibilityAction(moveUpLabel) {
+                            onMove(-1)
+                            true
+                        },
+                    )
+                }
+                if (index < lastIndex) {
+                    add(
+                        CustomAccessibilityAction(moveDownLabel) {
+                            onMove(1)
+                            true
+                        },
+                    )
+                }
             }
         }
     Row(
@@ -336,7 +338,7 @@ private fun QueueItem(
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                text = item.artistNames.joinToString(" / "),
+                text = item.artistLine,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 color = PlayerSecondaryContent,

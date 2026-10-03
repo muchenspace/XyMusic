@@ -38,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -113,10 +114,12 @@ internal fun CatalogTrackRow(
                 )
                 Text(
                     text =
-                    buildString {
-                        append(artistLine)
-                        track.album?.title?.takeIf(String::isNotBlank)?.let { album ->
-                            append(" · ").append(album)
+                    remember(artistLine, track.album?.title) {
+                        buildString {
+                            append(artistLine)
+                            track.album?.title?.takeIf(String::isNotBlank)?.let { album ->
+                                append(" · ").append(album)
+                            }
                         }
                     },
                     maxLines = 1,
@@ -181,12 +184,12 @@ internal fun CatalogAlbumRow(album: CatalogAlbumUi, onClick: () -> Unit, modifie
                     color = MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.bodyMedium,
                 )
+                val trackCountLabel = stringResource(R.string.catalog_track_count, album.trackCount)
                 Text(
                     text =
-                    listOfNotNull(
-                        album.releaseDate,
-                        stringResource(R.string.catalog_track_count, album.trackCount),
-                    ).joinToString(" · "),
+                    remember(album.releaseDate, trackCountLabel) {
+                        listOfNotNull(album.releaseDate, trackCountLabel).joinToString(" · ")
+                    },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -598,8 +601,8 @@ internal fun formatDuration(durationMs: Long): String {
     )
 }
 
-internal fun CatalogTrackUi.artistNames(): String = artists
-    .joinToString(separator = " · ", transform = CatalogArtistLinkUi::name)
+// Delegates to the model's cached body property so rows do not rebuild the
+// joined artist string on every recomposition.
+internal fun CatalogTrackUi.artistNames(): String = artistLine
 
-internal fun CatalogAlbumUi.artistNames(): String = artists
-    .joinToString(separator = " · ", transform = CatalogArtistLinkUi::name)
+internal fun CatalogAlbumUi.artistNames(): String = artistLine

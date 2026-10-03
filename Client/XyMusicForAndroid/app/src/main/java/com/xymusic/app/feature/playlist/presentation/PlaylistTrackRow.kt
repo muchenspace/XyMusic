@@ -1,13 +1,14 @@
 package com.xymusic.app.feature.playlist.presentation
 
-import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateColor
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateDp
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
@@ -97,76 +98,70 @@ internal fun PlaylistTrackRow(
     val handleSize = if (compact) 38.dp else 44.dp
     val visualDragging = isDragging || dragActive
     val shape = RoundedCornerShape(if (compact) 12.dp else 16.dp)
-    val containerColor by animateColorAsState(
-        targetValue =
-        if (visualDragging) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.background
-        },
-        animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing),
+    // One transition drives every drag affordance. Separate animate*AsState calls
+    // would each run their own animation clock for the same boolean.
+    val dragTransition =
+        updateTransition(
+            targetState = visualDragging,
+            label = "playlist-row-drag",
+        )
+    val dragSpec = tween<Float>(durationMillis = 120, easing = FastOutSlowInEasing)
+    val draggingContainerColor = MaterialTheme.colorScheme.primaryContainer
+    val settledContainerColor = MaterialTheme.colorScheme.background
+    val draggingPrimaryContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+    val settledPrimaryContentColor = MaterialTheme.colorScheme.onSurface
+    val draggingSecondaryContentColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.74f)
+    val settledSecondaryContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val containerColor by dragTransition.animateColor(
+        transitionSpec = { tween(durationMillis = 120, easing = FastOutSlowInEasing) },
         label = "playlist-row-container",
-    )
-    val primaryContentColor by animateColorAsState(
-        targetValue =
-        if (visualDragging) {
-            MaterialTheme.colorScheme.onPrimaryContainer
-        } else {
-            MaterialTheme.colorScheme.onSurface
-        },
-        animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing),
+    ) { dragging -> if (dragging) draggingContainerColor else settledContainerColor }
+    val primaryContentColor by dragTransition.animateColor(
+        transitionSpec = { tween(durationMillis = 120, easing = FastOutSlowInEasing) },
         label = "playlist-row-primary-content",
-    )
-    val secondaryContentColor by animateColorAsState(
-        targetValue =
-        if (visualDragging) {
-            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.74f)
-        } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        },
-        animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing),
+    ) { dragging -> if (dragging) draggingPrimaryContentColor else settledPrimaryContentColor }
+    val secondaryContentColor by dragTransition.animateColor(
+        transitionSpec = { tween(durationMillis = 120, easing = FastOutSlowInEasing) },
         label = "playlist-row-secondary-content",
-    )
-    val shadowElevation by animateDpAsState(
-        targetValue = if (visualDragging) 10.dp else 0.dp,
-        animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing),
+    ) { dragging -> if (dragging) draggingSecondaryContentColor else settledSecondaryContentColor }
+    val shadowElevation by dragTransition.animateDp(
+        transitionSpec = { tween(durationMillis = 120, easing = FastOutSlowInEasing) },
         label = "playlist-row-shadow",
-    )
-    val tonalElevation by animateDpAsState(
-        targetValue = if (visualDragging) 5.dp else 0.dp,
-        animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing),
+    ) { dragging -> if (dragging) 10.dp else 0.dp }
+    val tonalElevation by dragTransition.animateDp(
+        transitionSpec = { tween(durationMillis = 120, easing = FastOutSlowInEasing) },
         label = "playlist-row-tonal-elevation",
-    )
-    val scale = animateFloatAsState(
-        targetValue = if (visualDragging) 1.012f else 1f,
-        animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing),
+    ) { dragging -> if (dragging) 5.dp else 0.dp }
+    val scale by dragTransition.animateFloat(
+        transitionSpec = { dragSpec },
         label = "playlist-row-scale",
-    )
-    val handleScale = animateFloatAsState(
-        targetValue = if (visualDragging) 1.12f else 1f,
-        animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing),
+    ) { dragging -> if (dragging) 1.012f else 1f }
+    val handleScale by dragTransition.animateFloat(
+        transitionSpec = { dragSpec },
         label = "playlist-handle-scale",
-    )
+    ) { dragging -> if (dragging) 1.12f else 1f }
     val actions =
-        if (reorderEnabled) {
-            buildList {
-                if (index > 0) {
-                    add(
-                        CustomAccessibilityAction(moveUpLabel) {
-                            onMove(-1).also { moved -> if (moved) onReorderFinished() }
-                        },
-                    )
+        remember(reorderEnabled, index, lastIndex, moveUpLabel, moveDownLabel) {
+            if (reorderEnabled) {
+                buildList {
+                    if (index > 0) {
+                        add(
+                            CustomAccessibilityAction(moveUpLabel) {
+                                onMove(-1).also { moved -> if (moved) onReorderFinished() }
+                            },
+                        )
+                    }
+                    if (index < lastIndex) {
+                        add(
+                            CustomAccessibilityAction(moveDownLabel) {
+                                onMove(1).also { moved -> if (moved) onReorderFinished() }
+                            },
+                        )
+                    }
                 }
-                if (index < lastIndex) {
-                    add(
-                        CustomAccessibilityAction(moveDownLabel) {
-                            onMove(1).also { moved -> if (moved) onReorderFinished() }
-                        },
-                    )
-                }
+            } else {
+                emptyList()
             }
-        } else {
-            emptyList()
         }
 
     Surface(
@@ -182,8 +177,8 @@ internal fun PlaylistTrackRow(
                 // Drag deltas arrive much faster than structural reorder updates. Read them in
                 // the layer phase so moving a finger does not recompose and relayout the row.
                 translationY = if (dragActive) dragOffsetY else settledOffsetY.value
-                scaleX = scale.value
-                scaleY = scale.value
+                scaleX = scale
+                scaleY = scale
             },
         shape = shape,
         color = containerColor,
@@ -259,8 +254,8 @@ internal fun PlaylistTrackRow(
                     .size(handleSize)
                     .testTag(PlaylistDetailTestTags.reorderHandle(entry.entryId))
                     .graphicsLayer {
-                        scaleX = handleScale.value
-                        scaleY = handleScale.value
+                        scaleX = handleScale
+                        scaleY = handleScale
                     }.then(
                         if (reorderEnabled) {
                             Modifier.pointerInput(entry.entryId, compact) {

@@ -1,5 +1,6 @@
 package com.xymusic.app.feature.library.presentation
 
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -58,6 +59,7 @@ data class LibraryHistoryUi(
     val completed: Boolean,
 )
 
+@Immutable
 data class LibraryUiState(
     val selectedTab: LibraryTab = LibraryTab.Favorites,
     val playlists: List<PlaylistSummary> = emptyList(),

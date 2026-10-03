@@ -30,6 +30,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -488,10 +489,12 @@ internal fun LandscapeCatalogTrackRow(
                 )
                 Text(
                     text =
-                    buildString {
-                        append(artistLine)
-                        track.album?.title?.takeIf(String::isNotBlank)?.let { album ->
-                            append(" \u00b7 ").append(album)
+                    remember(artistLine, track.album?.title) {
+                        buildString {
+                            append(artistLine)
+                            track.album?.title?.takeIf(String::isNotBlank)?.let { album ->
+                                append(" \u00b7 ").append(album)
+                            }
                         }
                     },
                     maxLines = 1,
@@ -554,12 +557,12 @@ internal fun LandscapeCatalogAlbumRow(album: CatalogAlbumUi, onClick: () -> Unit
                     color = MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.bodySmall,
                 )
+                val trackCountLabel = stringResource(R.string.catalog_track_count, album.trackCount)
                 Text(
                     text =
-                    listOfNotNull(
-                        album.releaseDate,
-                        stringResource(R.string.catalog_track_count, album.trackCount),
-                    ).joinToString(" \u00b7 "),
+                    remember(album.releaseDate, trackCountLabel) {
+                        listOfNotNull(album.releaseDate, trackCountLabel).joinToString(" \u00b7 ")
+                    },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

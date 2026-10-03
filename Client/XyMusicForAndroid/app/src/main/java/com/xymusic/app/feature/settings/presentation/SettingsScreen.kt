@@ -30,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -54,6 +55,7 @@ import com.xymusic.app.domain.server.ServerEndpoint
 import com.xymusic.app.feature.settings.domain.AvatarImageSource
 import com.xymusic.app.feature.settings.domain.model.UserProfile
 
+@Immutable
 private data class SettingsDialogState(
     val editProfile: Boolean,
     val profile: UserProfile?,

@@ -91,6 +91,14 @@ kotlin {
     }
 }
 
+composeCompiler {
+    // domain and core:model do not run the Compose compiler, so types declared
+    // there would otherwise be treated as unstable at every call site.
+    stabilityConfigurationFiles.add(
+        rootProject.layout.projectDirectory.file("config/compose-stability.conf"),
+    )
+}
+
 ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
     arg("room.incremental", "true")

@@ -1,6 +1,7 @@
 package com.xymusic.app.app.trackactions
 
 import androidx.annotation.StringRes
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xymusic.app.R
@@ -33,6 +34,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+@Immutable
 data class TrackActionsUiState(
     val selectedTrackId: String? = null,
     val selectedIsFavorite: Boolean = false,

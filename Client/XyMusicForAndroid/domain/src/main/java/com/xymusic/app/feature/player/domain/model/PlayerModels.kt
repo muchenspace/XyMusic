@@ -9,7 +9,11 @@ data class PlayerQueueItem(
     val artworkUrl: String?,
     val artworkCacheKey: String?,
     val durationMs: Long,
-)
+) {
+    // Evaluated once per instance and excluded from equals(), so queue rows do
+    // not rebuild the joined artist line on every recomposition.
+    val artistLine: String = artistNames.joinToString(" / ")
+}
 
 data class PlayerState(
     val connectionState: PlayerConnectionState = PlayerConnectionState.DISCONNECTED,
@@ -28,8 +32,10 @@ data class PlayerState(
     val sleepTimerRemainingMs: Long? = null,
     val failure: PlayerFailure? = null,
 ) {
-    val currentItem: PlayerQueueItem?
-        get() = queue.firstOrNull { it.queueItemId == currentQueueItemId }
+    // Resolved once per state instance. Composing call sites read this several
+    // times per recomposition, so a computed getter would rescan the whole queue
+    // on every read.
+    val currentItem: PlayerQueueItem? = queue.firstOrNull { it.queueItemId == currentQueueItemId }
 }
 
 enum class PlayerConnectionState {

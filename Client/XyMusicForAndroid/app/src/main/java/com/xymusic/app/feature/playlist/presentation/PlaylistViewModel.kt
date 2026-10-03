@@ -1,5 +1,6 @@
 package com.xymusic.app.feature.playlist.presentation
 
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -41,8 +42,10 @@ object PlaylistRouteArgs {
     const val PlaylistId = "playlistId"
 }
 
+@Immutable
 data class PlaylistEntryUi(val entryId: String, val position: Int, val track: CatalogTrackUi)
 
+@Immutable
 data class PlaylistDetailUi(
     val id: String,
     val name: String,
@@ -54,6 +57,7 @@ data class PlaylistDetailUi(
     val entries: List<PlaylistEntryUi>,
 )
 
+@Immutable
 data class PlaylistUiState(
     val detail: PlaylistDetailUi? = null,
     val isRefreshing: Boolean = false,

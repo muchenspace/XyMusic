@@ -1,5 +1,6 @@
 package com.xymusic.app.feature.settings.presentation
 
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xymusic.app.R
@@ -32,6 +33,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+@Immutable
 data class SettingsUiState(
     val profile: UserProfile? = null,
     val settings: AppSettings = AppSettings(),
