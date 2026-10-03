@@ -121,7 +121,9 @@ private suspend fun extractArtworkAmbientColor(
     }
 }.getOrNull()
 
-private val artworkAmbientPaletteCache = LruCache<String, ArtworkAmbientPalette>(64)
+// Sized for a full listening session: a small cache made fast track skipping
+// re-decode and re-quantize the same artwork.
+private val artworkAmbientPaletteCache = LruCache<String, ArtworkAmbientPalette>(256)
 
 private fun cachedArtworkAmbientPalette(key: String): ArtworkAmbientPalette? =
     synchronized(artworkAmbientPaletteCache) {

@@ -39,6 +39,13 @@ interface CatalogLocalDataSource {
     suspend fun replaceArtist(detail: ArtistDetailDto, cachedAtEpochMs: Long)
 
     suspend fun replaceAlbum(detail: AlbumDetailDto, cachedAtEpochMs: Long)
+
+    /** When the cached detail row was written, or null when it is not cached. */
+    suspend fun trackCachedAtEpochMs(trackId: String): Long?
+
+    suspend fun artistCachedAtEpochMs(artistId: String): Long?
+
+    suspend fun albumCachedAtEpochMs(albumId: String): Long?
 }
 
 class RoomCatalogLocalDataSource
@@ -133,4 +140,10 @@ constructor(private val catalogDao: CatalogDao) : CatalogLocalDataSource {
         catalogDao.mergeArtistReferences(item.artistReferences)
         catalogDao.replaceAlbum(item.album, item.credits)
     }
+
+    override suspend fun trackCachedAtEpochMs(trackId: String): Long? = catalogDao.track(trackId)?.cachedAtEpochMs
+
+    override suspend fun artistCachedAtEpochMs(artistId: String): Long? = catalogDao.artist(artistId)?.cachedAtEpochMs
+
+    override suspend fun albumCachedAtEpochMs(albumId: String): Long? = catalogDao.album(albumId)?.cachedAtEpochMs
 }

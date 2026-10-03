@@ -48,6 +48,15 @@ internal class PlaybackArtworkBitmapLoader(
 
     private var lastFailedRequest: FailedArtworkRequest? = null
 
+    init {
+        // MediaSession asks for artwork on the main thread, and the first request for a
+        // track without artwork would otherwise draw the fallback bitmap there. Warming
+        // it on IO moves that canvas work off the playback thread.
+        scope.launch(Dispatchers.IO) {
+            runCatching { fallbackBitmap }
+        }
+    }
+
     override fun supportsMimeType(mimeType: String): Boolean = bitmapDecoder.supportsMimeType(mimeType)
 
     override fun decodeBitmap(data: ByteArray): ListenableFuture<Bitmap> = bitmapDecoder.decodeBitmap(data)

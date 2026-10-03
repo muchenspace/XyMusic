@@ -212,6 +212,18 @@ object DatabaseMigrations {
             }
         }
 
+    val MIGRATION_7_8 =
+        object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Target lookups during library and playlist merges filtered on owner and
+                // target without an index, so they scanned every row for that owner.
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_pending_sync_owner_target " +
+                        "ON pending_sync_operations(owner_user_id, target_type, target_id)",
+                )
+            }
+        }
+
     val ALL =
         arrayOf(
             MIGRATION_1_2,
@@ -220,5 +232,6 @@ object DatabaseMigrations {
             MIGRATION_4_5,
             MIGRATION_5_6,
             MIGRATION_6_7,
+            MIGRATION_7_8,
         )
 }

@@ -42,16 +42,14 @@ class XyMusicApplication :
         }
     }
 
-    override fun newImageLoader(context: PlatformContext): ImageLoader {
-        return ImageLoader.Builder(context)
-            .components {
-                // Artwork is served from the same public asset endpoints as
-                // playback media, so Coil reuses that client to inherit AppDns
-                // (custom DoH/UDP resolution) and the shared connection pool.
-                add(OkHttpNetworkFetcherFactory(callFactory = { mediaHttpClient.get() }))
-            }
-            .build()
-    }
+    override fun newImageLoader(context: PlatformContext): ImageLoader = ImageLoader.Builder(context)
+        .components {
+            // Artwork is served from the same public asset endpoints as
+            // playback media, so Coil reuses that client to inherit AppDns
+            // (custom DoH/UDP resolution) and the shared connection pool.
+            add(OkHttpNetworkFetcherFactory(callFactory = { mediaHttpClient.get() }))
+        }
+        .build()
 
     override val workManagerConfiguration: Configuration
         get() =

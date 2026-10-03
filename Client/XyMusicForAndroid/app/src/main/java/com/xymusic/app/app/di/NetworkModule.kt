@@ -40,6 +40,8 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 import kotlinx.serialization.json.Json
 import okhttp3.Call
+import okhttp3.ConnectionPool
+import okhttp3.Dispatcher
 import okhttp3.Dns
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -83,8 +85,7 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideAppDns(appSettingsRepository: AppSettingsRepository): AppDns =
-        AppDns(appSettingsRepository)
+    fun provideAppDns(appSettingsRepository: AppSettingsRepository): AppDns = AppDns(appSettingsRepository)
 
     @Provides
     @Singleton
@@ -145,12 +146,11 @@ object NetworkModule {
     fun provideMediaHttpClient(
         removeAuthorizationInterceptor: RemoveAuthorizationInterceptor,
         dns: AppDns? = null,
-    ): OkHttpClient =
-        baseClientBuilder(dns)
-            .addInterceptor(removeAuthorizationInterceptor)
-            .readTimeout(MEDIA_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            .callTimeout(0, TimeUnit.SECONDS)
-            .build()
+    ): OkHttpClient = baseClientBuilder(dns)
+        .addInterceptor(removeAuthorizationInterceptor)
+        .readTimeout(MEDIA_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .callTimeout(0, TimeUnit.SECONDS)
+        .build()
 
     @Provides
     @Singleton
@@ -225,6 +225,11 @@ object NetworkModule {
 
     private fun baseClientBuilder(dns: Dns? = null): OkHttpClient.Builder = OkHttpClient
         .Builder()
+        // All API clients target the same host. Sharing one pool and dispatcher means the
+        // first screen reuses an established connection across the auth, API and media
+        // clients instead of completing three separate handshakes.
+        .connectionPool(sharedConnectionPool)
+        .dispatcher(sharedDispatcher)
         .apply { if (dns != null) dns(dns) }
         .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .readTimeout(API_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -239,4 +244,6 @@ object NetworkModule {
     private const val API_CALL_TIMEOUT_SECONDS = 45L
     private val PLACEHOLDER_API_BASE_URL = "https://localhost/".toHttpUrl()
     private val JSON_MEDIA_TYPE = "application/json".toMediaType()
+    private val sharedConnectionPool = ConnectionPool()
+    private val sharedDispatcher = Dispatcher()
 }

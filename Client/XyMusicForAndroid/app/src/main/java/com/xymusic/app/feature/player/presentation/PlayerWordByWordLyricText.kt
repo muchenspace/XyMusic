@@ -163,7 +163,10 @@ internal fun normalizedTimedWordLayouts(text: String, words: List<PlayerLyricWor
 
 private class WordByWordLyricDrawCache(private val words: List<TimedWordLayout>) {
     private val completedPath = Path()
-    private val frameHighlightPath = Path()
+
+    // Reused per frame for the active word's finished fragments. Kept separate from
+    // completedPath so neither has to be copied into the other while drawing.
+    private val completedFragmentsPath = Path()
     private val timingIndex = WordTimingIndex(words)
     private val progress = MutableWordTimedHighlightProgress()
     private var layoutResult: TextLayoutResult? = null
@@ -212,43 +215,37 @@ private class WordByWordLyricDrawCache(private val words: List<TimedWordLayout>)
         alpha: Float,
     ) {
         ensureCompletedPath(completedCount)
-        frameHighlightPath.reset()
-        var hasCompleteFragments = completedCount > 0
-        if (hasCompleteFragments) frameHighlightPath.addPath(completedPath)
         val currentWord = word
-        if (currentWord == null) {
-            if (hasCompleteFragments) {
-                clipPath(frameHighlightPath) {
-                    drawText(layout, color = highlightColor, alpha = alpha.coerceIn(0f, 1f))
+        // Completed words and the current word's finished fragments are disjoint
+        // regions, so they can be clipped and drawn separately. That avoids copying
+        // the whole accumulated path on every frame of the active line.
+        val highlightAlpha = alpha.coerceIn(0f, 1f)
+        fun drawCompletedWords() {
+            if (completedCount > 0) {
+                clipPath(completedPath) {
+                    drawText(layout, color = highlightColor, alpha = highlightAlpha)
                 }
             }
+        }
+        if (currentWord == null) {
+            drawCompletedWords()
             return
         }
         val clampedFraction = fraction.coerceIn(0f, 1f)
-        if (clampedFraction <= 0f) {
-            if (hasCompleteFragments) {
-                clipPath(frameHighlightPath) {
-                    drawText(layout, color = highlightColor, alpha = alpha.coerceIn(0f, 1f))
-                }
-            }
-            return
-        }
         val totalAdvance = currentWord.totalAdvance
-        if (totalAdvance <= 0f) {
-            if (hasCompleteFragments) {
-                clipPath(frameHighlightPath) {
-                    drawText(layout, color = highlightColor, alpha = alpha.coerceIn(0f, 1f))
-                }
-            }
+        if (clampedFraction <= 0f || totalAdvance <= 0f) {
+            drawCompletedWords()
             return
         }
         var remainingAdvance = totalAdvance * clampedFraction
         var partialFragment: WordHighlightFragment? = null
         var partialAdvance = 0f
+        completedFragmentsPath.reset()
+        var hasCompletedFragments = false
         for (fragment in currentWord.fragments) {
             if (remainingAdvance >= fragment.advanceWidth) {
-                frameHighlightPath.addPath(fragment.path)
-                hasCompleteFragments = true
+                completedFragmentsPath.addPath(fragment.path)
+                hasCompletedFragments = true
                 remainingAdvance -= fragment.advanceWidth
             } else {
                 if (remainingAdvance > 0f) {
@@ -258,9 +255,10 @@ private class WordByWordLyricDrawCache(private val words: List<TimedWordLayout>)
                 break
             }
         }
-        if (hasCompleteFragments) {
-            clipPath(frameHighlightPath) {
-                drawText(layout, color = highlightColor, alpha = alpha.coerceIn(0f, 1f))
+        drawCompletedWords()
+        if (hasCompletedFragments) {
+            clipPath(completedFragmentsPath) {
+                drawText(layout, color = highlightColor, alpha = highlightAlpha)
             }
         }
         partialFragment?.let { fragment ->

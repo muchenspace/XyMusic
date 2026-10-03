@@ -39,7 +39,9 @@ class ServerResourceUrlInterceptorTest {
             response.use {
                 val content = checkNotNull(it.body).string()
                 val origin = server.url("/").toString().removeSuffix("/")
-                assertThat(it.header("Content-Length")).isNull()
+                // The body is rewritten, so the header must describe the new bytes
+                // instead of being dropped.
+                assertThat(it.header("Content-Length")).isEqualTo(content.toByteArray().size.toString())
                 assertThat(content).contains("$origin/api/v1/assets/asset-1/cover-hash")
                 assertThat(content).contains("$origin/api/v1/oss/b2JqZWN0cw/cover.jpg?X-Amz-Signature=a%2Bb")
                 assertThat(content).contains("$origin/api/v1/playback/streams/session-1?ticket=abc")

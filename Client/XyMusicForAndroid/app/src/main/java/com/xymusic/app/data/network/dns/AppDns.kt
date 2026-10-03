@@ -32,6 +32,10 @@ class AppDns @Inject constructor(
 
     private val cache = ConcurrentHashMap<String, CachedDnsRecord>()
 
+    // Coalesces concurrent lookups for the same host. Cold DoH resolution includes a
+    // TLS handshake, and the first screen fires several requests in parallel.
+    private val inFlight = ConcurrentHashMap<String, InFlightLookup>()
+
     @Volatile
     private var cachedDohClient: Pair<String, DnsOverHttps>? = null
 
@@ -74,6 +78,36 @@ class AppDns @Inject constructor(
             }
         }
 
+        return resolveCoalesced(hostname, settings)
+    }
+
+    /**
+     * Shares one resolution between concurrent callers for the same host. DoH
+     * resolution is a cold TLS round trip, so parallel first-screen requests must
+     * not each start their own query. Followers wait for the leader's result; if
+     * the leader fails they resolve directly rather than spinning on the failed
+     * entry.
+     */
+    private fun resolveCoalesced(hostname: String, settings: DnsSettings): List<InetAddress> {
+        val candidate = InFlightLookup()
+        val leader = inFlight.putIfAbsent(hostname, candidate)
+        if (leader != null) {
+            leader.awaitResult()?.let { return it }
+            return resolveUncached(hostname, settings)
+        }
+        return try {
+            val resolved = resolveUncached(hostname, settings)
+            candidate.complete(resolved)
+            resolved
+        } catch (failure: Exception) {
+            candidate.completeWithFailure()
+            throw failure
+        } finally {
+            inFlight.remove(hostname, candidate)
+        }
+    }
+
+    private fun resolveUncached(hostname: String, settings: DnsSettings): List<InetAddress> {
         val resolved = if (!settings.customDnsEnabled) {
             systemDns.lookup(hostname)
         } else {
@@ -187,9 +221,11 @@ class AppDns @Inject constructor(
         fun isIpAddress(ip: String): Boolean {
             val trimmed = ip.trim()
             val parts = trimmed.split('.')
-            if (parts.size == 4 && parts.all { part ->
-                part.toIntOrNull()?.let { it in 0..255 } == true
-            }) {
+            if (parts.size == 4 &&
+                parts.all { part ->
+                    part.toIntOrNull()?.let { it in 0..255 } == true
+                }
+            ) {
                 return true
             }
             if (trimmed.contains(':')) {
@@ -199,8 +235,31 @@ class AppDns @Inject constructor(
         }
     }
 
-    private data class CachedDnsRecord(
-        val addresses: List<InetAddress>,
-        val expiresAt: Long,
-    )
+    private data class CachedDnsRecord(val addresses: List<InetAddress>, val expiresAt: Long)
+
+    /**
+     * A single in-flight resolution. [awaitResult] returns null when the leader
+     * failed so a waiter can retry instead of observing a synthetic failure.
+     */
+    private class InFlightLookup {
+        private val latch = java.util.concurrent.CountDownLatch(1)
+
+        @Volatile
+        private var result: List<InetAddress>? = null
+
+        fun complete(addresses: List<InetAddress>) {
+            result = addresses
+            latch.countDown()
+        }
+
+        fun completeWithFailure() {
+            result = null
+            latch.countDown()
+        }
+
+        fun awaitResult(): List<InetAddress>? {
+            latch.await()
+            return result
+        }
+    }
 }

@@ -5,10 +5,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
-import androidx.paging.map
 import com.xymusic.app.core.model.media.Album
 import com.xymusic.app.core.model.media.Artist
 import com.xymusic.app.core.model.media.Track
+import com.xymusic.app.core.paging.mapPagedItems
 import com.xymusic.app.core.paging.pagingDataFlow
 import com.xymusic.app.core.ui.media.toUi
 import com.xymusic.app.feature.search.domain.SearchResult
@@ -72,7 +72,7 @@ constructor(
                 } else {
                     flowOf(PagingData.empty<Track>())
                 }
-            }.map { pagingData -> pagingData.map { it.toUi() } }
+            }.mapPagedItems { it.toUi() }
             .cachedIn(viewModelScope)
 
     val artists =
@@ -83,7 +83,7 @@ constructor(
                 } else {
                     flowOf(PagingData.empty<Artist>())
                 }
-            }.map { pagingData -> pagingData.map { it.toUi() } }
+            }.mapPagedItems { it.toUi() }
             .cachedIn(viewModelScope)
 
     val albums =
@@ -94,7 +94,7 @@ constructor(
                 } else {
                     flowOf(PagingData.empty<Album>())
                 }
-            }.map { pagingData -> pagingData.map { it.toUi() } }
+            }.mapPagedItems { it.toUi() }
             .cachedIn(viewModelScope)
 
     init {

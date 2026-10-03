@@ -7,9 +7,9 @@ import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheDataSource
-import androidx.media3.datasource.cache.ContentMetadata
 import androidx.media3.datasource.cache.CacheEvictor
 import androidx.media3.datasource.cache.CacheSpan
+import androidx.media3.datasource.cache.ContentMetadata
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import com.xymusic.app.core.common.IoDispatcher
@@ -52,7 +52,7 @@ constructor(
                 context.filesDir.resolve("playback-media"),
                 evictor,
                 StandaloneDatabaseProvider(context),
-            )
+            ).also { created -> evictor.onCacheCreated(created) }
         }
 
     val cache: Cache
@@ -68,7 +68,11 @@ constructor(
             ) { maxBytes, persistentPins -> CachePolicy(maxBytes, persistentPins) }
                 .distinctUntilChanged()
                 .collect { policy ->
-                    evictor.updatePolicy(cache, policy.maxBytes, policy.persistentPins)
+                    // Records the policy without touching the cache. Creating SimpleCache
+                    // scans the cache directory and opens its own database, so it must not
+                    // happen during PlaybackService.onCreate; onCacheCreated applies the
+                    // pending policy when playback first needs the cache.
+                    evictor.updatePolicy(policy.maxBytes, policy.persistentPins)
                 }
         }
     }
@@ -141,19 +145,29 @@ internal class AdjustableLeastRecentlyUsedCacheEvictor : CacheEvictor {
     private var currentSizeBytes = 0L
     private var maxBytes = Long.MAX_VALUE
     private var evictionEnabled = false
+    private var pendingMaxBytes: Long? = null
+    private var pendingPersistentPins: Set<String> = emptySet()
     private val persistentPinnedKeys = mutableSetOf<String>()
     private val optimisticPersistentPinnedKeys = mutableSetOf<String>()
     private val temporaryPinnedKeys = mutableSetOf<String>()
 
-    fun updatePolicy(cache: Cache, maxBytes: Long, persistentPins: Set<String>) {
+    /**
+     * Records the desired policy without touching the cache, so the cache can stay
+     * uncreated until playback needs it. Applied by [onCacheCreated].
+     */
+    @Synchronized
+    fun updatePolicy(maxBytes: Long, persistentPins: Set<String>) {
         require(maxBytes > 0) { "Cache limit must be positive" }
-        synchronized(this) {
-            this.maxBytes = maxBytes
-            persistentPinnedKeys.clear()
-            persistentPinnedKeys.addAll(persistentPins)
-            optimisticPersistentPinnedKeys.removeAll(persistentPins)
-            evictionEnabled = true
-        }
+        pendingMaxBytes = maxBytes
+        pendingPersistentPins = persistentPins
+        persistentPinnedKeys.clear()
+        persistentPinnedKeys.addAll(persistentPins)
+        optimisticPersistentPinnedKeys.removeAll(persistentPins)
+        evictionEnabled = true
+    }
+
+    /** Applies the policy recorded before the cache existed and evicts down to it. */
+    fun onCacheCreated(cache: Cache) {
         evict(cache, 0)
     }
 
@@ -220,6 +234,12 @@ internal class AdjustableLeastRecentlyUsedCacheEvictor : CacheEvictor {
         while (true) {
             val candidate =
                 synchronized(this) {
+                    // A policy recorded before the cache existed takes effect here, on the
+                    // first eviction after creation, without forcing the cache into being.
+                    pendingMaxBytes?.let { pending ->
+                        maxBytes = pending
+                        pendingMaxBytes = null
+                    }
                     if (
                         !evictionEnabled ||
                         currentSizeBytes + incomingLength <= maxBytes ||

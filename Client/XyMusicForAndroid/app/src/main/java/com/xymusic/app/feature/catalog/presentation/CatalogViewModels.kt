@@ -4,7 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.paging.cachedIn
-import androidx.paging.map
+import com.xymusic.app.core.paging.mapPagedItems
 import com.xymusic.app.core.paging.pagingDataFlow
 import com.xymusic.app.core.ui.media.toUi
 import com.xymusic.app.feature.catalog.domain.CatalogResult
@@ -168,7 +168,7 @@ constructor(
                     albumId = albumId,
                     sort = TrackSort.ALBUM_ORDER_ASC,
                 ),
-            ).pagingDataFlow().map { pagingData -> pagingData.map { it.toUi() } }
+            ).pagingDataFlow().mapPagedItems { it.toUi() }
             .cachedIn(viewModelScope)
 
     init {
@@ -231,7 +231,7 @@ constructor(
                     artistId = artistId,
                     sort = AlbumSort.RELEASE_DATE_DESC,
                 ),
-            ).pagingDataFlow().map { pagingData -> pagingData.map { it.toUi() } }
+            ).pagingDataFlow().mapPagedItems { it.toUi() }
             .cachedIn(viewModelScope)
 
     val tracks =
@@ -241,7 +241,7 @@ constructor(
                     artistId = artistId,
                     sort = TrackSort.PUBLISHED_DESC,
                 ),
-            ).pagingDataFlow().map { pagingData -> pagingData.map { it.toUi() } }
+            ).pagingDataFlow().mapPagedItems { it.toUi() }
             .cachedIn(viewModelScope)
 
     init {

@@ -132,6 +132,11 @@ class PlaybackPersistenceControllerTest {
         clock = Clock.fixed(Instant.ofEpochMilli(10_000), ZoneOffset.UTC),
         cancelSleepTimer = {},
         clearPlaybackGrants = {},
+        // Keeps the snapshot mapping on the test scheduler so advanceUntilIdle()
+        // observes it, instead of the real IO pool.
+        ioDispatcher = this.testScheduler.let { scheduler ->
+            kotlinx.coroutines.test.StandardTestDispatcher(scheduler)
+        },
     )
 
     private class InMemoryPlaybackQueueStore(initialItems: List<StoredPlaybackQueueItem>) : PlaybackQueueStore {

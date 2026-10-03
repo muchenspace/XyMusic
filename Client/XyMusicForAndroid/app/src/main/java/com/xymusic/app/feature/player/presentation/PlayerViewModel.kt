@@ -52,6 +52,7 @@ constructor(
 ) : ViewModel() {
     private val mutableEffects = MutableSharedFlow<PlayerUiEffect>(extraBufferCapacity = 1)
     private val lyricsRefreshMutex = Mutex()
+    private val playbackSessionStarted = java.util.concurrent.atomic.AtomicBoolean(false)
     val effects = mutableEffects.asSharedFlow()
 
     private val selectedLyrics =
@@ -148,9 +149,6 @@ constructor(
 
     init {
         viewModelScope.launch {
-            if (playbackQueueUseCases.observe().first().isNotEmpty()) playerUseCases.connect()
-        }
-        viewModelScope.launch {
             playerUseCases.state
                 .map { state -> state.failure }
                 .distinctUntilChanged()
@@ -162,6 +160,19 @@ constructor(
                 .collect { failure ->
                     mutableEffects.emit(PlayerUiEffect.ShowMessage(failure.messageRes()))
                 }
+        }
+    }
+
+    /**
+     * Starts the playback service when the persisted queue is non-empty. Connecting
+     * builds PlaybackService, ExoPlayer and the media session on the main thread, so
+     * callers defer this past the first drawn frame to keep it out of the cold-start
+     * window. Idempotent.
+     */
+    fun startPlaybackSession() {
+        if (!playbackSessionStarted.compareAndSet(false, true)) return
+        viewModelScope.launch {
+            if (playbackQueueUseCases.observe().first().isNotEmpty()) playerUseCases.connect()
         }
     }
 

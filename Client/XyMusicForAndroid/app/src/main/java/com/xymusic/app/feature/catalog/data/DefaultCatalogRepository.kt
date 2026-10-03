@@ -158,6 +158,9 @@ constructor(
 
     override fun observeAlbum(albumId: String): Flow<Album?> = local.observeAlbum(albumId).map { it?.toDomain() }
 
+    // No cache TTL here: this path also supplies lyrics, and paging writes the track's
+    // cached timestamp through summary merges without ever writing lyrics. Skipping the
+    // fetch on a fresh timestamp would leave tracks permanently without lyrics.
     override suspend fun refreshTrack(trackId: String): CatalogResult<Unit> = refreshExecutor.execute(
         request = {
             remote.track(trackId).also { detail ->
@@ -167,29 +170,44 @@ constructor(
         persist = { detail: TrackDetailDto, cachedAt -> local.replaceTrack(detail, cachedAt) },
     )
 
-    override suspend fun refreshArtist(artistId: String): CatalogResult<Unit> = refreshExecutor.execute(
-        request = {
-            remote.artist(artistId).also { detail ->
-                if (detail.id != artistId) throw CatalogProtocolException("Artist detail ID mismatch")
-            }
-        },
-        persist = { detail: ArtistDetailDto, cachedAt -> local.replaceArtist(detail, cachedAt) },
-    )
+    override suspend fun refreshArtist(artistId: String): CatalogResult<Unit> {
+        if (local.artistCachedAtEpochMs(artistId).isFresh()) return CatalogResult.Success(Unit)
+        return refreshExecutor.execute(
+            request = {
+                remote.artist(artistId).also { detail ->
+                    if (detail.id != artistId) throw CatalogProtocolException("Artist detail ID mismatch")
+                }
+            },
+            persist = { detail: ArtistDetailDto, cachedAt -> local.replaceArtist(detail, cachedAt) },
+        )
+    }
 
-    override suspend fun refreshAlbum(albumId: String): CatalogResult<Unit> = refreshExecutor.execute(
-        request = {
-            remote.album(albumId).also { detail ->
-                if (detail.id != albumId) throw CatalogProtocolException("Album detail ID mismatch")
-            }
-        },
-        persist = { detail: AlbumDetailDto, cachedAt -> local.replaceAlbum(detail, cachedAt) },
-    )
+    override suspend fun refreshAlbum(albumId: String): CatalogResult<Unit> {
+        if (local.albumCachedAtEpochMs(albumId).isFresh()) return CatalogResult.Success(Unit)
+        return refreshExecutor.execute(
+            request = {
+                remote.album(albumId).also { detail ->
+                    if (detail.id != albumId) throw CatalogProtocolException("Album detail ID mismatch")
+                }
+            },
+            persist = { detail: AlbumDetailDto, cachedAt -> local.replaceAlbum(detail, cachedAt) },
+        )
+    }
+
+    /**
+     * Detail screens refresh on entry. Re-fetching a document cached moments ago only
+     * costs a round trip and a write, so a fresh cache entry is treated as a hit.
+     */
+    private fun Long?.isFresh(): Boolean = this != null && clock.millis() - this < DETAIL_CACHE_TTL_MS
 
     private fun pagingConfig(): PagingConfig = PagingConfig(
         pageSize = PAGE_SIZE,
         initialLoadSize = INITIAL_LOAD_SIZE,
         prefetchDistance = PREFETCH_DISTANCE,
         enablePlaceholders = false,
+        // Bounds retained pages. Without it a long scroll keeps every loaded page alive
+        // for the ViewModel's lifetime.
+        maxSize = MAX_RETAINED_ITEMS,
     )
 
     private companion object {
@@ -197,7 +215,14 @@ constructor(
 
         // Keep detail pages from writing a second page before the first frame is ready.
         const val INITIAL_LOAD_SIZE = PAGE_SIZE
-        const val PREFETCH_DISTANCE = 6
+
+        // Prefetch at least one page ahead so the list does not reach its end before the
+        // next page request starts, which is what produces the trailing loading row.
+        const val PREFETCH_DISTANCE = PAGE_SIZE
+        const val MAX_RETAINED_ITEMS = PAGE_SIZE * 30
+
+        /** How long a cached album or artist detail is served without a refetch. */
+        const val DETAIL_CACHE_TTL_MS = 5L * 60L * 1_000L
     }
 }
 

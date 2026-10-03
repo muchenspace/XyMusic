@@ -22,7 +22,9 @@ import java.time.Clock
 import java.util.Collections
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -30,6 +32,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 internal class PlaybackPersistenceController(
     private val player: Player,
@@ -40,6 +43,7 @@ internal class PlaybackPersistenceController(
     private val clock: Clock,
     private val cancelSleepTimer: () -> Unit,
     private val clearPlaybackGrants: () -> Unit,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     private val persistenceMutex = Mutex()
     private val persistenceJobs = Collections.synchronizedSet(mutableSetOf<Job>())
@@ -240,49 +244,56 @@ internal class PlaybackPersistenceController(
         val currentQueueItemId = player.currentMediaItem?.mediaId
         val currentPosition =
             player.currentMediaItem?.globalPlaybackPositionMs(player.currentPosition) ?: 0
+        // Player access is main-thread only, but parsing media ids, titles and artist
+        // lists for a long queue is not. Snapshot the items and resolve the enqueue
+        // timestamps here (the map is main-thread owned), then map them on the IO
+        // dispatcher so a timeline change cannot drop frames.
         val now = clock.millis()
+        val mediaItems =
+            List(player.mediaItemCount, player::getMediaItemAt)
+                .filter { mediaItem -> mediaItem.mediaId.isNotBlank() }
+                .map { mediaItem ->
+                    mediaItem to enqueuedAtByQueueItemId.getOrPut(mediaItem.mediaId) { now }
+                }
         var items =
-            buildList {
-                repeat(player.mediaItemCount) { index ->
-                    val mediaItem = player.getMediaItemAt(index)
-                    if (mediaItem.mediaId.isBlank()) return@repeat
-                    val trackId =
-                        runCatching {
-                            PlaybackMediaUri.trackId(requireNotNull(mediaItem.localConfiguration).uri)
-                        }.getOrNull() ?: return@repeat
-                    add(
-                        StoredPlaybackQueueItem(
-                            queueItemId = mediaItem.mediaId,
-                            position = size,
-                            trackId = trackId,
-                            resumePositionMs =
-                            if (mediaItem.mediaId == currentQueueItemId) {
-                                currentPosition
-                            } else {
-                                0
-                            },
-                            isCurrent = mediaItem.mediaId == currentQueueItemId,
-                            enqueuedAtEpochMillis =
-                            enqueuedAtByQueueItemId.getOrPut(mediaItem.mediaId) {
-                                now
-                            },
-                            title =
-                            mediaItem.mediaMetadata.title
-                                ?.toString()
-                                .orEmpty()
-                                .ifBlank { trackId },
-                            artistNames =
-                            mediaItem.mediaMetadata.extras
-                                ?.getStringArrayList(PlaybackMediaMetadata.EXTRA_ARTISTS)
-                                .orEmpty(),
-                            albumTitle = mediaItem.mediaMetadata.albumTitle?.toString(),
-                            artworkUrl = mediaItem.mediaMetadata.artworkUri?.toString(),
-                            artworkCacheKey =
-                            mediaItem.mediaMetadata.extras
-                                ?.getString(PlaybackMediaMetadata.EXTRA_ARTWORK_CACHE_KEY),
-                            durationMs = mediaItem.playbackMetadataDurationMs(),
-                        ),
-                    )
+            withContext(ioDispatcher) {
+                buildList {
+                    mediaItems.forEach { (mediaItem, enqueuedAtEpochMillis) ->
+                        val trackId =
+                            runCatching {
+                                PlaybackMediaUri.trackId(requireNotNull(mediaItem.localConfiguration).uri)
+                            }.getOrNull() ?: return@forEach
+                        add(
+                            StoredPlaybackQueueItem(
+                                queueItemId = mediaItem.mediaId,
+                                position = size,
+                                trackId = trackId,
+                                resumePositionMs =
+                                if (mediaItem.mediaId == currentQueueItemId) {
+                                    currentPosition
+                                } else {
+                                    0
+                                },
+                                isCurrent = mediaItem.mediaId == currentQueueItemId,
+                                enqueuedAtEpochMillis = enqueuedAtEpochMillis,
+                                title =
+                                mediaItem.mediaMetadata.title
+                                    ?.toString()
+                                    .orEmpty()
+                                    .ifBlank { trackId },
+                                artistNames =
+                                mediaItem.mediaMetadata.extras
+                                    ?.getStringArrayList(PlaybackMediaMetadata.EXTRA_ARTISTS)
+                                    .orEmpty(),
+                                albumTitle = mediaItem.mediaMetadata.albumTitle?.toString(),
+                                artworkUrl = mediaItem.mediaMetadata.artworkUri?.toString(),
+                                artworkCacheKey =
+                                mediaItem.mediaMetadata.extras
+                                    ?.getString(PlaybackMediaMetadata.EXTRA_ARTWORK_CACHE_KEY),
+                                durationMs = mediaItem.playbackMetadataDurationMs(),
+                            ),
+                        )
+                    }
                 }
             }
         if (items.isNotEmpty() && items.none(StoredPlaybackQueueItem::isCurrent)) {
@@ -327,9 +338,9 @@ internal class PlaybackPersistenceController(
             trackId = trackId,
             positionMs = mediaItem.globalPlaybackPositionMs(player.currentPosition),
             durationMs =
-                mediaItem.globalPlaybackDurationMs(
-                    player.duration.takeUnless { it == C.TIME_UNSET }?.coerceAtLeast(0) ?: 0,
-                ),
+            mediaItem.globalPlaybackDurationMs(
+                player.duration.takeUnless { it == C.TIME_UNSET }?.coerceAtLeast(0) ?: 0,
+            ),
             occurredAtEpochMillis = clock.millis(),
             event = event,
         ).also { lastCheckpoint = it }
@@ -390,8 +401,8 @@ internal class PlaybackPersistenceController(
                 lastCheckpoint
                     ?.copy(
                         positionMs =
-                            oldPosition.mediaItem?.globalPlaybackPositionMs(oldPosition.positionMs)
-                                ?: oldPosition.positionMs.coerceAtLeast(0),
+                        oldPosition.mediaItem?.globalPlaybackPositionMs(oldPosition.positionMs)
+                            ?: oldPosition.positionMs.coerceAtLeast(0),
                         occurredAtEpochMillis = clock.millis(),
                         event = transitionEvent,
                     )?.let { checkpoint ->
@@ -460,7 +471,10 @@ internal class PlaybackPersistenceController(
     }
 
     private companion object {
-        const val CHECKPOINT_INTERVAL_MS = 15_000L
+        // Each checkpoint writes the queue row, upserts history and schedules sync work.
+        // The resume position only needs to survive process death, so a coarser cadence
+        // halves that work during playback without changing what the user observes.
+        const val CHECKPOINT_INTERVAL_MS = 30_000L
         const val STRUCTURAL_PERSISTENCE_DEBOUNCE_MS = 250L
     }
 

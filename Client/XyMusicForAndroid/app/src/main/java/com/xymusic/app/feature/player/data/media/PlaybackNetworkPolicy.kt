@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.os.SystemClock
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
@@ -37,6 +38,9 @@ constructor(
     private var activeNetworkState: ActiveNetworkState? = null
 
     @Volatile
+    private var fallbackMetered: FallbackMeteredSample? = null
+
+    @Volatile
     private var mobileDataPolicy: MobileDataPolicy? = null
 
     private val networkCallback =
@@ -63,7 +67,12 @@ constructor(
         }
 
     init {
-        connectivityManager.registerDefaultNetworkCallback(networkCallback)
+        // Registering the callback is a synchronous binder call, so it is deferred
+        // off the constructor: this object is built during PlaybackService.onCreate,
+        // which runs in the cold-start window.
+        scope.launch {
+            connectivityManager.registerDefaultNetworkCallback(networkCallback)
+        }
         scope.launch {
             settingsRepository.settings
                 .distinctUntilChanged()
@@ -74,12 +83,29 @@ constructor(
     }
 
     fun requireStreamingAllowed() {
-        val isActiveNetworkMetered =
-            activeNetworkState?.isMetered
-                ?: connectivityManager.isActiveNetworkMetered
-        if (!isStreamingAllowed(mobileDataPolicy, isActiveNetworkMetered)) {
+        // Prefer the cached callback value; before the first callback lands, fall back
+        // to the system query at most once per second. Re-querying per read would put
+        // an IPC round trip on ExoPlayer's loading thread for every 64 KiB block.
+        val isMetered = activeNetworkState?.isMetered ?: resolveFallbackMetered()
+        if (!isStreamingAllowed(mobileDataPolicy, isMetered)) {
             throw IOException("Streaming on the active network is disabled by user settings")
         }
+    }
+
+    private fun resolveFallbackMetered(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        val cached = fallbackMetered
+        if (cached != null && now - cached.sampledAtElapsedRealtimeMs < FALLBACK_SAMPLE_TTL_MS) {
+            return cached.isMetered
+        }
+        val isMetered = connectivityManager.isActiveNetworkMetered
+        fallbackMetered = FallbackMeteredSample(isMetered, now)
+        return isMetered
+    }
+    private data class FallbackMeteredSample(val isMetered: Boolean, val sampledAtElapsedRealtimeMs: Long)
+
+    private companion object {
+        const val FALLBACK_SAMPLE_TTL_MS = 1_000L
     }
 }
 

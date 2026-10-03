@@ -44,6 +44,11 @@ data class CatalogRemoteKeyEntity(
             value = ["owner_user_id", "status", "next_attempt_at_epoch_ms", "created_at_epoch_ms"],
         ),
         Index(name = "index_pending_sync_lease", value = ["status", "lease_expires_at_epoch_ms"]),
+        // Serves the target lookups used while merging library and playlist refreshes.
+        Index(
+            name = "index_pending_sync_owner_target",
+            value = ["owner_user_id", "target_type", "target_id"],
+        ),
     ],
 )
 data class PendingSyncOperationEntity(

@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.unit.dp
@@ -63,12 +64,20 @@ fun MainNavigation(
     val catalogPlaybackViewModel: CatalogPlaybackViewModel = hiltViewModel()
     val trackActionsViewModel: TrackActionsViewModel = hiltViewModel()
     val playerUiState by playerViewModel.structuralUiState.collectAsStateWithLifecycle()
-    val playbackPosition = rememberPlaybackPositionState(playerViewModel.playbackState)
+    var playerPresented by rememberSaveable { mutableStateOf(false) }
+    // The expanded player and lyrics need VSync; the collapsed mini bar only draws a
+    // thin progress line and is served by a coarse tick.
+    val playbackPosition = rememberPlaybackPositionState(playerViewModel.playbackState, highFrequency = playerPresented)
     val trackActionsUiState by trackActionsViewModel.uiState.collectAsStateWithLifecycle()
     val playerIsFavorite = trackActionsUiState.playerIsFavorite
     val hasPlayerItem = playerUiState.player.currentItem != null
-    val imeVisible = WindowInsets.isImeVisible
-    var playerPresented by rememberSaveable { mutableStateOf(false) }
+
+    // Building PlaybackService, ExoPlayer and the media session runs on the main thread,
+    // so start it only after the first frame has been drawn.
+    LaunchedEffect(playerViewModel) {
+        withFrameNanos { }
+        playerViewModel.startPlaybackSession()
+    }
 
     PlayerEffectSnackbar(playerViewModel.effects, snackbarHostState)
     LaunchedEffect(trackActionsViewModel, snackbarHostState, resources) {
@@ -88,6 +97,9 @@ fun MainNavigation(
     }
 
     BoxWithConstraints(modifier = modifier) {
+        // Read inside the subcomposition so an IME show/hide only invalidates the
+        // chrome subtree instead of the whole navigation body.
+        val imeVisible = WindowInsets.isImeVisible
         val compactLandscape = isCompactLandscape(maxWidth, maxHeight)
         val layoutConfig =
             MainNavigationLayoutConfig(

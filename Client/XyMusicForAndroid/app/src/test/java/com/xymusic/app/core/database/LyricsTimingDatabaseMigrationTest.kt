@@ -52,7 +52,7 @@ class LyricsTimingDatabaseMigrationTest {
         helper
             .runMigrationsAndValidate(
                 XyMusicDatabase.VERSION,
-                listOf(DatabaseMigrations.MIGRATION_6_7),
+                listOf(DatabaseMigrations.MIGRATION_6_7, DatabaseMigrations.MIGRATION_7_8),
             ).use { database ->
                 database.prepare("SELECT COUNT(*) FROM lyrics").use { statement ->
                     assertThat(statement.step()).isTrue()

@@ -191,8 +191,11 @@ constructor(
     private fun pagingConfig(): PagingConfig = PagingConfig(
         pageSize = SPECIFIC_SCOPE_LIMIT,
         initialLoadSize = SPECIFIC_SCOPE_LIMIT,
-        prefetchDistance = 5,
+        // Matches the server page size so the next page request starts before the list
+        // reaches its end instead of showing a trailing loading row.
+        prefetchDistance = SPECIFIC_SCOPE_LIMIT,
         enablePlaceholders = false,
+        maxSize = SPECIFIC_SCOPE_LIMIT * 30,
     )
 
     private fun signedOutFailure(): SearchResult.Failure = SearchResult.Failure(

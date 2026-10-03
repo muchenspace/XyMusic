@@ -16,6 +16,10 @@ interface LibraryDao {
     @Upsert
     suspend fun upsertFavorite(favorite: FavoriteEntity)
 
+    /** Upserts a whole refresh page as one batch instead of one statement per favorite. */
+    @Upsert
+    suspend fun upsertFavorites(favorites: List<FavoriteEntity>)
+
     @Query("SELECT * FROM favorites WHERE owner_user_id = :ownerUserId AND track_id = :trackId")
     suspend fun favorite(ownerUserId: String, trackId: String): FavoriteEntity?
 

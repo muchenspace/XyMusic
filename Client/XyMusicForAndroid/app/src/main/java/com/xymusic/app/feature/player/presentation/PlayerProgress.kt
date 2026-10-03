@@ -9,12 +9,14 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.withFrameNanos
 import com.xymusic.app.feature.player.domain.model.PlayerState
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
@@ -42,13 +44,21 @@ internal fun rememberPlaybackInteractionPositionState(playbackPosition: State<Fl
 /**
  * Creates the single playback clock used by the navigation tree.
  *
- * The flow collector only updates the latest player sample. A frame ticker is
+ * The flow collector only updates the latest player sample. A ticker is
  * launched while playback is active, so paused screens do not keep a frame
  * coroutine alive and multiple consumers do not create independent tickers.
+ *
+ * [highFrequency] selects the tick source. The expanded player and the lyrics
+ * view need VSync, but the collapsed mini bar only draws a thin progress line,
+ * so it is served by a coarse timer instead of waking the process every frame.
  */
 @Composable
-internal fun rememberPlaybackPositionState(playerFlow: StateFlow<PlayerState>): State<Float> {
+internal fun rememberPlaybackPositionState(
+    playerFlow: StateFlow<PlayerState>,
+    highFrequency: Boolean = true,
+): State<Float> {
     val clock = remember(playerFlow) { PlaybackPositionClock(playerFlow.value) }
+    val currentHighFrequency = rememberUpdatedState(highFrequency)
     LaunchedEffect(playerFlow, clock) {
         var ticker: Job? = null
         try {
@@ -56,7 +66,7 @@ internal fun rememberPlaybackPositionState(playerFlow: StateFlow<PlayerState>): 
                 clock.update(player)
                 if (player.isPlaying) {
                     if (ticker?.isActive != true) {
-                        ticker = launch { clock.runWhilePlaying() }
+                        ticker = launch { clock.runWhilePlaying { currentHighFrequency.value } }
                     }
                 } else {
                     ticker?.cancel()
@@ -96,7 +106,7 @@ private class PlaybackPositionClock(initialPlayer: PlayerState) {
         position.floatValue = latestPlayer.get().positionMs.toFloat()
     }
 
-    suspend fun runWhilePlaying() {
+    suspend fun runWhilePlaying(highFrequency: () -> Boolean) {
         val coroutineContext = currentCoroutineContext()
         val loopState = PlaybackPositionLoopState()
         while (coroutineContext.isActive) {
@@ -107,7 +117,20 @@ private class PlaybackPositionClock(initialPlayer: PlayerState) {
                     player = currentPlayer,
                     displayedPositionMs = position.floatValue,
                 )?.let { snappedPosition -> position.floatValue = snappedPosition }
-            withFrameNanos {
+            if (highFrequency()) {
+                withFrameNanos {
+                    position.floatValue =
+                        loopState.renderFrame(
+                            sampledPlayer = currentPlayer,
+                            latestPlayer = latestPlayer.get(),
+                            displayedPositionMs = position.floatValue,
+                        )
+                }
+            } else {
+                // The mini bar only draws a thin line that advances across the whole
+                // track, so a coarse tick is visually identical while cutting VSync
+                // wakeups by an order of magnitude.
+                delay(LOW_FREQUENCY_TICK_MS)
                 position.floatValue =
                     loopState.renderFrame(
                         sampledPlayer = currentPlayer,
@@ -339,3 +362,4 @@ private const val PLAYBACK_POSITION_CORRECTION_MS = 120f
 private const val PLAYBACK_POSITION_CORRECTION_EPSILON_MS = 0.5f
 private const val PLAYBACK_POSITION_SNAP_THRESHOLD_MS = 250f
 private const val NANOS_PER_MILLISECOND = 1_000_000L
+private const val LOW_FREQUENCY_TICK_MS = 250L

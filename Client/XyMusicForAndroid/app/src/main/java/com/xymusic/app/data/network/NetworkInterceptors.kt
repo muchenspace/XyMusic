@@ -168,7 +168,6 @@ constructor() : Interceptor {
         val mediaType = body.contentType()
         if (mediaType?.subtype?.contains("json", ignoreCase = true) != true) return response
 
-        val content = body.string()
         val serverOrigin =
             response.request.url
                 .newBuilder()
@@ -178,28 +177,67 @@ constructor() : Interceptor {
                 .build()
                 .toString()
                 .removeSuffix("/")
-        val rewritten = RESOURCE_URL_PREFIXES.fold(content) { value, prefix ->
-            value.replace(prefix, "\"$serverOrigin${prefix.removePrefix("\"")}")
-        }
+        val rewritten = rewriteResourceUrls(body.string(), serverOrigin)
+        val rewrittenBytes = rewritten.toByteArray(Charsets.UTF_8)
         return response
             .newBuilder()
-            .removeHeader(HEADER_CONTENT_LENGTH)
-            .body(rewritten.toResponseBody(mediaType))
+            .apply {
+                // The body is rebuilt, so a stale length would be wrong; when the origin
+                // response declared one, keep the header accurate instead of dropping it.
+                if (response.header(HEADER_CONTENT_LENGTH) != null) {
+                    header(HEADER_CONTENT_LENGTH, rewrittenBytes.size.toString())
+                } else {
+                    removeHeader(HEADER_CONTENT_LENGTH)
+                }
+            }
+            .body(rewrittenBytes.toResponseBody(mediaType))
             .build()
     }
 
     private companion object {
-        // Resource URLs in JSON are relative by contract. They must be made
-        // absolute before Coil/Media3 consumes them because those consumers do
-        // not inherit Retrofit's configured base URL.
-        val RESOURCE_URL_PREFIXES = listOf(
-            "\"/api/v1/assets/",
-            "\"/api/v1/oss/",
-            "\"/api/v1/playback/streams/",
-            "\"/api/v1/users/me/avatar/uploads/",
-        )
         const val HEADER_CONTENT_LENGTH = "Content-Length"
     }
+}
+
+// Resource URLs in JSON are relative by contract. They must be made absolute before
+// Coil/Media3 consumes them because those consumers do not inherit Retrofit's
+// configured base URL.
+private val RESOURCE_URL_PREFIXES = listOf(
+    "\"/api/v1/assets/",
+    "\"/api/v1/oss/",
+    "\"/api/v1/playback/streams/",
+    "\"/api/v1/users/me/avatar/uploads/",
+)
+
+/**
+ * Prefixes every relative resource URL with [serverOrigin] in one pass.
+ *
+ * The previous implementation chained one full `String.replace` per prefix, which
+ * allocated a complete copy of the response body for each. A single scan keeps one
+ * output buffer regardless of how many prefixes the document contains.
+ */
+internal fun rewriteResourceUrls(content: String, serverOrigin: String): String {
+    val builder = StringBuilder(content.length + serverOrigin.length)
+    var cursor = 0
+    while (true) {
+        var nextIndex = -1
+        var nextPrefix: String? = null
+        RESOURCE_URL_PREFIXES.forEach { prefix ->
+            val index = content.indexOf(prefix, cursor)
+            if (index != -1 && (nextIndex == -1 || index < nextIndex)) {
+                nextIndex = index
+                nextPrefix = prefix
+            }
+        }
+        val prefix = nextPrefix ?: break
+        builder.append(content, cursor, nextIndex)
+        // The prefix includes its leading quote; the origin goes inside it.
+        builder.append('"').append(serverOrigin).append(prefix, 1, prefix.length)
+        cursor = nextIndex + prefix.length
+    }
+    if (cursor == 0) return content
+    builder.append(content, cursor, content.length)
+    return builder.toString()
 }
 
 class ClientMetadataInterceptor

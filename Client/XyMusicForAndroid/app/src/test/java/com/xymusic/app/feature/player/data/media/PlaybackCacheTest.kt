@@ -78,10 +78,12 @@ class PlaybackCacheTest {
         cache.add(cachedSpan(key = "old", length = 60, lastTouchTimestamp = 1))
         cache.add(cachedSpan(key = "new", length = 60, lastTouchTimestamp = 2))
 
-        evictor.updatePolicy(cache.delegate, maxBytes = 200, persistentPins = emptySet())
+        evictor.updatePolicy(maxBytes = 200, persistentPins = emptySet())
+        evictor.onCacheCreated(cache.delegate)
         assertThat(cache.removedKeys).isEmpty()
 
-        evictor.updatePolicy(cache.delegate, maxBytes = 100, persistentPins = emptySet())
+        evictor.updatePolicy(maxBytes = 100, persistentPins = emptySet())
+        evictor.onCacheCreated(cache.delegate)
 
         assertThat(cache.removedKeys).containsExactly("old")
         assertThat(cache.activeKeys).containsExactly("new")
@@ -95,10 +97,10 @@ class PlaybackCacheTest {
         cache.add(cachedSpan(key = "streamed", length = 40, lastTouchTimestamp = 2))
 
         evictor.updatePolicy(
-            cache.delegate,
             maxBytes = 80,
             persistentPins = setOf("downloaded"),
         )
+        evictor.onCacheCreated(cache.delegate)
 
         assertThat(cache.removedKeys).containsExactly("streamed")
         assertThat(cache.activeKeys).containsExactly("downloaded")

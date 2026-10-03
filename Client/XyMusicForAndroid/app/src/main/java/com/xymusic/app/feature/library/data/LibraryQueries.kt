@@ -33,7 +33,7 @@ internal class LibraryQueries(private val libraryDao: LibraryDao, private val se
             flowOf(PagingData.empty<Track>())
         } else {
             Pager(
-                config = PagingConfig(pageSize = 30, enablePlaceholders = false),
+                config = libraryPagingConfig(),
                 pagingSourceFactory = { libraryDao.pagedFavoriteTracks(owner) },
             ).flow.map { data -> data.map { it.toDomain() } }
         }
@@ -45,9 +45,27 @@ internal class LibraryQueries(private val libraryDao: LibraryDao, private val se
             flowOf(PagingData.empty<PlaybackHistoryItem>())
         } else {
             Pager(
-                config = PagingConfig(pageSize = 30, enablePlaceholders = false),
+                config = libraryPagingConfig(),
                 pagingSourceFactory = { libraryDao.pagedHistory(owner) },
             ).flow.map { data -> data.map { it.toDomain() } }
         }
+    }
+
+    private companion object {
+        const val PAGE_SIZE = 30
+
+        // Left at the default this becomes pageSize * 3 = 90 rows on first load, which
+        // makes the initial query needlessly heavy for a list that shows far fewer.
+        const val INITIAL_LOAD_SIZE = PAGE_SIZE
+        const val PREFETCH_DISTANCE = PAGE_SIZE
+        const val MAX_RETAINED_ITEMS = PAGE_SIZE * 30
+
+        fun libraryPagingConfig() = PagingConfig(
+            pageSize = PAGE_SIZE,
+            initialLoadSize = INITIAL_LOAD_SIZE,
+            prefetchDistance = PREFETCH_DISTANCE,
+            enablePlaceholders = false,
+            maxSize = MAX_RETAINED_ITEMS,
+        )
     }
 }

@@ -306,16 +306,19 @@ internal class LibraryFavoriteOperations(
                         refreshStart.favoritesByTrackId[trackId] !=
                             currentFavoritesByTrackId[trackId]
                     }
-                libraryDao.deleteFavorites(owner)
-                items.forEach { item ->
-                    libraryDao.upsertFavorite(
+                val serverFavorites =
+                    items.map { item ->
                         FavoriteEntity(
                             owner,
                             item.track.id,
                             Instant.parse(item.favoritedAt).toEpochMilli(),
-                        ),
-                    )
-                }
+                        )
+                    }
+                replaceFavoritesIfChanged(
+                    owner = owner,
+                    serverFavorites = serverFavorites,
+                    currentFavoritesByTrackId = currentFavoritesByTrackId,
+                )
                 protectedTrackIds.forEach { trackId ->
                     val current = currentFavoritesByTrackId[trackId]
                     if (current == null) {
@@ -501,6 +504,22 @@ internal class LibraryFavoriteOperations(
         val remoteSucceeded: Boolean,
         val pendingPersisted: Boolean,
     )
+
+    /**
+     * Replaces the cached favorites only when the server set actually differs. A refresh
+     * that returns the cached set would otherwise delete and reinsert every row,
+     * invalidating paging sources and rewriting identical data.
+     */
+    private suspend fun replaceFavoritesIfChanged(
+        owner: String,
+        serverFavorites: List<FavoriteEntity>,
+        currentFavoritesByTrackId: Map<String, FavoriteEntity>,
+    ) {
+        val serverFavoritesByTrackId = serverFavorites.associateBy(FavoriteEntity::trackId)
+        if (serverFavoritesByTrackId == currentFavoritesByTrackId) return
+        libraryDao.deleteFavorites(owner)
+        libraryDao.upsertFavorites(serverFavorites)
+    }
 
     private companion object {
         val FAVORITE_OPERATION_TYPES =

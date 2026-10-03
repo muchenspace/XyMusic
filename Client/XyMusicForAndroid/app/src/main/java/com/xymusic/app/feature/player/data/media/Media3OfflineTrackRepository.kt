@@ -1,6 +1,5 @@
 package com.xymusic.app.feature.player.data.media
 
-import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.cache.CacheDataSource
@@ -62,21 +61,19 @@ constructor(
     private val playbackNetworkPolicy: PlaybackNetworkPolicy,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : OfflineMediaDownloader {
-    override suspend fun download(grant: PlaybackGrant): Long? {
-        return runInterruptible(ioDispatcher) {
-            val cacheKey = "track:${grant.trackId}"
-            val builder = DataSpec.Builder()
-                .setUri(grant.streamUrl)
-                .setKey(cacheKey)
-            grant.contentLength?.takeIf { it > 0 }?.let(builder::setLength)
-            CacheWriter(
-                downloadDataSource(),
-                builder.build(),
-                null,
-                null,
-            ).cache()
-            playbackCache.cachedContentLength(cacheKey)
-        }
+    override suspend fun download(grant: PlaybackGrant): Long? = runInterruptible(ioDispatcher) {
+        val cacheKey = "track:${grant.trackId}"
+        val builder = DataSpec.Builder()
+            .setUri(grant.streamUrl)
+            .setKey(cacheKey)
+        grant.contentLength?.takeIf { it > 0 }?.let(builder::setLength)
+        CacheWriter(
+            downloadDataSource(),
+            builder.build(),
+            null,
+            null,
+        ).cache()
+        playbackCache.cachedContentLength(cacheKey)
     }
 
     private fun downloadDataSource(): CacheDataSource {
@@ -119,7 +116,11 @@ constructor(
                 is AppSessionState.SignedIn ->
                     offlineTrackDao
                         .observeAll(state.userId)
-                        .map { tracks -> tracks.map(::toDomain) }
+                        .map { tracks ->
+                            // Each row decodes a JSON artist list, so the mapping runs off
+                            // the collecting dispatcher instead of on the main thread.
+                            withContext(ioDispatcher) { tracks.map(::toDomain) }
+                        }
                 AppSessionState.Loading, AppSessionState.SignedOut -> flowOf(emptyList())
             }
         }

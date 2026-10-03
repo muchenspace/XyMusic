@@ -5,11 +5,11 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.paging.cachedIn
-import androidx.paging.map
 import com.xymusic.app.R
 import com.xymusic.app.core.common.DefaultDispatcher
 import com.xymusic.app.core.common.runCatchingPreservingCancellation
 import com.xymusic.app.core.model.media.Track
+import com.xymusic.app.core.paging.mapPagedItems
 import com.xymusic.app.core.paging.pagingDataFlow
 import com.xymusic.app.core.ui.media.CatalogAlbumLinkUi
 import com.xymusic.app.core.ui.media.CatalogArtistLinkUi
@@ -104,14 +104,14 @@ constructor(
         libraryUseCases
             .favorites()
             .pagingDataFlow()
-            .map { paging -> paging.map(Track::toCatalogUi) }
+            .mapPagedItems { track -> track.toCatalogUi() }
             .cachedIn(viewModelScope)
 
     val history =
         libraryUseCases
             .history()
             .pagingDataFlow()
-            .map { paging -> paging.map(PlaybackHistoryItem::toUi) }
+            .mapPagedItems { item -> item.toUi() }
             .cachedIn(viewModelScope)
 
     val downloads =
