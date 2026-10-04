@@ -216,6 +216,7 @@ class FeatureDependencyArchitectureTest {
         private val allowedFeatureDependencies =
             mapOf(
                 "library" to setOf("player", "playlist"),
+                "player" to setOf("catalog"),
                 "playlist" to setOf("player"),
                 "settings" to setOf("auth", "server"),
             )

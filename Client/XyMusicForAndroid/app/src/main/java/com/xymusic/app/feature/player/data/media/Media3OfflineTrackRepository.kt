@@ -1,5 +1,6 @@
 package com.xymusic.app.feature.player.data.media
 
+import android.util.Log
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.cache.CacheDataSource
@@ -18,6 +19,8 @@ import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.session.SessionIdentityProvider
 import com.xymusic.app.core.session.SessionMutationCoordinator
+import com.xymusic.app.feature.catalog.domain.CatalogRepository
+import com.xymusic.app.feature.catalog.domain.CatalogResult
 import com.xymusic.app.feature.player.domain.OfflineTrack
 import com.xymusic.app.feature.player.domain.OfflineTrackRepository
 import com.xymusic.app.feature.player.domain.OfflineTrackResult
@@ -67,13 +70,17 @@ constructor(
             .setUri(grant.streamUrl)
             .setKey(cacheKey)
         grant.contentLength?.takeIf { it > 0 }?.let(builder::setLength)
+        var totalDownloaded = 0L
+        val progressListener = CacheWriter.ProgressListener { _, bytesCached, _ ->
+            totalDownloaded = bytesCached
+        }
         CacheWriter(
             downloadDataSource(),
             builder.build(),
             null,
-            null,
+            progressListener,
         ).cache()
-        playbackCache.cachedContentLength(cacheKey)
+        playbackCache.cachedContentLength(cacheKey) ?: totalDownloaded.takeIf { it > 0 }
     }
 
     private fun downloadDataSource(): CacheDataSource {
@@ -86,9 +93,11 @@ constructor(
             .Factory()
             .setCache(playbackCache.cache)
             .setUpstreamDataSourceFactory(upstream)
-            .createDataSource()
+            .createDataSourceForDownloading()
     }
 }
+
+private const val TAG = "Media3OfflineTrackRepo"
 
 @Singleton
 @UnstableApi
@@ -98,6 +107,7 @@ class Media3OfflineTrackRepository
 constructor(
     private val offlineTrackDao: OfflineTrackDao,
     private val catalogDao: CatalogDao,
+    private val catalogRepository: CatalogRepository,
     private val offlineMediaStore: OfflineMediaStore,
     private val offlineMediaDownloader: OfflineMediaDownloader,
     private val playbackGrantRepository: PlaybackGrantRepository,
@@ -152,11 +162,16 @@ constructor(
         return try {
             val existingResult = existingDownloadResult(trackId, downloadIdentity, ownerUserId)
             if (existingResult != null) return existingResult
-            val prepared = prepareDownload(trackId, downloadIdentity) ?: return OfflineTrackResult.Unavailable
+            val prepared = prepareDownload(trackId, downloadIdentity)
+                ?: run {
+                    Log.w(TAG, "prepareDownload returned null for track $trackId")
+                    return OfflineTrackResult.Unavailable
+                }
             executeDownload(prepared, downloadIdentity, ownerUserId)
         } catch (failure: CancellationException) {
             throw failure
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            Log.e(TAG, "Download failed for track $trackId", error)
             OfflineTrackResult.Unavailable
         }
     }
@@ -184,12 +199,24 @@ constructor(
     }
 
     private suspend fun prepareDownload(trackId: String, downloadIdentity: ActiveSessionIdentity): PreparedDownload? {
-        val metadata = catalogDao.tracks(listOf(trackId)).singleOrNull() ?: return null
+        val metadata = catalogDao.tracks(listOf(trackId)).singleOrNull()
+            ?: run {
+                when (catalogRepository.refreshTrack(trackId)) {
+                    is CatalogResult.Success -> catalogDao.tracks(listOf(trackId)).singleOrNull()
+                    is CatalogResult.Failure -> {
+                        Log.w(TAG, "Failed to refresh metadata for track $trackId")
+                        null
+                    }
+                }
+            } ?: return null
         if (!isCurrent(downloadIdentity)) return null
         val grant =
             when (val result = playbackGrantRepository.get(trackId = trackId)) {
                 is PlayerResult.Success -> result.value
-                is PlayerResult.Failure -> return null
+                is PlayerResult.Failure -> {
+                    Log.w(TAG, "Failed to get playback grant for track $trackId: $result")
+                    return null
+                }
             }
         if (!isCurrent(downloadIdentity)) return null
         return PreparedDownload(metadata, grant)
@@ -207,9 +234,8 @@ constructor(
             if (!beginDownload(claim, downloadIdentity)) return OfflineTrackResult.Unavailable
             val downloadedLength = offlineMediaDownloader.download(prepared.grant)
             currentCoroutineContext().ensureActive()
-            val contentLength = prepared.grant.contentLength ?: downloadedLength
+            val contentLength = (prepared.grant.contentLength ?: downloadedLength)?.takeIf { it > 0L }
                 ?: return OfflineTrackResult.Unavailable
-            if (contentLength <= 0L) return OfflineTrackResult.Unavailable
             val track =
                 prepared.metadata.toEntity(
                     ownerUserId = ownerUserId,
@@ -218,15 +244,17 @@ constructor(
                     downloadedAtEpochMillis = clock.millis(),
                     json = json,
                 )
-            if (!commitDownload(track, claim, downloadIdentity, operationJob)) {
+            if (commitDownload(track, claim, downloadIdentity, operationJob)) {
+                OfflineTrackResult.Success
+            } else {
                 discardUncommitted(claim)
-                return OfflineTrackResult.Unavailable
+                OfflineTrackResult.Unavailable
             }
-            OfflineTrackResult.Success
         } catch (failure: CancellationException) {
             discardUncommitted(claim)
             throw failure
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            Log.e(TAG, "executeDownload failed for track ${prepared.grant.trackId}", error)
             discardUncommitted(claim)
             OfflineTrackResult.Unavailable
         }

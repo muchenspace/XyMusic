@@ -7,12 +7,22 @@ import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import com.xymusic.app.core.database.XyMusicDatabase
 import com.xymusic.app.core.database.seedTrack
+import com.xymusic.app.core.model.media.Album
+import com.xymusic.app.core.model.media.Artist
+import com.xymusic.app.core.model.media.Track
+import com.xymusic.app.core.model.media.TrackDetail
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
 import com.xymusic.app.core.session.ActiveSessionIdentity
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.session.SessionIdentityProvider
 import com.xymusic.app.core.session.SessionMutationCoordinator
+import com.xymusic.app.domain.paging.PagedStream
+import com.xymusic.app.feature.catalog.domain.CatalogRepository
+import com.xymusic.app.feature.catalog.domain.CatalogResult
+import com.xymusic.app.feature.catalog.domain.model.AlbumQuery
+import com.xymusic.app.feature.catalog.domain.model.ArtistQuery
+import com.xymusic.app.feature.catalog.domain.model.TrackQuery
 import com.xymusic.app.feature.player.domain.OfflineTrackResult
 import com.xymusic.app.feature.player.domain.PlaybackGrant
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
@@ -29,8 +39,10 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -169,13 +181,41 @@ class Media3OfflineTrackRepositoryTest {
         assertThat(cache.removedKeys).isEmpty()
     }
 
+    @Test
+    fun unseededTrackRefreshesCatalogMetadataBeforeDownload() = runTest {
+        val grantRepository = ImmediateGrantRepository()
+        val downloader = RecordingDownloader(cache)
+        var refreshedTrackId: String? = null
+        val catalogRepository = object : FakeCatalogRepository() {
+            override suspend fun refreshTrack(trackId: String): CatalogResult<Unit> {
+                refreshedTrackId = trackId
+                database.seedTrack(trackId)
+                return CatalogResult.Success(Unit)
+            }
+        }
+        val repository = repository(
+            grantRepository = grantRepository,
+            downloader = downloader,
+            dispatcher = UnconfinedTestDispatcher(testScheduler),
+            catalogRepository = catalogRepository,
+        )
+
+        val result = repository.download(TRACK_ID)
+
+        assertThat(result).isEqualTo(OfflineTrackResult.Success)
+        assertThat(refreshedTrackId).isEqualTo(TRACK_ID)
+        assertThat(database.offlineTrackDao().track("alice", TRACK_ID)).isNotNull()
+    }
+
     private fun repository(
         grantRepository: PlaybackGrantRepository,
         downloader: OfflineMediaDownloader,
         dispatcher: kotlinx.coroutines.CoroutineDispatcher,
+        catalogRepository: CatalogRepository = FakeCatalogRepository(),
     ) = Media3OfflineTrackRepository(
         offlineTrackDao = database.offlineTrackDao(),
         catalogDao = database.catalogDao(),
+        catalogRepository = catalogRepository,
         offlineMediaStore = mediaStore,
         offlineMediaDownloader = downloader,
         playbackGrantRepository = grantRepository,
@@ -186,6 +226,20 @@ class Media3OfflineTrackRepositoryTest {
         sessionMutationCoordinator = SessionMutationCoordinator(),
         ioDispatcher = dispatcher,
     )
+
+private open class FakeCatalogRepository : CatalogRepository {
+    override fun pagedTracks(query: TrackQuery): PagedStream<Track> = error("Not used")
+    override fun pagedArtists(query: ArtistQuery): PagedStream<Artist> = error("Not used")
+    override fun pagedAlbums(query: AlbumQuery): PagedStream<Album> = error("Not used")
+    override suspend fun randomAlbums(limit: Int): CatalogResult<List<Album>> = error("Not used")
+    override suspend fun randomTracks(limit: Int): CatalogResult<List<Track>> = error("Not used")
+    override fun observeTrack(trackId: String): Flow<TrackDetail?> = flowOf(null)
+    override fun observeArtist(artistId: String): Flow<Artist?> = flowOf(null)
+    override fun observeAlbum(albumId: String): Flow<Album?> = flowOf(null)
+    override suspend fun refreshTrack(trackId: String): CatalogResult<Unit> = CatalogResult.Success(Unit)
+    override suspend fun refreshArtist(artistId: String): CatalogResult<Unit> = CatalogResult.Success(Unit)
+    override suspend fun refreshAlbum(albumId: String): CatalogResult<Unit> = CatalogResult.Success(Unit)
+}
 
     private class FakeSessionProvider(userId: String, sessionId: String) :
         AppSessionProvider,
