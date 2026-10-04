@@ -32,11 +32,6 @@ data class SearchOverview(
     val albums: List<Album>,
 )
 
-enum class SearchScope {
-    ALL,
-    TRACKS,
-    ARTISTS,
-    ALBUMS,
-}
+typealias SearchScope = com.xymusic.app.core.model.search.SearchScope
 
 data class SearchHistoryItem(val query: SearchQuery, val scope: SearchScope, val searchedAtEpochMillis: Long)

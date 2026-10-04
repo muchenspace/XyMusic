@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -13,26 +12,24 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-
 	"xymusic/server/internal/config"
 	"xymusic/server/internal/modules/setup"
-	"xymusic/server/internal/platform/database"
-	"xymusic/server/internal/platform/security"
 	"xymusic/server/internal/platform/workerstatus"
 	"xymusic/server/internal/shared/apperror"
-	sharedidempotency "xymusic/server/internal/shared/idempotency"
 )
 
 type ServiceDependencies struct {
-	Database           *database.Pool
+	Database           Database
+	Databases          DatabaseFactory
 	Runtime            RuntimeController
-	Store              ConfigurationStore
+	Store              Store
+	Configuration      ConfigurationStore
+	Idempotency        IdempotencyFactory
 	Storage            MediaStorageFactory
 	MediaTool          MediaTool
 	Worker             WorkerMonitor
 	Metrics            RuntimeMetrics
+	DirectoryProbe     DirectoryProbe
 	RootDirectory      string
 	ConfigurationPath  string
 	Listener           ListenerDTO
@@ -42,13 +39,17 @@ type ServiceDependencies struct {
 }
 
 type Service struct {
-	database           *database.Pool
+	database           Database
+	databases          DatabaseFactory
 	runtime            RuntimeController
-	store              ConfigurationStore
+	store              Store
+	configuration      ConfigurationStore
+	idempotency        IdempotencyFactory
 	storage            MediaStorageFactory
 	mediaTool          MediaTool
 	worker             WorkerMonitor
 	metrics            RuntimeMetrics
+	directoryProbe     DirectoryProbe
 	rootDirectory      string
 	configurationPath  string
 	listener           ListenerDTO
@@ -59,9 +60,10 @@ type Service struct {
 }
 
 func NewService(dependencies ServiceDependencies) (*Service, error) {
-	if dependencies.Database == nil || dependencies.Runtime == nil || dependencies.Store == nil ||
+	if dependencies.Database == nil || dependencies.Databases == nil || dependencies.Runtime == nil ||
+		dependencies.Store == nil || dependencies.Configuration == nil || dependencies.Idempotency == nil ||
 		dependencies.Storage == nil || dependencies.MediaTool == nil || dependencies.Worker == nil ||
-		dependencies.Metrics == nil {
+		dependencies.Metrics == nil || dependencies.DirectoryProbe == nil {
 		return nil, errors.New("admin settings dependencies are required")
 	}
 	root, err := filepath.Abs(dependencies.RootDirectory)
@@ -85,10 +87,14 @@ func NewService(dependencies ServiceDependencies) (*Service, error) {
 		version = "development"
 	}
 	return &Service{
-		database: dependencies.Database, runtime: dependencies.Runtime, store: dependencies.Store,
-		storage: dependencies.Storage, mediaTool: dependencies.MediaTool, worker: dependencies.Worker,
-		metrics:       dependencies.Metrics,
-		rootDirectory: root, configurationPath: configurationPath, listener: dependencies.Listener,
+		database: dependencies.Database, databases: dependencies.Databases,
+		runtime: dependencies.Runtime, store: dependencies.Store,
+		configuration: dependencies.Configuration,
+		idempotency:   dependencies.Idempotency,
+		storage:       dependencies.Storage, mediaTool: dependencies.MediaTool, worker: dependencies.Worker,
+		metrics:        dependencies.Metrics,
+		directoryProbe: dependencies.DirectoryProbe,
+		rootDirectory:  root, configurationPath: configurationPath, listener: dependencies.Listener,
 		applicationVersion: version, startedAt: startedAt, now: now,
 	}, nil
 }
@@ -111,7 +117,7 @@ func (service *Service) TestDatabase(ctx context.Context, input DatabaseInput) (
 		return TestResponse{}, err
 	}
 	started := service.now()
-	pool, err := database.Open(ctx, candidate.Database)
+	pool, err := service.databases.Open(ctx, candidate.Database)
 	if err != nil {
 		return TestResponse{}, apperror.DependencyUnavailable("Database connection test failed")
 	}
@@ -193,7 +199,7 @@ func (service *Service) TestLocalLibrary(_ context.Context, directory *string) (
 		value = filepath.Join(service.rootDirectory, value)
 	}
 	value = filepath.Clean(value)
-	if err := requireDirectory(value); err != nil {
+	if err := service.requireDirectory(value); err != nil {
 		return LocalLibraryTestResponse{}, err
 	}
 	return LocalLibraryTestResponse{OK: true, Message: "Music directory is readable", NormalizedPath: value}, nil
@@ -212,12 +218,12 @@ func (service *Service) ApplyIdempotently(
 	if err != nil {
 		return IdempotentSettingsResult{}, err
 	}
-	candidatePool, err := database.Open(ctx, candidate.Database)
+	candidatePool, err := service.databases.Open(ctx, candidate.Database)
 	if err != nil {
 		return IdempotentSettingsResult{}, err
 	}
 	defer candidatePool.Close()
-	if err := requireAdministrator(ctx, candidatePool, actorID); err != nil {
+	if err := service.store.RequireAdministrator(ctx, candidatePool, actorID); err != nil {
 		return IdempotentSettingsResult{}, err
 	}
 	if !reflect.DeepEqual(current.Database, candidate.Database) {
@@ -225,21 +231,19 @@ func (service *Service) ApplyIdempotently(
 		if resolveErr != nil {
 			return IdempotentSettingsResult{}, validation(resolveErr.Error())
 		}
-		if err := database.RunMigrations(ctx, candidatePool.Pool, resolved.Paths.MigrationsDirectory); err != nil {
+		if err := service.databases.Migrate(ctx, candidatePool, resolved.Paths.MigrationsDirectory); err != nil {
 			return IdempotentSettingsResult{}, normalizeConfigurationError(err)
 		}
 	}
-	cipher, err := security.NewPayloadCipher(candidate.Security.IdempotencyEncryptionSecret)
+	idempotency, err := service.idempotency.New(candidatePool, candidate.Security.IdempotencyEncryptionSecret)
 	if err != nil {
 		return IdempotentSettingsResult{}, err
 	}
-	idempotency := sharedidempotency.New(candidatePool.Pool, cipher)
-	result, err := sharedidempotency.Execute(ctx, idempotency, sharedidempotency.Input{
-		ActorID: actorID, Scope: "admin.system.settings.apply", Key: key, Payload: input,
-	}, func() (sharedidempotency.HTTPResult[SettingsDTO], error) {
-		body, applyErr := service.Apply(ctx, actorID, input)
-		return sharedidempotency.HTTPResult[SettingsDTO]{Status: 200, Body: body}, applyErr
-	})
+	result, err := idempotency.Execute(ctx, actorID, "admin.system.settings.apply", key, input,
+		func() (int, SettingsDTO, error) {
+			body, applyErr := service.Apply(ctx, actorID, input)
+			return 200, body, applyErr
+		})
 	if err != nil {
 		return IdempotentSettingsResult{}, err
 	}
@@ -266,12 +270,12 @@ func (service *Service) Apply(ctx context.Context, actorID string, input UpdateI
 	if len(changed) == 0 {
 		return SettingsDTO{}, validation("At least one system setting must change")
 	}
-	candidatePool, err := database.Open(ctx, candidate.Database)
+	candidatePool, err := service.databases.Open(ctx, candidate.Database)
 	if err != nil {
 		return SettingsDTO{}, normalizeConfigurationError(err)
 	}
 	defer candidatePool.Close()
-	if err := requireAdministrator(ctx, candidatePool, actorID); err != nil {
+	if err := service.store.RequireAdministrator(ctx, candidatePool, actorID); err != nil {
 		return SettingsDTO{}, err
 	}
 	resolvedCandidate, err := config.ResolveRuntime(candidate, service.rootDirectory)
@@ -279,7 +283,7 @@ func (service *Service) Apply(ctx context.Context, actorID string, input UpdateI
 		return SettingsDTO{}, validation(err.Error())
 	}
 	if hasPrefix(changed, "database.") {
-		if err := database.RunMigrations(ctx, candidatePool.Pool, resolvedCandidate.Paths.MigrationsDirectory); err != nil {
+		if err := service.databases.Migrate(ctx, candidatePool, resolvedCandidate.Paths.MigrationsDirectory); err != nil {
 			return SettingsDTO{}, normalizeConfigurationError(err)
 		}
 	}
@@ -287,7 +291,7 @@ func (service *Service) Apply(ctx context.Context, actorID string, input UpdateI
 		active, ok := service.runtime.ActiveConfig()
 		if ok && reflect.DeepEqual(active, candidate) {
 			_ = service.runtime.Initialize(context.WithoutCancel(ctx), previous, status.Source)
-			_ = service.store.Save(previous)
+			_ = service.configuration.Save(previous)
 		}
 		return SettingsDTO{}, normalizeConfigurationError(cause)
 	}
@@ -308,7 +312,7 @@ func (service *Service) Apply(ctx context.Context, actorID string, input UpdateI
 	if err := service.runtime.Initialize(ctx, candidate, setup.RuntimeSourceManaged); err != nil {
 		return failure(err)
 	}
-	if err := service.store.Save(candidate); err != nil {
+	if err := service.configuration.Save(candidate); err != nil {
 		return failure(err)
 	}
 	newStatus := service.runtime.Status()
@@ -329,12 +333,12 @@ func (service *Service) SystemInformation(ctx context.Context) (SystemInformatio
 	if err != nil {
 		return SystemInformationDTO{}, err
 	}
-	var databaseVersion string
-	if err := service.database.QueryRow(ctx, "select current_setting('server_version')").Scan(&databaseVersion); err != nil {
+	databaseVersion, err := service.store.ServerVersion(ctx)
+	if err != nil {
 		return SystemInformationDTO{}, err
 	}
-	migration := migrationInformation(ctx, service.database)
-	queues, err := queueInformation(ctx, service.database)
+	migration := service.store.MigrationInformation(ctx)
+	queues, err := service.store.QueueInformation(ctx)
 	if err != nil {
 		return SystemInformationDTO{}, err
 	}
@@ -399,70 +403,19 @@ func (service *Service) validateAffectedDependencies(
 		}
 	}
 	if previous.LocalLibrary.Directory != candidate.LocalLibrary.Directory {
-		if err := requireDirectory(resolved.LocalLibrary.Directory); err != nil {
+		if err := service.requireDirectory(resolved.LocalLibrary.Directory); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func requireAdministrator(ctx context.Context, pool *database.Pool, actorID string) error {
-	var id string
-	err := pool.QueryRow(ctx, `
-		select id from users where id=$1 and role='ADMIN' and status='ACTIVE' limit 1
-	`, actorID).Scan(&id)
-	if err == nil {
-		return nil
-	}
-	var databaseError *pgconn.PgError
-	if errors.As(err, &databaseError) && (databaseError.Code == "42P01" || databaseError.Code == "42703") {
-		return apperror.Conflict(apperror.CodeResourceConflict, "The target database is not an initialized compatible XyMusic database", nil)
-	}
-	if errors.Is(err, pgx.ErrNoRows) {
-		return apperror.Conflict(apperror.CodeResourceConflict, "The target database does not contain the current active administrator", nil)
-	}
-	return err
-}
-
-func migrationInformation(ctx context.Context, pool *database.Pool) string {
-	var count int
-	var latest *string
-	err := pool.QueryRow(ctx, `
-		select count(*)::int, max(created_at)::text from drizzle.__drizzle_migrations
-	`).Scan(&count, &latest)
-	if err != nil {
-		return "not initialized"
-	}
-	if latest == nil {
-		return fmt.Sprintf("%d applied", count)
-	}
-	return fmt.Sprintf("%d applied, latest %s", count, *latest)
-}
-
-func queueInformation(ctx context.Context, pool *database.Pool) (QueueDTO, error) {
-	result := QueueDTO{}
-	err := pool.QueryRow(ctx, `
-		select
-			(select count(*)::int from library_scan_runs where status in ('PENDING','RUNNING')),
-			(select count(*)::int from metadata_writeback_jobs where status in ('PENDING','PROCESSING')),
-			(
-				(select count(*)::int from tag_scraping_jobs where status in ('PENDING','RUNNING')) +
-				(select count(*)::int from artist_artwork_scraping_jobs where status in ('PENDING','RUNNING'))
-			)
-	`).Scan(&result.Scans, &result.Writeback, &result.Scraping)
-	if err != nil {
-		return QueueDTO{}, err
-	}
-	result.Total = result.Media + result.Scans + result.Cleanup + result.Writeback + result.Scraping
-	return result, nil
-}
-
-func requireDirectory(path string) error {
-	info, err := os.Stat(path)
+func (service *Service) requireDirectory(path string) error {
+	info, err := service.directoryProbe.Stat(path)
 	if err != nil || !info.IsDir() {
 		return validation("Music directory is not readable")
 	}
-	directory, err := os.Open(path)
+	directory, err := service.directoryProbe.Open(path)
 	if err != nil {
 		return validation("Music directory is not readable by the service process")
 	}

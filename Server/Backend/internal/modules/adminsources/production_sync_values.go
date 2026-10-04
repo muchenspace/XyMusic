@@ -5,7 +5,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
-	"xymusic/server/internal/modules/adminmetadata"
+	"xymusic/server/internal/platform/mediafile"
 )
 
 func normalizeCatalogText(value string) string {
@@ -56,10 +56,10 @@ func sameOptionalString(left, right *string) bool {
 	return left == nil && right == nil || left != nil && right != nil && *left == *right
 }
 
-func primaryCreditNames(metadata adminmetadata.MetadataSnapshot) []string {
+func primaryCreditNames(metadata mediafile.MetadataSnapshot) []string {
 	names := make([]string, 0, len(metadata.Credits))
 	for _, credit := range metadata.Credits {
-		if credit.Role == adminmetadata.CreditPrimary {
+		if credit.Role == mediafile.CreditPrimary {
 			names = append(names, credit.Name)
 		}
 	}

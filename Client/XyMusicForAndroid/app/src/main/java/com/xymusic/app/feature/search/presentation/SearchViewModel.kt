@@ -8,9 +8,9 @@ import androidx.paging.cachedIn
 import com.xymusic.app.core.model.media.Album
 import com.xymusic.app.core.model.media.Artist
 import com.xymusic.app.core.model.media.Track
-import com.xymusic.app.core.paging.mapPagedItems
-import com.xymusic.app.core.paging.pagingDataFlow
 import com.xymusic.app.core.ui.media.toUi
+import com.xymusic.app.core.ui.paging.mapPagedItems
+import com.xymusic.app.core.ui.paging.pagingDataFlow
 import com.xymusic.app.feature.search.domain.SearchResult
 import com.xymusic.app.feature.search.domain.SearchUseCases
 import com.xymusic.app.feature.search.domain.model.SearchHistoryItem

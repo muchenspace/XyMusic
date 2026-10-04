@@ -1,7 +1,10 @@
 package com.xymusic.app.feature.player.presentation
 
+import com.xymusic.app.core.model.media.LRC_LINE_TIMESTAMP_PREFIX_REGEX
+import com.xymusic.app.core.model.media.LRC_METADATA_ONLY_LINE_REGEX
 import com.xymusic.app.core.model.media.LyricsFormat
 import com.xymusic.app.core.model.media.LyricsTiming
+import com.xymusic.app.core.model.media.normalizeLyricsContent
 import com.xymusic.app.core.model.media.requireValidLyricsDocument
 
 internal data class ParsedPlayerLyrics(
@@ -23,10 +26,7 @@ internal fun parsePlayerLyrics(
     timing: LyricsTiming,
     language: String?,
 ): ParsedPlayerLyrics {
-    val normalizedContent = content
-        .replace("\r\n", "\n")
-        .replace('\r', '\n')
-        .removePrefix(BYTE_ORDER_MARK)
+    val normalizedContent = normalizeLyricsContent(content)
     requireValidLyricsDocument(format, timing, normalizedContent)
     val parsed =
         when (format) {
@@ -61,7 +61,7 @@ private fun parseLrcLyrics(content: String, timing: LyricsTiming): ParsedLrcLyri
         content
             .lineSequence()
             .flatMap { rawLine ->
-                val timestampPrefix = LRC_TIMESTAMP_PREFIX_REGEX.find(rawLine) ?: return@flatMap emptySequence()
+                val timestampPrefix = LRC_LINE_TIMESTAMP_PREFIX_REGEX.find(rawLine) ?: return@flatMap emptySequence()
                 val lineTimes =
                     LRC_TIMESTAMP_REGEX
                         .findAll(timestampPrefix.value)
@@ -199,13 +199,8 @@ private fun timestampToTimeMs(minutes: String, seconds: String, fraction: String
     return (minuteValue * 60 + secondValue) * 1_000 + fractionMs
 }
 
-private val LRC_TIMESTAMP_PREFIX_REGEX =
-    Regex("^\\s*(?:\\[\\d{1,3}:[0-5]\\d(?:[.:]\\d{1,3})?]\\s*)+")
 private val LRC_TIMESTAMP_REGEX = Regex("\\[(\\d{1,3}):([0-5]\\d)(?:[.:](\\d{1,3}))?]")
 private val LRC_LINE_TAG_REGEX = Regex("\\[[^]\\r\\n]*]")
-private val LRC_METADATA_ONLY_LINE_REGEX =
-    Regex("^\\s*(?:\\[[A-Za-z][A-Za-z0-9_-]*:[^\\[\\]\\r\\n]*]\\s*)+$")
 private val LRC_OFFSET_TAG_REGEX = Regex("\\[offset:([+-]?\\d+)]", RegexOption.IGNORE_CASE)
 private val ENHANCED_LRC_TIMESTAMP_REGEX = Regex("<\\d{1,3}:\\d{2}(?:[.:]\\d{1,3})?>")
 private val WORD_TIMESTAMP_REGEX = Regex("<(\\d{1,3}):(\\d{2})(?:[.:](\\d{1,3}))?>")
-private const val BYTE_ORDER_MARK = "\uFEFF"

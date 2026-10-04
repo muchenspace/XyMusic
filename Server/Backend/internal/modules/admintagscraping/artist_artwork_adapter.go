@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"xymusic/server/internal/modules/adminmedia"
 	"xymusic/server/internal/shared/apperror"
 )
 
@@ -30,8 +29,8 @@ func (adapter *AdminMediaArtworkApplier) ApplyArtistArtwork(
 		return apperror.Validation("Artist artwork apply context is invalid")
 	}
 	digest := sha256.Sum256(artwork.Bytes)
-	upload, _, err := adapter.media.CreateUpload(ctx, actorID, uuid.NewString(), adminmedia.CreateUploadInput{
-		Purpose:        adminmedia.PurposeArtistArtwork,
+	upload, _, err := adapter.media.CreateUpload(ctx, actorID, uuid.NewString(), MediaCreateUploadInput{
+		Purpose:        MediaPurposeArtistArtwork,
 		TargetID:       artistID,
 		FileName:       "scraped-artist." + artwork.Extension,
 		ContentType:    artwork.ContentType,
@@ -55,7 +54,7 @@ func (adapter *AdminMediaArtworkApplier) ApplyArtistArtwork(
 		actorID,
 		upload.ID,
 		uuid.NewString(),
-		adminmedia.CompleteUploadInput{CompletionFence: &artistArtworkCompletionFence{
+		MediaCompleteUploadInput{CompletionFence: &artistArtworkCompletionFence{
 			executionContext: ctx,
 			mutationFence:    completionMutationFenceFromContext(ctx),
 			artistID:         artistID,
@@ -82,7 +81,7 @@ type artistArtworkCompletionFence struct {
 	candidate        ArtistCandidate
 }
 
-func (fence *artistArtworkCompletionFence) Lock(ctx context.Context, tx pgx.Tx) error {
+func (fence *artistArtworkCompletionFence) Lock(ctx context.Context, tx MediaTx) error {
 	if fence == nil {
 		return nil
 	}
@@ -133,4 +132,4 @@ func (fence *artistArtworkCompletionFence) Lock(ctx context.Context, tx pgx.Tx) 
 	return nil
 }
 
-var _ adminmedia.CompletionFence = (*artistArtworkCompletionFence)(nil)
+var _ MediaCompletionFence = (*artistArtworkCompletionFence)(nil)

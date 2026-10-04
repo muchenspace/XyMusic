@@ -140,8 +140,13 @@ internal class LibraryHistoryOperations(
                 ?: return history
         if (occurredAtEpochMs <= history.updatedAtEpochMs) return history
         val event =
-            runCatching { PlaybackEvent.valueOf(payload.event) }.getOrNull()
-                ?: return history
+            when (payload.event) {
+                "STARTED" -> PlaybackEvent.STARTED
+                "PROGRESS" -> PlaybackEvent.PROGRESS
+                "PAUSED" -> PlaybackEvent.PAUSED
+                "COMPLETED" -> PlaybackEvent.COMPLETED
+                else -> null
+            } ?: return history
         return history.copy(
             lastPositionMs = payload.positionMs,
             playCount = history.playCount + if (event == PlaybackEvent.STARTED) 1 else 0,

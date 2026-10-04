@@ -8,29 +8,6 @@ enum class ArtistCreditRole {
     PRODUCER,
 }
 
-enum class LyricsFormat {
-    LRC,
-    PLAIN,
-}
-
-enum class LyricsTiming {
-    LINE,
-    WORD,
-}
-
-enum class PlaylistVisibility {
-    PRIVATE,
-    UNLISTED,
-    PUBLIC,
-}
-
-enum class SearchScope {
-    ALL,
-    TRACKS,
-    ARTISTS,
-    ALBUMS,
-}
-
 enum class CatalogItemType {
     TRACK,
     ARTIST,

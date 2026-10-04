@@ -1,5 +1,10 @@
 package com.xymusic.app.core.model.media
 
+fun normalizeLyricsContent(content: String): String = content
+    .replace("\r\n", "\n")
+    .replace('\r', '\n')
+    .removePrefix(BYTE_ORDER_MARK)
+
 fun requireValidLyricsDocument(format: LyricsFormat, timing: LyricsTiming, content: String) {
     when (format) {
         LyricsFormat.PLAIN -> require(timing == LyricsTiming.LINE) {
@@ -13,10 +18,7 @@ fun requireValidLyricsDocument(format: LyricsFormat, timing: LyricsTiming, conte
 
 private fun hasCompleteWordTiming(content: String): Boolean {
     var hasTimedLyricLine = false
-    val normalizedContent = content
-        .replace("\r\n", "\n")
-        .replace('\r', '\n')
-        .removePrefix(BYTE_ORDER_MARK)
+    val normalizedContent = normalizeLyricsContent(content)
     for (rawLine in normalizedContent.lineSequence()) {
         when (rawLine.wordTimingStatus()) {
             LyricsLineTimingStatus.Ignored -> Unit
@@ -29,8 +31,8 @@ private fun hasCompleteWordTiming(content: String): Boolean {
 
 private fun String.wordTimingStatus(): LyricsLineTimingStatus {
     if (isBlank()) return LyricsLineTimingStatus.Ignored
-    val prefix = LINE_TIMESTAMP_PREFIX_REGEX.find(this)
-        ?: return if (METADATA_ONLY_LINE_REGEX.matches(this)) {
+    val prefix = LRC_LINE_TIMESTAMP_PREFIX_REGEX.find(this)
+        ?: return if (LRC_METADATA_ONLY_LINE_REGEX.matches(this)) {
             LyricsLineTimingStatus.Ignored
         } else {
             LyricsLineTimingStatus.Invalid
@@ -70,10 +72,14 @@ private enum class LyricsLineTimingStatus {
     Invalid,
 }
 
-private val LINE_TIMESTAMP_PREFIX_REGEX =
+/** Line timestamp prefix shared by the lyrics contract and the player parser. */
+val LRC_LINE_TIMESTAMP_PREFIX_REGEX =
     Regex("^\\s*(?:\\[[0-9]{1,3}:[0-5][0-9](?:[.:][0-9]{1,3})?]\\s*)+")
-private val METADATA_ONLY_LINE_REGEX =
+
+/** Metadata-only line shared by the lyrics contract and the player parser. */
+val LRC_METADATA_ONLY_LINE_REGEX =
     Regex("^\\s*(?:\\[[A-Za-z][A-Za-z0-9_-]*:[^\\[\\]\\r\\n]*]\\s*)+$")
+
 private val WORD_TIMESTAMP_REGEX = Regex("<([0-9]{1,3}):([0-5][0-9])(?:[.:]([0-9]{1,3}))?>")
 private val WORD_TIMESTAMP_START_REGEX = Regex("^\\s*<[0-9]{1,3}:[0-5][0-9](?:[.:][0-9]{1,3})?>")
 private val ANY_WORD_MARKER_REGEX = Regex("<[^>]*(?:>|$)")

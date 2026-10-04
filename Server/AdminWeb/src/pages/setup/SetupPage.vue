@@ -30,10 +30,11 @@ import {
 } from "@/features/setup/application/setup-form";
 import { useSetup } from "@/app/services/setup";
 import { canAdvanceSetupStep } from "@/features/setup/application/setup-navigation";
+import { appQueryKeys } from "@/app/query-keys";
 import AppButton from "@/components/AppButton.vue";
 import BaseDialog from "@/components/BaseDialog.vue";
 import StatePanel from "@/components/StatePanel.vue";
-import { invalidateSetupState, SETUP_STATUS_STALE_MS } from "@/app/router";
+import { invalidateSetupState, SETUP_STATUS_STALE_MS } from "@/app/setup-status";
 import { useUiStore } from "@/stores/ui";
 import xymusicIcon from "@/assets/xymusic.png";
 
@@ -83,7 +84,7 @@ const includePatternsText = linesModel(form.source.includePatterns);
 const excludePatternsText = linesModel(form.source.excludePatterns);
 
 const statusQuery = useQuery({
-  queryKey: ["setup", "status"],
+  queryKey: appQueryKeys.setupStatus,
   queryFn: ({ signal }) => setup.status(signal),
   staleTime: SETUP_STATUS_STALE_MS,
   refetchOnMount: false,

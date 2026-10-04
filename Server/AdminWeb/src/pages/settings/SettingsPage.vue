@@ -1,19 +1,26 @@
 <script setup lang="ts">
 import { AlertTriangle, CheckCircle2, Database, HardDrive, Info, Library, LockKeyhole, RefreshCw, Save, ShieldCheck, Wrench } from "lucide-vue-next";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
+import { useMutation, useQuery } from "@tanstack/vue-query";
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { onBeforeRouteLeave } from "vue-router";
 import { ApiError } from "@/shared/application/api-error";
 import AppButton from "@/components/AppButton.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import StatePanel from "@/components/StatePanel.vue";
-import type { RuntimeSettings, RuntimeSettingsUpdate } from "@/features/settings/domain/models";
+import type { RuntimeSettings } from "@/features/settings/domain/models";
+import {
+  buildRuntimeSettingsUpdate,
+  settingsEditableState,
+  settingsEditorSnapshot,
+  settingsMediaToolsPayload,
+} from "@/features/settings/application/settings-editor";
+import { appQueryKeys } from "@/app/query-keys";
+import { applyAdminSettings, invalidateAdminSettingsDependents } from "@/app/query-client";
 import { useSettingsAdmin } from "@/app/services/settings";
 import { useUiStore } from "@/stores/ui";
 import { formatBytes, formatDuration } from "@/utils/format";
 
 type Tab = "database" | "storage" | "media" | "library" | "access" | "system";
-const queryClient = useQueryClient();
 const ui = useUiStore();
 const settingsAdmin = useSettingsAdmin();
 const tab = ref<Tab>("database");
@@ -37,28 +44,27 @@ const form = reactive({
   security: { accessTokenTtlSeconds: 0, refreshTokenTtlSeconds: 0 },
   http: { ipv4Host: "", ipv4Port: 0, ipv6Host: "", ipv6Port: 0 },
 });
-const settingsQuery = useQuery({ queryKey: ["admin", "settings"], queryFn: ({ signal }) => settingsAdmin.settings(signal) });
-const systemQuery = useQuery({ queryKey: ["admin", "system"], queryFn: ({ signal }) => settingsAdmin.systemInformation(signal), enabled: computed(() => tab.value === "system"), refetchInterval: computed(() => tab.value === "system" ? 5_000 : false) });
+const settingsQuery = useQuery({ queryKey: appQueryKeys.adminSettings, queryFn: ({ signal }) => settingsAdmin.settings(signal) });
+const systemQuery = useQuery({ queryKey: appQueryKeys.adminSystem, queryFn: ({ signal }) => settingsAdmin.systemInformation(signal), enabled: computed(() => tab.value === "system"), refetchInterval: computed(() => tab.value === "system" ? 5_000 : false) });
 
-function editableState(): object { return { database: form.database, storage: form.storage, autoDetectMedia: autoDetectMedia.value, mediaTools: form.mediaTools, localLibrary: form.localLibrary, registration: form.registration, security: form.security, http: form.http, proxies: proxies.value, includePatterns: includePatterns.value, excludePatterns: excludePatterns.value, databasePassword: databasePassword.value }; }
+function editorState() {
+  return { ...form, autoDetectMedia: autoDetectMedia.value, proxies: proxies.value, includePatterns: includePatterns.value, excludePatterns: excludePatterns.value, databasePassword: databasePassword.value };
+}
+function editableState(): object { return settingsEditableState(editorState()); }
 function applySettings(settings: RuntimeSettings): void {
-  form.version = settings.version;
-  Object.assign(form.database, { host: settings.database.host ?? "", port: settings.database.port ?? 5432, database: settings.database.database ?? "", username: settings.database.username ?? "", sslMode: settings.database.sslMode ?? "prefer", maximumConnections: settings.database.maximumConnections ?? 10 });
-  Object.assign(form.storage, { assetDirectory: settings.storage.assetDirectory ?? "", uploadTtlSeconds: settings.storage.uploadTtlSeconds ?? 3600, streamTtlSeconds: settings.storage.streamTtlSeconds ?? 900, maxUploadBytes: settings.storage.maxUploadBytes ?? 1_073_741_824 });
-  autoDetectMedia.value = Boolean(settings.mediaTools.directory);
-  Object.assign(form.mediaTools, { directory: settings.mediaTools.directory ?? "", ffmpegPath: settings.mediaTools.ffmpegPath, ffprobePath: settings.mediaTools.ffprobePath });
-  Object.assign(form.localLibrary, { name: settings.localLibrary.name, directory: settings.localLibrary.directory, mode: settings.localLibrary.mode, enabled: settings.localLibrary.enabled, syncOnStartup: settings.localLibrary.syncOnStartup, scanIntervalMinutes: settings.localLibrary.scanIntervalMinutes });
-  Object.assign(form.registration, { enabled: settings.registration.enabled });
-  Object.assign(form.security, { accessTokenTtlSeconds: settings.security.accessTokenTtlSeconds, refreshTokenTtlSeconds: settings.security.refreshTokenTtlSeconds });
-  Object.assign(form.http, {
-    ipv4Host: settings.http.ipv4Host,
-    ipv4Port: settings.http.ipv4Port,
-    ipv6Host: settings.http.ipv6Host,
-    ipv6Port: settings.http.ipv6Port,
-  });
-  proxies.value = settings.http.trustedProxyAddresses.join("\n");
-  includePatterns.value = settings.localLibrary.includePatterns.join("\n");
-  excludePatterns.value = settings.localLibrary.excludePatterns.join("\n");
+  const snapshot = settingsEditorSnapshot(settings);
+  form.version = snapshot.version;
+  Object.assign(form.database, snapshot.database);
+  Object.assign(form.storage, snapshot.storage);
+  autoDetectMedia.value = snapshot.autoDetectMedia;
+  Object.assign(form.mediaTools, snapshot.mediaTools);
+  Object.assign(form.localLibrary, snapshot.localLibrary);
+  Object.assign(form.registration, snapshot.registration);
+  Object.assign(form.security, snapshot.security);
+  Object.assign(form.http, snapshot.http);
+  proxies.value = snapshot.proxies;
+  includePatterns.value = snapshot.includePatterns;
+  excludePatterns.value = snapshot.excludePatterns;
   databasePassword.value = "";
   baseline.value = JSON.stringify(editableState());
 }
@@ -99,16 +105,10 @@ async function reloadSettings(): Promise<void> {
   const result = await settingsQuery.refetch();
   if (result.data) applySettings(result.data);
 }
-function lines(value: string): string[] { return [...new Set(value.split(/[,，\r\n]+/).map((item) => item.trim()).filter(Boolean))]; }
 
 const testDatabase = useMutation({ mutationFn: () => settingsAdmin.testDatabase({ ...form.database, password: databasePassword.value || undefined }), onSuccess: (result) => { testMessage.value = `${result.message}${result.latencyMs ? ` · ${result.latencyMs} ms` : ""}`; }, onError: (error) => { actionError.value = detailedApiError(error, "数据库测试失败"); } });
 const testStorage = useMutation({ mutationFn: () => settingsAdmin.testStorage({ ...form.storage }), onSuccess: (result) => { testMessage.value = `${result.message}${result.latencyMs ? ` · ${result.latencyMs} ms` : ""}`; }, onError: (error) => { actionError.value = detailedApiError(error, "存储测试失败"); } });
-function mediaToolsPayload() {
-  return autoDetectMedia.value
-    ? { directory: form.mediaTools.directory.trim() }
-    : { ffmpegPath: form.mediaTools.ffmpegPath.trim(), ffprobePath: form.mediaTools.ffprobePath.trim() };
-}
-const testMedia = useMutation({ mutationFn: () => settingsAdmin.testMediaTools(mediaToolsPayload()), onSuccess: (result) => { testMessage.value = [result.message, ...(result.details ?? [])].join(" · "); }, onError: (error) => { actionError.value = detailedApiError(error, "FFmpeg 测试失败"); } });
+const testMedia = useMutation({ mutationFn: () => settingsAdmin.testMediaTools(settingsMediaToolsPayload(editorState())), onSuccess: (result) => { testMessage.value = [result.message, ...(result.details ?? [])].join(" · "); }, onError: (error) => { actionError.value = detailedApiError(error, "FFmpeg 测试失败"); } });
 const testLibrary = useMutation({ mutationFn: () => settingsAdmin.testLocalLibrary(form.localLibrary.directory), onSuccess: (result) => { testMessage.value = `${result.message}${result.normalizedPath ? ` · ${result.normalizedPath}` : ""}`; }, onError: (error) => { actionError.value = detailedApiError(error, "资料库目录测试失败"); } });
 const testing = computed(() => testDatabase.isPending.value || testStorage.isPending.value || testMedia.isPending.value || testLibrary.isPending.value);
 async function testCurrent(): Promise<void> {
@@ -119,38 +119,10 @@ async function testCurrent(): Promise<void> {
   else if (tab.value === "library") await testLibrary.mutateAsync();
 }
 
-function sectionChanged(section: "database" | "storage" | "mediaTools" | "localLibrary" | "registration" | "security" | "http" | "proxies" | "includePatterns" | "excludePatterns" | "autoDetectMedia"): boolean {
-  const current = editableState() as Record<string, unknown>;
-  const saved = JSON.parse(baseline.value || "{}") as Record<string, unknown>;
-  return JSON.stringify(current[section]) !== JSON.stringify(saved[section]);
+function payload() {
+  return buildRuntimeSettingsUpdate(editorState(), baseline.value);
 }
-function payload(): RuntimeSettingsUpdate {
-  const result: RuntimeSettingsUpdate = { expectedVersion: form.version };
-  // Send only sections the administrator actually changed.
-  if (sectionChanged("database") || databasePassword.value.trim()) {
-    result.database = { ...form.database, password: databasePassword.value || undefined };
-  }
-  if (sectionChanged("storage")) {
-    result.storage = { ...form.storage };
-  }
-  if (sectionChanged("mediaTools") || sectionChanged("autoDetectMedia")) {
-    result.mediaTools = mediaToolsPayload();
-  }
-  if (sectionChanged("localLibrary") || sectionChanged("includePatterns") || sectionChanged("excludePatterns")) {
-    result.localLibrary = {
-      ...form.localLibrary,
-      includePatterns: lines(includePatterns.value),
-      excludePatterns: lines(excludePatterns.value),
-    };
-  }
-  if (sectionChanged("registration")) result.registration = { enabled: form.registration.enabled };
-  if (sectionChanged("security")) result.security = { ...form.security };
-  if (sectionChanged("http") || sectionChanged("proxies")) {
-    result.http = { ...form.http, trustedProxyAddresses: lines(proxies.value) };
-  }
-  return result;
-}
-const saveMutation = useMutation({ mutationFn: () => settingsAdmin.update(payload()), onSuccess: async (settings) => { applySettings(settings); queryClient.setQueryData(["admin", "settings"], settings); if (settings.restartRequiredFields.length) ui.notify("warning", "设置已保存，监听地址需重启生效", `当前仍监听 IPv4 ${settings.actualListener.ipv4.host}:${settings.actualListener.ipv4.port}，IPv6 [${settings.actualListener.ipv6.host}]:${settings.actualListener.ipv6.port}`); else ui.notify("success", "系统设置已应用", "Server 已切换配置，Worker 将自动安全重载"); await Promise.all([queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === "admin" && query.queryKey[1] !== "settings" }), queryClient.invalidateQueries({ queryKey: ["service", "readiness"] })]); }, onError: (error) => { actionError.value = detailedApiError(error, "设置保存失败，服务继续使用原配置"); } });
+const saveMutation = useMutation({ mutationFn: () => settingsAdmin.update(payload()), onSuccess: async (settings) => { applySettings(settings); applyAdminSettings(settings); if (settings.restartRequiredFields.length) ui.notify("warning", "设置已保存，监听地址需重启生效", `当前仍监听 IPv4 ${settings.actualListener.ipv4.host}:${settings.actualListener.ipv4.port}，IPv6 [${settings.actualListener.ipv6.host}]:${settings.actualListener.ipv6.port}`); else ui.notify("success", "系统设置已应用", "Server 已切换配置，Worker 将自动安全重载"); await invalidateAdminSettingsDependents(); }, onError: (error) => { actionError.value = detailedApiError(error, "设置保存失败，服务继续使用原配置"); } });
 
 function save(): void {
   resetMessages();

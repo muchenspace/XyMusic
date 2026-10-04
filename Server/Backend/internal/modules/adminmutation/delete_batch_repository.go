@@ -36,15 +36,11 @@ func (repository *Repository) CreatePermanentDeleteBatch(
 		if err != nil {
 			return PermanentDeleteBatchRecord{}, nil, err
 		}
-		if state.Version != item.ExpectedVersion {
-			return PermanentDeleteBatchRecord{}, nil, versionConflict("Track", item.ExpectedVersion, state.Version, map[string]any{"trackId": item.TrackID})
+		if err := CheckTrackVersion(item.ExpectedVersion, state.Version, item.TrackID); err != nil {
+			return PermanentDeleteBatchRecord{}, nil, err
 		}
-		if state.Status != "ARCHIVED" {
-			return PermanentDeleteBatchRecord{}, nil, apperror.New(
-				apperror.CodeInvalidStateTransition,
-				"Track must be in the recycle bin before permanent deletion",
-				apperror.WithMetadata(map[string]any{"trackId": item.TrackID}),
-			)
+		if err := CanDeleteTrackPermanently(state.Status, item.TrackID); err != nil {
+			return PermanentDeleteBatchRecord{}, nil, err
 		}
 	}
 	jobID := uuid.NewString()

@@ -6,19 +6,9 @@ void bootstrap();
 
 async function bootstrap(): Promise<void> {
   if (new URLSearchParams(window.location.search).get("window") === "desktop-lyrics") {
-    const [
-      { bootstrapDesktopLyricsApp },
-      { TauriDesktopLyricsEventBridge },
-      { TauriDesktopLyricsWindowPlacement },
-    ] = await Promise.all([
-      import("./desktop-lyrics"),
-      import("./infrastructure/desktop/TauriDesktopLyricsEventBridge"),
-      import("./infrastructure/windows/TauriDesktopLyricsWindowPlacement"),
-    ]);
-    await bootstrapDesktopLyricsApp("#app", {
-      bridge: new TauriDesktopLyricsEventBridge(),
-      placement: new TauriDesktopLyricsWindowPlacement(),
-    });
+    const { createDesktopLyricsWindowServices } = await import("./infrastructure/container");
+    const { bootstrapDesktopLyricsApp, options } = await createDesktopLyricsWindowServices();
+    await bootstrapDesktopLyricsApp("#app", options);
     return;
   }
 

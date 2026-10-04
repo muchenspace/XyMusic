@@ -1,16 +1,13 @@
 package adminauth
 
 import (
-	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -28,19 +25,9 @@ const (
 	CSRFCookie    = "xymusic_admin_csrf"
 )
 
-type Identity interface {
-	Login(context.Context, identity.LoginInput) (identity.AuthSessionDTO, error)
-	Refresh(context.Context, string, string) (identity.RefreshResult, error)
-	Authenticate(context.Context, string) (identity.AuthenticatedActor, error)
-	Logout(context.Context, identity.AuthenticatedActor) error
-	GetAuthenticatedUser(context.Context, identity.AuthenticatedActor) (identity.CurrentUserDTO, error)
-}
-
 type Routes struct {
-	identity Identity
-	config   config.Config
-	limiter  ratelimit.Limiter
-	trusted  map[string]struct{}
+	service *Service
+	trusted map[string]struct{}
 }
 
 func NewRoutes(identityService Identity, cfg config.Config, limiter ratelimit.Limiter) (*Routes, error) {
@@ -55,7 +42,14 @@ func NewRoutes(identityService Identity, cfg config.Config, limiter ratelimit.Li
 		}
 		trusted[normalized] = struct{}{}
 	}
-	return &Routes{identity: identityService, config: cfg, limiter: limiter, trusted: trusted}, nil
+	service, err := NewService(
+		identityService, limiter,
+		cfg.Security.AccessTokenTTLSeconds, cfg.Security.RefreshTokenTTLSeconds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &Routes{service: service, trusted: trusted}, nil
 }
 
 func (routes *Routes) Register(router gin.IRouter) {
@@ -85,45 +79,23 @@ func (routes *Routes) login(c *gin.Context) error {
 	if input.DeviceName != "" && (len([]rune(input.DeviceName)) < 1 || len([]rune(input.DeviceName)) > 100) {
 		return routeValidationError()
 	}
-	if err := routes.limiter.Consume(c.Request.Context(), "admin-login:"+c.ClientIP(), 20, 15*time.Minute); err != nil {
-		return err
-	}
-	if err := routes.limiter.Consume(c.Request.Context(), "admin-login-account:"+identity.RateLimitSubject(input.Username), 10, 15*time.Minute); err != nil {
-		return err
-	}
-	deviceName := input.DeviceName
-	if deviceName == "" {
-		deviceName = "Web administration console"
-	}
-	session, err := routes.identity.Login(c.Request.Context(), identity.LoginInput{
+	result, err := routes.service.Login(c.Request.Context(), c.ClientIP(), LoginInput{
 		Username: input.Username, Password: input.Password,
-		Device: identity.DeviceInfoInput{InstallationID: input.InstallationID, Name: deviceName, Platform: identity.DevicePlatformWeb, AppVersion: "admin-web/1"},
+		InstallationID: input.InstallationID, DeviceName: input.DeviceName,
 	})
 	if err != nil {
 		return err
 	}
-	actor, err := routes.identity.Authenticate(c.Request.Context(), "Bearer "+session.Tokens.AccessToken)
-	if err != nil {
-		return err
-	}
-	if actor.Role != identity.RoleAdmin {
-		_ = routes.identity.Logout(c.Request.Context(), actor)
-		return apperror.Forbidden("Administrator role is required")
-	}
-	csrf, err := newCSRFToken()
-	if err != nil {
-		return err
-	}
-	routes.writeSession(c, session, csrf)
+	routes.writeSession(c, result.Session, result.CSRFToken)
 	return nil
 }
 
 func (routes *Routes) session(c *gin.Context) error {
-	actor, err := RequireAdmin(c, routes.identity, false)
+	actor, err := RequireAdmin(c, routes.identity(), false)
 	if err != nil {
 		return err
 	}
-	user, err := routes.identity.GetAuthenticatedUser(c.Request.Context(), actor)
+	user, err := routes.service.Session(c.Request.Context(), actor)
 	if err != nil {
 		return err
 	}
@@ -137,41 +109,25 @@ func (routes *Routes) session(c *gin.Context) error {
 }
 
 func (routes *Routes) refresh(c *gin.Context) error {
-	if err := routes.limiter.Consume(c.Request.Context(), "admin-refresh:"+c.ClientIP(), 60, 15*time.Minute); err != nil {
-		return err
-	}
 	cookies := ParseCookies(c.GetHeader("Cookie"))
-	if err := RequireCSRF(c, cookies); err != nil {
-		return err
-	}
-	refreshToken := cookies[RefreshCookie]
-	if refreshToken == "" {
-		return apperror.Unauthorized(apperror.CodeSessionRevoked, "Refresh session is unavailable")
-	}
-	result, err := routes.identity.Refresh(c.Request.Context(), refreshToken, c.GetHeader("Idempotency-Key"))
+	result, err := routes.service.Refresh(
+		c.Request.Context(), c.ClientIP(), cookies[RefreshCookie],
+		c.GetHeader("Idempotency-Key"),
+		CSRFProof{Cookie: cookies[CSRFCookie], Header: c.GetHeader("X-CSRF-Token")},
+	)
 	if err != nil {
 		return err
 	}
-	if result.Session.User.Role != identity.RoleAdmin {
-		return apperror.Forbidden("Administrator role is required")
-	}
-	csrf := cookies[CSRFCookie]
-	if csrf == "" {
-		csrf, err = newCSRFToken()
-		if err != nil {
-			return err
-		}
-	}
-	routes.writeSession(c, result.Session, csrf)
+	routes.writeSession(c, result.Session, result.CSRFToken)
 	return nil
 }
 
 func (routes *Routes) logout(c *gin.Context) error {
-	actor, err := RequireAdmin(c, routes.identity, true)
+	actor, err := RequireAdmin(c, routes.identity(), true)
 	if err != nil {
 		return err
 	}
-	if err := routes.identity.Logout(c.Request.Context(), actor); err != nil {
+	if err := routes.service.Logout(c.Request.Context(), actor); err != nil {
 		return err
 	}
 	secure := routes.secureRequest(c.Request)
@@ -183,11 +139,15 @@ func (routes *Routes) logout(c *gin.Context) error {
 	return nil
 }
 
+// identity exposes the underlying identity service for the shared
+// RequireAdmin middleware used across admin modules.
+func (routes *Routes) identity() Identity { return routes.service.identity }
+
 func (routes *Routes) writeSession(c *gin.Context, session identity.AuthSessionDTO, csrf string) {
 	secure := routes.secureRequest(c.Request)
-	appendSessionCookie(c, AccessCookie, session.Tokens.AccessToken, "/api/v1/admin", routes.config.Security.AccessTokenTTLSeconds, true, secure)
-	appendSessionCookie(c, RefreshCookie, session.Tokens.RefreshToken, "/api/v1/admin/auth/refresh", routes.config.Security.RefreshTokenTTLSeconds, true, secure)
-	appendSessionCookie(c, CSRFCookie, csrf, "/", routes.config.Security.RefreshTokenTTLSeconds, false, secure)
+	appendSessionCookie(c, AccessCookie, session.Tokens.AccessToken, "/api/v1/admin", routes.service.AccessTokenTTLSeconds(), true, secure)
+	appendSessionCookie(c, RefreshCookie, session.Tokens.RefreshToken, "/api/v1/admin/auth/refresh", routes.service.RefreshTokenTTLSeconds(), true, secure)
+	appendSessionCookie(c, CSRFCookie, csrf, "/", routes.service.RefreshTokenTTLSeconds(), false, secure)
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, gin.H{"user": session.User, "csrfToken": csrf})
 }
@@ -219,12 +179,7 @@ func RequireAdmin(c *gin.Context, identityService Identity, mutation bool) (iden
 }
 
 func RequireCSRF(c *gin.Context, cookies map[string]string) error {
-	cookieValue := cookies[CSRFCookie]
-	headerValue := c.GetHeader("X-CSRF-Token")
-	if len(cookieValue) < 16 || len(cookieValue) != len(headerValue) || subtle.ConstantTimeCompare([]byte(cookieValue), []byte(headerValue)) != 1 {
-		return apperror.Forbidden("CSRF token is invalid")
-	}
-	return nil
+	return VerifyCSRF(cookies[CSRFCookie], c.GetHeader("X-CSRF-Token"))
 }
 
 func ParseCookies(header string) map[string]string {

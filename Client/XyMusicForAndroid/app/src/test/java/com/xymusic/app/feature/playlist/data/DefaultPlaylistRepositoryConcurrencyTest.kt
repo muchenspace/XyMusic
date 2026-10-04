@@ -11,8 +11,8 @@ import com.xymusic.app.core.database.XyMusicDatabase
 import com.xymusic.app.core.database.entity.PlaylistEntity
 import com.xymusic.app.core.database.entity.PlaylistEntryEntity
 import com.xymusic.app.core.database.entity.TrackEntity
-import com.xymusic.app.core.database.model.PlaylistVisibility as StoredPlaylistVisibility
 import com.xymusic.app.core.database.model.SyncTargetType
+import com.xymusic.app.core.model.playlist.PlaylistVisibility as StoredPlaylistVisibility
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState

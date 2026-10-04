@@ -2,6 +2,7 @@ package com.xymusic.app.feature.player.data.media
 
 import android.app.Application
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.cache.Cache
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
@@ -362,12 +363,19 @@ private open class FakeCatalogRepository : CatalogRepository {
         override fun isFullyCached(cacheKey: String, contentLength: Long): Boolean =
             contentLength > 0 && cacheKey in cachedKeys
 
+        override fun cachedContentLength(cacheKey: String): Long? = null
+
+        override val cache: Cache
+            get() = error("Not used")
+
         override suspend fun remove(cacheKey: String) {
             removedKeys += cacheKey
             cachedKeys -= cacheKey
             pinnedKeys -= cacheKey
             persistentPinnedKeys -= cacheKey
         }
+
+        override suspend fun clear() = Unit
     }
 
     private companion object {

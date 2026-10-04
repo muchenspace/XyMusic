@@ -1,5 +1,14 @@
 import type { LyricLine, Lyrics } from "../domain/music";
 import { interpolateLyricPlaybackSeconds, resolveLyricPlaybackPosition } from "../domain/lyricsTimeline";
+import {
+  LYRIC_TRANSITION_LINE_DISTANCE_PX,
+  LYRIC_TRANSITION_MAX_DURATION_MS,
+  LYRIC_TRANSITION_MIN_DURATION_MS,
+  LYRIC_TRANSITION_PIXELS_PER_SECOND,
+  fastOutSlowIn,
+  fastOutSlowInTiming,
+  type LyricTimingSample,
+} from "../shared/lyrics/transition";
 import type { DesktopLyricsClockPayload } from "./protocol";
 
 export interface DesktopLyricLineFrame {
@@ -52,10 +61,11 @@ export interface DesktopLyricsTransitionSample {
 }
 
 export const DESKTOP_LYRICS_DENSE_INTERVAL_SECONDS = 0.45;
-export const DESKTOP_LYRICS_TRANSITION_MIN_DURATION_MS = 300;
-export const DESKTOP_LYRICS_TRANSITION_MAX_DURATION_MS = 520;
-export const DESKTOP_LYRICS_TRANSITION_LINE_DISTANCE_PX = 56;
-export const DESKTOP_LYRICS_TRANSITION_PIXELS_PER_SECOND = 185;
+export const DESKTOP_LYRICS_TRANSITION_MIN_DURATION_MS = LYRIC_TRANSITION_MIN_DURATION_MS;
+export const DESKTOP_LYRICS_TRANSITION_MAX_DURATION_MS = LYRIC_TRANSITION_MAX_DURATION_MS;
+export const DESKTOP_LYRICS_TRANSITION_LINE_DISTANCE_PX = LYRIC_TRANSITION_LINE_DISTANCE_PX;
+export const DESKTOP_LYRICS_TRANSITION_PIXELS_PER_SECOND = LYRIC_TRANSITION_PIXELS_PER_SECOND;
+export { fastOutSlowIn };
 const DESKTOP_LYRICS_SPRING_STIFFNESS = 200;
 const DESKTOP_LYRICS_SPRING_SETTLE_EPSILON = 0.001;
 const DESKTOP_LYRICS_SPRING_MIN_SETTLE_MS = 300;
@@ -226,37 +236,8 @@ export function smoothstep(value: number): number {
   return clamped * clamped * (3 - 2 * clamped);
 }
 
-/** Material/Compose FastOutSlowInEasing: cubic-bezier(0.4, 0, 0.2, 1). */
-export function fastOutSlowIn(value: number): number {
-  return fastOutSlowInTiming(value).value;
-}
-
-interface DesktopLyricsTimingSample {
-  value: number;
-  slope: number;
-}
-
-function fastOutSlowInTiming(value: number): DesktopLyricsTimingSample {
-  const input = Math.max(0, Math.min(1, finiteNumber(value)));
-  if (input === 0 || input === 1) return { value: input, slope: 0 };
-  let lower = 0;
-  let upper = 1;
-  for (let iteration = 0; iteration < 30; iteration += 1) {
-    const candidate = (lower + upper) / 2;
-    if (cubicBezierCoordinate(candidate, 0.4, 0.2) < input) lower = candidate;
-    else upper = candidate;
-  }
-  const curveTime = (lower + upper) / 2;
-  const xVelocity = cubicBezierDerivative(curveTime, 0.4, 0.2);
-  const yVelocity = cubicBezierDerivative(curveTime, 0, 1);
-  return {
-    value: cubicBezierCoordinate(curveTime, 0, 1),
-    slope: xVelocity > Number.EPSILON ? yVelocity / xVelocity : 0,
-  };
-}
-
 /** Compose's no-bounce spring: damping ratio 1 and low stiffness 200. */
-function noBounceSpringTiming(elapsedSeconds: number, initialVelocityPerSecond: number): DesktopLyricsTimingSample {
+function noBounceSpringTiming(elapsedSeconds: number, initialVelocityPerSecond: number): LyricTimingSample {
   const time = Math.max(0, finiteNumber(elapsedSeconds));
   const velocity = Math.max(0, finiteNumber(initialVelocityPerSecond));
   const angularFrequency = Math.sqrt(DESKTOP_LYRICS_SPRING_STIFFNESS);
@@ -332,20 +313,6 @@ function lineFrame(
 
 function isMatchingTrack(lyrics: Lyrics, clock: DesktopLyricsClockPayload): boolean {
   return clock.trackId !== null && lyrics.trackId === clock.trackId;
-}
-
-function cubicBezierCoordinate(time: number, firstControl: number, secondControl: number): number {
-  const inverse = 1 - time;
-  return 3 * inverse * inverse * time * firstControl
-    + 3 * inverse * time * time * secondControl
-    + time * time * time;
-}
-
-function cubicBezierDerivative(time: number, firstControl: number, secondControl: number): number {
-  const inverse = 1 - time;
-  return 3 * inverse * inverse * firstControl
-    + 6 * inverse * time * (secondControl - firstControl)
-    + 3 * time * time * (1 - secondControl);
 }
 
 function normalizeTransitionDuration(durationMs: number): number {

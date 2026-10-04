@@ -17,17 +17,20 @@ export type {
   PermanentDeleteTracksJob,
   PermanentDeleteTrackItemStatus,
   PermanentDeleteTracksJobStatus,
+  PermanentDeleteTrackResult,
   TrackMutationTarget,
   TrackDetail,
   TrackMetadataRecord,
   TrackSummary,
   TrackStatus,
+  TrackTagPatch,
   TrackTagValues,
 } from "@/features/music/domain/models";
 
 export type { ArtworkSummary } from "@/shared/domain/artwork";
 export type { MediaUploadCompletion, MediaUploadPurpose, MediaUploadReservation } from "@/shared/domain/media-upload";
 export type { MediaToolsConfig } from "@/shared/domain/runtime-config";
+export type { Page as PageResult, PageQuery as ListQuery } from "@/shared/domain/pagination";
 export type { ProblemDetails } from "@/shared/application/api-error";
 export type {
   CreateUserInput,
@@ -69,22 +72,3 @@ export type {
   SetupStatus,
   SetupValidationResult,
 } from "@/features/setup/domain/models";
-
-export interface PageResult<T> {
-  items: T[];
-  page: number;
-  pageSize: number;
-  total: number;
-  totalPages?: number;
-  nextCursor?: string;
-}
-
-export interface ListQuery {
-  page?: number;
-  pageSize?: number;
-  search?: string;
-  sort?: string;
-  order?: "asc" | "desc";
-  cursor?: string;
-  cursorMode?: "cursor" | "offset";
-}

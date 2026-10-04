@@ -24,20 +24,26 @@ type Routes struct {
 	service *Service
 	signer  *TicketSigner
 	userCtx UserContext
+	opener  AssetOpener
 }
 
 func NewRoutes(
 	service *Service,
 	signer *TicketSigner,
 	userCtx UserContext,
+	opener AssetOpener,
 ) (*Routes, error) {
 	if service == nil || signer == nil || userCtx == nil {
 		return nil, errors.New("playback routes require service, signer, and userCtx")
+	}
+	if opener == nil {
+		opener = NewOSAssetOpener()
 	}
 	return &Routes{
 		service: service,
 		signer:  signer,
 		userCtx: userCtx,
+		opener:  opener,
 	}, nil
 }
 
@@ -86,19 +92,18 @@ func (routes *Routes) serveStream(c *gin.Context) error {
 		return err
 	}
 
-	file, err := os.Open(source.SourcePath)
+	file, _, modTime, err := routes.opener.Open(source.SourcePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return apperror.NotFound("Audio file was not found")
 		}
+		var openError *AssetOpenError
+		if errors.As(err, &openError) && openError.Operation == "stat" {
+			return fmt.Errorf("stat audio file: %w", openError.Err)
+		}
 		return fmt.Errorf("open audio file: %w", err)
 	}
 	defer file.Close()
-
-	stat, err := file.Stat()
-	if err != nil {
-		return fmt.Errorf("stat audio file: %w", err)
-	}
 
 	format := sourceFormatForPath(source.SourcePath)
 	if format.mimeType != "" {
@@ -109,7 +114,7 @@ func (routes *Routes) serveStream(c *gin.Context) error {
 	if source.ChecksumSHA256 != "" {
 		c.Header("ETag", fmt.Sprintf(`"%s"`, source.ChecksumSHA256))
 	}
-	http.ServeContent(c.Writer, c.Request, filepath.Base(source.SourcePath), stat.ModTime(), file)
+	http.ServeContent(c.Writer, c.Request, filepath.Base(source.SourcePath), modTime, file)
 	return nil
 }
 

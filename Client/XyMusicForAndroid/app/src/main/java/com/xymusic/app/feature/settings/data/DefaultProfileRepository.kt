@@ -1,8 +1,7 @@
 package com.xymusic.app.feature.settings.data
 
 import com.xymusic.app.core.common.IoDispatcher
-import com.xymusic.app.core.data.media.remote.ArtworkDto
-import com.xymusic.app.core.model.media.Artwork
+import com.xymusic.app.core.data.media.toDomainArtwork
 import com.xymusic.app.core.network.ApiHttpClient
 import com.xymusic.app.core.network.MediaHttpClient
 import com.xymusic.app.core.network.ServerGeneration
@@ -312,25 +311,13 @@ constructor(
         username = username,
         displayName = displayName,
         bio = bio,
-        avatar = avatar.toDomain(),
+        avatar = avatar.toDomainArtwork(),
         role = UserRole.valueOf(role),
         status = UserStatus.valueOf(status),
         version = version,
         createdAtEpochMillis = Instant.parse(createdAt).toEpochMilli(),
         updatedAtEpochMillis = Instant.parse(updatedAt).toEpochMilli(),
     )
-
-    private fun ArtworkDto?.toDomain(): Artwork? = this?.let {
-        Artwork(
-            assetId,
-            url,
-            cacheKey,
-            mimeType,
-            expiresAt?.let { value -> Instant.parse(value).toEpochMilli() },
-            width,
-            height,
-        )
-    }
 
     private fun requireOwner(): String = (sessionProvider.sessionState.value as? AppSessionState.SignedIn)?.userId
         ?: throw SignedOutException

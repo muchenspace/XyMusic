@@ -264,7 +264,7 @@ func TestListTracksFiltersByAudioStatus(t *testing.T) {
 
 func newCatalogService(t *testing.T, store Store, artworks ArtworkPresenter) *Service {
 	t.Helper()
-	service, err := NewService(store, artworks)
+	service, err := NewServiceWithOptions(store, artworks, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

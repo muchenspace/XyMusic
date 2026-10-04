@@ -5,16 +5,16 @@ import (
 	"errors"
 	"time"
 
-	sharedidempotency "xymusic/server/internal/shared/idempotency"
+	platformidempotency "xymusic/server/internal/platform/idempotency"
 )
 
 type PersistentIdempotency struct {
-	service *sharedidempotency.Service
+	service *platformidempotency.Service
 }
 
 var _ Idempotency = (*PersistentIdempotency)(nil)
 
-func NewPersistentIdempotency(service *sharedidempotency.Service) *PersistentIdempotency {
+func NewPersistentIdempotency(service *platformidempotency.Service) *PersistentIdempotency {
 	return &PersistentIdempotency{service: service}
 }
 
@@ -26,15 +26,15 @@ func (adapter *PersistentIdempotency) ExecuteReservation(
 	if adapter == nil || adapter.service == nil {
 		return UploadReservationDTO{}, false, errors.New("admin media idempotency service is required")
 	}
-	result, err := sharedidempotency.Execute(ctx, adapter.service, sharedidempotency.Input{
+	result, err := platformidempotency.Execute(ctx, adapter.service, platformidempotency.Input{
 		ActorID: input.ActorID,
 		Scope:   input.Scope,
 		Key:     input.Key,
 		Payload: input.Payload,
 		TTL:     24 * time.Hour,
-	}, func() (sharedidempotency.HTTPResult[UploadReservationDTO], error) {
+	}, func() (platformidempotency.HTTPResult[UploadReservationDTO], error) {
 		body, operationErr := operation()
-		return sharedidempotency.HTTPResult[UploadReservationDTO]{
+		return platformidempotency.HTTPResult[UploadReservationDTO]{
 			Status: 201,
 			Body:   body,
 		}, operationErr
@@ -53,15 +53,15 @@ func (adapter *PersistentIdempotency) ExecuteCompletion(
 	if adapter == nil || adapter.service == nil {
 		return UploadCompletionDTO{}, false, errors.New("admin media idempotency service is required")
 	}
-	result, err := sharedidempotency.Execute(ctx, adapter.service, sharedidempotency.Input{
+	result, err := platformidempotency.Execute(ctx, adapter.service, platformidempotency.Input{
 		ActorID: input.ActorID,
 		Scope:   input.Scope,
 		Key:     input.Key,
 		Payload: input.Payload,
 		TTL:     24 * time.Hour,
-	}, func() (sharedidempotency.HTTPResult[UploadCompletionDTO], error) {
+	}, func() (platformidempotency.HTTPResult[UploadCompletionDTO], error) {
 		body, operationErr := operation()
-		return sharedidempotency.HTTPResult[UploadCompletionDTO]{
+		return platformidempotency.HTTPResult[UploadCompletionDTO]{
 			Status: 200,
 			Body:   body,
 		}, operationErr

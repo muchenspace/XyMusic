@@ -2,7 +2,6 @@ package com.xymusic.app.app.integration
 
 import com.xymusic.app.feature.library.domain.LibraryRepository
 import com.xymusic.app.feature.library.domain.LibraryResult
-import com.xymusic.app.feature.library.domain.model.PlaybackEvent
 import com.xymusic.app.feature.library.domain.model.PlaybackProgressCommand
 import com.xymusic.app.feature.player.domain.PlaybackCheckpoint
 import com.xymusic.app.feature.player.domain.PlaybackEventSink
@@ -24,7 +23,7 @@ constructor(private val libraryRepository: LibraryRepository) :
                     playbackSessionId = checkpoint.playbackSessionId,
                     positionMs = checkpoint.positionMs,
                     occurredAtEpochMillis = checkpoint.occurredAtEpochMillis,
-                    event = PlaybackEvent.valueOf(checkpoint.event.name),
+                    event = checkpoint.event,
                 ),
             )
         check(result is LibraryResult.Success) { "Unable to durably store playback checkpoint" }

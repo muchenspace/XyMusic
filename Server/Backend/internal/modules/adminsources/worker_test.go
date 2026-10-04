@@ -14,7 +14,7 @@ func TestWorkerInitializesDefaultAndStartupSources(t *testing.T) {
 	store := &workerStoreStub{startupIDs: []string{testRootID}}
 	worker, err := NewWorker(WorkerOptions{
 		Store: store, Scanner: scannerFunc(func(context.Context, ScanInput) (ScanResult, error) { return ScanResult{}, nil }),
-		RootDirectory: directory,
+		RootDirectory: directory, RootProbe: OSRootProbe{},
 		DefaultRoot: config.LocalLibrary{
 			Name: "Local", Directory: directory, Mode: string(RootModeReadOnly), Enabled: true,
 			SyncOnStartup: true, IncludePatterns: []string{}, ExcludePatterns: []string{},
@@ -55,7 +55,7 @@ func TestWorkerExecutesClaimWithProgressAndFencing(t *testing.T) {
 		return ScanResult{DiscoveredFiles: 3, ProcessedFiles: 3, FailedFiles: 1, ArchivedFiles: 2}, nil
 	})
 	worker, err := NewWorker(WorkerOptions{
-		Store: store, Scanner: scanner, RootDirectory: t.TempDir(),
+		Store: store, Scanner: scanner, RootDirectory: t.TempDir(), RootProbe: OSRootProbe{},
 		WorkerID: "worker-test", Lease: time.Second, Heartbeat: 100 * time.Millisecond,
 		ProgressWrite: 0, Now: func() time.Time { return now },
 		DefaultRoot: config.LocalLibrary{Directory: store.claim.Root.Path, Mode: string(RootModeReadOnly), IncludePatterns: []string{}, ExcludePatterns: []string{}},
@@ -89,7 +89,7 @@ func TestWorkerFinalizesRequestedCancellation(t *testing.T) {
 		return ScanResult{}, ErrScanCancelled
 	})
 	worker, err := NewWorker(WorkerOptions{
-		Store: store, Scanner: scanner, RootDirectory: t.TempDir(), WorkerID: "worker-test",
+		Store: store, Scanner: scanner, RootDirectory: t.TempDir(), RootProbe: OSRootProbe{}, WorkerID: "worker-test",
 		Lease: time.Second, Heartbeat: 100 * time.Millisecond,
 		DefaultRoot: config.LocalLibrary{Directory: store.claim.Root.Path, Mode: string(RootModeReadOnly), IncludePatterns: []string{}, ExcludePatterns: []string{}},
 	})
@@ -123,7 +123,7 @@ func TestWorkerStopsScannerWhenHeartbeatFails(t *testing.T) {
 		}
 	})
 	worker, err := NewWorker(WorkerOptions{
-		Store: store, Scanner: scanner, RootDirectory: t.TempDir(), WorkerID: "worker-test",
+		Store: store, Scanner: scanner, RootDirectory: t.TempDir(), RootProbe: OSRootProbe{}, WorkerID: "worker-test",
 		Lease: time.Second, Heartbeat: 10 * time.Millisecond,
 		DefaultRoot: config.LocalLibrary{Directory: store.claim.Root.Path, Mode: string(RootModeReadOnly), IncludePatterns: []string{}, ExcludePatterns: []string{}},
 	})
@@ -157,7 +157,7 @@ func TestWorkerStopsScannerWhenScanOwnershipIsLost(t *testing.T) {
 		return ScanResult{}, ErrScanCancelled
 	})
 	worker, err := NewWorker(WorkerOptions{
-		Store: store, Scanner: scanner, RootDirectory: t.TempDir(), WorkerID: "worker-test",
+		Store: store, Scanner: scanner, RootDirectory: t.TempDir(), RootProbe: OSRootProbe{}, WorkerID: "worker-test",
 		Lease: time.Second, Heartbeat: 100 * time.Millisecond,
 		DefaultRoot: config.LocalLibrary{Directory: store.claim.Root.Path, Mode: string(RootModeReadOnly), IncludePatterns: []string{}, ExcludePatterns: []string{}},
 	})

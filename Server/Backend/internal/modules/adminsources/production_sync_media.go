@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
-	"xymusic/server/internal/modules/adminmetadata"
+	"xymusic/server/internal/platform/mediafile"
 	sharedlyrics "xymusic/server/internal/shared/lyrics"
 )
 
@@ -141,7 +141,7 @@ func readSidecarContent(path string) ([]byte, error) {
 	return content, nil
 }
 
-func mergeLyrics(sidecars []scannedLyric, embedded *adminmetadata.MetadataLyrics) []scannedLyric {
+func mergeLyrics(sidecars []scannedLyric, embedded *mediafile.MetadataLyrics) []scannedLyric {
 	result := append([]scannedLyric(nil), sidecars...)
 	languages := make(map[string]struct{}, len(result))
 	for _, lyric := range result {

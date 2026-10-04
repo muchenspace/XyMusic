@@ -2,6 +2,7 @@ import { createPinia } from "pinia";
 import { createApp, defineComponent, h } from "vue";
 import { describe, expect, it, vi } from "vitest";
 import type { ApplicationServices } from "../src/application/services";
+import { LibraryBrowserService } from "../src/application/services/LibraryBrowserService";
 import type { Playlist, Track } from "../src/domain/music";
 import { applicationServicesKey } from "../src/presentation/services";
 import { useLibraryStore } from "../src/presentation/stores/libraryStore";
@@ -15,6 +16,7 @@ describe("library list cache", () => {
       catalog: {},
       library: { favorites },
       playlists: {},
+      libraryBrowser: new LibraryBrowserService({} as never),
     } as unknown as ApplicationServices;
     let store!: ReturnType<typeof useLibraryStore>;
     const Root = defineComponent({
@@ -47,6 +49,7 @@ describe("library list cache", () => {
       catalog: {},
       library: { history },
       playlists: {},
+      libraryBrowser: new LibraryBrowserService({} as never),
     } as unknown as ApplicationServices;
     let store!: ReturnType<typeof useLibraryStore>;
     const Root = defineComponent({
@@ -78,6 +81,7 @@ describe("library list cache", () => {
       catalog: {},
       library: { favorites },
       playlists: { create },
+      libraryBrowser: new LibraryBrowserService({} as never),
     } as unknown as ApplicationServices;
     let store!: ReturnType<typeof useLibraryStore>;
     const Root = defineComponent({

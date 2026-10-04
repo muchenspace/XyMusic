@@ -3,7 +3,8 @@ import { CloudOff, RefreshCw } from "lucide-vue-next";
 import { useQuery } from "@tanstack/vue-query";
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { cacheSetupState, SETUP_STATUS_STALE_MS } from "@/app/router";
+import { cacheSetupState, SETUP_STATUS_STALE_MS } from "@/app/setup-status";
+import { appQueryKeys } from "@/app/query-keys";
 import AppButton from "@/components/AppButton.vue";
 import { useSetup } from "@/app/services/setup";
 import xymusicIcon from "@/assets/xymusic.png";
@@ -14,7 +15,7 @@ const setup = useSetup();
 const navigating = ref(false);
 
 const statusQuery = useQuery({
-  queryKey: ["setup", "status"],
+  queryKey: appQueryKeys.setupStatus,
   queryFn: ({ signal }) => setup.status(signal),
   staleTime: SETUP_STATUS_STALE_MS,
   refetchOnMount: "always",

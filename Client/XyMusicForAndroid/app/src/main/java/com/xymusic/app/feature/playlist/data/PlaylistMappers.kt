@@ -1,18 +1,16 @@
 package com.xymusic.app.feature.playlist.data
 
-import com.xymusic.app.core.data.media.remote.ArtworkDto
 import com.xymusic.app.core.data.media.remote.TrackSummaryDto
+import com.xymusic.app.core.data.media.toArtworkColumns
 import com.xymusic.app.core.data.media.toDomain
+import com.xymusic.app.core.data.media.toDomainArtwork
 import com.xymusic.app.core.database.dao.CatalogDao
 import com.xymusic.app.core.database.dao.PlaylistSnapshot
-import com.xymusic.app.core.database.entity.ArtworkColumns
 import com.xymusic.app.core.database.entity.PlaylistEntity
 import com.xymusic.app.core.database.entity.PlaylistEntryEntity
-import com.xymusic.app.core.database.model.PlaylistVisibility as DatabasePlaylistVisibility
-import com.xymusic.app.core.database.model.toDomainArtwork
+import com.xymusic.app.core.database.model.toDomainArtwork as toDomainArtworkColumns
 import com.xymusic.app.core.model.media.AlbumReference
 import com.xymusic.app.core.model.media.ArtistReference
-import com.xymusic.app.core.model.media.Artwork
 import com.xymusic.app.core.model.media.Track
 import com.xymusic.app.feature.playlist.data.remote.PlaylistDetailDto
 import com.xymusic.app.feature.playlist.data.remote.PlaylistEntryDto
@@ -31,8 +29,8 @@ internal fun PlaylistSummaryDto.toEntity(ownerUserId: String): PlaylistEntity {
         id = id,
         name = name,
         description = description,
-        visibility = DatabasePlaylistVisibility.valueOf(visibility),
-        cover = cover.toColumns(),
+        visibility = PlaylistVisibility.fromWireValue(visibility),
+        cover = cover.toArtworkColumns(),
         trackCount = trackCount,
         version = version,
         createdAtEpochMs = Instant.parse(createdAt).toEpochMilli(),
@@ -82,18 +80,6 @@ private fun TrackSummaryDto.toDomainTrack(): Track = Track(
     publishedAtEpochMillis = Instant.parse(publishedAt).toEpochMilli(),
 )
 
-private fun ArtworkDto?.toDomainArtwork(): Artwork? = this?.let { artwork ->
-    Artwork(
-        assetId = artwork.assetId,
-        url = artwork.url,
-        cacheKey = artwork.cacheKey,
-        mimeType = artwork.mimeType,
-        expiresAtEpochMillis = artwork.expiresAt?.let(Instant::parse)?.toEpochMilli(),
-        width = artwork.width,
-        height = artwork.height,
-    )
-}
-
 internal fun PlaylistEntryDto.toEntity(ownerUserId: String, playlistId: String): PlaylistEntryEntity =
     PlaylistEntryEntity(
         ownerUserId = ownerUserId,
@@ -110,8 +96,8 @@ internal fun PlaylistEntity.toDomain(): PlaylistSummary = PlaylistSummary(
     ownerUserId = ownerUserId,
     name = name,
     description = description,
-    visibility = PlaylistVisibility.valueOf(visibility.name),
-    cover = cover.toDomainArtwork(),
+    visibility = visibility,
+    cover = cover.toDomainArtworkColumns(),
     trackCount = trackCount,
     version = version,
     createdAtEpochMillis = createdAtEpochMs,
@@ -141,17 +127,5 @@ internal suspend fun PlaylistSnapshot.toDomain(catalogDao: CatalogDao): Playlist
                 )
             }
         },
-    )
-}
-
-private fun ArtworkDto?.toColumns(): ArtworkColumns? = this?.let {
-    ArtworkColumns(
-        assetId = assetId,
-        url = url,
-        cacheKey = cacheKey,
-        mimeType = mimeType,
-        expiresAtEpochMs = expiresAt?.let { value -> Instant.parse(value).toEpochMilli() },
-        width = width,
-        height = height,
     )
 }

@@ -245,6 +245,63 @@ describe("desktop lyrics controller", () => {
 
     controller.dispose();
   });
+
+  it("keeps only the latest clock while the native transport is busy", async () => {
+    const firstClock = deferred<void>();
+    let clockCalls = 0;
+    const integration = createIntegration({
+      sendClock: vi.fn(() => {
+        clockCalls += 1;
+        return clockCalls === 1 ? firstClock.promise : Promise.resolve();
+      }),
+    });
+    const controller = new DesktopLyricsController(integration, createPreferences(), new ManualTaskScheduler(), new FakePageLifecycle());
+    await controller.initialize();
+    await controller.setVisible(true);
+    const clock = (positionSeconds: number) => ({
+      trackId: "track-1",
+      isPlaying: true,
+      positionSeconds,
+      anchoredAtMs: 1,
+      positionDiscontinuityVersion: 0,
+    });
+
+    controller.sendClock(() => clock(1));
+    controller.sendClock(() => clock(2));
+    controller.sendClock(() => clock(3));
+
+    expect(integration.sendClock).toHaveBeenCalledOnce();
+    firstClock.resolve();
+    await settle();
+
+    expect(integration.sendClock).toHaveBeenCalledTimes(2);
+    expect(integration.sendClock.mock.calls[1]?.[0]).toMatchObject({ positionSeconds: 3 });
+
+    controller.dispose();
+  });
+
+  it("orders snapshots and clocks in one monotonic transport stream", async () => {
+    const sent: Array<{ revision?: number; transportEpoch: string }> = [];
+    const integration = createIntegration({
+      sendSnapshot: vi.fn(async (snapshot: { revision?: number; transportEpoch: string }) => { sent.push(snapshot); }),
+      sendClock: vi.fn(async (clock: { revision?: number; transportEpoch: string }) => { sent.push(clock); }),
+    });
+    const controller = new DesktopLyricsController(integration, createPreferences(), new ManualTaskScheduler(), new FakePageLifecycle());
+    await controller.initialize();
+    await controller.setVisible(true);
+
+    controller.requestSnapshot(() => snapshotInput(), true);
+    controller.sendClock(() => clockInput());
+    await settle();
+
+    expect(sent.length).toBeGreaterThanOrEqual(2);
+    expect(sent.every((message) => Number.isFinite(message.revision))).toBe(true);
+    expect(sent.slice(1).every((message, index) => message.revision! > sent[index]!.revision!)).toBe(true);
+    expect(new Set(sent.map((message) => message.transportEpoch)).size).toBe(1);
+    expect(sent[0]!.transportEpoch).toMatch(/\S/u);
+
+    controller.dispose();
+  });
 });
 
 function createIntegration(overrides: Partial<DesktopLyrics> = {}): DesktopLyrics & Record<string, ReturnType<typeof vi.fn>> {
@@ -260,6 +317,34 @@ function createIntegration(overrides: Partial<DesktopLyrics> = {}): DesktopLyric
     onWindowState: vi.fn(async () => () => undefined),
     ...overrides,
   } as DesktopLyrics & Record<string, ReturnType<typeof vi.fn>>;
+}
+
+function snapshotInput() {
+  return {
+    track: { id: "track-1", title: "Track", artist: "Artist" },
+    lyrics: null,
+    isPlaying: true,
+    renderActive: true,
+    positionSeconds: 1,
+    anchoredAtMs: 1,
+    positionDiscontinuityVersion: 0,
+    offsetSeconds: 0,
+    showTranslation: false,
+    locked: false,
+    fontScale: 1,
+    textColor: "#f4f5f7",
+    highlightColor: "#cf9437",
+  };
+}
+
+function clockInput() {
+  return {
+    trackId: "track-1",
+    isPlaying: true,
+    positionSeconds: 1,
+    anchoredAtMs: 1,
+    positionDiscontinuityVersion: 0,
+  };
 }
 
 function createPreferences(overrides: Partial<ReturnType<typeof desktopLyricsPreferences>> = {}) {

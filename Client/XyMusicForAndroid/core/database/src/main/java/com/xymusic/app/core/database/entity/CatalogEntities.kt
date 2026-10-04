@@ -7,8 +7,8 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.xymusic.app.core.database.model.ArtistCreditRole
-import com.xymusic.app.core.database.model.LyricsFormat
-import com.xymusic.app.core.database.model.LyricsTiming
+import com.xymusic.app.core.model.media.LyricsFormat
+import com.xymusic.app.core.model.media.LyricsTiming
 
 data class ArtworkColumns(
     @ColumnInfo(name = "asset_id") val assetId: String?,

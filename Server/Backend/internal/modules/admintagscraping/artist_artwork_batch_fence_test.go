@@ -7,8 +7,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestArtistArtworkBatchMutationFenceCommitsSuccessAtomically(t *testing.T) {
@@ -118,7 +116,7 @@ func (tx *artistArtworkBatchFenceTxStub) Exec(
 	_ context.Context,
 	query string,
 	arguments ...any,
-) (pgconn.CommandTag, error) {
+) (MediaCommandTag, error) {
 	tx.t.Helper()
 	if tx.execIndex >= len(tx.execs) {
 		tx.t.Fatalf("unexpected Exec(%q, %#v)", compactBatchFenceSQL(query), arguments)
@@ -131,7 +129,7 @@ func (tx *artistArtworkBatchFenceTxStub) Exec(
 	if expected.check != nil {
 		expected.check(arguments...)
 	}
-	return pgconn.NewCommandTag("UPDATE " + string(rune('0'+expected.rowsAffected))), nil
+	return mediaCommandTag{rowsAffected: expected.rowsAffected}, nil
 }
 
 func (tx *artistArtworkBatchFenceTxStub) assertComplete() {

@@ -2,6 +2,7 @@ package setup
 
 import (
 	"context"
+	"os"
 
 	"xymusic/server/internal/config"
 )
@@ -94,6 +95,24 @@ type SourceValidator interface {
 
 type PasswordHasher interface {
 	Hash(string) (string, error)
+}
+
+// MigrationProbe validates that a directory contains readable database
+// migration files.
+type MigrationProbe interface {
+	Validate(directory string) error
+}
+
+// ExecutableLocator resolves the running executable path when the service
+// root is not supplied explicitly.
+type ExecutableLocator interface {
+	Executable() (string, error)
+}
+
+// FileProbe performs the read-only filesystem checks used while validating
+// setup paths. It mirrors os.Stat for the metadata the service inspects.
+type FileProbe interface {
+	Stat(string) (os.FileInfo, error)
 }
 
 type ValidatedSource struct {

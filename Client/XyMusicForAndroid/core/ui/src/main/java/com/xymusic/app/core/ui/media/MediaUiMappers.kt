@@ -6,11 +6,14 @@ import com.xymusic.app.core.model.media.Artist
 import com.xymusic.app.core.model.media.ArtistReference
 import com.xymusic.app.core.model.media.Artwork
 import com.xymusic.app.core.model.media.Track
+import com.xymusic.app.core.model.player.PlayerQueueItem
+import com.xymusic.app.core.model.playlist.PlaylistVisibility
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
+import java.util.UUID
 
 fun Artwork.toUi(): CatalogArtworkUi = CatalogArtworkUi(
     url = url,
@@ -37,6 +40,31 @@ fun Track.toUi(): CatalogTrackUi = CatalogTrackUi(
     discNumber = discNumber,
     trackNumber = trackNumber,
 )
+
+fun CatalogTrackUi.toPlayerQueueItem(): PlayerQueueItem = toPlayerQueueItem(UUID.randomUUID().toString())
+
+fun CatalogTrackUi.toPlayerQueueItem(queueItemId: String): PlayerQueueItem = PlayerQueueItem(
+    queueItemId = queueItemId,
+    trackId = id,
+    title = title,
+    artistNames = artists.map(CatalogArtistLinkUi::name),
+    albumTitle = album?.title,
+    artworkUrl = artwork?.url,
+    artworkCacheKey = artwork?.cacheKey,
+    durationMs = durationMs,
+)
+
+fun PlaylistVisibility.toPlaylistEditorOption(): PlaylistVisibilityOption = when (this) {
+    PlaylistVisibility.PRIVATE -> PlaylistVisibilityOption.PRIVATE
+    PlaylistVisibility.UNLISTED -> PlaylistVisibilityOption.UNLISTED
+    PlaylistVisibility.PUBLIC -> PlaylistVisibilityOption.PUBLIC
+}
+
+fun PlaylistVisibilityOption.toPlaylistVisibility(): PlaylistVisibility = when (this) {
+    PlaylistVisibilityOption.PRIVATE -> PlaylistVisibility.PRIVATE
+    PlaylistVisibilityOption.UNLISTED -> PlaylistVisibility.UNLISTED
+    PlaylistVisibilityOption.PUBLIC -> PlaylistVisibility.PUBLIC
+}
 
 fun Album.toUi(): CatalogAlbumUi = CatalogAlbumUi(
     id = id,

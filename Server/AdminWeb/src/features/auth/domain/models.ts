@@ -1,5 +1,5 @@
 import type { ArtworkSummary } from "@/shared/domain/artwork";
-import type { UserRole, UserStatus } from "@/features/users/domain/models";
+import type { UserRole, UserStatus } from "@/shared/domain/user-role";
 
 export interface AdminProfile {
   id: string;

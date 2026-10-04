@@ -8,13 +8,14 @@ import androidx.paging.cachedIn
 import com.xymusic.app.R
 import com.xymusic.app.core.common.DefaultDispatcher
 import com.xymusic.app.core.common.runCatchingPreservingCancellation
-import com.xymusic.app.core.model.media.Track
-import com.xymusic.app.core.paging.mapPagedItems
-import com.xymusic.app.core.paging.pagingDataFlow
 import com.xymusic.app.core.ui.media.CatalogAlbumLinkUi
 import com.xymusic.app.core.ui.media.CatalogArtistLinkUi
 import com.xymusic.app.core.ui.media.CatalogArtworkUi
 import com.xymusic.app.core.ui.media.CatalogTrackUi
+import com.xymusic.app.core.ui.media.toPlayerQueueItem
+import com.xymusic.app.core.ui.media.toUi
+import com.xymusic.app.core.ui.paging.mapPagedItems
+import com.xymusic.app.core.ui.paging.pagingDataFlow
 import com.xymusic.app.feature.library.domain.LibraryResult
 import com.xymusic.app.feature.library.domain.LibraryUseCases
 import com.xymusic.app.feature.library.domain.model.PlaybackHistoryItem
@@ -22,7 +23,6 @@ import com.xymusic.app.feature.player.domain.OfflineTrack
 import com.xymusic.app.feature.player.domain.OfflineTrackUseCases
 import com.xymusic.app.feature.player.domain.PlayerResult
 import com.xymusic.app.feature.player.domain.PlayerUseCases
-import com.xymusic.app.feature.player.domain.model.PlayerQueueItem
 import com.xymusic.app.feature.playlist.domain.PlaylistResult
 import com.xymusic.app.feature.playlist.domain.PlaylistUseCases
 import com.xymusic.app.feature.playlist.domain.model.CreatePlaylistCommand
@@ -31,7 +31,6 @@ import com.xymusic.app.feature.playlist.domain.model.PlaylistVisibility
 import com.xymusic.app.feature.playlist.domain.model.UpdatePlaylistCommand
 import com.xymusic.app.feature.playlist.domain.model.ValueChange
 import dagger.hilt.android.lifecycle.HiltViewModel
-import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -104,7 +103,7 @@ constructor(
         libraryUseCases
             .favorites()
             .pagingDataFlow()
-            .mapPagedItems { track -> track.toCatalogUi() }
+            .mapPagedItems { track -> track.toUi() }
             .cachedIn(viewModelScope)
 
     val history =
@@ -320,32 +319,10 @@ constructor(
 }
 
 private fun PlaybackHistoryItem.toUi(): LibraryHistoryUi = LibraryHistoryUi(
-    track = track.toCatalogUi(),
+    track = track.toUi(),
     lastPositionMs = lastPositionMs,
     playCount = playCount,
     completed = completed,
-)
-
-private fun Track.toCatalogUi(): CatalogTrackUi = CatalogTrackUi(
-    id = id,
-    title = title,
-    artists = artists.map { CatalogArtistLinkUi(it.id, it.name) },
-    album = album?.let { CatalogAlbumLinkUi(it.id, it.title) },
-    artwork = artwork?.let { CatalogArtworkUi(it.url, it.cacheKey) },
-    durationMs = durationMs,
-    discNumber = discNumber,
-    trackNumber = trackNumber,
-)
-
-private fun CatalogTrackUi.toPlayerQueueItem(): PlayerQueueItem = PlayerQueueItem(
-    queueItemId = UUID.randomUUID().toString(),
-    trackId = id,
-    title = title,
-    artistNames = artists.map(CatalogArtistLinkUi::name),
-    albumTitle = album?.title,
-    artworkUrl = artwork?.url,
-    artworkCacheKey = artwork?.cacheKey,
-    durationMs = durationMs,
 )
 
 private fun OfflineTrack.toCatalogUi(): CatalogTrackUi = CatalogTrackUi(

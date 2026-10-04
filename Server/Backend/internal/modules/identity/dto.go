@@ -1,5 +1,7 @@
 package identity
 
+import "xymusic/server/internal/shared/mediadto"
+
 // RegistrationDTO is returned after a user account is created. Its JSON
 // shape intentionally matches the legacy TypeScript API.
 type RegistrationDTO struct {
@@ -9,16 +11,7 @@ type RegistrationDTO struct {
 }
 
 // ArtworkDTO describes an avatar that can be downloaded by an API client.
-type ArtworkDTO struct {
-	AssetID  string `json:"assetId"`
-	URL      string `json:"url"`
-	CacheKey string `json:"cacheKey"`
-	MimeType string `json:"mimeType"`
-	// ExpiresAt remains in API v1 for client compatibility. Stable artwork resources set it to null.
-	ExpiresAt *string `json:"expiresAt"`
-	Width     *int    `json:"width,omitempty"`
-	Height    *int    `json:"height,omitempty"`
-}
+type ArtworkDTO = mediadto.ArtworkDTO
 
 // CurrentUserDTO is the canonical authenticated-user representation used by
 // login, refresh and GET /api/v1/users/me.

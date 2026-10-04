@@ -1,3 +1,5 @@
+import type { Page, PageQuery } from "@/shared/domain/pagination";
+
 export type JobStatus = "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELED";
 
 export interface JobSummary {
@@ -51,31 +53,17 @@ export interface MetadataWritebackJob {
   updatedAt: string;
 }
 
-export interface JobListQuery {
+export type JobListQuery = PageQuery & {
   page: number;
   pageSize: number;
   status?: string;
   type?: string;
-  search?: string;
-  sort?: string;
-  order?: "asc" | "desc";
-  cursor?: string;
-  cursorMode?: "cursor" | "offset";
-}
+};
 
-export interface JobPage<T> {
-  items: T[];
-  page: number;
-  pageSize: number;
-  total: number;
-  totalPages?: number;
-  nextCursor?: string;
-}
+export type JobPage<T> = Page<T>;
 
-export interface WritebackListQuery {
+export type WritebackListQuery = PageQuery & {
   page: number;
   pageSize: number;
   status?: string;
-  cursor?: string;
-  cursorMode?: "cursor" | "offset";
-}
+};

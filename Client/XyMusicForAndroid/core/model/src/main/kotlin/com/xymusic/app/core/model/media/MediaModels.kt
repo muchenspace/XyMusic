@@ -55,9 +55,27 @@ data class TrackDetail(val track: Track, val lyrics: List<Lyrics>)
 enum class LyricsFormat {
     LRC,
     PLAIN,
+    ;
+
+    companion object {
+        fun fromWireValue(value: String): LyricsFormat = when (value) {
+            "LRC" -> LRC
+            "PLAIN" -> PLAIN
+            else -> throw IllegalArgumentException("Unknown lyrics format: $value")
+        }
+    }
 }
 
 enum class LyricsTiming {
     LINE,
     WORD,
+    ;
+
+    companion object {
+        fun fromWireValue(value: String): LyricsTiming = when (value) {
+            "LINE" -> LINE
+            "WORD" -> WORD
+            else -> throw IllegalArgumentException("Unknown lyrics timing: $value")
+        }
+    }
 }

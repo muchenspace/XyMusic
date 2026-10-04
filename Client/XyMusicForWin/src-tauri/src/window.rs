@@ -96,6 +96,9 @@ pub fn toggle_main_window_fullscreen(app: AppHandle) -> Result<(), String> {
     if mini_mode_active {
         return Err("true fullscreen is unavailable in mini mode".to_string());
     }
+    // NOTE: Mini mode and true fullscreen are mutually exclusive platform
+    // constraints. The application layer documents this in the
+    // DesktopWindowController port; keep both sides in sync when changing it.
 
     let was_maximized = window.is_maximized().map_err(|error| error.to_string())?;
     let result = run_on_main_window_thread(&window, move |window| {

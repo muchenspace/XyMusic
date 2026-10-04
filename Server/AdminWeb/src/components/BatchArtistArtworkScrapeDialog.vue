@@ -10,6 +10,7 @@ import {
   batchItemStatusPresentation,
   batchJobStatusPresentation,
 } from "@/features/scraping/presentation/batch-status";
+import { useBatchPolling } from "@/features/scraping/presentation/use-batch-polling";
 import { useTagScraping } from "@/app/services/scraping";
 
 const open = defineModel<boolean>({ required: true });
@@ -25,12 +26,23 @@ const notice = ref("");
 const submittedCount = ref(0);
 const conditionExcluded = ref(0);
 const artistNames = ref(new Map<string, string>());
-let timer: ReturnType<typeof setTimeout> | undefined;
-let pollController: AbortController | undefined;
-let pollGeneration = 0;
-let pollFailures = 0;
-let completedEmitted = false;
 let actionGeneration = 0;
+const polling = useBatchPolling<ArtistArtworkBatch>({
+  isOpen: () => open.value,
+  fetchBatch: (id, updatedAt, signal) => scraping.artistArtworkBatch(id, updatedAt, signal),
+  isTerminal: (update) => update.status !== "PENDING" && update.status !== "RUNNING",
+  applyBatch: (update) => { job.value = update; },
+  currentBatch: () => job.value,
+  onCompleted: () => emit("completed"),
+  onSuccess: () => { error.value = ""; },
+  onError: (cause) => { error.value = cause instanceof Error ? cause.message : "读取头像刮削任务失败"; },
+  mergeBatch: (current, update) => {
+    if (!current || !update.partialItems) return update;
+    const items = new Map(current.items.map((item) => [item.id, item]));
+    for (const item of update.items) items.set(item.id, item);
+    return { ...update, items: [...items.values()].sort((left, right) => left.position - right.position) };
+  },
+});
 
 const sourceOptions: Array<{ value: ArtistSource; label: string }> = [
   { value: "qmusic", label: "QQ 音乐" },
@@ -38,13 +50,13 @@ const sourceOptions: Array<{ value: ArtistSource; label: string }> = [
 
 watch(open, (value) => {
   actionGeneration += 1;
-  stopPolling();
+  polling.stop();
   if (!value) return;
   if (job.value && (job.value.status === "PENDING" || job.value.status === "RUNNING")) {
     artistNames.value = new Map(props.artists.map((artist) => [artist.id, artist.name]));
     loading.value = false;
     error.value = "";
-    beginPolling(job.value.id);
+    polling.begin(job.value.id);
     return;
   }
   sources.value = ["qmusic"];
@@ -55,77 +67,15 @@ watch(open, (value) => {
   submittedCount.value = 0;
   conditionExcluded.value = 0;
   artistNames.value = new Map(props.artists.map((artist) => [artist.id, artist.name]));
-  completedEmitted = false;
+  polling.resetCompletion();
 }, { immediate: true });
 
 onUnmounted(() => {
   actionGeneration += 1;
-  stopPolling();
 });
-
-function stopPolling(): void {
-  pollGeneration += 1;
-  if (timer) clearTimeout(timer);
-  timer = undefined;
-  pollController?.abort();
-  pollController = undefined;
-}
-
-function schedulePolling(id: string, generation: number, delay = 2_000): void {
-  if (!open.value || generation !== pollGeneration) return;
-  if (timer) clearTimeout(timer);
-  timer = setTimeout(() => void refresh(id, generation), delay);
-}
-
-function beginPolling(id: string): void {
-  stopPolling();
-  completedEmitted = false;
-  pollFailures = 0;
-  schedulePolling(id, pollGeneration);
-}
-
-function finishIfTerminal(update: ArtistArtworkBatch): boolean {
-  if (update.status === "PENDING" || update.status === "RUNNING") return false;
-  if (!completedEmitted) {
-    completedEmitted = true;
-    emit("completed");
-  }
-  return true;
-}
 
 function artistName(artistId: string): string {
   return artistNames.value.get(artistId) ?? `艺术家 ${artistId.slice(0, 8)}`;
-}
-
-function mergeBatchUpdate(current: ArtistArtworkBatch | undefined, update: ArtistArtworkBatch): ArtistArtworkBatch {
-  if (!current || !update.partialItems) return update;
-  const items = new Map(current.items.map((item) => [item.id, item]));
-  for (const item of update.items) items.set(item.id, item);
-  return { ...update, items: [...items.values()].sort((left, right) => left.position - right.position) };
-}
-
-async function refresh(id = job.value?.id, generation = pollGeneration): Promise<void> {
-  if (!id || generation !== pollGeneration || !open.value) return;
-  if (timer) clearTimeout(timer);
-  timer = undefined;
-  const controller = new AbortController();
-  pollController = controller;
-  try {
-    const update = await scraping.artistArtworkBatch(id, job.value?.updatedAt, controller.signal);
-    if (generation !== pollGeneration || !open.value) return;
-    pollFailures = 0;
-    error.value = "";
-    const merged = mergeBatchUpdate(job.value, update);
-    job.value = merged;
-    if (!finishIfTerminal(merged)) schedulePolling(id, generation);
-  } catch (cause) {
-    if (controller.signal.aborted || generation !== pollGeneration || !open.value) return;
-    error.value = cause instanceof Error ? cause.message : "读取头像刮削任务失败";
-    pollFailures += 1;
-    schedulePolling(id, generation, Math.min(10_000, 2_000 * 2 ** pollFailures));
-  } finally {
-    if (pollController === controller) pollController = undefined;
-  }
 }
 
 async function start(): Promise<void> {
@@ -152,21 +102,21 @@ async function start(): Promise<void> {
   }
 
   loading.value = true;
-  const generation = pollGeneration;
+  const generation = polling.generation();
   const action = ++actionGeneration;
   try {
     const created = await scraping.createArtistArtworkBatch({
       items: eligible.map((artist) => ({ artistId: artist.id, expectedVersion: artist.version })),
       options: { sources: [...sources.value], overwrite: false, reason: "" },
     });
-    if (generation !== pollGeneration || action !== actionGeneration || !open.value) return;
+    if (generation !== polling.generation() || action !== actionGeneration || !open.value) return;
     conditionExcluded.value += created.conditionExcluded;
     if (!created.job) {
       notice.value = "符合条件的艺术家在任务创建前已被排除，无需刮削。";
       return;
     }
     job.value = created.job;
-    if (!finishIfTerminal(created.job)) beginPolling(created.job.id);
+    if (!polling.finishIfTerminal(created.job)) polling.begin(created.job.id);
   } catch (cause) {
     if (action === actionGeneration && open.value) {
       error.value = cause instanceof Error ? cause.message : "创建头像刮削任务失败";
@@ -180,14 +130,14 @@ async function cancel(): Promise<void> {
   if (!job.value) return;
   const id = job.value.id;
   loading.value = true;
-  stopPolling();
-  const generation = pollGeneration;
+  polling.stop();
+  const generation = polling.generation();
   const action = ++actionGeneration;
   try {
     const update = await scraping.cancelArtistArtworkBatch(id);
-    if (generation !== pollGeneration || action !== actionGeneration || !open.value) return;
+    if (generation !== polling.generation() || action !== actionGeneration || !open.value) return;
     job.value = update;
-    if (!finishIfTerminal(update)) beginPolling(id);
+    if (!polling.finishIfTerminal(update)) polling.begin(id);
   } catch (cause) {
     if (action === actionGeneration && open.value) {
       error.value = cause instanceof Error ? cause.message : "取消头像刮削任务失败";
@@ -201,14 +151,14 @@ async function retry(): Promise<void> {
   if (!job.value) return;
   const id = job.value.id;
   loading.value = true;
-  stopPolling();
-  const generation = pollGeneration;
+  polling.stop();
+  const generation = polling.generation();
   const action = ++actionGeneration;
   try {
     const update = await scraping.retryArtistArtworkBatch(id);
-    if (generation !== pollGeneration || action !== actionGeneration || !open.value) return;
+    if (generation !== polling.generation() || action !== actionGeneration || !open.value) return;
     job.value = update;
-    if (!finishIfTerminal(update)) beginPolling(id);
+    if (!polling.finishIfTerminal(update)) polling.begin(id);
   } catch (cause) {
     if (action === actionGeneration && open.value) {
       error.value = cause instanceof Error ? cause.message : "重试头像刮削任务失败";

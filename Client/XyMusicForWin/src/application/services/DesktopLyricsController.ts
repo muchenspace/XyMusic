@@ -5,10 +5,13 @@ import type {
   DesktopLyricsSnapshot,
   DesktopLyricsWindowState,
 } from "../ports/DesktopLyrics";
+import { DESKTOP_LYRICS_PROTOCOL_VERSION } from "../ports/DesktopLyrics";
 import type {
+  DesktopLyricsClockInput,
   DesktopLyricsController as DesktopLyricsControllerPort,
   DesktopLyricsPlaybackRequest,
   DesktopLyricsControllerState,
+  DesktopLyricsSnapshotInput,
 } from "../ports/DesktopLyricsController";
 import type { PageLifecycle } from "../ports/PageLifecycle";
 import type { TaskScheduler } from "../ports/TaskScheduler";
@@ -21,15 +24,18 @@ import {
 import { SerialTaskQueue } from "./SerialTaskQueue";
 
 /**
- * Serializes native desktop-lyrics window updates and keeps its durable
- * preferences outside Vue state. The state is intentionally primitive-only so
- * presentation can cheaply project every native window-state event.
+ * Serializes native desktop-lyrics window updates, keeps its durable
+ * preferences outside Vue state and owns the snapshot/clock transport policy
+ * (transport epoch, monotonic revision, coalescing and debounce). Presentation
+ * only watches its own state and forwards a live projection of what should be
+ * rendered.
  */
 export class DesktopLyricsController implements DesktopLyricsControllerPort {
   private readonly listeners = new Set<(state: DesktopLyricsControllerState) => void>();
   private readonly playbackRequestListeners = new Set<(request: DesktopLyricsPlaybackRequest) => void>();
   private readonly transitions = new SerialTaskQueue();
   private readonly removePageHide: () => void;
+  private readonly transportEpoch = createDesktopLyricsTransportEpoch();
   private stateValue: DesktopLyricsControllerState;
   private initialized = false;
   private initializePromise: Promise<void> | null = null;
@@ -48,6 +54,19 @@ export class DesktopLyricsController implements DesktopLyricsControllerPort {
   private visibleRevision = 0;
   private lockedRevision = 0;
   private fullscreenBehaviorRevision = 0;
+  private transportRevision = 0;
+  private sendsCancelled = false;
+  private snapshotSending = false;
+  private snapshotPending = false;
+  private createPendingSnapshot: (() => DesktopLyricsSnapshotInput) | null = null;
+  private cancelSnapshotTimer: (() => void) | undefined;
+  private clockSending = false;
+  private pendingClock: DesktopLyricsClockInput | null = null;
+  private lastClockAt = 0;
+  private lastClockPosition = -1;
+  private lastClockTrackId: string | null = null;
+  private lastClockPlaying = false;
+  private lastClockDiscontinuityVersion = -1;
 
   constructor(
     private readonly integration: DesktopLyrics,
@@ -237,16 +256,60 @@ export class DesktopLyricsController implements DesktopLyricsControllerPort {
     return () => this.playbackRequestListeners.delete(listener);
   }
 
-  sendSnapshot(snapshot: DesktopLyricsSnapshot): Promise<void> {
-    return this.disposed ? Promise.resolve() : this.integration.sendSnapshot(snapshot);
+  requestSnapshot(create: () => DesktopLyricsSnapshotInput, force = false): void {
+    if (this.disposed || (!force && !this.stateValue.visible)) return;
+    this.sendsCancelled = false;
+    this.createPendingSnapshot = create;
+    if (this.snapshotSending) {
+      this.snapshotPending = true;
+      return;
+    }
+    void this.drainSnapshots();
   }
 
-  sendClock(clock: DesktopLyricsClock): Promise<void> {
-    return this.disposed ? Promise.resolve() : this.integration.sendClock(clock);
+  scheduleSnapshot(create: () => DesktopLyricsSnapshotInput): void {
+    if (this.disposed || !this.stateValue.visible) return;
+    this.cancelSnapshotTimer?.();
+    this.cancelSnapshotTimer = this.scheduler.delay(() => {
+      this.cancelSnapshotTimer = undefined;
+      this.requestSnapshot(create);
+    }, SNAPSHOT_STYLE_DEBOUNCE_MS);
+  }
+
+  offerClock(create: () => DesktopLyricsClockInput | null): void {
+    if (this.disposed || !this.stateValue.actuallyVisible) return;
+    const clock = create();
+    if (!clock) return;
+    const stateChanged = clock.trackId !== this.lastClockTrackId
+      || clock.isPlaying !== this.lastClockPlaying
+      || clock.positionDiscontinuityVersion !== this.lastClockDiscontinuityVersion;
+    const jumped = Math.abs(clock.positionSeconds - this.lastClockPosition) >= CLOCK_JUMP_SECONDS;
+    if (stateChanged || jumped || !clock.isPlaying || clock.anchoredAtMs - this.lastClockAt >= CLOCK_INTERVAL_MS) {
+      this.enqueueClock(clock);
+    }
+  }
+
+  sendClock(create: () => DesktopLyricsClockInput | null): void {
+    if (this.disposed) return;
+    const clock = create();
+    if (clock) this.enqueueClock(clock);
+  }
+
+  discardPendingClock(): void {
+    this.pendingClock = null;
+  }
+
+  cancelPendingSends(): void {
+    this.sendsCancelled = true;
+    this.cancelSnapshotTimer?.();
+    this.cancelSnapshotTimer = undefined;
+    this.createPendingSnapshot = null;
+    this.pendingClock = null;
   }
 
   dispose(): void {
     if (this.disposed) return;
+    this.cancelPendingSends();
     this.flushPreferences();
     this.disposed = true;
     this.cancelInitializeRetry?.();
@@ -258,6 +321,73 @@ export class DesktopLyricsController implements DesktopLyricsControllerPort {
     this.playbackRequestListeners.clear();
     this.removeActions?.();
     this.removeActions = undefined;
+  }
+
+  private enqueueClock(input: DesktopLyricsClockInput): void {
+    if (this.disposed || !this.stateValue.actuallyVisible) return;
+    this.sendsCancelled = false;
+    this.pendingClock = input;
+    if (this.clockSending) return;
+    void this.drainClocks();
+  }
+
+  private async drainClocks(): Promise<void> {
+    this.clockSending = true;
+    try {
+      while (this.pendingClock && !this.disposed && !this.sendsCancelled && this.stateValue.actuallyVisible) {
+        const nextClock = this.pendingClock;
+        this.pendingClock = null;
+        this.lastClockAt = nextClock.anchoredAtMs;
+        this.lastClockPosition = nextClock.positionSeconds;
+        this.lastClockTrackId = nextClock.trackId;
+        this.lastClockPlaying = nextClock.isPlaying;
+        this.lastClockDiscontinuityVersion = nextClock.positionDiscontinuityVersion ?? -1;
+        try {
+          await this.integration.sendClock(this.buildClock(nextClock));
+        } catch {
+          // The next periodic anchor or ready handshake will repair transient delivery failures.
+        }
+      }
+    } finally {
+      this.clockSending = false;
+    }
+  }
+
+  private async drainSnapshots(): Promise<void> {
+    this.snapshotSending = true;
+    try {
+      do {
+        this.snapshotPending = false;
+        await this.sendSnapshotNow();
+      } while (this.snapshotPending && !this.disposed && !this.sendsCancelled);
+    } finally {
+      this.snapshotSending = false;
+    }
+  }
+
+  private async sendSnapshotNow(): Promise<void> {
+    const create = this.createPendingSnapshot;
+    if (!create) return;
+    const snapshot: DesktopLyricsSnapshot = {
+      version: DESKTOP_LYRICS_PROTOCOL_VERSION,
+      transportEpoch: this.transportEpoch,
+      revision: ++this.transportRevision,
+      ...create(),
+    };
+    try {
+      await this.integration.sendSnapshot(snapshot);
+    } catch {
+      // A hidden or restarting lyric window can temporarily miss a snapshot; ready will request another.
+    }
+  }
+
+  private buildClock(input: DesktopLyricsClockInput): DesktopLyricsClock {
+    return {
+      version: DESKTOP_LYRICS_PROTOCOL_VERSION,
+      transportEpoch: this.transportEpoch,
+      revision: ++this.transportRevision,
+      ...input,
+    };
   }
 
   private applyWindowState(state: DesktopLyricsWindowState, reconcileIntent = false): void {
@@ -420,3 +550,13 @@ function normalizeNativeStateRevision(value: number): number {
 const MAX_INITIALIZE_ATTEMPTS = 3;
 const INITIALIZE_RETRY_BASE_MS = 600;
 export const FONT_SCALE_PERSIST_DEBOUNCE_MS = 180;
+const CLOCK_INTERVAL_MS = 250;
+const CLOCK_JUMP_SECONDS = 0.75;
+const SNAPSHOT_STYLE_DEBOUNCE_MS = 120;
+
+function createDesktopLyricsTransportEpoch(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `desktop-lyrics-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}

@@ -1,84 +1,72 @@
 import { ref } from "vue";
 import { defineStore } from "pinia";
-import type { AvatarUpload, ServerConfig, UserSession } from "../../application/ports/SessionRepository";
+import type { ServerConfig, UserSession } from "../../application/ports/SessionRepository";
 import { useApplicationServices } from "../services";
 import { errorMessage } from "../utils/errorMessage";
 
 export const useSessionStore = defineStore("session", () => {
   const services = useApplicationServices();
-  const sessionRepository = services.session;
+  const sessionUseCases = services.session;
   const diagnostics = services.diagnostics;
   const session = ref<UserSession | null>(null);
-  const serverConfig = ref<ServerConfig>(sessionRepository.serverConfig());
+  const serverConfig = ref<ServerConfig>(sessionUseCases.serverConfig());
   const restoring = ref(true);
   const switchingServer = ref(false);
   const savingProfile = ref(false);
   const uploadingAvatar = ref(false);
   const error = ref("");
   const registrationMessage = ref("");
-  let requestId = 0;
 
   async function restore() {
-    const request = ++requestId;
     restoring.value = true;
     error.value = "";
-    try {
-      const restored = await sessionRepository.restore();
-      if (request === requestId) {
-        session.value = restored;
-        serverConfig.value = sessionRepository.serverConfig();
-        diagnostics?.info("session", restored ? "Session restored" : "No saved session");
-      }
+    const outcome = await sessionUseCases.restore();
+    if (!outcome.current) return;
+    if (outcome.kind === "success") {
+      session.value = outcome.value;
+      serverConfig.value = sessionUseCases.serverConfig();
+      diagnostics?.info("session", outcome.value ? "Session restored" : "No saved session");
+    } else {
+      error.value = errorMessage(outcome.cause);
+      diagnostics?.warn("session", `恢复登录状态失败：${error.value}`);
     }
-    catch (cause) {
-      if (request === requestId) {
-        error.value = errorMessage(cause);
-        diagnostics?.warn("session", `恢复登录状态失败：${error.value}`);
-      }
-    }
-    finally { if (request === requestId) restoring.value = false; }
+    restoring.value = false;
   }
 
   async function login(server: ServerConfig, username: string, password: string) {
-    const request = ++requestId;
     error.value = "";
-    try {
-      const loggedIn = await sessionRepository.login(server, username, password);
-      if (request === requestId) {
-        session.value = loggedIn;
-        serverConfig.value = sessionRepository.serverConfig();
-        diagnostics?.info("session", `Login succeeded: ${server.protocol}://${server.host}:${server.port}`);
-      }
-    }
-    catch (cause) {
-      if (request === requestId) {
-        error.value = errorMessage(cause, "登录失败");
+    const outcome = await sessionUseCases.login(server, username, password);
+    if (outcome.kind === "error") {
+      if (outcome.current) {
+        error.value = errorMessage(outcome.cause, "登录失败");
         diagnostics?.warn("session", `登录失败：${error.value}`);
       }
-      throw cause;
+      throw outcome.cause;
+    }
+    if (outcome.current) {
+      session.value = outcome.value;
+      serverConfig.value = sessionUseCases.serverConfig();
+      diagnostics?.info("session", `Login succeeded: ${server.protocol}://${server.host}:${server.port}`);
     }
   }
 
   async function register(server: ServerConfig, username: string, password: string) {
-    const request = ++requestId;
     error.value = "";
     registrationMessage.value = "";
-    try {
-      const result = await sessionRepository.register(server, username, password);
-      if (request === requestId) {
-        serverConfig.value = sessionRepository.serverConfig();
-        registrationMessage.value = "账号创建成功，请登录";
-        diagnostics?.info("session", `Registration succeeded: ${result.username}`);
-      }
-      return result;
-    }
-    catch (cause) {
-      if (request === requestId) {
-        error.value = errorMessage(cause, "注册失败");
+    const outcome = await sessionUseCases.register(server, username, password);
+    if (outcome.kind === "error") {
+      if (outcome.current) {
+        error.value = errorMessage(outcome.cause, "注册失败");
         diagnostics?.warn("session", `注册失败：${error.value}`);
       }
-      throw cause;
+      throw outcome.cause;
     }
+    if (outcome.current) {
+      serverConfig.value = sessionUseCases.serverConfig();
+      registrationMessage.value = "账号创建成功，请登录";
+      diagnostics?.info("session", `Registration succeeded: ${outcome.value.username}`);
+    }
+    return outcome.value;
   }
 
   function clearAuthFeedback() {
@@ -87,12 +75,12 @@ export const useSessionStore = defineStore("session", () => {
   }
 
   async function logout() {
-    requestId += 1;
+    sessionUseCases.invalidatePending();
     error.value = "";
     session.value = null;
     restoring.value = false;
     try {
-      const result = await sessionRepository.logout();
+      const result = await sessionUseCases.logout();
       diagnostics?.info("session", "已退出当前设备");
       if (result.warning) diagnostics?.warn("session", result.warning);
       return result;
@@ -101,12 +89,12 @@ export const useSessionStore = defineStore("session", () => {
   }
 
   async function logoutAll() {
-    requestId += 1;
+    sessionUseCases.invalidatePending();
     error.value = "";
     session.value = null;
     restoring.value = false;
     try {
-      const result = await sessionRepository.logoutAll();
+      const result = await sessionUseCases.logoutAll();
       diagnostics?.info("session", "已请求退出所有设备");
       if (result.warning) diagnostics?.warn("session", result.warning);
       return result;
@@ -115,11 +103,11 @@ export const useSessionStore = defineStore("session", () => {
   }
 
   async function switchServer(server: ServerConfig) {
-    requestId += 1;
+    sessionUseCases.invalidatePending();
     switchingServer.value = true;
     error.value = "";
     try {
-      const result = await sessionRepository.switchServer(server);
+      const result = await sessionUseCases.switchServer(server);
       serverConfig.value = result.server;
       session.value = null;
       diagnostics?.info("session", `服务器已切换：${server.protocol}://${server.host}:${server.port}`);
@@ -143,7 +131,7 @@ export const useSessionStore = defineStore("session", () => {
     savingProfile.value = true;
     error.value = "";
     try {
-      const updated = await sessionRepository.updateProfile({ ...input, expectedVersion: current.user.version });
+      const updated = await sessionUseCases.updateProfile({ ...input, expectedVersion: current.user.version });
       if (session.value?.user.id === userId) session.value = updated;
     }
     catch (cause) { error.value = errorMessage(cause); }
@@ -156,7 +144,7 @@ export const useSessionStore = defineStore("session", () => {
     uploadingAvatar.value = true;
     error.value = "";
     try {
-      const updated = await sessionRepository.uploadAvatar(await toAvatarUpload(file));
+      const updated = await sessionUseCases.uploadAvatar(file);
       if (session.value?.user.id === userId) session.value = updated;
     }
     catch (cause) { error.value = errorMessage(cause); }
@@ -165,32 +153,3 @@ export const useSessionStore = defineStore("session", () => {
 
   return { session, serverConfig, restoring, switchingServer, savingProfile, uploadingAvatar, error, registrationMessage, restore, register, login, logout, logoutAll, switchServer, updateProfile, uploadAvatar, clearAuthFeedback };
 });
-
-async function toAvatarUpload(file: File): Promise<AvatarUpload> {
-  const mediaType = avatarMediaType(file);
-  if (!mediaType) throw new Error("头像仅支持 JPG、PNG 或 WebP");
-  if (file.size <= 0 || file.size > MAX_AVATAR_BYTES) throw new Error("头像大小必须在 5MB 以内");
-  return {
-    name: file.name,
-    mediaType,
-    bytes: new Uint8Array(await file.arrayBuffer()),
-  };
-}
-
-const AVATAR_MEDIA_TYPES = ["image/jpeg", "image/png", "image/webp"];
-const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
-
-function avatarMediaType(file: File): string | null {
-  const declared = file.type.trim().toLowerCase();
-  if (declared === "image/jpg") return "image/jpeg";
-  if (AVATAR_MEDIA_TYPES.includes(declared)) return declared;
-
-  const extension = file.name.trim().toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
-  switch (extension) {
-    case "jpg":
-    case "jpeg": return "image/jpeg";
-    case "png": return "image/png";
-    case "webp": return "image/webp";
-    default: return null;
-  }
-}

@@ -1,13 +1,14 @@
 import { computed, onScopeDispose, ref } from "vue";
 import { defineStore } from "pinia";
 import type { Album, Artist, Playlist, PlaylistDetail, PlaylistEntry, PlaylistVisibility, Track } from "../../domain/music";
-import type { LibraryView } from "../../domain/navigation";
+import type { LibraryView } from "../../application/navigation";
 import type { FavoriteSort, PlaylistSort } from "../../domain/pagination";
+import type { LibraryListSnapshot, PlaylistMutationHost } from "../../application/services/LibraryBrowserService";
 import { useApplicationServices } from "../services";
 import { errorMessage } from "../utils/errorMessage";
 
 export const useLibraryStore = defineStore("library-view", () => {
-  const { catalog, library, playlists: playlistUseCases } = useApplicationServices();
+  const { catalog, library, playlists: playlistUseCases, libraryBrowser } = useApplicationServices();
   const activeView = ref<LibraryView>("discover");
   const tracks = ref<Track[]>([]);
   const playlists = ref<Playlist[]>([]);
@@ -24,20 +25,27 @@ export const useLibraryStore = defineStore("library-view", () => {
   const detailNextCursor = ref<string | null>(null);
   const favoriteSort = ref<FavoriteSort>("FAVORITED_DESC");
   const playlistSort = ref<PlaylistSort>("UPDATED_DESC");
-  let requestId = 0;
-  let requestController: AbortController | null = null;
-  let retryAction: (() => Promise<void>) | null = null;
   let detailSource: { kind: "album" | "artist" | "playlist"; id: string } | null = null;
-  const listCache = new Map<string, ListSnapshot>();
   const favoriteOverrides = new Map<string, boolean>();
+  const playlistMutationHost: PlaylistMutationHost = {
+    currentDetail: () => selectedPlaylist.value,
+    isMutating: () => playlistMutating.value,
+    setMutating: (value) => { playlistMutating.value = value; },
+    applyDetail: (detail) => {
+      selectedPlaylist.value = detail;
+      syncSelectedPlaylist();
+    },
+    applySummary: (detail) => {
+      replacePlaylist(detail);
+      libraryBrowser.invalidateList("playlists");
+    },
+  };
 
   const visibleTracks = computed(() => tracks.value);
 
   async function navigate(view: LibraryView, force = false, cacheBeforeNavigate = true) {
     if (cacheBeforeNavigate) cacheCurrentList();
-    requestController?.abort();
-    requestController = null;
-    const currentRequest = ++requestId;
+    libraryBrowser.cancelRequest();
     loadingMore.value = false;
     activeView.value = view;
     selectedPlaylist.value = null;
@@ -55,78 +63,44 @@ export const useLibraryStore = defineStore("library-view", () => {
       return;
     }
     loading.value = view !== "discover" && view !== "settings";
-    try {
-      if (view === "discover" || view === "settings") return;
-      const controller = new AbortController();
-      requestController = controller;
-      if (view === "recent") {
-        const result = await library.history(undefined, PAGE_SIZE, controller.signal);
-        if (currentRequest === requestId) {
-          tracks.value = applyFavoriteOverrides(result.items);
-          nextCursor.value = result.nextCursor;
-        }
-      }
-      if (view === "favorites") {
-        const result = await library.favorites(favoriteSort.value, undefined, PAGE_SIZE, controller.signal);
-        if (currentRequest === requestId) {
-          tracks.value = applyFavoriteOverrides(result.items, true);
-          nextCursor.value = result.nextCursor;
-        }
-      }
-      if (view === "playlists") {
-        const result = await playlistUseCases.list(playlistSort.value, undefined, PAGE_SIZE, controller.signal);
-        if (currentRequest === requestId) {
-          playlists.value = result.items;
-          nextCursor.value = result.nextCursor;
-        }
-      }
-    } catch (cause) {
-      if (currentRequest === requestId && !requestController?.signal.aborted) {
+    if (view === "discover" || view === "settings") return;
+    await libraryBrowser.runPage<LibraryPageResult>({
+      abortPrevious: true,
+      load: (signal) => loadLibraryPage(view, undefined, signal),
+      apply: (page) => applyLibraryPage(view, page),
+      onError: (cause) => {
         error.value = errorMessage(cause);
         setRetry(() => navigate(view, true, false));
-      }
-    } finally {
-      if (currentRequest === requestId) {
+      },
+      retry: () => navigate(view, true, false),
+      onSettled: () => {
         loading.value = false;
-        requestController = null;
         if (!error.value) cacheCurrentList();
-      }
-    }
+      },
+    });
   }
 
   async function loadMore(): Promise<void> {
     const cursor = nextCursor.value;
     if (!cursor || loadingMore.value || loading.value) return;
     const view = activeView.value;
-    const controller = new AbortController();
-    requestController = controller;
-    const currentRequest = ++requestId;
     loadingMore.value = true;
     error.value = "";
     clearRetry();
-    try {
-      if (view === "recent") {
-        const page = await library.history(cursor, PAGE_SIZE, controller.signal);
-        if (currentRequest === requestId) { tracks.value.push(...applyFavoriteOverrides(page.items)); nextCursor.value = page.nextCursor; }
-      } else if (view === "favorites") {
-        const page = await library.favorites(favoriteSort.value, cursor, PAGE_SIZE, controller.signal);
-        if (currentRequest === requestId) { tracks.value.push(...applyFavoriteOverrides(page.items, true)); nextCursor.value = page.nextCursor; }
-      } else if (view === "playlists") {
-        const page = await playlistUseCases.list(playlistSort.value, cursor, PAGE_SIZE, controller.signal);
-        if (currentRequest === requestId) { playlists.value.push(...page.items); nextCursor.value = page.nextCursor; }
-      }
-    } catch (cause) {
-      if (currentRequest === requestId && !controller.signal.aborted) {
+    await libraryBrowser.runPage<LibraryPageResult>({
+      abortPrevious: false,
+      load: (signal) => loadLibraryPage(view, cursor, signal),
+      apply: (page) => appendLibraryPage(view, page),
+      onError: (cause) => {
         error.value = errorMessage(cause);
         setRetry(loadMore);
-      }
-    } finally {
-      if (currentRequest === requestId) {
+      },
+      retry: loadMore,
+      onSettled: () => {
         loadingMore.value = false;
-        requestController = null;
         if (!error.value) cacheCurrentList();
-      }
-    }
+      },
+    });
   }
 
   async function changeSort(value: string): Promise<void> {
@@ -134,7 +108,7 @@ export const useLibraryStore = defineStore("library-view", () => {
     cacheCurrentList();
     if (view === "favorites") favoriteSort.value = value as FavoriteSort;
     if (view === "playlists") playlistSort.value = value as PlaylistSort;
-    listCache.delete(listCacheKey(view));
+    libraryBrowser.deleteListCache(view, favoriteSort.value, playlistSort.value);
     await navigate(view, true, false);
   }
 
@@ -150,12 +124,8 @@ export const useLibraryStore = defineStore("library-view", () => {
   async function openPlaylist(playlist: Playlist) {
     cacheCurrentList();
     activeView.value = "playlists";
-    requestController?.abort();
     loadingMore.value = false;
     detailLoadingMore.value = false;
-    const controller = new AbortController();
-    requestController = controller;
-    const currentRequest = ++requestId;
     detailSource = { kind: "playlist", id: playlist.id };
     detailOpen.value = true;
     heading.value = playlist.title;
@@ -165,76 +135,48 @@ export const useLibraryStore = defineStore("library-view", () => {
     loading.value = true;
     error.value = "";
     clearRetry();
-    try {
-      const detail = await playlistUseCases.getPage(playlist.id, undefined, DETAIL_PAGE_SIZE, controller.signal);
-      if (currentRequest === requestId && !controller.signal.aborted) {
-        selectedPlaylist.value = applyPlaylistFavoriteOverrides(detail);
-        tracks.value = selectedPlaylist.value.entries.map((entry) => entry.track);
+    await libraryBrowser.runPage<PlaylistDetail>({
+      abortPrevious: true,
+      load: (signal) => playlistUseCases.getPage(playlist.id, undefined, DETAIL_PAGE_SIZE, signal),
+      apply: (detail) => {
+        const applied = applyPlaylistFavoriteOverrides(detail);
+        selectedPlaylist.value = applied;
+        tracks.value = applied.entries.map((entry) => entry.track);
         detailNextCursor.value = detail.nextCursor ?? null;
-      }
-    } catch (cause) {
-      if (currentRequest === requestId && !controller.signal.aborted) {
+      },
+      onError: (cause) => {
         error.value = errorMessage(cause);
         setRetry(() => openPlaylist(playlist));
-      }
-    } finally {
-      if (currentRequest === requestId) {
-        loading.value = false;
-        requestController = null;
-      }
-    }
+      },
+      retry: () => openPlaylist(playlist),
+      onSettled: () => { loading.value = false; },
+    });
   }
 
   async function loadMoreCollection(): Promise<void> {
     const source = detailSource;
     const cursor = detailNextCursor.value;
     if (!detailOpen.value || !source || !cursor || detailLoadingMore.value || loading.value) return;
-    const controller = new AbortController();
-    requestController = controller;
-    const currentRequest = ++requestId;
     detailLoadingMore.value = true;
     error.value = "";
     clearRetry();
-    try {
-      if (source.kind === "album") {
-        const page = await catalog.albumTracksPage(source.id, cursor, DETAIL_PAGE_SIZE, controller.signal);
-        if (currentRequest === requestId) { tracks.value.push(...applyFavoriteOverrides(page.items)); detailNextCursor.value = page.nextCursor; }
-      } else if (source.kind === "artist") {
-        const page = await catalog.artistTracksPage(source.id, cursor, DETAIL_PAGE_SIZE, controller.signal);
-        if (currentRequest === requestId) { tracks.value.push(...applyFavoriteOverrides(page.items)); detailNextCursor.value = page.nextCursor; }
-      } else {
-        const page = await playlistUseCases.getPage(source.id, cursor, DETAIL_PAGE_SIZE, controller.signal);
-        if (currentRequest === requestId && selectedPlaylist.value?.id === source.id) {
-          const entries = page.entries.map((entry) => ({ ...entry, track: applyFavoriteOverride(entry.track) }));
-          const mergedEntries = sortPlaylistEntriesNewestFirst([...selectedPlaylist.value.entries, ...entries]);
-          selectedPlaylist.value = {
-            ...selectedPlaylist.value,
-            version: page.version,
-            trackCount: page.trackCount,
-            entries: mergedEntries,
-            nextCursor: page.nextCursor,
-          };
-          tracks.value = mergedEntries.map((entry) => entry.track);
-          detailNextCursor.value = page.nextCursor ?? null;
-        }
-      }
-    } catch (cause) {
-      if (currentRequest === requestId && !controller.signal.aborted) {
+    await libraryBrowser.runPage<CollectionPage>({
+      abortPrevious: false,
+      load: (signal) => loadCollectionPage(source, cursor, signal),
+      apply: (page) => applyCollectionPage(source, page),
+      onError: (cause) => {
         error.value = errorMessage(cause);
         setRetry(loadMoreCollection);
-      }
-    } finally {
-      if (currentRequest === requestId) {
-        detailLoadingMore.value = false;
-        requestController = null;
-      }
-    }
+      },
+      retry: loadMoreCollection,
+      onSettled: () => { detailLoadingMore.value = false; },
+    });
   }
 
   async function createPlaylist(name: string, description: string, visibility: PlaylistVisibility) {
     const created = await playlistUseCases.create(name, description, visibility);
     playlists.value.unshift(created);
-    invalidateListCache("playlists");
+    libraryBrowser.invalidateList("playlists");
     return created;
   }
 
@@ -243,24 +185,24 @@ export const useLibraryStore = defineStore("library-view", () => {
     replacePlaylist(updated);
     if (selectedPlaylist.value?.id === updated.id) selectedPlaylist.value = { ...selectedPlaylist.value, ...updated };
     heading.value = updated.title;
-    invalidateListCache("playlists");
+    libraryBrowser.invalidateList("playlists");
     return updated;
   }
 
   async function deletePlaylist(playlist: Playlist) {
     await playlistUseCases.delete(playlist);
     playlists.value = playlists.value.filter((item) => item.id !== playlist.id);
-    invalidateListCache("playlists");
+    libraryBrowser.invalidateList("playlists");
     selectedPlaylist.value = null;
     tracks.value = [];
     await navigate("playlists");
   }
 
   async function addTrack(playlist: Playlist, trackId: string) {
-    const version = await playlistUseCases.addTrack(playlist, trackId);
-    replacePlaylist({ ...playlist, version, trackCount: playlist.trackCount + 1 });
-    invalidateListCache("playlists");
-    if (selectedPlaylist.value?.id === playlist.id) await openPlaylist({ ...playlist, version });
+    const updated = await libraryBrowser.addTrack(playlist, trackId);
+    replacePlaylist(updated);
+    libraryBrowser.invalidateList("playlists");
+    if (selectedPlaylist.value?.id === playlist.id) await openPlaylist(updated);
   }
 
   async function removeEntry(entryId: string) {
@@ -268,70 +210,20 @@ export const useLibraryStore = defineStore("library-view", () => {
   }
 
   async function removeEntries(entryIds: string[]): Promise<number> {
-    if (!selectedPlaylist.value || playlistMutating.value) return 0;
-    const requested = new Set(entryIds);
-    let removed = 0;
-    playlistMutating.value = true;
-    try {
-      for (const entryId of requested) {
-        const detail: PlaylistDetail | null = selectedPlaylist.value;
-        if (!detail?.entries.some((entry) => entry.id === entryId)) continue;
-        const version = await playlistUseCases.removeTrack(detail, entryId);
-        removed += 1;
-        const updated: PlaylistDetail = { ...detail, version, trackCount: Math.max(0, detail.trackCount - 1) };
-        if (selectedPlaylist.value !== detail) {
-          replacePlaylist(updated);
-          invalidateListCache("playlists");
-          return removed;
-        }
-        selectedPlaylist.value = {
-          ...updated,
-          entries: detail.entries.filter((entry) => entry.id !== entryId),
-        };
-        syncSelectedPlaylist();
-      }
-      return removed;
-    } finally {
-      playlistMutating.value = false;
-    }
+    return libraryBrowser.removeEntries(entryIds, playlistMutationHost);
   }
 
   async function moveEntry(entryId: string, direction: -1 | 1) {
     if (detailNextCursor.value) return;
     const detail = selectedPlaylist.value;
     if (!detail) return;
-    const entries = [...detail.entries];
-    const index = entries.findIndex((entry) => entry.id === entryId);
-    const target = index + direction;
-    if (index < 0 || target < 0 || target >= entries.length) return;
-    [entries[index], entries[target]] = [entries[target]!, entries[index]!];
-    await reorderEntries(entries.map((entry) => entry.id));
+    const orderedEntryIds = libraryBrowser.movedEntryIds(detail.entries, entryId, direction);
+    if (!orderedEntryIds) return;
+    await reorderEntries(orderedEntryIds);
   }
 
   async function reorderEntries(orderedEntryIds: string[]): Promise<void> {
-    if (detailNextCursor.value) return;
-    const detail = selectedPlaylist.value;
-    if (!detail || playlistMutating.value) return;
-    const currentIds = detail.entries.map((entry) => entry.id);
-    if (!isSameEntrySet(currentIds, orderedEntryIds) || currentIds.every((id, index) => id === orderedEntryIds[index])) return;
-    playlistMutating.value = true;
-    try {
-      const byId = new Map(detail.entries.map((entry) => [entry.id, entry]));
-      const version = await playlistUseCases.reorder(detail, orderedEntryIds);
-      if (selectedPlaylist.value !== detail) {
-        replacePlaylist({ ...detail, version });
-        invalidateListCache("playlists");
-        return;
-      }
-      selectedPlaylist.value = {
-        ...detail,
-        version,
-        entries: orderedEntryIds.map((id, index) => ({ ...byId.get(id)!, position: orderedEntryIds.length - 1 - index })),
-      };
-      syncSelectedPlaylist();
-    } finally {
-      playlistMutating.value = false;
-    }
+    await libraryBrowser.reorderEntries(orderedEntryIds, playlistMutationHost, Boolean(detailNextCursor.value));
   }
 
   function syncSelectedPlaylist(): void {
@@ -339,20 +231,20 @@ export const useLibraryStore = defineStore("library-view", () => {
     if (!detail) return;
     tracks.value = detail.entries.map((entry) => entry.track);
     replacePlaylist(detail);
-    invalidateListCache("playlists");
+    libraryBrowser.invalidateList("playlists");
   }
 
   function removeFavorite(trackId: string) {
     tracks.value = tracks.value.filter((track) => track.id !== trackId);
-    invalidateListCache("favorites");
+    libraryBrowser.invalidateList("favorites");
   }
 
   function setFavorite(trackId: string, favorite: boolean): void {
     favoriteOverrides.set(trackId, favorite);
     updateFavorite(tracks.value, trackId, favorite);
     if (selectedPlaylist.value) updateFavorite(selectedPlaylist.value.entries.map((entry) => entry.track), trackId, favorite);
-    for (const snapshot of listCache.values()) updateFavorite(snapshot.tracks, trackId, favorite);
-    invalidateListCache("favorites");
+    libraryBrowser.setCachedFavorite(trackId, favorite);
+    libraryBrowser.invalidateList("favorites");
   }
 
   function replacePlaylist(playlist: Playlist) {
@@ -362,52 +254,32 @@ export const useLibraryStore = defineStore("library-view", () => {
 
   function setPlaylists(value: Playlist[]): void {
     playlists.value = [...value];
-    invalidateListCache("playlists");
+    libraryBrowser.invalidateList("playlists");
   }
 
   function cacheCurrentList(): void {
-    if (detailOpen.value || !isListView(activeView.value) || loading.value) return;
-    const key = listCacheKey(activeView.value);
-    listCache.delete(key);
-    const snapshot: ListSnapshot = {
+    if (detailOpen.value || loading.value) return;
+    const view = activeView.value;
+    const snapshot: LibraryListSnapshot = {
       tracks: [...tracks.value],
       nextCursor: nextCursor.value,
     };
-    if (activeView.value === "playlists") snapshot.playlists = [...playlists.value];
-    listCache.set(key, snapshot);
-    while (listCache.size > MAX_LIST_CACHE_ENTRIES) listCache.delete(listCache.keys().next().value!);
+    if (view === "playlists") snapshot.playlists = [...playlists.value];
+    libraryBrowser.cacheList(view, favoriteSort.value, playlistSort.value, snapshot);
   }
 
   function restoreCachedList(view: LibraryView): boolean {
-    if (!isListView(view)) return false;
-    const key = listCacheKey(view);
-    const cached = listCache.get(key);
+    const cached = libraryBrowser.restoreList(view, favoriteSort.value, playlistSort.value);
     if (!cached) return false;
-    listCache.delete(key);
-    listCache.set(key, cached);
     tracks.value = applyFavoriteOverrides(cached.tracks, view === "favorites");
     if (view === "playlists" && cached.playlists) playlists.value = [...cached.playlists];
     nextCursor.value = cached.nextCursor;
     return true;
   }
 
-  function invalidateListCache(view: LibraryView): void {
-    for (const key of listCache.keys()) if (key.startsWith(`${view}:`)) listCache.delete(key);
-  }
-
-  function listCacheKey(view: LibraryView): string {
-    if (view === "favorites") return `${view}:${favoriteSort.value}`;
-    if (view === "playlists") return `${view}:${playlistSort.value}`;
-    return `${view}:default`;
-  }
-
   async function loadTrackCollection(title: string, source: { kind: "album" | "artist"; id: string }, loader: (signal: AbortSignal) => Promise<{ items: Track[]; nextCursor: string | null }>) {
-    requestController?.abort();
     loadingMore.value = false;
     detailLoadingMore.value = false;
-    const controller = new AbortController();
-    requestController = controller;
-    const currentRequest = ++requestId;
     detailOpen.value = true;
     detailSource = source;
     heading.value = title;
@@ -417,31 +289,93 @@ export const useLibraryStore = defineStore("library-view", () => {
     loading.value = true;
     error.value = "";
     clearRetry();
-    try {
-      const result = await loader(controller.signal);
-      if (currentRequest === requestId && !controller.signal.aborted) {
+    await libraryBrowser.runPage<{ items: Track[]; nextCursor: string | null }>({
+      abortPrevious: true,
+      load: (signal) => loader(signal),
+      apply: (result) => {
         tracks.value = applyFavoriteOverrides(result.items);
         detailNextCursor.value = result.nextCursor;
-      }
-    }
-    catch (cause) {
-      if (currentRequest === requestId && !controller.signal.aborted) {
+      },
+      onError: (cause) => {
         error.value = errorMessage(cause);
         setRetry(() => loadTrackCollection(title, source, loader));
-      }
+      },
+      retry: () => loadTrackCollection(title, source, loader),
+      onSettled: () => { loading.value = false; },
+    });
+  }
+
+  async function loadLibraryPage(view: LibraryView, cursor: string | undefined, signal: AbortSignal): Promise<LibraryPageResult> {
+    if (view === "recent") {
+      const page = await library.history(cursor, PAGE_SIZE, signal);
+      return { tracks: page.items, playlists: null, nextCursor: page.nextCursor };
     }
-    finally {
-      if (currentRequest === requestId) {
-        loading.value = false;
-        requestController = null;
-      }
+    if (view === "favorites") {
+      const page = await library.favorites(favoriteSort.value, cursor, PAGE_SIZE, signal);
+      return { tracks: page.items, playlists: null, nextCursor: page.nextCursor };
     }
+    const page = await playlistUseCases.list(playlistSort.value, cursor, PAGE_SIZE, signal);
+    return { tracks: [], playlists: page.items, nextCursor: page.nextCursor };
+  }
+
+  function applyLibraryPage(view: LibraryView, page: LibraryPageResult): void {
+    if (view === "playlists") {
+      playlists.value = page.playlists ?? [];
+      nextCursor.value = page.nextCursor;
+      return;
+    }
+    tracks.value = applyFavoriteOverrides(page.tracks, view === "favorites");
+    nextCursor.value = page.nextCursor;
+  }
+
+  function appendLibraryPage(view: LibraryView, page: LibraryPageResult): void {
+    if (view === "playlists") {
+      playlists.value.push(...page.playlists ?? []);
+      nextCursor.value = page.nextCursor;
+      return;
+    }
+    tracks.value.push(...applyFavoriteOverrides(page.tracks, view === "favorites"));
+    nextCursor.value = page.nextCursor;
+  }
+
+  async function loadCollectionPage(
+    source: { kind: "album" | "artist" | "playlist"; id: string },
+    cursor: string,
+    signal: AbortSignal,
+  ): Promise<CollectionPage> {
+    if (source.kind === "album") {
+      const page = await catalog.albumTracksPage(source.id, cursor, DETAIL_PAGE_SIZE, signal);
+      return { kind: "tracks", items: page.items, nextCursor: page.nextCursor };
+    }
+    if (source.kind === "artist") {
+      const page = await catalog.artistTracksPage(source.id, cursor, DETAIL_PAGE_SIZE, signal);
+      return { kind: "tracks", items: page.items, nextCursor: page.nextCursor };
+    }
+    return { kind: "playlist", detail: await playlistUseCases.getPage(source.id, cursor, DETAIL_PAGE_SIZE, signal) };
+  }
+
+  function applyCollectionPage(source: { kind: "album" | "artist" | "playlist"; id: string }, page: CollectionPage): void {
+    if (page.kind === "tracks") {
+      tracks.value.push(...applyFavoriteOverrides(page.items));
+      detailNextCursor.value = page.nextCursor;
+      return;
+    }
+    if (selectedPlaylist.value?.id !== source.id) return;
+    const entries = page.detail.entries.map((entry) => ({ ...entry, track: applyFavoriteOverride(entry.track) }));
+    const mergedEntries = sortPlaylistEntriesNewestFirst([...selectedPlaylist.value.entries, ...entries]);
+    selectedPlaylist.value = {
+      ...selectedPlaylist.value,
+      version: page.detail.version,
+      trackCount: page.detail.trackCount,
+      entries: mergedEntries,
+      nextCursor: page.detail.nextCursor,
+    };
+    tracks.value = mergedEntries.map((entry) => entry.track);
+    detailNextCursor.value = page.detail.nextCursor ?? null;
   }
 
   function cancelPending(): void {
-    requestId += 1;
-    requestController?.abort();
-    requestController = null;
+    libraryBrowser.cancelRequest();
     loading.value = false;
     loadingMore.value = false;
     detailLoadingMore.value = false;
@@ -450,20 +384,20 @@ export const useLibraryStore = defineStore("library-view", () => {
   onScopeDispose(cancelPending);
 
   async function retry(): Promise<void> {
-    const action = retryAction;
+    const action = libraryBrowser.takeRetry();
     if (!action) return;
-    clearRetry();
+    retryAvailable.value = false;
     error.value = "";
     await action();
   }
 
   function setRetry(action: () => Promise<void>): void {
-    retryAction = action;
+    libraryBrowser.setRetry(action);
     retryAvailable.value = true;
   }
 
   function clearRetry(): void {
-    retryAction = null;
+    libraryBrowser.clearRetry();
     retryAvailable.value = false;
   }
 
@@ -482,7 +416,7 @@ export const useLibraryStore = defineStore("library-view", () => {
     detailNextCursor.value = null;
     detailSource = null;
     clearRetry();
-    listCache.clear();
+    libraryBrowser.clearListCache();
     favoriteOverrides.clear();
     error.value = "";
   }
@@ -512,29 +446,19 @@ export const useLibraryStore = defineStore("library-view", () => {
 const VIEW_TITLES: Record<LibraryView, string> = { discover: "发现音乐", recent: "最近播放", favorites: "喜欢的音乐", playlists: "我的歌单", settings: "设置" };
 const PAGE_SIZE = 50;
 const DETAIL_PAGE_SIZE = 100;
-const MAX_LIST_CACHE_ENTRIES = 8;
 
-interface ListSnapshot {
+interface LibraryPageResult {
   tracks: Track[];
-  playlists?: Playlist[];
+  playlists: Playlist[] | null;
   nextCursor: string | null;
 }
 
-function isListView(view: LibraryView): boolean {
-  return view === "favorites" || view === "playlists";
-}
+type CollectionPage =
+  | { kind: "tracks"; items: Track[]; nextCursor: string | null }
+  | { kind: "playlist"; detail: PlaylistDetail };
 
 function sortPlaylistEntriesNewestFirst(entries: PlaylistEntry[]): PlaylistEntry[] {
   return [...entries].sort((left, right) => right.position - left.position);
-}
-
-function isSameEntrySet(currentIds: string[], orderedIds: string[]): boolean {
-  if (currentIds.length !== orderedIds.length) return false;
-  const current = new Set(currentIds);
-  const ordered = new Set(orderedIds);
-  return current.size === currentIds.length
-    && ordered.size === orderedIds.length
-    && orderedIds.every((id) => current.has(id));
 }
 
 function updateFavorite(items: Track[], trackId: string, favorite: boolean): void {

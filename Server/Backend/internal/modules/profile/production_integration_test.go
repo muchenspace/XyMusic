@@ -18,9 +18,9 @@ import (
 	"xymusic/server/internal/config"
 	"xymusic/server/internal/modules/identity"
 	"xymusic/server/internal/platform/database"
+	platformidempotency "xymusic/server/internal/platform/idempotency"
 	"xymusic/server/internal/platform/localmedia"
 	platformsecurity "xymusic/server/internal/platform/security"
-	sharedidempotency "xymusic/server/internal/shared/idempotency"
 	"xymusic/server/internal/testsupport"
 )
 
@@ -59,29 +59,47 @@ func TestProfileProductionAvatarLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sharedIdempotency := sharedidempotency.New(pool.Pool, cipher)
-	idempotencyService := NewPersistentIdempotency(sharedIdempotency)
+	platformIdempotency := platformidempotency.New(pool.Pool, cipher)
+	idempotencyService := NewPersistentIdempotency(platformIdempotency)
+
+	inspector, err := NewFFmpegAvatarInspector(
+		localMedia,
+		cfg.Media.FFprobePath,
+		cfg.Media.FFmpegPath,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	identityStore := identity.NewRepository(pool.Pool)
-	accessTokens := platformsecurity.NewAccessTokenService(cfg.Security.AccessTokenSecret, 15*time.Minute)
-	identityService, err := identity.NewService(cfg, identity.ServiceDependencies{
-		Repository:   identityStore,
-		AccessTokens: accessTokens,
-		Idempotency:  identity.NewPersistentRefreshIdempotency(sharedIdempotency),
-		ArtworkURLs:  &artworkURLStub{},
-		Passwords:    identity.SecurityPasswordManager{},
-	})
+	accessTokens := identity.NewAccessTokenService(cfg.Security.AccessTokenSecret, 15*time.Minute)
+	identityService, err := identity.NewService(
+		cfg.Security.RefreshTokenTTLSeconds,
+		cfg.Registration.Enabled,
+		identity.ServiceDependencies{
+			Repository:   identityStore,
+			AccessTokens: accessTokens,
+			Idempotency:  identity.NewPersistentRefreshIdempotency(platformIdempotency),
+			ArtworkURLs:  &artworkURLStub{},
+			Passwords:    identity.SecurityPasswordManager{},
+			Secrets:      identity.SecuritySecretHasher{},
+			OpaqueToken:  identity.CreateOpaqueToken,
+		})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	profileStore := NewRepository(pool.Pool)
-	profileService, err := NewService(cfg, ServiceDependencies{
-		Repository:   profileStore,
-		CurrentUsers: identityService,
-		Idempotency:  idempotencyService,
-		LocalMedia:   localMedia,
-	})
+	profileService, err := NewService(
+		cfg.MediaStorage.UploadTTLSeconds,
+		cfg.MediaStorage.MaxUploadBytes,
+		ServiceDependencies{
+			Repository:   profileStore,
+			CurrentUsers: identityService,
+			Idempotency:  idempotencyService,
+			LocalMedia:   localMedia,
+			Inspector:    inspector,
+		})
 	if err != nil {
 		t.Fatal(err)
 	}

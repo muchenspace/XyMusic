@@ -36,8 +36,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.xymusic.app.R
-import com.xymusic.app.data.network.dns.AppDns
 import com.xymusic.app.domain.settings.DnsSettings
+import com.xymusic.app.domain.settings.isIpAddress
 
 object DnsSettingsTestTags {
     const val Dialog = "dns_settings_dialog"
@@ -87,7 +87,7 @@ fun DnsSettingsDialog(
 
         if (customDnsEnabled) {
             val ips = trimmedDns.split(',', ';', ' ').map { it.trim() }.filter { it.isNotEmpty() }
-            if (ips.isEmpty() || !ips.all { AppDns.isIpAddress(it) }) {
+            if (ips.isEmpty() || !ips.all { isIpAddress(it) }) {
                 dnsServerError = invalidDnsMessage
                 hasError = true
             } else {

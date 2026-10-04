@@ -2,11 +2,15 @@ import { createPinia } from "pinia";
 import { createApp, defineComponent, h, nextTick } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ApplicationServices } from "../src/application/services";
+import { HomeFeedService } from "../src/application/services/HomeFeedService";
+import { LibraryBrowserService } from "../src/application/services/LibraryBrowserService";
+import { LyricsCacheService } from "../src/application/services/LyricsCacheService";
 import { applicationServicesKey } from "../src/presentation/services";
 import { useHomeStore } from "../src/presentation/stores/homeStore";
 import { useLibraryStore } from "../src/presentation/stores/libraryStore";
 import { useLyricsStore } from "../src/presentation/stores/lyricsStore";
 import { useToastStore } from "../src/presentation/stores/toastStore";
+import { createTestLyricsPreferencePersistence } from "./support/lyricsPreferencePersistence";
 
 const mountedApps: Array<ReturnType<typeof createApp>> = [];
 
@@ -20,16 +24,18 @@ describe("presentation store disposal", () => {
     vi.useFakeTimers();
     let signal: AbortSignal | undefined;
     const search = vi.fn();
+    const catalog = {
+      home: vi.fn((nextSignal: AbortSignal) => {
+        signal = nextSignal;
+        return new Promise(() => undefined);
+      }),
+      randomAlbums: vi.fn(async () => []),
+      randomTracks: vi.fn(async () => []),
+      search,
+    };
     const services = {
-      catalog: {
-        home: vi.fn((nextSignal: AbortSignal) => {
-          signal = nextSignal;
-          return new Promise(() => undefined);
-        }),
-        randomAlbums: vi.fn(async () => []),
-        randomTracks: vi.fn(async () => []),
-        search,
-      },
+      catalog,
+      homeFeed: new HomeFeedService(catalog as never, timerScheduler()),
     } as unknown as ApplicationServices;
     const { store } = mountStore(useHomeStore, services);
 
@@ -54,6 +60,7 @@ describe("presentation store disposal", () => {
         }),
       },
       playlists: {},
+      libraryBrowser: new LibraryBrowserService({} as never),
     } as unknown as ApplicationServices;
     const { store: library } = mountStore(useLibraryStore, libraryServices);
 
@@ -63,14 +70,16 @@ describe("presentation store disposal", () => {
     expect(librarySignal?.aborted).toBe(true);
 
     let lyricsSignal: AbortSignal | undefined;
+    const lyricPreferences = preferences();
+    const catalogLyrics = vi.fn((_trackId: string, signal: AbortSignal) => {
+      lyricsSignal = signal;
+      return new Promise(() => undefined);
+    });
     const lyricServices = {
-      catalog: {
-        lyrics: vi.fn((_trackId: string, signal: AbortSignal) => {
-          lyricsSignal = signal;
-          return new Promise(() => undefined);
-        }),
-      },
-      uiPreferences: preferences(),
+      catalog: { lyrics: catalogLyrics },
+      lyricsCache: new LyricsCacheService({ getLyrics: catalogLyrics } as never),
+      uiPreferences: lyricPreferences,
+      lyricsPreferencePersistence: createTestLyricsPreferencePersistence(lyricPreferences),
     } as unknown as ApplicationServices;
     const { store: lyrics } = mountStore(useLyricsStore, lyricServices);
 
@@ -127,5 +136,18 @@ function preferences() {
     readLyricsOffset: () => 0,
     writeLyricsOffset() {},
     clearLyricsOffsets() {},
+  };
+}
+
+function timerScheduler() {
+  return {
+    delay(callback: () => void, milliseconds: number) {
+      const handle = window.setTimeout(callback, milliseconds);
+      return () => window.clearTimeout(handle);
+    },
+    whenIdle(callback: () => void) {
+      const handle = window.setTimeout(callback, 0);
+      return () => window.clearTimeout(handle);
+    },
   };
 }

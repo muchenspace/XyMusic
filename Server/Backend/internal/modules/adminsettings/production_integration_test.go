@@ -52,10 +52,13 @@ func TestProductionSettingsReadAndDependencyProbes(t *testing.T) {
 	}
 	defer metrics.Close()
 	service, err := NewService(ServiceDependencies{
-		Database: pool, Runtime: runtime, Store: productionNoopStore{},
-		Storage: ProductionMediaStorageFactory{}, MediaTool: setup.CommandMediaTool{}, Worker: monitor,
-		Metrics:       metrics,
-		RootDirectory: filepath.Dir(absolute), ConfigurationPath: absolute,
+		Database: NewProductionDatabase(pool), Databases: ProductionDatabaseFactory{},
+		Runtime: runtime, Store: NewRepository(NewProductionDatabase(pool)), Configuration: productionNoopStore{},
+		Idempotency: ProductionIdempotencyFactory{},
+		Storage:     ProductionMediaStorageFactory{}, MediaTool: setup.CommandMediaTool{}, Worker: monitor,
+		Metrics:        metrics,
+		DirectoryProbe: ProductionDirectoryProbe{},
+		RootDirectory:  filepath.Dir(absolute), ConfigurationPath: absolute,
 		Listener: ListenerDTO{
 			IPv4: ListenerAddressDTO{Host: cfg.HTTP.IPv4Host, Port: cfg.HTTP.IPv4Port},
 			IPv6: ListenerAddressDTO{Host: cfg.HTTP.IPv6Host, Port: cfg.HTTP.IPv6Port},

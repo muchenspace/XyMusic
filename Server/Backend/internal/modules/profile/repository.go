@@ -179,19 +179,6 @@ func (repository *Repository) FindAvatarUpload(ctx context.Context, actorID, upl
 	return upload, nil
 }
 
-func (repository *Repository) MarkAvatarUploadFailed(ctx context.Context, actorID, uploadID string) error {
-	_, err := repository.pool.Exec(ctx, `
-		update media_uploads
-		set status = 'FAILED', completion_token = null, completion_started_at = null
-		where id = $1 and uploader_id = $2 and target_id = $2 and status = 'CREATED'`,
-		uploadID, actorID,
-	)
-	if err != nil {
-		return fmt.Errorf("mark avatar reservation failed: %w", err)
-	}
-	return nil
-}
-
 func (repository *Repository) ClaimAvatarCompletion(
 	ctx context.Context,
 	actorID string,

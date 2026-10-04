@@ -22,7 +22,7 @@ type ArtistArtworkBatchMutationFence struct {
 
 // Lock is called inside the final AdminMedia transaction. It prevents a
 // cancelled, expired, or reclaimed batch attempt from committing artwork.
-func (fence *ArtistArtworkBatchMutationFence) Lock(ctx context.Context, tx pgx.Tx) error {
+func (fence *ArtistArtworkBatchMutationFence) Lock(ctx context.Context, tx MediaTx) error {
 	if fence == nil {
 		return nil
 	}
@@ -78,7 +78,7 @@ func (fence *ArtistArtworkBatchMutationFence) Lock(ctx context.Context, tx pgx.T
 // back together with the artwork attachment.
 func (fence *ArtistArtworkBatchMutationFence) CommitSuccess(
 	ctx context.Context,
-	tx pgx.Tx,
+	tx MediaTx,
 	candidate ArtistCandidate,
 ) error {
 	if fence == nil || fence.JobID == "" || fence.ItemID == "" ||

@@ -8,13 +8,13 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"unicode/utf16"
 
 	"github.com/gin-gonic/gin"
 
 	"xymusic/server/internal/modules/adminauth"
 	"xymusic/server/internal/platform/httpserver"
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/httpx"
 	"xymusic/server/internal/shared/pagination"
 )
 
@@ -347,6 +347,6 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
-func javascriptLength(value string) int { return len(utf16.Encode([]rune(value))) }
+func javascriptLength(value string) int { return httpx.JavascriptStringLength(value) }
 
 var queryUUIDPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)

@@ -10,10 +10,10 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"unicode/utf16"
 
 	"xymusic/server/internal/config"
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/httpx"
 )
 
 func mergeSettings(current config.Config, input UpdateInput) (config.Config, error) {
@@ -31,63 +31,63 @@ func mergeSettings(current config.Config, input UpdateInput) (config.Config, err
 	if err != nil {
 		return config.Config{}, err
 	}
-	environment := config.ToEnvironment(candidate)
+	overrides := map[string]string{}
 	if input.LocalLibrary != nil {
 		library := input.LocalLibrary
 		if library.Name != nil {
-			environment["LOCAL_MUSIC_SOURCE_NAME"], err = requiredText(*library.Name, 120, "localLibrary.name")
+			overrides["LOCAL_MUSIC_SOURCE_NAME"], err = requiredText(*library.Name, 120, "localLibrary.name")
 		}
 		if err == nil && library.Directory != nil {
-			environment["LOCAL_MUSIC_DIRECTORY"], err = requiredText(*library.Directory, 4000, "localLibrary.directory")
+			overrides["LOCAL_MUSIC_DIRECTORY"], err = requiredText(*library.Directory, 4000, "localLibrary.directory")
 		}
 		if err == nil && library.Mode != nil {
 			if *library.Mode != "READ_ONLY" && *library.Mode != "READ_WRITE" {
 				err = validation("localLibrary.mode is invalid")
 			} else {
-				environment["LOCAL_MUSIC_SOURCE_MODE"] = *library.Mode
+				overrides["LOCAL_MUSIC_SOURCE_MODE"] = *library.Mode
 			}
 		}
 		if library.Enabled != nil {
-			environment["LOCAL_MUSIC_SOURCE_ENABLED"] = strconv.FormatBool(*library.Enabled)
+			overrides["LOCAL_MUSIC_SOURCE_ENABLED"] = strconv.FormatBool(*library.Enabled)
 		}
 		if library.SyncOnStartup != nil {
-			environment["LOCAL_MUSIC_SYNC_ON_STARTUP"] = strconv.FormatBool(*library.SyncOnStartup)
+			overrides["LOCAL_MUSIC_SYNC_ON_STARTUP"] = strconv.FormatBool(*library.SyncOnStartup)
 		}
 		if err == nil && library.ScanIntervalMinutes.Set {
 			if library.ScanIntervalMinutes.Value == nil {
-				environment["LOCAL_MUSIC_SCAN_INTERVAL_MINUTES"] = ""
+				overrides["LOCAL_MUSIC_SCAN_INTERVAL_MINUTES"] = ""
 			} else if value := *library.ScanIntervalMinutes.Value; value < 5 || value > 10080 {
 				err = validation("localLibrary.scanIntervalMinutes is invalid")
 			} else {
-				environment["LOCAL_MUSIC_SCAN_INTERVAL_MINUTES"] = strconv.Itoa(value)
+				overrides["LOCAL_MUSIC_SCAN_INTERVAL_MINUTES"] = strconv.Itoa(value)
 			}
 		}
 		if err == nil && library.IncludePatterns != nil {
-			environment["LOCAL_MUSIC_INCLUDE_PATTERNS"], err = encodePatterns(*library.IncludePatterns, "localLibrary.includePatterns")
+			overrides["LOCAL_MUSIC_INCLUDE_PATTERNS"], err = encodePatterns(*library.IncludePatterns, "localLibrary.includePatterns")
 		}
 		if err == nil && library.ExcludePatterns != nil {
-			environment["LOCAL_MUSIC_EXCLUDE_PATTERNS"], err = encodePatterns(*library.ExcludePatterns, "localLibrary.excludePatterns")
+			overrides["LOCAL_MUSIC_EXCLUDE_PATTERNS"], err = encodePatterns(*library.ExcludePatterns, "localLibrary.excludePatterns")
 		}
 	}
 	if input.Registration != nil {
 		if input.Registration.Enabled == nil {
 			return config.Config{}, validation("registration.enabled is required")
 		}
-		environment["REGISTRATION_ENABLED"] = strconv.FormatBool(*input.Registration.Enabled)
+		overrides["REGISTRATION_ENABLED"] = strconv.FormatBool(*input.Registration.Enabled)
 	}
 	if err == nil && input.Security != nil {
 		if value := input.Security.AccessTokenTTLSeconds; value != nil {
 			if *value < 60 || *value > 86400 {
 				err = validation("security.accessTokenTtlSeconds is invalid")
 			} else {
-				environment["ACCESS_TOKEN_TTL_SECONDS"] = strconv.Itoa(*value)
+				overrides["ACCESS_TOKEN_TTL_SECONDS"] = strconv.Itoa(*value)
 			}
 		}
 		if value := input.Security.RefreshTokenTTLSeconds; err == nil && value != nil {
 			if *value < 3600 || *value > 31536000 {
 				err = validation("security.refreshTokenTtlSeconds is invalid")
 			} else {
-				environment["REFRESH_TOKEN_TTL_SECONDS"] = strconv.Itoa(*value)
+				overrides["REFRESH_TOKEN_TTL_SECONDS"] = strconv.Itoa(*value)
 			}
 		}
 	}
@@ -105,16 +105,16 @@ func mergeSettings(current config.Config, input UpdateInput) (config.Config, err
 			if hostErr != nil {
 				err = hostErr
 			} else {
-				environment["HTTP_IPV4_HOST"] = host
-				environment["HTTP_HOST"] = host
+				overrides["HTTP_IPV4_HOST"] = host
+				overrides["HTTP_HOST"] = host
 			}
 		}
 		if err == nil && ipv4Port != nil {
 			if *ipv4Port < 1 || *ipv4Port > 65535 {
 				err = validation("http.ipv4Port is invalid")
 			} else {
-				environment["HTTP_IPV4_PORT"] = strconv.Itoa(*ipv4Port)
-				environment["HTTP_PORT"] = strconv.Itoa(*ipv4Port)
+				overrides["HTTP_IPV4_PORT"] = strconv.Itoa(*ipv4Port)
+				overrides["HTTP_PORT"] = strconv.Itoa(*ipv4Port)
 			}
 		}
 		if err == nil && input.HTTP.IPv6Host != nil {
@@ -122,14 +122,14 @@ func mergeSettings(current config.Config, input UpdateInput) (config.Config, err
 			if hostErr != nil {
 				err = hostErr
 			} else {
-				environment["HTTP_IPV6_HOST"] = host
+				overrides["HTTP_IPV6_HOST"] = host
 			}
 		}
 		if err == nil && input.HTTP.IPv6Port != nil {
 			if *input.HTTP.IPv6Port < 1 || *input.HTTP.IPv6Port > 65535 {
 				err = validation("http.ipv6Port is invalid")
 			} else {
-				environment["HTTP_IPV6_PORT"] = strconv.Itoa(*input.HTTP.IPv6Port)
+				overrides["HTTP_IPV6_PORT"] = strconv.Itoa(*input.HTTP.IPv6Port)
 			}
 		}
 		if err == nil && input.HTTP.TrustedProxyAddresses != nil {
@@ -143,14 +143,14 @@ func mergeSettings(current config.Config, input UpdateInput) (config.Config, err
 						break
 					}
 				}
-				environment["HTTP_TRUSTED_PROXY_ADDRESSES"] = strings.Join(values, ",")
+				overrides["HTTP_TRUSTED_PROXY_ADDRESSES"] = strings.Join(values, ",")
 			}
 		}
 	}
 	if err != nil {
 		return config.Config{}, err
 	}
-	return parseCandidate(environment)
+	return applyEnvironment(candidate, overrides)
 }
 
 func mergeDatabase(current config.Config, input DatabaseInput) (config.Config, error) {
@@ -222,22 +222,22 @@ func mergeDatabase(current config.Config, input DatabaseInput) (config.Config, e
 			return config.Config{}, validation("database.sslMode is invalid")
 		}
 	}
-	environment := config.ToEnvironment(current)
-	environment["DATABASE_URL"] = parsed.String()
+	overrides := map[string]string{}
+	overrides["DATABASE_URL"] = parsed.String()
 	if input.MaximumConnections != nil {
 		if *input.MaximumConnections < 1 || *input.MaximumConnections > 100 {
 			return config.Config{}, validation("database.maximumConnections is invalid")
 		}
-		environment["DATABASE_MAX_CONNECTIONS"] = strconv.Itoa(*input.MaximumConnections)
+		overrides["DATABASE_MAX_CONNECTIONS"] = strconv.Itoa(*input.MaximumConnections)
 	}
-	return parseCandidate(environment)
+	return applyEnvironment(current, overrides)
 }
 
 func mergeStorage(current config.Config, input StorageInput) (config.Config, error) {
-	environment := config.ToEnvironment(current)
+	overrides := map[string]string{}
 	var err error
 	if input.AssetDirectory != nil {
-		environment["MEDIA_ASSET_DIRECTORY"], err = requiredText(*input.AssetDirectory, 4000, "storage.assetDirectory")
+		overrides["MEDIA_ASSET_DIRECTORY"], err = requiredText(*input.AssetDirectory, 4000, "storage.assetDirectory")
 		if err != nil {
 			return config.Config{}, err
 		}
@@ -246,60 +246,60 @@ func mergeStorage(current config.Config, input StorageInput) (config.Config, err
 		if *input.UploadTTLSeconds < 60 || *input.UploadTTLSeconds > 86400 {
 			return config.Config{}, validation("storage.uploadTtlSeconds is invalid")
 		}
-		environment["MEDIA_UPLOAD_TTL_SECONDS"] = strconv.Itoa(*input.UploadTTLSeconds)
+		overrides["MEDIA_UPLOAD_TTL_SECONDS"] = strconv.Itoa(*input.UploadTTLSeconds)
 	}
 	if input.StreamTTLSeconds != nil {
 		if *input.StreamTTLSeconds < 60 || *input.StreamTTLSeconds > 86400 {
 			return config.Config{}, validation("storage.streamTtlSeconds is invalid")
 		}
-		environment["MEDIA_STREAM_TTL_SECONDS"] = strconv.Itoa(*input.StreamTTLSeconds)
+		overrides["MEDIA_STREAM_TTL_SECONDS"] = strconv.Itoa(*input.StreamTTLSeconds)
 	}
 	if input.MaxUploadBytes != nil {
 		if *input.MaxUploadBytes < 1 || *input.MaxUploadBytes > config.MaxServerRequestBodyBytes {
 			return config.Config{}, validation("storage.maxUploadBytes is invalid")
 		}
-		environment["MAX_UPLOAD_BYTES"] = strconv.FormatInt(*input.MaxUploadBytes, 10)
+		overrides["MAX_UPLOAD_BYTES"] = strconv.FormatInt(*input.MaxUploadBytes, 10)
 	}
-	return parseCandidate(environment)
+	return applyEnvironment(current, overrides)
 }
 
 func mergeMediaTools(current config.Config, input MediaToolsInput) (config.Config, error) {
-	environment := config.ToEnvironment(current)
+	overrides := map[string]string{}
 	if input.Directory != nil {
 		if strings.TrimSpace(*input.Directory) == "" {
-			environment["MEDIA_TOOLS_MODE"] = "ADVANCED"
-			environment["FFMPEG_PATH"] = ""
-			environment["FFPROBE_PATH"] = ""
-			return parseCandidate(environment)
+			overrides["MEDIA_TOOLS_MODE"] = "ADVANCED"
+			overrides["FFMPEG_PATH"] = ""
+			overrides["FFPROBE_PATH"] = ""
+			return applyEnvironment(current, overrides)
 		}
 		directory, err := requiredText(*input.Directory, 2000, "mediaTools.directory")
 		if err != nil {
 			return config.Config{}, err
 		}
-		environment["MEDIA_TOOLS_DIRECTORY"] = directory
-		environment["MEDIA_TOOLS_MODE"] = "DIRECTORY"
-		environment["FFMPEG_PATH"] = filepath.Join(directory, executableName("ffmpeg"))
-		environment["FFPROBE_PATH"] = filepath.Join(directory, executableName("ffprobe"))
-		return parseCandidate(environment)
+		overrides["MEDIA_TOOLS_DIRECTORY"] = directory
+		overrides["MEDIA_TOOLS_MODE"] = "DIRECTORY"
+		overrides["FFMPEG_PATH"] = filepath.Join(directory, executableName("ffmpeg"))
+		overrides["FFPROBE_PATH"] = filepath.Join(directory, executableName("ffprobe"))
+		return applyEnvironment(current, overrides)
 	}
 	if input.FFmpegPath != nil {
 		value, err := optionalText(*input.FFmpegPath, 2000, "mediaTools.ffmpegPath")
 		if err != nil {
 			return config.Config{}, err
 		}
-		environment["FFMPEG_PATH"] = value
+		overrides["FFMPEG_PATH"] = value
 	}
 	if input.FFprobePath != nil {
 		value, err := optionalText(*input.FFprobePath, 2000, "mediaTools.ffprobePath")
 		if err != nil {
 			return config.Config{}, err
 		}
-		environment["FFPROBE_PATH"] = value
+		overrides["FFPROBE_PATH"] = value
 	}
 	if input.FFmpegPath != nil || input.FFprobePath != nil {
-		environment["MEDIA_TOOLS_MODE"] = "ADVANCED"
+		overrides["MEDIA_TOOLS_MODE"] = "ADVANCED"
 	}
-	return parseCandidate(environment)
+	return applyEnvironment(current, overrides)
 }
 
 func changedFields(previous, candidate config.Config) []string {
@@ -354,8 +354,8 @@ func listenerHost(value string, ipv4 bool, field string) (string, error) {
 	return host, nil
 }
 
-func parseCandidate(environment map[string]string) (config.Config, error) {
-	candidate, err := config.Parse(environment)
+func applyEnvironment(current config.Config, overrides map[string]string) (config.Config, error) {
+	candidate, err := config.ApplyEnvironment(current, overrides)
 	if err != nil {
 		return config.Config{}, validation(err.Error())
 	}
@@ -436,5 +436,5 @@ func optionalText(value string, maximum int, field string) (string, error) {
 	return result, nil
 }
 
-func textLength(value string) int    { return len(utf16.Encode([]rune(value))) }
+func textLength(value string) int    { return httpx.JavascriptStringLength(value) }
 func validation(detail string) error { return apperror.Validation(detail) }

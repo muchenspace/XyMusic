@@ -8,13 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
-	"xymusic/server/internal/platform/localmedia"
+	"xymusic/server/internal/platform/mediaexec"
 	"xymusic/server/internal/shared/apperror"
 )
 
@@ -24,19 +23,12 @@ const (
 	normalizedImageMaxEdge = 1600
 )
 
-type CommandResult struct {
-	Stdout   string
-	Stderr   string
-	ExitCode int
-	TimedOut bool
-}
+type CommandResult = mediaexec.CommandResult
 
-type CommandRunner interface {
-	Run(context.Context, string, []string, time.Duration) (CommandResult, error)
-}
+type CommandRunner = mediaexec.CommandRunner
 
 type FFmpegMediaInspector struct {
-	localMedia  *localmedia.Store
+	localMedia  AssetStore
 	ffprobePath string
 	ffmpegPath  string
 	runner      CommandRunner
@@ -45,7 +37,7 @@ type FFmpegMediaInspector struct {
 var _ MediaInspector = (*FFmpegMediaInspector)(nil)
 
 func NewFFmpegMediaInspector(
-	localMedia *localmedia.Store,
+	localMedia AssetStore,
 	ffprobePath string,
 	ffmpegPath string,
 ) (*FFmpegMediaInspector, error) {
@@ -53,7 +45,7 @@ func NewFFmpegMediaInspector(
 }
 
 func newFFmpegMediaInspector(
-	localMedia *localmedia.Store,
+	localMedia AssetStore,
 	ffprobePath string,
 	ffmpegPath string,
 	runner CommandRunner,
@@ -268,29 +260,4 @@ func fileSHA256(path string) (int64, string, error) {
 	return info.Size(), hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
-type osCommandRunner struct{}
-
-func (osCommandRunner) Run(ctx context.Context, executable string, args []string, timeout time.Duration) (CommandResult, error) {
-	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	cmd := exec.CommandContext(cmdCtx, executable, args...)
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	res := CommandResult{Stdout: stdout.String(), Stderr: stderr.String()}
-	if errors.Is(cmdCtx.Err(), context.DeadlineExceeded) {
-		res.TimedOut = true
-		res.ExitCode = -1
-		return res, nil
-	}
-	if err == nil {
-		return res, nil
-	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		res.ExitCode = exitErr.ExitCode()
-		return res, nil
-	}
-	return CommandResult{}, err
-}
+type osCommandRunner = mediaexec.OSCommandRunner

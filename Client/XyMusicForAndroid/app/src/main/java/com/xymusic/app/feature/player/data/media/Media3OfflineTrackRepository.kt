@@ -59,7 +59,7 @@ fun interface OfflineMediaDownloader {
 class CacheOfflineMediaDownloader
 @Inject
 constructor(
-    private val playbackCache: PlaybackCache,
+    private val offlineMediaCache: OfflineMediaCache,
     @MediaHttpClient private val mediaHttpClient: OkHttpClient,
     private val playbackNetworkPolicy: PlaybackNetworkPolicy,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -80,7 +80,7 @@ constructor(
             null,
             progressListener,
         ).cache()
-        playbackCache.cachedContentLength(cacheKey) ?: totalDownloaded.takeIf { it > 0 }
+        offlineMediaCache.cachedContentLength(cacheKey) ?: totalDownloaded.takeIf { it > 0 }
     }
 
     private fun downloadDataSource(): CacheDataSource {
@@ -91,7 +91,7 @@ constructor(
             )
         return CacheDataSource
             .Factory()
-            .setCache(playbackCache.cache)
+            .setCache(offlineMediaCache.cache)
             .setUpstreamDataSourceFactory(upstream)
             .createDataSourceForDownloading()
     }
@@ -108,7 +108,7 @@ constructor(
     private val offlineTrackDao: OfflineTrackDao,
     private val catalogDao: CatalogDao,
     private val catalogRepository: CatalogRepository,
-    private val offlineMediaStore: OfflineMediaStore,
+    private val offlineMediaStore: OfflineMediaStorePort,
     private val offlineMediaDownloader: OfflineMediaDownloader,
     private val playbackGrantRepository: PlaybackGrantRepository,
     private val json: Json,
@@ -261,7 +261,7 @@ constructor(
     }
 
     private suspend fun beginDownload(
-        claim: OfflineMediaStore.DownloadClaim,
+        claim: DownloadClaim,
         downloadIdentity: ActiveSessionIdentity,
     ): Boolean = sessionMutationCoordinator.mutate {
         if (isCurrent(downloadIdentity)) {
@@ -274,7 +274,7 @@ constructor(
 
     private suspend fun commitDownload(
         track: OfflineTrackEntity,
-        claim: OfflineMediaStore.DownloadClaim,
+        claim: DownloadClaim,
         downloadIdentity: ActiveSessionIdentity,
         operationJob: Job?,
     ): Boolean = withContext(NonCancellable) {
@@ -321,7 +321,7 @@ constructor(
 
     private fun isCurrent(expectedIdentity: ActiveSessionIdentity): Boolean = activeIdentity() == expectedIdentity
 
-    private suspend fun discardUncommitted(claim: OfflineMediaStore.DownloadClaim) {
+    private suspend fun discardUncommitted(claim: DownloadClaim) {
         withContext(NonCancellable) {
             runCatching { offlineMediaStore.discardUncommitted(claim) }
         }

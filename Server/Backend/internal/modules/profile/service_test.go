@@ -8,21 +8,19 @@ import (
 	"testing"
 	"time"
 
-	"xymusic/server/internal/config"
 	"xymusic/server/internal/modules/identity"
 	"xymusic/server/internal/platform/localmedia"
 	"xymusic/server/internal/shared/apperror"
 )
 
 type profileStoreStub struct {
-	updateProfile          func(context.Context, string, int, ProfileChanges, time.Time) error
-	createAvatarUpload     func(context.Context, CreateUploadParams) (AvatarUpload, error)
-	findAvatarUpload       func(context.Context, string, string) (AvatarUpload, error)
-	markAvatarUploadFailed func(context.Context, string, string) error
-	claimCompletion        func(context.Context, string, string, string, time.Time, time.Duration) (CompletionClaim, error)
-	completionStatus       func(context.Context, string, string) (string, error)
-	finalizeCompletion     func(context.Context, FinalizeAvatarParams) error
-	failCompletion         func(context.Context, string, string, bool, string, time.Time) error
+	updateProfile      func(context.Context, string, int, ProfileChanges, time.Time) error
+	createAvatarUpload func(context.Context, CreateUploadParams) (AvatarUpload, error)
+	findAvatarUpload   func(context.Context, string, string) (AvatarUpload, error)
+	claimCompletion    func(context.Context, string, string, string, time.Time, time.Duration) (CompletionClaim, error)
+	completionStatus   func(context.Context, string, string) (string, error)
+	finalizeCompletion func(context.Context, FinalizeAvatarParams) error
+	failCompletion     func(context.Context, string, string, bool, string, time.Time) error
 }
 
 func (stub *profileStoreStub) UpdateProfile(ctx context.Context, userID string, version int, changes ProfileChanges, now time.Time) error {
@@ -42,12 +40,6 @@ func (stub *profileStoreStub) FindAvatarUpload(ctx context.Context, actorID, upl
 		return AvatarUpload{}, errors.New("unexpected FindAvatarUpload call")
 	}
 	return stub.findAvatarUpload(ctx, actorID, uploadID)
-}
-func (stub *profileStoreStub) MarkAvatarUploadFailed(ctx context.Context, actorID, uploadID string) error {
-	if stub.markAvatarUploadFailed == nil {
-		return errors.New("unexpected MarkAvatarUploadFailed call")
-	}
-	return stub.markAvatarUploadFailed(ctx, actorID, uploadID)
 }
 func (stub *profileStoreStub) ClaimAvatarCompletion(ctx context.Context, actorID, uploadID, token string, now time.Time, lease time.Duration) (CompletionClaim, error) {
 	if stub.claimCompletion == nil {
@@ -142,20 +134,18 @@ func newProfileTestService(
 		t.Fatal(err)
 	}
 
-	service, err := NewService(config.Config{
-		MediaStorage: config.MediaStorage{
-			UploadTTLSeconds: 300,
-			MaxUploadBytes:   10 * 1024 * 1024,
-		},
-	}, ServiceDependencies{
-		Repository:   store,
-		CurrentUsers: reader,
-		Idempotency:  idempotency,
-		LocalMedia:   mediaStore,
-		Inspector:    inspector,
-		Clock:        fixedProfileClock{now: now},
-		IDGenerator:  func() string { return "upload-1" },
-	})
+	service, err := NewService(
+		300,
+		10*1024*1024,
+		ServiceDependencies{
+			Repository:   store,
+			CurrentUsers: reader,
+			Idempotency:  idempotency,
+			LocalMedia:   mediaStore,
+			Inspector:    inspector,
+			Clock:        fixedProfileClock{now: now},
+			IDGenerator:  func() string { return "upload-1" },
+		})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +247,9 @@ func TestCreateAvatarUploadReservesAndReturnsUploadPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Body.Method != "PUT" || result.Body.UploadPath != "/api/v1/users/me/avatar/uploads/upload-1" {
+	// The service returns only reservation data; routes assemble uploadUrl and
+	// uploadPath from the upload ID.
+	if result.Body.Method != "PUT" || result.Body.UploadPath != "" || result.Body.UploadURL != "" {
 		t.Fatalf("reservation result = %#v", result.Body)
 	}
 }

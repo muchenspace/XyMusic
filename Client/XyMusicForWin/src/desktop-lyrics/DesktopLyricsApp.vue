@@ -25,9 +25,9 @@ import {
   DESKTOP_LYRICS_TRANSITION_LINE_DISTANCE_PX,
   buildDesktopLyricsFrame,
   estimatePlaybackSeconds,
-  fastOutSlowIn,
   type DesktopLyricsTransition,
 } from "./timeline";
+import { sampleLyricCorrection } from "../shared/lyrics/transition";
 import {
   LYRIC_PLAYBACK_POSITION_CORRECTION_EPSILON_SECONDS,
   LYRIC_PLAYBACK_POSITION_CORRECTION_MS,
@@ -262,13 +262,14 @@ function renderedDesktopPlaybackSeconds(
   const activeCorrection = playbackPositionCorrection;
   let candidate = basePosition;
   if (activeCorrection) {
-    const progress = clamp(
-      (timestamp - activeCorrection.startedAtMs) / LYRIC_PLAYBACK_POSITION_CORRECTION_MS,
-      0,
-      1,
+    const sampled = sampleLyricCorrection(
+      activeCorrection.offsetSeconds,
+      activeCorrection.startedAtMs,
+      timestamp,
+      LYRIC_PLAYBACK_POSITION_CORRECTION_MS,
     );
-    candidate += activeCorrection.offsetSeconds * (1 - fastOutSlowIn(progress));
-    if (progress >= 1) playbackPositionCorrection = null;
+    candidate += sampled.remainingOffsetSeconds;
+    if (sampled.finished) playbackPositionCorrection = null;
   }
   const rendered = playbackClock.isPlaying
     ? Math.max(lastRenderedPlaybackSeconds, candidate)
@@ -283,7 +284,7 @@ function sendAction(action: DesktopLyricsActionPayload): void {
 
 function requestReady(): void {
   if (disposed) return;
-  sendAction(createDesktopLyricsAction("ready"));
+  sendAction(createDesktopLyricsAction("ready", Date.now()));
   if (!stateHandshakeComplete) scheduleReadyRetry();
 }
 
@@ -304,15 +305,15 @@ function stopReadyRetries(): void {
 }
 
 function requestPrevious(): void {
-  sendAction(createDesktopLyricsAction("previous"));
+  sendAction(createDesktopLyricsAction("previous", Date.now()));
 }
 
 function requestTogglePlayback(): void {
-  sendAction(createDesktopLyricsAction("toggle-playback"));
+  sendAction(createDesktopLyricsAction("toggle-playback", Date.now()));
 }
 
 function requestNext(): void {
-  sendAction(createDesktopLyricsAction("next"));
+  sendAction(createDesktopLyricsAction("next", Date.now()));
 }
 
 function requestFontScale(delta: number): void {
@@ -331,7 +332,7 @@ function requestLock(): void {
 }
 
 function requestClose(): void {
-  sendAction(createDesktopLyricsAction("close"));
+  sendAction(createDesktopLyricsAction("close", Date.now()));
 }
 
 function syncDesktopLyricsTransition(_identity: string, _targetIndex: number): void {

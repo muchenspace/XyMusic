@@ -1,5 +1,6 @@
 import type { ArtworkSummary } from "@/shared/domain/artwork";
 import type { AudioStatus } from "@/shared/domain/audio-status";
+import type { Page, PageQuery } from "@/shared/domain/pagination";
 
 export type { ArtworkSummary } from "@/shared/domain/artwork";
 export type { AudioStatus } from "@/shared/domain/audio-status";
@@ -56,6 +57,9 @@ export interface TrackMutationTarget {
   expectedVersion: number;
 }
 
+/** @deprecated Kept as an alias of {@link TrackMutationTarget}; both describe the same optimistic-lock target. */
+export type TrackMetadataUpdateTarget = TrackMutationTarget;
+
 export interface BatchRestoreTrackItem {
   trackId: string;
   status: "READY";
@@ -111,6 +115,13 @@ export interface PermanentDeleteTracksJob {
   startedAt: string | null;
   completedAt: string | null;
   items: PermanentDeleteTrackJobItem[];
+}
+
+export interface PermanentDeleteTrackResult {
+  deleted: boolean;
+  deletedFiles: number;
+  quarantinedFiles: number;
+  scheduledObjects: number;
 }
 
 export interface MetadataCredit {
@@ -251,24 +262,9 @@ export interface ArtistSummary {
   version: number;
 }
 
-export interface MusicPage<T> {
-  items: T[];
-  page: number;
-  pageSize: number;
-  total: number;
-  totalPages?: number;
-  nextCursor?: string;
-}
+export type MusicPage<T> = Page<T>;
 
-export interface MusicListQuery {
-  page?: number;
-  pageSize?: number;
-  search?: string;
-  sort?: string;
-  order?: "asc" | "desc";
-  cursor?: string;
-  cursorMode?: "cursor" | "offset";
-}
+export type MusicListQuery = PageQuery;
 
 export interface TrackListQuery extends MusicListQuery {
   status?: string;
@@ -278,12 +274,24 @@ export interface TrackListQuery extends MusicListQuery {
 
 export type TrackTagPatch = Partial<Omit<TrackTagValues, "hasArtwork">>;
 
-export interface TrackMetadataUpdateTarget {
-  trackId: string;
-  expectedVersion: number;
+const MAX_BATCH_METADATA_UPDATES = 200;
+
+/**
+ * Validates the lyrics timing marker on a metadata record returned by the
+ * server. Kept in the domain so HTTP gateways stay pure mapping adapters.
+ */
+export function validateTrackMetadataRecord(record: TrackMetadataRecord): TrackMetadataRecord {
+  validateLyricsTiming(record.raw.lyrics);
+  validateLyricsTiming(record.effective.lyrics);
+  if (Object.prototype.hasOwnProperty.call(record.overrides, "lyrics")) validateLyricsTiming(record.overrides.lyrics);
+  return record;
 }
 
-const MAX_BATCH_METADATA_UPDATES = 200;
+export function validateLyricsTiming(lyrics: MetadataLyrics | null | undefined): void {
+  if (lyrics && lyrics.timing !== "LINE" && lyrics.timing !== "WORD") {
+    throw new Error("Track metadata lyrics timing is invalid");
+  }
+}
 
 export function toMetadataUpdateTargets(tracks: readonly TrackSummary[]): TrackMetadataUpdateTarget[] {
   if (tracks.length > MAX_BATCH_METADATA_UPDATES) {

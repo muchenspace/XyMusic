@@ -7,14 +7,14 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode/utf16"
 
-	"github.com/jackc/pgx/v5/pgconn"
 	"golang.org/x/text/unicode/norm"
 
 	"xymusic/server/internal/modules/catalog"
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/httpx"
 	"xymusic/server/internal/shared/pagination"
+	"xymusic/server/internal/shared/timeformat"
 )
 
 type PasswordHasher interface {
@@ -32,10 +32,6 @@ type Service struct {
 	artworks  ArtworkPresenter
 	passwords PasswordHasher
 	cursors   *pagination.CursorCodec
-}
-
-func NewService(dependencies ServiceDependencies) (*Service, error) {
-	return NewServiceWithOptions(dependencies, nil)
 }
 
 func NewServiceWithOptions(dependencies ServiceDependencies, cursors *pagination.CursorCodec) (*Service, error) {
@@ -75,7 +71,7 @@ func (service *Service) Dashboard(ctx context.Context) (DashboardDTO, error) {
 func (service *Service) ListUsers(ctx context.Context, input ListUsersInput) (UserPageDTO, error) {
 	query := strings.TrimSpace(input.Query)
 	input.Query = query
-	if javascriptStringLength(query) > 100 || !validRoleFilter(input.Role) || !validStatusFilter(input.Status) {
+	if httpx.JavascriptStringLength(query) > 100 || !validRoleFilter(input.Role) || !validStatusFilter(input.Status) {
 		return UserPageDTO{}, apperror.Validation("User filters are invalid")
 	}
 	if input.CursorMode {
@@ -264,7 +260,7 @@ func (service *Service) CreateUser(ctx context.Context, input CreateUserInput) (
 		Username: username, NormalizedUsername: normalizeUsername(username),
 		PasswordHash: passwordHash, DisplayName: displayName, Role: input.Role,
 	})
-	if isUniqueViolation(err) {
+	if errors.Is(err, ErrDuplicateUsername) {
 		return UserDetailDTO{}, duplicateUsernameError()
 	}
 	if err != nil {
@@ -318,8 +314,10 @@ func (service *Service) UpdateUser(
 		status := input.Status.Value
 		params.Status = &status
 	}
-	if err := service.store.UpdateUser(ctx, params); isUniqueViolation(err) {
+	if err := service.store.UpdateUser(ctx, params); errors.Is(err, ErrDuplicateUsername) {
 		return UserDetailDTO{}, duplicateUsernameError()
+	} else if errors.Is(err, ErrLastActiveAdministrator) {
+		return UserDetailDTO{}, lastActiveAdministratorError()
 	} else if err != nil {
 		return UserDetailDTO{}, err
 	}
@@ -403,7 +401,7 @@ func validateUpdateInput(input UpdateUserInput) error {
 }
 
 func validatePassword(value string) error {
-	length := javascriptStringLength(value)
+	length := httpx.JavascriptStringLength(value)
 	if length < 6 || length > 128 {
 		return apperror.Validation("password must contain 6 to 128 characters")
 	}
@@ -412,7 +410,7 @@ func validatePassword(value string) error {
 
 func requiredText(value string, maximum int, field string) (string, error) {
 	result := strings.TrimSpace(value)
-	if result == "" || javascriptStringLength(result) > maximum {
+	if result == "" || httpx.JavascriptStringLength(result) > maximum {
 		return "", apperror.Validation(field + " is invalid")
 	}
 	return result, nil
@@ -423,7 +421,7 @@ func nullableText(value *string, maximum int, field string) (*string, error) {
 		return nil, nil
 	}
 	result := strings.TrimSpace(*value)
-	if javascriptStringLength(result) > maximum {
+	if httpx.JavascriptStringLength(result) > maximum {
 		return nil, apperror.Validation(field + " is invalid")
 	}
 	if result == "" {
@@ -446,22 +444,20 @@ func normalizeUsername(value string) string {
 	return strings.ToLower(strings.TrimSpace(norm.NFKC.String(value)))
 }
 
-func javascriptStringLength(value string) int { return len(utf16.Encode([]rune(value))) }
-
 func formatTimestamp(value time.Time) string {
-	return value.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+	return timeformat.Timestamp(value)
 }
 
 func duplicateUsernameError() error {
 	return apperror.Conflict(apperror.CodeDuplicateUsername, "Username is already registered", nil)
 }
 
-func isUniqueViolation(err error) bool {
-	if err == nil {
-		return false
-	}
-	var postgresError *pgconn.PgError
-	return errors.As(err, &postgresError) && postgresError.Code == "23505"
+func lastActiveAdministratorError() error {
+	return apperror.Conflict(
+		apperror.CodeInvalidStateTransition,
+		"The last active administrator cannot be removed",
+		nil,
+	)
 }
 
 func nonNilCounts(input map[string]int) map[string]int {

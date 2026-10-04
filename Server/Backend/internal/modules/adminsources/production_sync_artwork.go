@@ -11,7 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"xymusic/server/internal/modules/adminmetadata"
+	"xymusic/server/internal/platform/mediafile"
 )
 
 func attachAlbumArtwork(
@@ -140,9 +140,9 @@ func (synchronizer *ProductionSynchronizer) stageArtwork(
 
 	runner := synchronizer.artworkRunner
 	if runner == nil {
-		runner = adminmetadata.OSProcessRunner{}
+		runner = mediafile.OSProcessRunner{}
 	}
-	runExtraction := func(mapSpecifier string) (adminmetadata.ProcessResult, error) {
+	runExtraction := func(mapSpecifier string) (mediafile.ProcessResult, error) {
 		arguments := []string{
 			"-nostdin", "-hide_banner", "-loglevel", "error", "-y",
 			"-i", sourcePath,

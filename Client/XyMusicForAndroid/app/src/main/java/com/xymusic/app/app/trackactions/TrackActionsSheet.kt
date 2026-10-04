@@ -48,10 +48,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.xymusic.app.R
-import com.xymusic.app.app.playlist.toPlaylistVisibility
 import com.xymusic.app.core.ui.component.MediaArtwork
 import com.xymusic.app.core.ui.layout.isCompactLandscape
 import com.xymusic.app.core.ui.media.PlaylistEditorDialog
+import com.xymusic.app.core.ui.media.toPlaylistVisibility
 import com.xymusic.app.feature.playlist.domain.model.PlaylistSummary
 import com.xymusic.app.feature.playlist.domain.model.PlaylistVisibility
 

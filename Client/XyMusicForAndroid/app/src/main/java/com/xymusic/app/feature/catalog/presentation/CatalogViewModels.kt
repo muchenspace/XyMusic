@@ -4,9 +4,9 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.paging.cachedIn
-import com.xymusic.app.core.paging.mapPagedItems
-import com.xymusic.app.core.paging.pagingDataFlow
 import com.xymusic.app.core.ui.media.toUi
+import com.xymusic.app.core.ui.paging.mapPagedItems
+import com.xymusic.app.core.ui.paging.pagingDataFlow
 import com.xymusic.app.feature.catalog.domain.CatalogResult
 import com.xymusic.app.feature.catalog.domain.CatalogUseCases
 import com.xymusic.app.feature.catalog.domain.model.AlbumQuery

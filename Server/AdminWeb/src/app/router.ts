@@ -1,10 +1,17 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
 import type { SetupStatus } from "@/features/setup/domain/models";
-import { useSetup } from "@/app/services/setup";
 import { useAuthStore } from "@/stores/auth";
 import { useUiStore } from "@/stores/ui";
-import { queryClient } from "@/app/query-client";
-import { ADMIN_AUTH_SYNC_STORAGE_KEY } from "@/api/client";
+import { ADMIN_AUTH_SYNC_STORAGE_KEY } from "@/shared/application/admin-auth-sync";
+import { clearSetupState, currentSetupState } from "@/app/setup-status";
+
+export {
+  SETUP_REQUIRED_DEDUP_MS,
+  SETUP_STATUS_STALE_MS,
+  cacheSetupState,
+  canReuseSetupState,
+  invalidateSetupState,
+} from "@/app/setup-status";
 
 declare module "vue-router" {
   interface RouteMeta {
@@ -13,54 +20,8 @@ declare module "vue-router" {
   }
 }
 
-let setupState: SetupStatus | undefined;
-let setupStateCheckedAt = 0;
-let setupRequest: Promise<SetupStatus> | undefined;
-const setup = useSetup();
-export const SETUP_STATUS_STALE_MS = 5_000;
-export const SETUP_REQUIRED_DEDUP_MS = 1_000;
-
-export function canReuseSetupState(
-  state: SetupStatus | undefined,
-  checkedAt: number,
-  now = Date.now(),
-): state is SetupStatus {
-  if (!state || checkedAt <= 0) return false;
-  const age = now - checkedAt;
-  if (age < 0) return false;
-  return age < (state.setupRequired ? SETUP_REQUIRED_DEDUP_MS : SETUP_STATUS_STALE_MS);
-}
-
-export function cacheSetupState(value: SetupStatus): void {
-  setupState = value;
-  setupStateCheckedAt = Date.now();
-  queryClient.setQueryData(["setup", "status"], value);
-}
-
-async function currentSetupState(): Promise<SetupStatus> {
-  if (setupRequest) return setupRequest;
-  if (canReuseSetupState(setupState, setupStateCheckedAt)) return setupState;
-  setupRequest = setup.status().then((value) => {
-    cacheSetupState(value);
-    return value;
-  }).finally(() => { setupRequest = undefined; });
-  return setupRequest;
-}
-
-function clearSetupState(): void {
-  setupState = undefined;
-  setupStateCheckedAt = 0;
-  queryClient.removeQueries({ queryKey: ["setup", "status"] });
-}
-
 function serviceUnavailableRedirect(redirect: string) {
   return { name: "service-unavailable", query: { redirect } } as const;
-}
-
-export function invalidateSetupState(): void {
-  setupState = undefined;
-  setupStateCheckedAt = 0;
-  void queryClient.invalidateQueries({ queryKey: ["setup", "status"] });
 }
 
 const routes: RouteRecordRaw[] = [

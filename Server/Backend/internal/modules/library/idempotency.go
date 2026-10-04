@@ -5,16 +5,16 @@ import (
 	"errors"
 	"time"
 
-	sharedidempotency "xymusic/server/internal/shared/idempotency"
+	platformidempotency "xymusic/server/internal/platform/idempotency"
 )
 
 type PersistentIdempotency struct {
-	service *sharedidempotency.Service
+	service *platformidempotency.Service
 }
 
 var _ Idempotency = (*PersistentIdempotency)(nil)
 
-func NewPersistentIdempotency(service *sharedidempotency.Service) *PersistentIdempotency {
+func NewPersistentIdempotency(service *platformidempotency.Service) *PersistentIdempotency {
 	return &PersistentIdempotency{service: service}
 }
 
@@ -26,15 +26,15 @@ func (adapter *PersistentIdempotency) ExecutePlayback(
 	if adapter == nil || adapter.service == nil {
 		return MutationResult[HistoryItemDTO]{}, errors.New("library idempotency service is required")
 	}
-	result, err := sharedidempotency.Execute(ctx, adapter.service, sharedidempotency.Input{
+	result, err := platformidempotency.Execute(ctx, adapter.service, platformidempotency.Input{
 		ActorID: input.ActorID,
 		Scope:   input.Scope,
 		Key:     input.Key,
 		Payload: input.Payload,
 		TTL:     24 * time.Hour,
-	}, func() (sharedidempotency.HTTPResult[HistoryItemDTO], error) {
+	}, func() (platformidempotency.HTTPResult[HistoryItemDTO], error) {
 		body, err := operation()
-		return sharedidempotency.HTTPResult[HistoryItemDTO]{Status: 200, Body: body}, err
+		return platformidempotency.HTTPResult[HistoryItemDTO]{Status: 200, Body: body}, err
 	})
 	if err != nil {
 		return MutationResult[HistoryItemDTO]{}, err

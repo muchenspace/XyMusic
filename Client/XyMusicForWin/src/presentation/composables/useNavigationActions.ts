@@ -1,6 +1,6 @@
 import { computed, nextTick, onMounted, onUnmounted, watch, type Ref } from "vue";
 import type { Album, Artist, Playlist } from "../../domain/music";
-import type { LibraryView } from "../../domain/navigation";
+import type { LibraryView } from "../../application/navigation";
 import { useHomeStore } from "../stores/homeStore";
 import { useLibraryStore } from "../stores/libraryStore";
 import { useNavigationStore, type NavigationEntry } from "../stores/navigationStore";

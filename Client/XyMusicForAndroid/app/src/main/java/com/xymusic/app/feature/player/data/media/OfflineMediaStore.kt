@@ -1,5 +1,7 @@
 package com.xymusic.app.feature.player.data.media
 
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.cache.Cache
 import com.xymusic.app.core.database.OfflineAccountDataCleaner
 import com.xymusic.app.core.database.dao.OfflineTrackDao
 import com.xymusic.app.core.database.entity.OfflineTrackEntity
@@ -9,6 +11,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
+@UnstableApi
 interface OfflineMediaCache {
     fun pin(cacheKey: String)
 
@@ -18,41 +21,66 @@ interface OfflineMediaCache {
 
     fun isFullyCached(cacheKey: String, contentLength: Long): Boolean
 
+    fun cachedContentLength(cacheKey: String): Long?
+
+    val cache: Cache
+
     suspend fun remove(cacheKey: String)
+
+    suspend fun clear()
 }
 
+interface OfflineMediaStorePort {
+    fun createDownloadClaim(cacheKey: String): DownloadClaim
+
+    suspend fun beginDownload(claim: DownloadClaim)
+
+    suspend fun playableTrack(ownerUserId: String, trackId: String): OfflineTrackEntity?
+
+    suspend fun commit(track: OfflineTrackEntity, claim: DownloadClaim): Boolean
+
+    suspend fun remove(ownerUserId: String, trackId: String): Boolean
+
+    suspend fun discardUncommitted(claim: DownloadClaim)
+}
+
+class DownloadClaim internal constructor(internal val cacheKey: String)
+
 @Singleton
+@UnstableApi
 class OfflineMediaStore
 @Inject
 constructor(
     private val offlineTrackDao: OfflineTrackDao,
     private val offlineMediaCache: Lazy<OfflineMediaCache>,
-) : OfflineAccountDataCleaner {
+) : OfflineMediaStorePort,
+    OfflineAccountDataCleaner {
     private val mutationMutex = Mutex()
     private val activeDownloadClaims = mutableMapOf<String, MutableSet<DownloadClaim>>()
 
-    fun createDownloadClaim(cacheKey: String): DownloadClaim {
+    override fun createDownloadClaim(cacheKey: String): DownloadClaim {
         require(cacheKey.isNotBlank()) { "Cache key cannot be blank" }
         return DownloadClaim(cacheKey)
     }
 
-    suspend fun beginDownload(claim: DownloadClaim) = mutationMutex.withLock {
+    override suspend fun beginDownload(claim: DownloadClaim) = mutationMutex.withLock {
         val claims = activeDownloadClaims.getOrPut(claim.cacheKey) { mutableSetOf() }
         if (claims.isEmpty()) offlineMediaCache.get().pin(claim.cacheKey)
         claims += claim
     }
 
-    suspend fun playableTrack(ownerUserId: String, trackId: String): OfflineTrackEntity? = mutationMutex.withLock {
-        val track = offlineTrackDao.track(ownerUserId, trackId) ?: return@withLock null
-        if (offlineMediaCache.get().isFullyCached(track.cacheKey, track.contentLength)) {
-            track
-        } else {
-            removeLocked(track)
-            null
+    override suspend fun playableTrack(ownerUserId: String, trackId: String): OfflineTrackEntity? =
+        mutationMutex.withLock {
+            val track = offlineTrackDao.track(ownerUserId, trackId) ?: return@withLock null
+            if (offlineMediaCache.get().isFullyCached(track.cacheKey, track.contentLength)) {
+                track
+            } else {
+                removeLocked(track)
+                null
+            }
         }
-    }
 
-    suspend fun commit(track: OfflineTrackEntity, claim: DownloadClaim): Boolean = mutationMutex.withLock {
+    override suspend fun commit(track: OfflineTrackEntity, claim: DownloadClaim): Boolean = mutationMutex.withLock {
         require(track.cacheKey == claim.cacheKey) {
             "Download claim belongs to another cache key"
         }
@@ -68,13 +96,13 @@ constructor(
         true
     }
 
-    suspend fun remove(ownerUserId: String, trackId: String): Boolean = mutationMutex.withLock {
+    override suspend fun remove(ownerUserId: String, trackId: String): Boolean = mutationMutex.withLock {
         val track = offlineTrackDao.track(ownerUserId, trackId) ?: return@withLock false
         removeLocked(track)
         true
     }
 
-    suspend fun discardUncommitted(claim: DownloadClaim) = mutationMutex.withLock {
+    override suspend fun discardUncommitted(claim: DownloadClaim) = mutationMutex.withLock {
         val remainingClaims = releaseDownloadClaim(claim) ?: return@withLock
         if (remainingClaims > 0) return@withLock
         if (offlineTrackDao.cacheKeyReferenceCount(claim.cacheKey) == 0) {
@@ -118,6 +146,4 @@ constructor(
         if (claims.isEmpty()) activeDownloadClaims.remove(claim.cacheKey)
         return claims.size
     }
-
-    class DownloadClaim internal constructor(internal val cacheKey: String)
 }

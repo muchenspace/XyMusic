@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"time"
+
+	"xymusic/server/internal/shared/requestdto"
 )
 
 type CreditRole string
@@ -180,9 +182,7 @@ type UpdateTrackInput struct {
 	TrackNumber     OptionalNullableInt    `json:"trackNumber"`
 	DiscNumber      OptionalInt            `json:"discNumber"`
 }
-type VersionInput struct {
-	ExpectedVersion int `json:"expectedVersion"`
-}
+type VersionInput = requestdto.VersionInput
 type LyricsInput struct {
 	ExpectedVersion int            `json:"expectedVersion"`
 	Language        string         `json:"language"`

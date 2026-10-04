@@ -45,6 +45,8 @@ import com.xymusic.app.core.ui.component.LoadingState
 import com.xymusic.app.core.ui.layout.isCompactLandscape
 import com.xymusic.app.core.ui.layout.isWideLandscape
 import com.xymusic.app.core.ui.media.PlaylistEditorDialog
+import com.xymusic.app.core.ui.media.toPlaylistEditorOption
+import com.xymusic.app.core.ui.media.toPlaylistVisibility
 import com.xymusic.app.feature.playlist.domain.model.PlaylistVisibility
 import com.xymusic.app.ui.theme.spacing
 

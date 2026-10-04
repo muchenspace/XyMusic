@@ -8,11 +8,14 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"xymusic/server/internal/shared/apperror"
 	"xymusic/server/internal/shared/audiostatus"
 )
+
+var ErrDuplicateUsername = errors.New("username already exists")
 
 type Repository struct {
 	pool *pgxpool.Pool
@@ -227,6 +230,14 @@ func (repository *Repository) FindUser(
 }
 
 func (repository *Repository) CreateUser(ctx context.Context, input CreateUserParams) (string, error) {
+	userID, err := repository.createUser(ctx, input)
+	if isUniqueViolation(err) {
+		return "", ErrDuplicateUsername
+	}
+	return userID, err
+}
+
+func (repository *Repository) createUser(ctx context.Context, input CreateUserParams) (string, error) {
 	transaction, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return "", fmt.Errorf("begin managed user creation: %w", err)
@@ -253,6 +264,14 @@ func (repository *Repository) CreateUser(ctx context.Context, input CreateUserPa
 }
 
 func (repository *Repository) UpdateUser(ctx context.Context, input UpdateUserParams) error {
+	err := repository.updateUser(ctx, input)
+	if isUniqueViolation(err) {
+		return ErrDuplicateUsername
+	}
+	return err
+}
+
+func (repository *Repository) updateUser(ctx context.Context, input UpdateUserParams) error {
 	transaction, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin managed user update: %w", err)
@@ -273,9 +292,7 @@ func (repository *Repository) UpdateUser(ctx context.Context, input UpdateUserPa
 	if currentVersion != input.ExpectedVersion {
 		return userVersionConflict(input.ExpectedVersion, currentVersion)
 	}
-	removesAdministrator := currentRole == RoleAdmin && currentStatus == StatusActive &&
-		((input.Role != nil && *input.Role == RoleUser) ||
-			(input.Status != nil && (*input.Status == StatusSuspended || *input.Status == StatusDeleted)))
+	removesAdministrator := RemovesAdministratorAccess(currentRole, currentStatus, input.Role, input.Status)
 	if removesAdministrator {
 		rows, err := transaction.Query(ctx, `
 			SELECT id FROM users WHERE role = 'ADMIN' AND status = 'ACTIVE' FOR UPDATE
@@ -299,12 +316,8 @@ func (repository *Repository) UpdateUser(ctx context.Context, input UpdateUserPa
 		if err != nil {
 			return fmt.Errorf("iterate active administrators: %w", err)
 		}
-		if otherAdministrators < 1 {
-			return apperror.Conflict(
-				apperror.CodeInvalidStateTransition,
-				"The last active administrator cannot be removed",
-				nil,
-			)
+		if err := CanRemoveAdministrator(otherAdministrators); err != nil {
+			return err
 		}
 	}
 	set := []string{"version = version + 1", "updated_at = now()"}
@@ -342,8 +355,7 @@ func (repository *Repository) UpdateUser(ctx context.Context, input UpdateUserPa
 			return fmt.Errorf("update managed user profile: %w", err)
 		}
 	}
-	if (input.Status != nil && (*input.Status == StatusSuspended || *input.Status == StatusDeleted)) ||
-		(input.Role != nil && *input.Role == RoleUser) {
+	if RequiresSessionRevocation(input.Role, input.Status) {
 		if err := revokeAllUserSessions(ctx, transaction, input.UserID); err != nil {
 			return err
 		}
@@ -417,7 +429,7 @@ func (repository *Repository) UpdateStatus(
 	expectedVersion int,
 	status UserStatus,
 ) error {
-	if actorID == userID && status == StatusSuspended {
+	if IsSelfSuspension(actorID, userID, status) {
 		return apperror.Validation("Administrators cannot suspend their own account")
 	}
 	transaction, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
@@ -507,6 +519,14 @@ func userVersionConflict(expectedVersion, currentVersion int) error {
 		"expectedVersion": expectedVersion,
 		"currentVersion":  currentVersion,
 	})
+}
+
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var postgresError *pgconn.PgError
+	return errors.As(err, &postgresError) && postgresError.Code == "23505"
 }
 
 func appendAdminArgument(arguments *[]any, value any) int {

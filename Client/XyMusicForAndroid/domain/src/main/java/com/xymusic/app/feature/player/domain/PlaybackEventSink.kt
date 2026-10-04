@@ -1,5 +1,7 @@
 package com.xymusic.app.feature.player.domain
 
+import com.xymusic.app.feature.library.domain.model.PlaybackEvent
+
 data class PlaybackCheckpoint(
     val playbackSessionId: String,
     val queueItemId: String,
@@ -10,12 +12,7 @@ data class PlaybackCheckpoint(
     val event: PlaybackEventType,
 )
 
-enum class PlaybackEventType {
-    STARTED,
-    PROGRESS,
-    PAUSED,
-    COMPLETED,
-}
+typealias PlaybackEventType = PlaybackEvent
 
 fun interface PlaybackEventSink {
     suspend fun record(ownerUserId: String, checkpoint: PlaybackCheckpoint)

@@ -4,18 +4,18 @@ import (
 	"context"
 	"errors"
 
-	sharedidempotency "xymusic/server/internal/shared/idempotency"
+	platformidempotency "xymusic/server/internal/platform/idempotency"
 )
 
 // PersistentRefreshIdempotency adapts the shared encrypted PostgreSQL
 // idempotency service to the identity module's narrow refresh-token boundary.
 type PersistentRefreshIdempotency struct {
-	service *sharedidempotency.Service
+	service *platformidempotency.Service
 }
 
 var _ RefreshIdempotency = (*PersistentRefreshIdempotency)(nil)
 
-func NewPersistentRefreshIdempotency(service *sharedidempotency.Service) *PersistentRefreshIdempotency {
+func NewPersistentRefreshIdempotency(service *platformidempotency.Service) *PersistentRefreshIdempotency {
 	return &PersistentRefreshIdempotency{service: service}
 }
 
@@ -27,17 +27,17 @@ func (p *PersistentRefreshIdempotency) ExecuteRefresh(
 	if p == nil || p.service == nil {
 		return AuthSessionDTO{}, false, errors.New("persistent refresh idempotency service is required")
 	}
-	result, err := sharedidempotency.Execute(ctx, p.service, sharedidempotency.Input{
+	result, err := platformidempotency.Execute(ctx, p.service, platformidempotency.Input{
 		ActorID: input.ActorID,
 		Scope:   input.Scope,
 		Key:     input.Key,
 		Payload: input.Payload,
-	}, func() (sharedidempotency.HTTPResult[AuthSessionDTO], error) {
+	}, func() (platformidempotency.HTTPResult[AuthSessionDTO], error) {
 		session, err := operation(ctx)
 		if err != nil {
-			return sharedidempotency.HTTPResult[AuthSessionDTO]{}, err
+			return platformidempotency.HTTPResult[AuthSessionDTO]{}, err
 		}
-		return sharedidempotency.HTTPResult[AuthSessionDTO]{Status: 200, Body: session}, nil
+		return platformidempotency.HTTPResult[AuthSessionDTO]{Status: 200, Body: session}, nil
 	})
 	if err != nil {
 		return AuthSessionDTO{}, false, err

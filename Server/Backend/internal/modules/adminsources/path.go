@@ -2,8 +2,6 @@ package adminsources
 
 import (
 	"errors"
-	"io"
-	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -17,7 +15,7 @@ import (
 	"xymusic/server/internal/shared/pagination"
 )
 
-func validateRootInput(rootDirectory string, input RootMutation) (RootMutation, error) {
+func validateRootInput(rootDirectory string, probe RootProbe, input RootMutation) (RootMutation, error) {
 	input.Name = strings.TrimSpace(input.Name)
 	if input.Name == "" || utf8.RuneCountInString(input.Name) > 120 {
 		return RootMutation{}, apperror.Validation("Music source name is invalid")
@@ -40,26 +38,15 @@ func validateRootInput(rootDirectory string, input RootMutation) (RootMutation, 
 		return RootMutation{}, apperror.New(apperror.CodeValidationError, "Music source path is invalid", apperror.WithCause(err))
 	}
 	path = filepath.Clean(absolute)
-	metadata, err := os.Stat(path)
+	metadata, err := probe.Stat(path)
 	if err != nil || !metadata.IsDir() {
 		return RootMutation{}, apperror.New(apperror.CodeValidationError, "Music source path is not a directory", apperror.WithCause(err))
 	}
-	opened, err := os.Open(path)
-	if err != nil {
+	if err := probe.Readable(path); err != nil {
 		return RootMutation{}, apperror.New(apperror.CodeValidationError, "Music source path is not readable", apperror.WithCause(err))
 	}
-	_, readErr := opened.Readdirnames(1)
-	closeErr := opened.Close()
-	if (readErr != nil && !errors.Is(readErr, io.EOF)) || closeErr != nil {
-		return RootMutation{}, apperror.New(apperror.CodeValidationError, "Music source path is not readable", apperror.WithCause(errors.Join(readErr, closeErr)))
-	}
 	if input.Mode == RootModeReadWrite {
-		probe, err := os.CreateTemp(path, ".xymusic-write-probe-*")
-		if err != nil {
-			return RootMutation{}, apperror.New(apperror.CodeValidationError, "Music source path is not readable and writable", apperror.WithCause(err))
-		}
-		probePath := probe.Name()
-		if err := errors.Join(probe.Close(), os.Remove(probePath)); err != nil {
+		if err := probe.Writable(path); err != nil {
 			return RootMutation{}, apperror.New(apperror.CodeValidationError, "Music source path is not readable and writable", apperror.WithCause(err))
 		}
 	}
@@ -81,8 +68,8 @@ func validateRootInput(rootDirectory string, input RootMutation) (RootMutation, 
 	return input, nil
 }
 
-func browseDirectory(rootDirectory, value string, page, pageSize, offset int) (BrowseDTO, error) {
-	path, directories, err := readBrowseDirectories(rootDirectory, value)
+func browseDirectory(browser DirectoryBrowser, rootDirectory, value string, page, pageSize, offset int) (BrowseDTO, error) {
+	path, directories, err := readBrowseDirectories(browser, rootDirectory, value)
 	if err != nil {
 		return BrowseDTO{}, err
 	}
@@ -96,7 +83,7 @@ func browseDirectory(rootDirectory, value string, page, pageSize, offset int) (B
 	}, nil
 }
 
-func readBrowseDirectories(rootDirectory, value string) (string, []DirectoryDTO, error) {
+func readBrowseDirectories(browser DirectoryBrowser, rootDirectory, value string) (string, []DirectoryDTO, error) {
 	path := strings.TrimSpace(value)
 	if path == "" {
 		path = rootDirectory
@@ -108,11 +95,11 @@ func readBrowseDirectories(rootDirectory, value string) (string, []DirectoryDTO,
 		return "", nil, apperror.Validation("Browse path is not a directory")
 	}
 	path = filepath.Clean(absolute)
-	metadata, err := os.Stat(path)
+	metadata, err := browser.Stat(path)
 	if err != nil || !metadata.IsDir() {
 		return "", nil, apperror.New(apperror.CodeValidationError, "Browse path is not a directory", apperror.WithCause(err))
 	}
-	entries, err := os.ReadDir(path)
+	entries, err := browser.ReadDir(path)
 	if err != nil {
 		return "", nil, apperror.New(apperror.CodeValidationError, "Browse path is not a directory", apperror.WithCause(err))
 	}

@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import StatusBadge from "@/components/StatusBadge.vue";
 import type { AudioStatus } from "@/shared/domain/audio-status";
-import { trackAudioStatusPresentation } from "@/shared/presentation/audio-status";
+import { trackAudioStatusPresentation } from "@/features/music/presentation/audio-status";
 
 const props = defineProps<{
   status: AudioStatus;

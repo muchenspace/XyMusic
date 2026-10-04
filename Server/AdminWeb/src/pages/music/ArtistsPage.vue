@@ -18,6 +18,8 @@ import StatePanel from "@/components/StatePanel.vue";
 import type { ArtistSummary, MusicPage } from "@/features/music/domain/models";
 import { useMusicAdmin } from "@/app/services/music";
 import { DEFAULT_CATALOG_PAGE_SIZE } from "@/shared/presentation/pagination";
+import { useCursorPagination } from "@/shared/presentation/use-cursor-pagination";
+import { musicQueryKeys } from "@/features/music/presentation/query-keys";
 import { useUiStore } from "@/stores/ui";
 import { formatDate } from "@/utils/format";
 
@@ -27,10 +29,11 @@ const ui = useUiStore();
 const musicAdmin = useMusicAdmin();
 const search = ref("");
 const debounced = refDebounced(search, 300);
-const page = ref(1);
-const pageSize = ref(DEFAULT_CATALOG_PAGE_SIZE);
-const cursor = ref("");
-const cursorHistory = ref(new Map<number, string>());
+const { page, pageSize, cursor, reset: resetPaging, changePage, changePageSize } = useCursorPagination({
+  initialPageSize: DEFAULT_CATALOG_PAGE_SIZE,
+  isFetching: () => query.isFetching.value,
+  nextCursor: () => query.data.value?.nextCursor,
+});
 const selected = ref<ArtistSummary>();
 const selectedArtists = ref(new Map<string, ArtistSummary>());
 const selectedIds = computed(() => new Set(selectedArtists.value.keys()));
@@ -43,7 +46,7 @@ const form = reactive({ name: "", description: "" });
 const maximumBatchArtists = 200;
 
 const query = useQuery<MusicPage<ArtistSummary>, Error, MusicPage<ArtistSummary>, ArtistListQueryKey>({
-  queryKey: computed<ArtistListQueryKey>(() => ["admin", "artists", { page: page.value, pageSize: pageSize.value, search: debounced.value, cursor: cursor.value }]),
+  queryKey: computed<ArtistListQueryKey>(() => musicQueryKeys.artists({ page: page.value, pageSize: pageSize.value, search: debounced.value, cursor: cursor.value })),
   queryFn: ({ signal, queryKey }: QueryFunctionContext<ArtistListQueryKey>) => {
     const params = queryKey[2];
     return musicAdmin.listArtists({ ...params, cursorMode: "cursor", cursor: params.cursor || undefined, sort: "name", order: "asc" }, signal);
@@ -57,30 +60,7 @@ const pageArtists = computed(() => query.data.value?.items ?? []);
 const pageSelected = computed(() => pageArtists.value.length > 0 && pageArtists.value.every((artist) => selectedIds.value.has(artist.id)));
 const pagePartiallySelected = computed(() => !pageSelected.value && pageArtists.value.some((artist) => selectedIds.value.has(artist.id)));
 
-function resetPaging(): void {
-  page.value = 1;
-  cursor.value = "";
-  cursorHistory.value = new Map([[1, ""]]);
-}
-function changePage(nextPage: number): void {
-  if (query.isFetching.value || !Number.isSafeInteger(nextPage) || nextPage < 1 || nextPage === page.value) return;
-  const next = new Map(cursorHistory.value);
-  if (nextPage < page.value) cursor.value = next.get(nextPage) ?? "";
-  else {
-    const nextCursor = query.data.value?.nextCursor;
-    if (!nextCursor) return;
-    next.set(nextPage, nextCursor);
-    cursor.value = nextCursor;
-  }
-  cursorHistory.value = next;
-  page.value = nextPage;
-}
 function artistKey(artist: ArtistSummary): string { return artist.id; }
-
-function changePageSize(value: number): void {
-  pageSize.value = value;
-  resetPaging();
-}
 
 function edit(artist: ArtistSummary): void {
   selected.value = artist;
@@ -289,7 +269,7 @@ watch(editorOpen, (value) => {
           </article>
           </template>
         </VirtualGrid>
-        <AppPagination :page="page" :page-size="pageSize" :total="query.data.value.total" :total-pages="query.data.value.totalPages" cursor @change="changePage" @page-size-change="changePageSize" />
+        <AppPagination :page="page" :page-size="pageSize" :total="query.data.value.total" :total-pages="query.data.value.totalPages" @change="changePage" @page-size-change="changePageSize" />
       </template>
     </section>
 

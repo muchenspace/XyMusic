@@ -80,8 +80,3 @@ export function validateSetupComplete(
 ): z.SafeParseReturnType<unknown, SetupCompleteInput> {
   return setupCompleteSchema.safeParse(input) as z.SafeParseReturnType<unknown, SetupCompleteInput>;
 }
-
-
-export function normalizeSetupInput(input: unknown): SetupCompleteInput {
-  return setupCompleteSchema.parse(input) as SetupCompleteInput;
-}

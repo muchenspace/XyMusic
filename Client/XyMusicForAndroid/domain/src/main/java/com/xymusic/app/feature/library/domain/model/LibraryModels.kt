@@ -3,8 +3,6 @@ package com.xymusic.app.feature.library.domain.model
 import com.xymusic.app.core.model.media.Track
 import java.util.UUID
 
-data class FavoriteTrack(val track: Track, val favoritedAtEpochMillis: Long)
-
 data class PlaybackHistoryItem(
     val track: Track,
     val lastPositionMs: Long,

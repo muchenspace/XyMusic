@@ -111,18 +111,6 @@ class AppDnsTest {
         assertThat(systemCallCount.get()).isEqualTo(2)
     }
 
-    @Test
-    fun isIpAddressRecognizesIPv4AndIPv6() {
-        assertThat(AppDns.isIpAddress("223.5.5.5")).isTrue()
-        assertThat(AppDns.isIpAddress("127.0.0.1")).isTrue()
-        assertThat(AppDns.isIpAddress("::1")).isTrue()
-        assertThat(AppDns.isIpAddress("2400:3200::1")).isTrue()
-
-        assertThat(AppDns.isIpAddress("dns.alidns.com")).isFalse()
-        assertThat(AppDns.isIpAddress("example.com")).isFalse()
-        assertThat(AppDns.isIpAddress("999.999.999.999")).isFalse()
-    }
-
     private fun createAppDns(
         repository: AppSettingsRepository,
         systemDns: Dns = Dns.SYSTEM,

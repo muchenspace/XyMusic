@@ -6,7 +6,7 @@ import {
   selectDesktopLyricsMonitor,
   type DesktopLyricsMonitorGeometry,
   type PersistedDesktopLyricsPlacement,
-} from "../../application/services/DesktopLyricsPlacement";
+} from "../../shared/desktop-lyrics/DesktopLyricsPlacement";
 
 type PlacementStorage = Pick<Storage, "getItem" | "setItem">;
 

@@ -30,15 +30,11 @@ func (repository *Repository) ArchiveTracksBatch(
 		if err != nil {
 			return nil, err
 		}
-		if state.Version != item.ExpectedVersion {
-			return nil, versionConflict("Track", item.ExpectedVersion, state.Version, map[string]any{"trackId": item.TrackID})
+		if err := CheckTrackVersion(item.ExpectedVersion, state.Version, item.TrackID); err != nil {
+			return nil, err
 		}
-		if state.Status == "ARCHIVED" {
-			return nil, apperror.New(
-				apperror.CodeInvalidStateTransition,
-				"Track is already archived",
-				apperror.WithMetadata(map[string]any{"trackId": item.TrackID}),
-			)
+		if err := CanArchiveTrack(state.Status, item.TrackID); err != nil {
+			return nil, err
 		}
 		prepared = append(prepared, item)
 	}

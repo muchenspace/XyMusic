@@ -2,6 +2,7 @@ import { createApp, defineComponent, h, nextTick, ref } from "vue";
 import { createPinia } from "pinia";
 import { describe, expect, it, vi } from "vitest";
 import type { ApplicationServices } from "../src/application/services";
+import { LibraryBrowserService } from "../src/application/services/LibraryBrowserService";
 import type { Album, Track } from "../src/domain/music";
 import { useNavigationActions, type ScrollContainer } from "../src/presentation/composables/useNavigationActions";
 import { applicationServicesKey } from "../src/presentation/services";
@@ -28,6 +29,7 @@ describe("navigation actions", () => {
       catalog: { albumTracksPage },
       library: {},
       playlists: {},
+      libraryBrowser: new LibraryBrowserService({} as never),
     } as unknown as ApplicationServices);
     const element = document.createElement("div");
     document.body.appendChild(element);

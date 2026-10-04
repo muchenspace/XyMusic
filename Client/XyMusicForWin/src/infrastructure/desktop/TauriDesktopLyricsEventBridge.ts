@@ -1,12 +1,12 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import {
-  DESKTOP_LYRICS_EVENTS,
   type DesktopLyricsBridge,
   type DesktopLyricsUnlisten,
   type DesktopLyricsActionPayload,
   type DesktopLyricsClockPayload,
   type DesktopLyricsStatePayload,
 } from "../../application/ports/DesktopLyricsBridge";
+import { DESKTOP_LYRICS_EVENTS } from "./desktopLyricsEvents";
 
 export interface DesktopLyricsEventTransport {
   listen<T>(eventName: string, listener: (event: { payload: T }) => void): Promise<DesktopLyricsUnlisten>;

@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/text/unicode/norm"
 
-	"xymusic/server/internal/modules/adminmetadata"
+	"xymusic/server/internal/platform/mediafile"
 	sharedlyrics "xymusic/server/internal/shared/lyrics"
 )
 
@@ -243,7 +243,7 @@ func recordNewScanMetadata(
 	ctx context.Context,
 	transaction pgx.Tx,
 	trackID, sourceID string,
-	raw adminmetadata.MetadataSnapshot,
+	raw mediafile.MetadataSnapshot,
 	checksum string,
 	scannedAt time.Time,
 ) error {
@@ -259,7 +259,7 @@ func recordNewScanMetadata(
 	return nil
 }
 
-func encodeScanMetadata(raw adminmetadata.MetadataSnapshot) ([]byte, error) {
+func encodeScanMetadata(raw mediafile.MetadataSnapshot) ([]byte, error) {
 	if raw.Lyrics != nil {
 		if err := sharedlyrics.ValidateDocument(raw.Lyrics.Format, raw.Lyrics.Timing, raw.Lyrics.Content); err != nil {
 			return nil, fmt.Errorf("validate scanned local library metadata lyrics: %w", err)
@@ -308,7 +308,7 @@ func syncNewScannedLyrics(
 
 type trackArtistAssignment struct {
 	ArtistID string
-	Role     adminmetadata.CreditRole
+	Role     mediafile.CreditRole
 	Order    int
 }
 
@@ -354,8 +354,8 @@ func effectiveScanMetadata(
 	ctx context.Context,
 	transaction pgx.Tx,
 	trackID string,
-	raw adminmetadata.MetadataSnapshot,
-) (adminmetadata.MetadataSnapshot, bool, error) {
+	raw mediafile.MetadataSnapshot,
+) (mediafile.MetadataSnapshot, bool, error) {
 	var encoded []byte
 	err := transaction.QueryRow(ctx,
 		`SELECT overrides FROM track_metadata WHERE track_id=$1 FOR UPDATE`, trackID).Scan(&encoded)
@@ -363,34 +363,34 @@ func effectiveScanMetadata(
 		return raw, false, nil
 	}
 	if err != nil {
-		return adminmetadata.MetadataSnapshot{}, false, fmt.Errorf("lock local library metadata overrides: %w", err)
+		return mediafile.MetadataSnapshot{}, false, fmt.Errorf("lock local library metadata overrides: %w", err)
 	}
-	var overrides adminmetadata.MetadataOverrides
+	var overrides mediafile.MetadataOverrides
 	if err := json.Unmarshal(encoded, &overrides); err != nil {
-		return adminmetadata.MetadataSnapshot{}, false, fmt.Errorf("decode local library metadata overrides: %w", err)
+		return mediafile.MetadataSnapshot{}, false, fmt.Errorf("decode local library metadata overrides: %w", err)
 	}
-	effective, err := adminmetadata.ApplyMetadataOverrides(raw, overrides)
+	effective, err := mediafile.ApplyMetadataOverrides(raw, overrides)
 	if err != nil {
-		return adminmetadata.MetadataSnapshot{}, false, fmt.Errorf("apply local library metadata overrides: %w", err)
+		return mediafile.MetadataSnapshot{}, false, fmt.Errorf("apply local library metadata overrides: %w", err)
 	}
-	_, overridesLyrics := overrides[string(adminmetadata.FieldLyrics)]
+	_, overridesLyrics := overrides[string(mediafile.FieldLyrics)]
 	return effective, overridesLyrics, nil
 }
 
 func resolveMetadataArtists(
 	ctx context.Context,
 	transaction pgx.Tx,
-	metadata adminmetadata.MetadataSnapshot,
+	metadata mediafile.MetadataSnapshot,
 	cache *scanCatalogCache,
 ) ([]trackArtistAssignment, []string, error) {
 	credits := metadata.Credits
 	if len(credits) == 0 {
-		credits = []adminmetadata.MetadataCredit{{Name: "Unknown Artist", Role: adminmetadata.CreditPrimary}}
+		credits = []mediafile.MetadataCredit{{Name: "Unknown Artist", Role: mediafile.CreditPrimary}}
 	}
 	albumArtists := metadata.AlbumArtists
 	if len(albumArtists) == 0 {
 		for _, credit := range credits {
-			if credit.Role == adminmetadata.CreditPrimary {
+			if credit.Role == mediafile.CreditPrimary {
 				albumArtists = append(albumArtists, credit.Name)
 			}
 		}
@@ -408,7 +408,7 @@ func resolveMetadataArtists(
 		return nil, nil, err
 	}
 	assignments := make([]trackArtistAssignment, 0, len(credits))
-	roleOrders := make(map[adminmetadata.CreditRole]int)
+	roleOrders := make(map[mediafile.CreditRole]int)
 	seenCredits := make(map[string]struct{})
 	for _, credit := range credits {
 		artistID := ids[normalizeCatalogText(credit.Name)]
@@ -744,7 +744,7 @@ func upsertScanTrack(
 	transaction pgx.Tx,
 	trackID string,
 	exists bool,
-	metadata adminmetadata.MetadataSnapshot,
+	metadata mediafile.MetadataSnapshot,
 	durationMS *int64,
 	albumID *string,
 	artists []trackArtistAssignment,
@@ -816,7 +816,7 @@ func recordScanMetadata(
 	ctx context.Context,
 	transaction pgx.Tx,
 	trackID, sourceID string,
-	raw adminmetadata.MetadataSnapshot,
+	raw mediafile.MetadataSnapshot,
 	checksum string,
 	scannedAt time.Time,
 ) error {
@@ -847,15 +847,15 @@ func recordScanMetadata(
 	if err != nil {
 		return fmt.Errorf("lock scanned local library metadata: %w", err)
 	}
-	var previousRaw adminmetadata.MetadataSnapshot
+	var previousRaw mediafile.MetadataSnapshot
 	if err := json.Unmarshal(existingRaw, &previousRaw); err != nil {
 		return fmt.Errorf("decode previous local library metadata: %w", err)
 	}
-	var overrides adminmetadata.MetadataOverrides
+	var overrides mediafile.MetadataOverrides
 	if err := json.Unmarshal(overridesJSON, &overrides); err != nil {
 		return fmt.Errorf("decode local library metadata overrides: %w", err)
 	}
-	changed := !adminmetadata.MetadataSnapshotsEqual(previousRaw, raw) ||
+	changed := !mediafile.MetadataSnapshotsEqual(previousRaw, raw) ||
 		existingSource == nil || *existingSource != sourceID || existingChecksum == nil || *existingChecksum != checksum
 	nextVersion := version
 	if changed {

@@ -5,8 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-
 	"xymusic/server/internal/shared/apperror"
 )
 
@@ -97,14 +95,14 @@ type artistMutationFenceStub struct {
 	commit        func(ArtistCandidate) error
 }
 
-func (fence *artistMutationFenceStub) Lock(context.Context, pgx.Tx) error {
+func (fence *artistMutationFenceStub) Lock(context.Context, MediaTx) error {
 	fence.called = true
 	return fence.err
 }
 
 func (fence *artistMutationFenceStub) CommitSuccess(
 	_ context.Context,
-	_ pgx.Tx,
+	_ MediaTx,
 	candidate ArtistCandidate,
 ) error {
 	fence.successCalled = true

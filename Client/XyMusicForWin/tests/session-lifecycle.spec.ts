@@ -3,6 +3,8 @@ import { createPinia } from "pinia";
 import { flushPromises } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApplicationServices } from "../src/application/services";
+import { HomeFeedService } from "../src/application/services/HomeFeedService";
+import { LyricsCacheService } from "../src/application/services/LyricsCacheService";
 import type { Track } from "../src/domain/music";
 import { useSessionLifecycle } from "../src/presentation/composables/useSessionLifecycle";
 import { applicationServicesKey } from "../src/presentation/services";
@@ -73,12 +75,23 @@ describe("session workspace restoration", () => {
 });
 
 function createServices(restorePlayback: (ownerKey: string) => unknown): ApplicationServices {
+  const catalog = {
+    home: vi.fn(async () => { throw new Error("offline"); }),
+    randomAlbums: vi.fn(async () => []),
+    randomTracks: vi.fn(async () => []),
+  };
   return {
-    catalog: {
-      home: vi.fn(async () => { throw new Error("offline"); }),
-      randomAlbums: vi.fn(async () => []),
-      randomTracks: vi.fn(async () => []),
-    },
+    catalog,
+    homeFeed: new HomeFeedService(catalog as never, {
+      delay: (callback: () => void) => {
+        const handle = window.setTimeout(callback, 0);
+        return () => window.clearTimeout(handle);
+      },
+      whenIdle: (callback: () => void) => {
+        const handle = window.setTimeout(callback, 0);
+        return () => window.clearTimeout(handle);
+      },
+    }),
     library: {},
     playlists: {},
     playbackSession: new FakePlaybackSession({
@@ -124,8 +137,9 @@ function createServices(restorePlayback: (ownerKey: string) => unknown): Applica
       dispose() {},
     },
     session: {
-      restore: vi.fn(async () => null),
+      restore: vi.fn(async () => ({ kind: "success" as const, current: true, value: null })),
       serverConfig: vi.fn(() => ({ protocol: "http", host: "music.test", port: "3000" })),
+      sessionOwnerKey: (server: { protocol: string; host: string; port: string }, userId: string) => `${server.protocol}://${server.host}:${server.port}|${userId}`,
     },
     desktop: {
       async onMediaAction() { return () => undefined; },
@@ -169,6 +183,7 @@ function createServices(restorePlayback: (ownerKey: string) => unknown): Applica
       writeLyricsOffset() {},
       clearLyricsOffsets() {},
     },
+    lyricsCache: new LyricsCacheService({ getLyrics: vi.fn(async () => null) }),
   } as unknown as ApplicationServices;
 }
 

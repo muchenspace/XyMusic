@@ -12,15 +12,12 @@ import (
 	"xymusic/server/internal/shared/apperror"
 	"xymusic/server/internal/shared/pagination"
 	"xymusic/server/internal/shared/tagwriteback"
+	"xymusic/server/internal/shared/timeformat"
 )
 
 type Service struct {
 	store   Store
 	cursors *pagination.CursorCodec
-}
-
-func NewService(store Store) (*Service, error) {
-	return NewServiceWithOptions(store, nil)
 }
 
 func NewServiceWithOptions(store Store, cursors *pagination.CursorCodec) (*Service, error) {
@@ -134,7 +131,7 @@ func (service *Service) EnqueueWriteback(
 	}
 	job, err := service.store.EnqueueWriteback(ctx, actorID, trackID, validated)
 	if err != nil {
-		return WritebackJobDTO{}, err
+		return WritebackJobDTO{}, TranslateMetadataError(err)
 	}
 	return presentWriteback(job), nil
 }
@@ -234,7 +231,7 @@ func (service *Service) RetryWriteback(
 	}
 	job, err := service.store.RetryWriteback(ctx, actorID, jobID, validated)
 	if err != nil {
-		return WritebackJobDTO{}, err
+		return WritebackJobDTO{}, TranslateMetadataError(err)
 	}
 	return presentWriteback(job), nil
 }
@@ -375,15 +372,11 @@ func validWritebackStatus(value WritebackStatus, allowEmpty bool) bool {
 }
 
 func formatTimestamp(value time.Time) string {
-	return value.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+	return timeformat.Timestamp(value)
 }
 
 func formatOptionalTimestamp(value *time.Time) *string {
-	if value == nil {
-		return nil
-	}
-	formatted := formatTimestamp(*value)
-	return &formatted
+	return timeformat.OptionalTimestamp(value)
 }
 
 func userFacingWritebackError(message, code *string) *string {

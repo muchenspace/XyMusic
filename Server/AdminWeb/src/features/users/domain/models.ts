@@ -1,7 +1,8 @@
 import type { ArtworkSummary } from "@/shared/domain/artwork";
+import type { Page, PageQuery } from "@/shared/domain/pagination";
+import type { UserRole, UserStatus } from "@/shared/domain/user-role";
 
-export type UserStatus = "ACTIVE" | "SUSPENDED" | "DELETED";
-export type UserRole = "ADMIN" | "USER";
+export type { UserRole, UserStatus } from "@/shared/domain/user-role";
 
 export interface UserSummary {
   id: string;
@@ -54,21 +55,11 @@ export interface UpdateUserInput {
   reason?: string;
 }
 
-export interface UserListQuery {
+export type UserListQuery = PageQuery & {
   page: number;
   pageSize: number;
-  search?: string;
   status?: string;
   role?: string;
-  cursor?: string;
-  cursorMode?: "cursor" | "offset";
-}
+};
 
-export interface UserPage {
-  items: UserSummary[];
-  page: number;
-  pageSize: number;
-  total: number;
-  totalPages?: number;
-  nextCursor?: string;
-}
+export type UserPage = Page<UserSummary>;

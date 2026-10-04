@@ -66,10 +66,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xymusic.app.R
-import com.xymusic.app.app.playlist.toPlaylistVisibility
 import com.xymusic.app.core.ui.component.MediaArtwork
 import com.xymusic.app.core.ui.layout.isWideLandscape
 import com.xymusic.app.core.ui.media.PlaylistEditorDialog
+import com.xymusic.app.core.ui.media.toPlaylistVisibility
 import com.xymusic.app.feature.library.presentation.LibraryTab
 import com.xymusic.app.feature.library.presentation.LibraryUiState
 import com.xymusic.app.feature.playlist.domain.model.PlaylistSummary

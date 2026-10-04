@@ -16,6 +16,7 @@ import (
 	sharedlyrics "xymusic/server/internal/shared/lyrics"
 	"xymusic/server/internal/shared/pagination"
 	"xymusic/server/internal/shared/tagwriteback"
+	"xymusic/server/internal/shared/timeformat"
 )
 
 const defaultCatalogPageSize = 100
@@ -26,13 +27,6 @@ type Service struct {
 	cursors  *pagination.CursorCodec
 }
 
-func NewService(store Store, artworks ArtworkPresenter) (*Service, error) {
-	return NewServiceWithOptions(store, artworks, nil)
-}
-
-// NewServiceWithOptions enables signed keyset cursors for the high-volume
-// admin catalog endpoints. NewService remains available for small/local
-// callers and keeps the legacy offset behavior when no codec is supplied.
 func NewServiceWithOptions(
 	store Store,
 	artworks ArtworkPresenter,
@@ -881,7 +875,7 @@ func truncateRunes(value string, maximum int) string {
 }
 
 func formatTimestamp(value time.Time) string {
-	return value.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+	return timeformat.Timestamp(value)
 }
 
 func validOrder(value SortOrder) bool { return value == SortAscending || value == SortDescending }

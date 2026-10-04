@@ -28,8 +28,8 @@ export class SourceAdminUseCases {
     return this.gateway.update(sourceId, { ...input, expectedVersion: expectedVersion! });
   }
 
-  delete(sourceId: string, expectedVersion: number, _archiveCatalog = false): Promise<void> {
-    return this.gateway.delete(sourceId, expectedVersion, false);
+  delete(sourceId: string, expectedVersion: number, archiveCatalog = false): Promise<void> {
+    return this.gateway.delete(sourceId, expectedVersion, archiveCatalog);
   }
 
   browse(path: string, query: SourcePageQuery, signal?: AbortSignal): Promise<DirectoryListing> {

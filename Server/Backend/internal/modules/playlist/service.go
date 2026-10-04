@@ -7,11 +7,12 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf16"
 
 	"xymusic/server/internal/modules/catalog"
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/httpx"
 	"xymusic/server/internal/shared/pagination"
+	"xymusic/server/internal/shared/timeformat"
 )
 
 const (
@@ -452,7 +453,7 @@ func validateCreate(input CreateInput) (string, *string, Visibility, error) {
 
 func validateName(value string) (string, error) {
 	trimmed := strings.TrimSpace(value)
-	length := javascriptStringLength(trimmed)
+	length := httpx.JavascriptStringLength(trimmed)
 	if length < 1 || length > 100 {
 		return "", apperror.Validation("name must contain 1 to 100 characters")
 	}
@@ -464,7 +465,7 @@ func validateDescription(value *string) (*string, error) {
 		return nil, nil
 	}
 	trimmed := strings.TrimSpace(*value)
-	if javascriptStringLength(trimmed) > 1000 {
+	if httpx.JavascriptStringLength(trimmed) > 1000 {
 		return nil, apperror.Validation("description cannot exceed 1000 characters")
 	}
 	return &trimmed, nil
@@ -575,16 +576,8 @@ func firstPage[T any](items []T, limit int) ([]T, bool) {
 	return items[:limit], true
 }
 
-func javascriptStringLength(value string) int {
-	length := 0
-	for _, character := range value {
-		length += utf16.RuneLen(character)
-	}
-	return length
-}
-
 func formatTimestamp(value time.Time) string {
-	return value.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+	return timeformat.Timestamp(value)
 }
 
 func marshalBody(value any) (json.RawMessage, error) {

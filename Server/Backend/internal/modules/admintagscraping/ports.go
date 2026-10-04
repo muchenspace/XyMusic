@@ -2,6 +2,7 @@ package admintagscraping
 
 import (
 	"context"
+	"io"
 	"time"
 )
 
@@ -15,6 +16,63 @@ type MusicPlatform interface {
 type ArtworkApplier interface {
 	ApplyAlbumArtwork(context.Context, string, string, DownloadedArtwork) error
 	ApplyArtistArtwork(context.Context, string, string, int, bool, DownloadedArtwork) error
+}
+
+// MediaUploadPurpose mirrors the admin media purposes this module reserves.
+type MediaUploadPurpose string
+
+const (
+	MediaPurposeArtistArtwork MediaUploadPurpose = "ARTIST_ARTWORK"
+	MediaPurposeAlbumArtwork  MediaUploadPurpose = "ALBUM_ARTWORK"
+)
+
+// MediaRow and MediaCommandTag mirror the subset of the admin media
+// persistence result contracts this module depends on.
+type MediaRow interface {
+	Scan(dest ...any) error
+}
+
+type MediaCommandTag interface {
+	RowsAffected() int64
+}
+
+// MediaTx is the narrow transaction contract completion fences use.
+type MediaTx interface {
+	QueryRow(ctx context.Context, sql string, args ...any) MediaRow
+	Exec(ctx context.Context, sql string, args ...any) (MediaCommandTag, error)
+}
+
+type MediaCompletionFence interface {
+	Lock(context.Context, MediaTx) error
+}
+
+type MediaCreateUploadInput struct {
+	Purpose        MediaUploadPurpose
+	TargetID       string
+	FileName       string
+	ContentType    string
+	SizeBytes      int64
+	ChecksumSHA256 string
+}
+
+type MediaCompleteUploadInput struct {
+	CompletionFence MediaCompletionFence
+}
+
+type MediaUploadReservation struct {
+	ID string
+}
+
+type MediaUploadCompletion struct {
+	UploadID string
+	AssetID  string
+}
+
+type AdminMediaAPI interface {
+	CreateUpload(context.Context, string, string, MediaCreateUploadInput) (MediaUploadReservation, bool, error)
+	UploadDirect(context.Context, string, io.Reader, int64) error
+	CompleteUpload(context.Context, string, string, string, MediaCompleteUploadInput) (MediaUploadCompletion, bool, error)
+	AbandonUpload(context.Context, string, string) error
 }
 
 type Logger interface {

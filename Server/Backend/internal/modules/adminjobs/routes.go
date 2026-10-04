@@ -11,13 +11,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf16"
 
 	"github.com/gin-gonic/gin"
 
 	"xymusic/server/internal/modules/adminauth"
 	"xymusic/server/internal/platform/httpserver"
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/httpx"
 	"xymusic/server/internal/shared/pagination"
 	"xymusic/server/internal/shared/sse"
 )
@@ -318,7 +318,7 @@ func routeUUID(value string) (string, error) {
 }
 
 func routeJavascriptLength(value string) int {
-	return len(utf16.Encode([]rune(value)))
+	return httpx.JavascriptStringLength(value)
 }
 
 func routeContractError() error {

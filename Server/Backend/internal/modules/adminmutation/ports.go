@@ -2,10 +2,10 @@ package adminmutation
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"xymusic/server/internal/modules/catalog"
+	"xymusic/server/internal/shared/idempotencyport"
 )
 
 type Store interface {
@@ -52,19 +52,12 @@ type ArtworkPresenter interface {
 	Artworks(context.Context, []string) (map[string]catalog.ArtworkDTO, error)
 }
 
-type IdempotencyInput struct {
-	ActorID, Scope, Key string
-	Payload             any
-}
-type IdempotencyResponse struct {
-	Status int
-	Body   json.RawMessage
-}
-type IdempotencyResult struct {
-	Status   int
-	Body     json.RawMessage
-	Replayed bool
-}
+type IdempotencyInput = idempotencyport.Input
+
+type IdempotencyResponse = idempotencyport.Response
+
+type IdempotencyResult = idempotencyport.Result
+
 type Idempotency interface {
 	Execute(context.Context, IdempotencyInput, func() (IdempotencyResponse, error)) (IdempotencyResult, error)
 }

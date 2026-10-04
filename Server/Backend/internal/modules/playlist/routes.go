@@ -16,6 +16,7 @@ import (
 
 	"xymusic/server/internal/platform/httpserver"
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/httpx"
 )
 
 type API interface {
@@ -348,7 +349,7 @@ func optionalCursor(c *gin.Context) (string, error) {
 	if !exists {
 		return "", nil
 	}
-	length := javascriptStringLength(value)
+	length := httpx.JavascriptStringLength(value)
 	if length < 1 || length > 512 {
 		return "", routePlaylistValidationError()
 	}
@@ -388,11 +389,11 @@ func bindUUID(value, _ string) (string, error) {
 }
 
 func validateCreateRoute(input CreateInput) error {
-	length := javascriptStringLength(input.Name)
+	length := httpx.JavascriptStringLength(input.Name)
 	if length < 1 || length > 100 {
 		return routePlaylistValidationError()
 	}
-	if input.Description.Set && input.Description.Value != nil && javascriptStringLength(*input.Description.Value) > 1000 {
+	if input.Description.Set && input.Description.Value != nil && httpx.JavascriptStringLength(*input.Description.Value) > 1000 {
 		return routePlaylistValidationError()
 	}
 	if !validVisibility(input.Visibility) {
@@ -409,12 +410,12 @@ func validateUpdateRoute(input UpdateInput) error {
 		return routePlaylistValidationError()
 	}
 	if input.Name.Set {
-		length := javascriptStringLength(input.Name.Value)
+		length := httpx.JavascriptStringLength(input.Name.Value)
 		if length < 1 || length > 100 {
 			return routePlaylistValidationError()
 		}
 	}
-	if input.Description.Set && input.Description.Value != nil && javascriptStringLength(*input.Description.Value) > 1000 {
+	if input.Description.Set && input.Description.Value != nil && httpx.JavascriptStringLength(*input.Description.Value) > 1000 {
 		return routePlaylistValidationError()
 	}
 	if input.Visibility.Set && !validVisibility(input.Visibility.Value) {

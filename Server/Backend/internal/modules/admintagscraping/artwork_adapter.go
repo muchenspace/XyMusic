@@ -6,21 +6,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"io"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-
-	"xymusic/server/internal/modules/adminmedia"
 )
-
-type AdminMediaAPI interface {
-	CreateUpload(context.Context, string, string, adminmedia.CreateUploadInput) (adminmedia.UploadReservationDTO, bool, error)
-	UploadDirect(context.Context, string, io.Reader, int64) error
-	CompleteUpload(context.Context, string, string, string, adminmedia.CompleteUploadInput) (adminmedia.UploadCompletionDTO, bool, error)
-	AbandonUpload(context.Context, string, string) error
-}
 
 const artworkCompletionTimeout = 2 * time.Minute
 
@@ -28,7 +17,6 @@ type AdminMediaArtworkApplier struct {
 	media AdminMediaAPI
 }
 
-var _ AdminMediaAPI = (*adminmedia.Service)(nil)
 var _ ArtworkApplier = (*AdminMediaArtworkApplier)(nil)
 
 func NewAdminMediaArtworkApplier(media AdminMediaAPI) (*AdminMediaArtworkApplier, error) {
@@ -45,8 +33,8 @@ func (adapter *AdminMediaArtworkApplier) ApplyAlbumArtwork(
 	artwork DownloadedArtwork,
 ) error {
 	digest := sha256.Sum256(artwork.Bytes)
-	upload, _, err := adapter.media.CreateUpload(ctx, actorID, uuid.NewString(), adminmedia.CreateUploadInput{
-		Purpose:        adminmedia.PurposeAlbumArtwork,
+	upload, _, err := adapter.media.CreateUpload(ctx, actorID, uuid.NewString(), MediaCreateUploadInput{
+		Purpose:        MediaPurposeAlbumArtwork,
 		TargetID:       albumID,
 		FileName:       "scraped-cover." + artwork.Extension,
 		ContentType:    artwork.ContentType,
@@ -67,7 +55,7 @@ func (adapter *AdminMediaArtworkApplier) ApplyAlbumArtwork(
 		actorID,
 		upload.ID,
 		uuid.NewString(),
-		adminmedia.CompleteUploadInput{CompletionFence: &artworkCompletionFence{
+		MediaCompleteUploadInput{CompletionFence: &artworkCompletionFence{
 			executionContext: ctx,
 			mutationFence:    completionMutationFenceFromContext(ctx),
 		}},
@@ -102,7 +90,7 @@ type artworkCompletionFence struct {
 	mutationFence    artworkMutationFence
 }
 
-func (fence *artworkCompletionFence) Lock(ctx context.Context, tx pgx.Tx) error {
+func (fence *artworkCompletionFence) Lock(ctx context.Context, tx MediaTx) error {
 	if fence == nil {
 		return nil
 	}

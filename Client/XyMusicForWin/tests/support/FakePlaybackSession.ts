@@ -5,8 +5,8 @@ import type {
   QueueStart,
 } from "../../src/application/ports/PlaybackSession";
 import type { Track } from "../../src/domain/music";
-import type { PlayMode } from "../../src/domain/playbackState";
-import { splitPlayMode } from "../../src/domain/playbackState";
+import type { PlayMode } from "../../src/application/playbackMode";
+import { splitPlayMode } from "../../src/application/playbackMode";
 
 interface FakePlaybackSessionOptions {
   state?: Partial<PlaybackSessionState>;

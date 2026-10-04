@@ -1,7 +1,7 @@
 import { computed, onScopeDispose, ref, shallowReactive, toRef } from "vue";
 import { defineStore } from "pinia";
 import type { Track } from "../../domain/music";
-import { derivePlayMode, type PlayMode } from "../../domain/playbackState";
+import { derivePlayMode, type PlayMode } from "../../application/playbackMode";
 import type { PlaybackQueue, PlaybackTerminalEvent } from "../../application/ports/PlaybackSession";
 import { useApplicationServices } from "../services";
 

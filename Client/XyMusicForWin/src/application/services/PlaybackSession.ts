@@ -1,8 +1,10 @@
 import type { AudioSnapshot, AudioPlayer } from "../ports/AudioPlayer";
+import { CancellationSource, cancellationReason, type CancellationToken } from "../ports/Cancellation";
 import type { DesktopWindow } from "../ports/DesktopWindow";
 import type { Diagnostics } from "../ports/Diagnostics";
 import type { Notifier } from "../ports/Notifier";
 import type { PageLifecycle } from "../ports/PageLifecycle";
+import type { PlaybackEvent } from "../ports/PlaybackRepository";
 import type {
   PlaybackSession as PlaybackSessionPort,
   PlaybackQueue,
@@ -20,10 +22,10 @@ import type {
 import {
   cyclePlayMode as nextPlayMode,
   derivePlayMode,
-  normalizeResumePosition,
   splitPlayMode,
   type PlayMode,
-} from "../../domain/playbackState";
+} from "../playbackMode";
+import { normalizeResumePosition } from "../../domain/playbackState";
 import {
   nextTrackIndex,
   previousTrackIndex,
@@ -60,14 +62,14 @@ export class PlaybackSession implements PlaybackSessionPort {
   private loadRequest = 0;
   private playbackSessionId: string;
   private lastCheckpoint = 0;
-  private loadController: AbortController | null = null;
+  private loadController: CancellationSource | null = null;
   private lastNativePosition = -1;
   private pendingResumeTrackId = "";
   private pendingResumePosition = 0;
   private pendingResumeWasExplicitSeek = false;
   private pendingSeekTrackId = "";
   private pendingSeekSeconds: number | null = null;
-  private prefetchController: AbortController | null = null;
+  private prefetchController: CancellationSource | null = null;
   private prefetchedIndex = -1;
   private transitioning = false;
   private transitionActivated = false;
@@ -276,7 +278,7 @@ export class PlaybackSession implements PlaybackSessionPort {
     }
     const request = ++this.loadRequest;
     this.loadController?.abort();
-    const controller = new AbortController();
+    const controller = new CancellationSource();
     this.loadController = controller;
     const sessionId = this.playbackSessionId;
     const resumePosition = this.audio.snapshot().currentTime;
@@ -287,11 +289,11 @@ export class PlaybackSession implements PlaybackSessionPort {
         track.id,
         controller.signal,
       );
-      if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
+      if (request !== this.loadRequest || controller.aborted || this.currentTrack !== track) return;
       if (resolution.refreshed) {
         this.activeGrant = resolution.grant;
         await this.loadAudioGrant(resolution.grant, controller.signal);
-        if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
+        if (request !== this.loadRequest || controller.aborted || this.currentTrack !== track) return;
       }
       const pendingPosition = this.takePendingSeekPosition(track.id);
       if (resolution.refreshed || pendingPosition !== null) {
@@ -305,12 +307,12 @@ export class PlaybackSession implements PlaybackSessionPort {
         await this.mediaErrorRecovery;
         return;
       }
-      if (request === this.loadRequest && !controller.signal.aborted && !isAbortError(cause) && this.currentTrack === track) {
+      if (request === this.loadRequest && !controller.aborted && !isAbortError(cause) && this.currentTrack === track) {
         try {
           await this.reloadAndPlayCurrentTrack(track, sessionId, resumePosition, controller, request);
           return;
         } catch (retryCause) {
-          if (request !== this.loadRequest || controller.signal.aborted || isAbortError(retryCause)) return;
+          if (request !== this.loadRequest || controller.aborted || isAbortError(retryCause)) return;
           const message = errorMessage(retryCause, "播放失败");
           this.resumeAttemptActive = false;
           this.lastNativeStatus = "stopped";
@@ -749,23 +751,23 @@ export class PlaybackSession implements PlaybackSessionPort {
     track: ReadonlyTrack,
     sessionId: string,
     position: number,
-    controller: AbortController,
+    controller: CancellationSource,
     request: number,
   ): Promise<void> {
     this.playbackGrants.invalidate(track.id);
     await this.loadTrackWithRetry(track, controller, request);
-    if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track) return;
+    if (request !== this.loadRequest || controller.aborted || this.currentTrack !== track) return;
     const pendingPosition = this.takePendingSeekPosition(track.id);
     this.restoreResumePosition(track, pendingPosition ?? position, pendingPosition !== null);
     await this.audio.play();
-    if (request !== this.loadRequest || controller.signal.aborted || this.currentTrack !== track || this.playbackSessionId !== sessionId) return;
+    if (request !== this.loadRequest || controller.aborted || this.currentTrack !== track || this.playbackSessionId !== sessionId) return;
     this.markPlaybackStarted(track, sessionId);
   }
 
   private async retryCurrentTrackAfterMediaError(track: ReadonlyTrack): Promise<void> {
     const request = ++this.loadRequest;
     this.loadController?.abort();
-    const controller = new AbortController();
+    const controller = new CancellationSource();
     this.loadController = controller;
     const sessionId = this.playbackSessionId;
     const position = this.audio.snapshot().currentTime;
@@ -773,7 +775,7 @@ export class PlaybackSession implements PlaybackSessionPort {
     try {
       await this.reloadAndPlayCurrentTrack(track, sessionId, position, controller, request);
     } catch (cause) {
-      if (request === this.loadRequest && !controller.signal.aborted && !isAbortError(cause) && this.currentTrack === track) {
+      if (request === this.loadRequest && !controller.aborted && !isAbortError(cause) && this.currentTrack === track) {
         const message = errorMessage(cause, "播放失败");
         this.resumeAttemptActive = false;
         this.lastNativeStatus = "stopped";
@@ -806,7 +808,7 @@ export class PlaybackSession implements PlaybackSessionPort {
     const request = ++this.loadRequest;
     this.loadController?.abort();
     this.clearPrefetch();
-    const controller = new AbortController();
+    const controller = new CancellationSource();
     this.loadController = controller;
     this.updateState({ loading: true, error: "" });
     this.finishPlaybackSession(previousSession, terminalEvent);
@@ -840,7 +842,7 @@ export class PlaybackSession implements PlaybackSessionPort {
     this.desktopPlayback.setPlayback("paused", initialPosition, selectedTrack.duration);
     try {
       await this.loadTrackWithRetry(selectedTrack, controller, request);
-      if (request !== this.loadRequest || controller.signal.aborted) return false;
+      if (request !== this.loadRequest || controller.aborted) return false;
       const pendingSeekPosition = this.takePendingSeekPosition(selectedTrack.id);
       const targetPosition = pendingSeekPosition ?? initialPosition;
       if (targetPosition > 0) {
@@ -853,9 +855,9 @@ export class PlaybackSession implements PlaybackSessionPort {
       this.pendingResumeTrackId = "";
       this.pendingResumePosition = 0;
       this.pendingResumeWasExplicitSeek = false;
-      if (request !== this.loadRequest || controller.signal.aborted) return false;
+      if (request !== this.loadRequest || controller.aborted) return false;
       await this.audio.play();
-      if (request !== this.loadRequest || controller.signal.aborted) return false;
+      if (request !== this.loadRequest || controller.aborted) return false;
       const startedAt = this.audio.snapshot().currentTime;
       this.playbackSessionStarted = true;
       this.updateState({ error: "" });
@@ -865,7 +867,7 @@ export class PlaybackSession implements PlaybackSessionPort {
       void this.prepareNext();
       return true;
     } catch (cause) {
-      if (request === this.loadRequest && !controller.signal.aborted && !isAbortError(cause)) {
+      if (request === this.loadRequest && !controller.aborted && !isAbortError(cause)) {
         const message = errorMessage(cause, "无法播放该曲目");
         this.updateState({ error: message });
         this.diagnostics.error("playback", `${selectedTrack.title}: ${message}`);
@@ -942,7 +944,7 @@ export class PlaybackSession implements PlaybackSessionPort {
     void this.recordPlayback(session.track, session.sessionId, position, event);
   }
 
-  private async record(event: "STARTED" | "PROGRESS" | "PAUSED" | "COMPLETED"): Promise<void> {
+  private async record(event: PlaybackEvent): Promise<void> {
     const track = this.currentTrack;
     if (!track) return;
     await this.recordPlayback(track, this.playbackSessionId, this.stateValue.currentTime, event);
@@ -952,19 +954,19 @@ export class PlaybackSession implements PlaybackSessionPort {
     track: ReadonlyTrack,
     sessionId: string,
     position: number,
-    event: "STARTED" | "PROGRESS" | "PAUSED" | "COMPLETED",
+    event: PlaybackEvent,
   ): Promise<void> {
     await this.playback.record(track.id, sessionId, position * 1000, event).catch(() => undefined);
   }
 
   private async loadTrackWithRetry(
     track: ReadonlyTrack,
-    controller: AbortController,
+    controller: CancellationSource,
     request: number,
   ): Promise<void> {
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      if (request !== this.loadRequest || controller.signal.aborted) throw abortReason(controller.signal);
+      if (request !== this.loadRequest || controller.aborted) throw cancellationReason(controller);
       try {
         const grant = await this.playbackGrants.get(
           track.id,
@@ -975,11 +977,11 @@ export class PlaybackSession implements PlaybackSessionPort {
         await this.loadAudioGrant(grant, controller.signal);
         return;
       } catch (cause) {
-        if (controller.signal.aborted || isAbortError(cause)) throw cause;
+        if (controller.aborted || isAbortError(cause)) throw cause;
         lastError = cause;
         this.diagnostics.warn("playback", `${track.title}: playback attempt ${attempt + 1} failed`);
         this.playbackGrants.invalidate(track.id);
-        if (attempt < 2) await this.retryDelay(RETRY_DELAYS[attempt]!, controller.signal);
+        if (attempt < 2) await this.retryDelay(RETRY_DELAYS[attempt]!, controller);
       }
     }
     throw lastError;
@@ -996,12 +998,12 @@ export class PlaybackSession implements PlaybackSessionPort {
       : nextTrackIndex(this.stateValue.queue.length, this.stateValue.currentIndex, this.stateValue.shuffled);
     const track = this.stateValue.queue[index];
     if (!track) return;
-    const controller = new AbortController();
+    const controller = new CancellationSource();
     this.prefetchController = controller;
     try {
       const grant = await this.playbackGrants.get(track.id, controller.signal);
       await this.preloadAudioGrant(grant, controller.signal);
-      if (!controller.signal.aborted && this.prefetchController === controller) {
+      if (!controller.aborted && this.prefetchController === controller) {
         this.prefetchedIndex = index;
         this.prefetchedGrant = grant;
       }
@@ -1183,25 +1185,18 @@ export class PlaybackSession implements PlaybackSessionPort {
     });
   }
 
-  private retryDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
+  private retryDelay(milliseconds: number, token: CancellationToken): Promise<void> {
     return new Promise((resolve, reject) => {
       let cancelDelay: (() => void) | undefined;
-      const cleanup = () => signal.removeEventListener("abort", aborted);
-      const completed = () => {
-        cleanup();
-        resolve();
-      };
-      const aborted = () => {
+      const removeAbortListener = token.onAbort(() => {
         cancelDelay?.();
-        cleanup();
-        reject(abortReason(signal));
-      };
-      if (signal.aborted) {
-        aborted();
-        return;
-      }
-      signal.addEventListener("abort", aborted, { once: true });
-      cancelDelay = this.scheduler.delay(completed, milliseconds);
+        reject(cancellationReason(token));
+      });
+      if (token.aborted) return;
+      cancelDelay = this.scheduler.delay(() => {
+        removeAbortListener();
+        resolve();
+      }, milliseconds);
     });
   }
 
@@ -1229,16 +1224,6 @@ function isAbortError(cause: unknown): boolean {
     && cause !== null
     && "name" in cause
     && (cause as { name?: unknown }).name === "AbortError";
-}
-
-function abortReason(signal: AbortSignal): unknown {
-  return signal.reason ?? createAbortError("Request cancelled");
-}
-
-function createAbortError(message: string): Error {
-  const error = new Error(message);
-  error.name = "AbortError";
-  return error;
 }
 
 function validBitrate(value: number | undefined): number {

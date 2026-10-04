@@ -9,14 +9,14 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode/utf16"
 
 	"github.com/google/uuid"
 
-	"xymusic/server/internal/config"
 	"xymusic/server/internal/modules/identity"
-	"xymusic/server/internal/platform/localmedia"
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/clock"
+	"xymusic/server/internal/shared/httpx"
+	"xymusic/server/internal/shared/timeformat"
 )
 
 const (
@@ -33,7 +33,7 @@ type ServiceDependencies struct {
 	Repository   Store
 	CurrentUsers CurrentUserReader
 	Idempotency  Idempotency
-	LocalMedia   *localmedia.Store
+	LocalMedia   AssetStore
 	Inspector    AvatarInspector
 	Clock        Clock
 	Sleeper      Sleeper
@@ -44,7 +44,7 @@ type Service struct {
 	repository     Store
 	currentUsers   CurrentUserReader
 	idempotency    Idempotency
-	localMedia     *localmedia.Store
+	localMedia     AssetStore
 	inspector      AvatarInspector
 	clock          Clock
 	sleeper        Sleeper
@@ -53,7 +53,11 @@ type Service struct {
 	maxUploadBytes int64
 }
 
-func NewService(cfg config.Config, dependencies ServiceDependencies) (*Service, error) {
+func NewService(
+	uploadURLTTLSeconds int,
+	maxUploadBytes int64,
+	dependencies ServiceDependencies,
+) (*Service, error) {
 	if dependencies.Repository == nil {
 		return nil, errors.New("profile repository is required")
 	}
@@ -66,6 +70,9 @@ func NewService(cfg config.Config, dependencies ServiceDependencies) (*Service, 
 	if dependencies.LocalMedia == nil {
 		return nil, errors.New("profile local media store is required")
 	}
+	if dependencies.Inspector == nil {
+		return nil, errors.New("profile avatar inspector is required")
+	}
 	if dependencies.Clock == nil {
 		dependencies.Clock = systemClock{}
 	}
@@ -75,24 +82,12 @@ func NewService(cfg config.Config, dependencies ServiceDependencies) (*Service, 
 	if dependencies.IDGenerator == nil {
 		dependencies.IDGenerator = uuid.NewString
 	}
-	uploadURLTTL := time.Duration(cfg.MediaStorage.UploadTTLSeconds) * time.Second
+	uploadURLTTL := time.Duration(uploadURLTTLSeconds) * time.Second
 	if uploadURLTTL <= 0 {
 		uploadURLTTL = 300 * time.Second
 	}
-	maxUploadBytes := cfg.MediaStorage.MaxUploadBytes
 	if maxUploadBytes < 1 {
 		maxUploadBytes = 1024 * 1024 * 1024
-	}
-	if dependencies.Inspector == nil {
-		inspector, err := NewFFmpegAvatarInspector(
-			dependencies.LocalMedia,
-			cfg.Media.FFprobePath,
-			cfg.Media.FFmpegPath,
-		)
-		if err != nil {
-			return nil, err
-		}
-		dependencies.Inspector = inspector
 	}
 	return &Service{
 		repository:     dependencies.Repository,
@@ -180,15 +175,14 @@ func (s *Service) CreateAvatarUpload(
 				return AvatarUploadDTO{}, err
 			}
 
-			uploadPath := fmt.Sprintf("/api/v1/users/me/avatar/uploads/%s", upload.ID)
+			// The transport layer assembles uploadUrl/uploadPath from the
+			// upload ID so the service stays free of HTTP route knowledge.
 			return AvatarUploadDTO{
 				ID:              upload.ID,
 				Purpose:         upload.Purpose,
 				TargetID:        upload.TargetID,
 				Status:          upload.Status,
 				Method:          "PUT",
-				UploadURL:       uploadPath,
-				UploadPath:      uploadPath,
 				RequiredHeaders: map[string]string{"Content-Type": input.ContentType},
 				ExpiresAt:       formatTime(upload.ExpiresAt),
 			}, nil
@@ -339,7 +333,7 @@ func validateProfileChanges(input UpdateProfileInput) (ProfileChanges, error) {
 	changes := ProfileChanges{}
 	if input.DisplayName.Set {
 		name := strings.TrimSpace(input.DisplayName.Value)
-		if length := javascriptStringLength(name); length < 1 || length > 64 {
+		if length := httpx.JavascriptStringLength(name); length < 1 || length > 64 {
 			return ProfileChanges{}, apperror.Validation("displayName must contain 1 to 64 characters")
 		}
 		changes.DisplayNameSet = true
@@ -349,7 +343,7 @@ func validateProfileChanges(input UpdateProfileInput) (ProfileChanges, error) {
 		changes.BioSet = true
 		if input.Bio.Value != nil {
 			bio := strings.TrimSpace(*input.Bio.Value)
-			if length := javascriptStringLength(bio); length > 500 {
+			if length := httpx.JavascriptStringLength(bio); length > 500 {
 				return ProfileChanges{}, apperror.Validation("bio must contain at most 500 characters")
 			}
 			changes.Bio = &bio
@@ -359,7 +353,7 @@ func validateProfileChanges(input UpdateProfileInput) (ProfileChanges, error) {
 }
 
 func validateCreateAvatarInput(input CreateAvatarUploadInput, maxBytes int64) error {
-	if length := javascriptStringLength(input.FileName); length < 1 || length > 255 {
+	if length := httpx.JavascriptStringLength(input.FileName); length < 1 || length > 255 {
 		return apperror.Validation("fileName must contain 1 to 255 characters")
 	}
 	if input.ContentType != "image/jpeg" && input.ContentType != "image/png" && input.ContentType != "image/webp" {
@@ -374,17 +368,11 @@ func validateCreateAvatarInput(input CreateAvatarUploadInput, maxBytes int64) er
 	return nil
 }
 
-func javascriptStringLength(value string) int {
-	return len(utf16.Encode([]rune(value)))
-}
-
 func formatTime(value time.Time) string {
-	return value.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+	return timeformat.Timestamp(value)
 }
 
-type systemClock struct{}
-
-func (systemClock) Now() time.Time { return time.Now() }
+type systemClock = clock.System
 
 type contextSleeper struct{}
 

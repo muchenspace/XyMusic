@@ -41,7 +41,7 @@ export function useSessionLifecycle(resetDialogs: () => void, clearActionError: 
     services.playbackSession.clearGrants();
     if (!userId) { resetApplicationState(false); return; }
     navigation.reset();
-    const ownerKey = `${session.serverConfig.protocol}://${session.serverConfig.host}:${session.serverConfig.port}|${userId}`;
+    const ownerKey = services.session.sessionOwnerKey(session.serverConfig, userId);
     player.restoreState(ownerKey);
     await home.load();
     if (session.session?.user.id !== userId) return;

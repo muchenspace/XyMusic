@@ -32,6 +32,10 @@ kotlin {
 
 dependencies {
     api(project(":core:model"))
+    api(project(":domain"))
+
+    api(libs.androidx.paging.runtime)
+    api(libs.kotlinx.coroutines.core)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

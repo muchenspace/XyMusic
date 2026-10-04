@@ -8,8 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"xymusic/server/internal/config"
-	"xymusic/server/internal/platform/security"
 	"xymusic/server/internal/shared/apperror"
 )
 
@@ -158,15 +156,14 @@ func TestRegisterNormalizesAndCreatesProfileBackedUser(t *testing.T) {
 
 func TestRegisterExplainsWhenSelfServiceRegistrationIsDisabled(t *testing.T) {
 	t.Parallel()
-	service, err := NewService(config.Config{
-		Registration: config.Registration{Enabled: false},
-		Security:     config.Security{RefreshTokenTTLSeconds: 3600},
-	}, ServiceDependencies{
+	service, err := NewService(3600, false, ServiceDependencies{
 		Repository:   &storeStub{},
 		AccessTokens: tokenStub{},
 		Idempotency:  &idempotencyStub{},
 		ArtworkURLs:  artworkSignerStub{},
 		Passwords:    fakePasswords{},
+		Secrets:      SecuritySecretHasher{},
+		OpaqueToken:  func() (string, error) { return strings.Repeat("o", 64), nil },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -200,7 +197,7 @@ func TestLoginCreatesCompatibleSessionResponse(t *testing.T) {
 		if input.Device.Name != "Desktop" || input.Device.AppVersion != "2.0" {
 			t.Fatalf("device was not trimmed: %#v", input.Device)
 		}
-		if input.RefreshTokenHash != security.HashSecret(strings.Repeat("t", 64)) {
+		if input.RefreshTokenHash != testHashSecret(strings.Repeat("t", 64)) {
 			t.Fatalf("refresh token hash = %q", input.RefreshTokenHash)
 		}
 		if input.RefreshTokenFamilyID != "family-1" || !input.RefreshTokenExpiresAt.Equal(now.Add(time.Hour)) {
@@ -270,7 +267,7 @@ func TestRefreshTokenReuseRevokesFamilyAndSession(t *testing.T) {
 	}
 	store := &storeStub{}
 	store.findRefreshRecord = func(_ context.Context, hash string) (RefreshRecord, error) {
-		if hash != security.HashSecret(token) {
+		if hash != testHashSecret(token) {
 			t.Fatalf("token hash = %q", hash)
 		}
 		return record, nil
@@ -296,7 +293,7 @@ func TestRefreshTokenReuseRevokesFamilyAndSession(t *testing.T) {
 		t.Fatalf("unexpected idempotency input: %#v", idempotency.input)
 	}
 	payload, ok := idempotency.input.Payload.(map[string]string)
-	if !ok || payload["refreshTokenHash"] != security.HashSecret(token) {
+	if !ok || payload["refreshTokenHash"] != testHashSecret(token) {
 		t.Fatalf("unexpected idempotency payload: %#v", idempotency.input.Payload)
 	}
 	if len(idempotency.input.RequestHash) != 64 {
@@ -327,7 +324,7 @@ func TestRefreshRotatesTokenAndReturnsNewSessionCredentials(t *testing.T) {
 		if input.TokenID != "token-1" || input.SessionID != "session-1" || input.FamilyID != "family-1" || input.ParentTokenID != "token-1" {
 			t.Fatalf("unexpected rotation linkage: %#v", input)
 		}
-		if input.TokenHash != security.HashSecret(newToken) || !input.ExpiresAt.Equal(now.Add(time.Hour)) || !input.ConsumedAt.Equal(now) {
+		if input.TokenHash != testHashSecret(newToken) || !input.ExpiresAt.Equal(now.Add(time.Hour)) || !input.ConsumedAt.Equal(now) {
 			t.Fatalf("unexpected rotation token data: %#v", input)
 		}
 		return nil
@@ -372,9 +369,9 @@ func TestAdminRefreshIdempotencyReplaysAndRejectsChangedTokenPayload(t *testing.
 	store := &storeStub{}
 	store.findRefreshRecord = func(_ context.Context, hash string) (RefreshRecord, error) {
 		switch hash {
-		case security.HashSecret(originalToken):
+		case testHashSecret(originalToken):
 			return recordFor("token-original"), nil
-		case security.HashSecret(differentToken):
+		case testHashSecret(differentToken):
 			return recordFor("token-different"), nil
 		default:
 			return RefreshRecord{}, ErrNotFound
@@ -383,7 +380,7 @@ func TestAdminRefreshIdempotencyReplaysAndRejectsChangedTokenPayload(t *testing.
 	rotations := 0
 	store.rotateRefreshToken = func(_ context.Context, input RotateRefreshTokenParams) error {
 		rotations++
-		if input.TokenID != "token-original" || input.TokenHash != security.HashSecret(rotatedToken) {
+		if input.TokenID != "token-original" || input.TokenHash != testHashSecret(rotatedToken) {
 			t.Fatalf("rotation=%+v", input)
 		}
 		return nil
@@ -469,7 +466,7 @@ func TestAuthenticateChecksBackedSessionAndAuthorizationVersion(t *testing.T) {
 			AuthSession{ID: sessionID, UserID: userID}, nil
 	}
 	service := newTestServiceWith(t, store, testDependencies{tokens: tokenStub{
-		principal: security.Principal{UserID: "user-1", SessionID: "session-1", AuthVersion: 4, Role: "ADMIN"},
+		principal: Principal{UserID: "user-1", SessionID: "session-1", AuthVersion: 4, Role: "ADMIN"},
 	}})
 	actor, err := service.Authenticate(context.Background(), "Bearer signed-token")
 	if err != nil {
@@ -483,7 +480,7 @@ func TestAuthenticateChecksBackedSessionAndAuthorizationVersion(t *testing.T) {
 func TestAuthenticateMapsExpiredAndStaleTokens(t *testing.T) {
 	t.Parallel()
 	t.Run("expired access token", func(t *testing.T) {
-		service := newTestServiceWith(t, &storeStub{}, testDependencies{tokens: tokenStub{verifyErr: security.ErrExpiredAccessToken}})
+		service := newTestServiceWith(t, &storeStub{}, testDependencies{tokens: tokenStub{verifyErr: ErrExpiredAccessToken}})
 		_, err := service.Authenticate(context.Background(), "Bearer expired")
 		if !apperror.IsCode(err, apperror.CodeAccessTokenExpired) {
 			t.Fatalf("Authenticate() error = %v, want ACCESS_TOKEN_EXPIRED", err)
@@ -495,7 +492,7 @@ func TestAuthenticateMapsExpiredAndStaleTokens(t *testing.T) {
 			return User{ID: "user-1", Role: RoleUser, Status: UserStatusActive, AuthVersion: 2},
 				AuthSession{ID: "session-1", UserID: "user-1"}, nil
 		}
-		service := newTestServiceWith(t, store, testDependencies{tokens: tokenStub{principal: security.Principal{
+		service := newTestServiceWith(t, store, testDependencies{tokens: tokenStub{principal: Principal{
 			UserID: "user-1", SessionID: "session-1", Role: "USER", AuthVersion: 1,
 		}}})
 		_, err := service.Authenticate(context.Background(), "Bearer stale")
@@ -568,6 +565,10 @@ func TestLogoutAndLogoutAllUseActorScope(t *testing.T) {
 	if !logoutCalled || !logoutAllCalled {
 		t.Fatalf("logout called = %v, logout-all called = %v", logoutCalled, logoutAllCalled)
 	}
+}
+
+func testHashSecret(value string) string {
+	return SecuritySecretHasher{}.HashSecret(value)
 }
 
 type storeStub struct {
@@ -672,15 +673,15 @@ func (fakePasswords) Verify(password, encoded string) (bool, error) {
 }
 
 type tokenStub struct {
-	principal security.Principal
+	principal Principal
 	verifyErr error
 }
 
-func (t tokenStub) Issue(principal security.Principal) (string, time.Time, error) {
+func (t tokenStub) Issue(principal Principal) (string, time.Time, error) {
 	return "access-token", time.Date(2026, time.July, 16, 8, 15, 0, 123_000_000, time.UTC), nil
 }
 
-func (t tokenStub) Verify(string) (security.Principal, error) {
+func (t tokenStub) Verify(string) (Principal, error) {
 	return t.principal, t.verifyErr
 }
 
@@ -790,15 +791,13 @@ func newTestServiceWith(t *testing.T, store Store, overrides testDependencies) *
 	if overrides.opaqueToken == nil {
 		overrides.opaqueToken = func() (string, error) { return strings.Repeat("o", 64), nil }
 	}
-	service, err := NewService(config.Config{
-		Registration: config.Registration{Enabled: true},
-		Security:     config.Security{RefreshTokenTTLSeconds: 3600},
-	}, ServiceDependencies{
+	service, err := NewService(3600, true, ServiceDependencies{
 		Repository:   store,
 		AccessTokens: overrides.tokens,
 		Idempotency:  overrides.idempotency,
 		ArtworkURLs:  artworkSignerStub{},
 		Passwords:    fakePasswords{},
+		Secrets:      SecuritySecretHasher{},
 		Clock:        overrides.clock,
 		IDGenerator:  overrides.idGenerator,
 		OpaqueToken:  overrides.opaqueToken,

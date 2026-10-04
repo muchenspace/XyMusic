@@ -2,8 +2,9 @@ package adminmetadata
 
 import (
 	"context"
-	"encoding/json"
 	"time"
+
+	"xymusic/server/internal/shared/idempotencyport"
 )
 
 type Store interface {
@@ -45,18 +46,6 @@ type WritebackCommit struct {
 	Metadata       MetadataSnapshot
 }
 
-type ProcessResult struct {
-	Stdout          string
-	Stderr          string
-	ExitCode        int
-	TimedOut        bool
-	StdoutTruncated bool
-}
-
-type ProcessRunner interface {
-	Run(context.Context, string, []string, time.Duration) (ProcessResult, error)
-}
-
 type ArtworkDownloader interface {
 	DownloadToFile(context.Context, string, string, int64) error
 }
@@ -71,23 +60,11 @@ type Logger interface {
 	Error(string, map[string]any)
 }
 
-type IdempotencyInput struct {
-	ActorID string
-	Scope   string
-	Key     string
-	Payload any
-}
+type IdempotencyInput = idempotencyport.Input
 
-type IdempotencyResponse struct {
-	Status int
-	Body   json.RawMessage
-}
+type IdempotencyResponse = idempotencyport.Response
 
-type IdempotencyResult struct {
-	Status   int
-	Body     json.RawMessage
-	Replayed bool
-}
+type IdempotencyResult = idempotencyport.Result
 
 type Idempotency interface {
 	Execute(context.Context, IdempotencyInput, func() (IdempotencyResponse, error)) (IdempotencyResult, error)

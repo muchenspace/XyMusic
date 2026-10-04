@@ -39,11 +39,11 @@ func (repository *Repository) DeleteTrackPermanently(
 	if err != nil {
 		return DeleteResult{}, fmt.Errorf("query permanently deleted track: %w", err)
 	}
-	if version != expectedVersion {
-		return DeleteResult{}, versionConflict("Track", expectedVersion, version, nil)
+	if err := CheckTrackVersion(expectedVersion, version, ""); err != nil {
+		return DeleteResult{}, TranslateMutationError(err)
 	}
-	if status != "ARCHIVED" {
-		return DeleteResult{}, apperror.Conflict(apperror.CodeInvalidStateTransition, "Track must be in the recycle bin before permanent deletion", nil)
+	if err := CanDeleteTrackPermanently(status, ""); err != nil {
+		return DeleteResult{}, TranslateMutationError(err)
 	}
 
 	type sourceRecord struct {
@@ -140,13 +140,7 @@ func (repository *Repository) DeleteTrackPermanently(
 		_ = tx.Rollback(ctx)
 		return DeleteResult{}, err
 	}
-	conflictJobID := ""
-	for _, job := range writebacks {
-		if job.status == "PROCESSING" || (job.status == "PENDING" && job.workerHeld) {
-			conflictJobID = job.id
-			break
-		}
-	}
+	conflictJobID := DeletionWritebackConflict(writebacks)
 	if conflictJobID != "" {
 		if _, err := tx.Exec(ctx, `
 			UPDATE metadata_writeback_jobs SET

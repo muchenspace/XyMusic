@@ -10,7 +10,7 @@ import com.xymusic.app.core.network.MediaHttpClient
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.session.SessionInvalidator
-import com.xymusic.app.feature.player.data.media.PlaybackCache
+import com.xymusic.app.feature.player.data.media.OfflineMediaCache
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
 import com.xymusic.app.feature.player.domain.PlayerRepository
 import com.xymusic.app.feature.player.domain.PlayerResult
@@ -33,7 +33,7 @@ constructor(
     private val database: XyMusicDatabase,
     private val playerRepository: PlayerRepository,
     private val playbackGrantRepository: PlaybackGrantRepository,
-    private val playbackCache: PlaybackCache,
+    private val offlineMediaCache: OfflineMediaCache,
     private val searchOverviewStore: SearchOverviewStore,
     private val profileMemoryCache: ProfileMemoryCache,
     @ApiHttpClient private val apiHttpClient: OkHttpClient,
@@ -72,7 +72,7 @@ constructor(
         val ownerUserId = (sessionProvider.sessionState.value as? AppSessionState.SignedIn)?.userId
         attempt { sessionInvalidator.invalidateSession(ownerUserId) }
         attempt { database.clearAllTables() }
-        attempt { playbackCache.clear() }
+        attempt { offlineMediaCache.clear() }
         attempt { playbackGrantRepository.clear() }
         attempt { searchOverviewStore.clearMemory() }
         attempt { profileMemoryCache.clear() }

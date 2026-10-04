@@ -44,10 +44,12 @@ describe("desktop lyrics Tauri configuration", () => {
 
   it("routes the overlay to its lightweight entry instead of the main application", () => {
     const mainSource = readFileSync(path.join(projectRoot, "src/main.ts"), "utf8");
+    const containerSource = readFileSync(path.join(projectRoot, "src/infrastructure/container.ts"), "utf8");
 
     expect(mainSource).toContain('get("window") === "desktop-lyrics"');
-    expect(mainSource).toContain('import("./desktop-lyrics")');
-    expect(mainSource.indexOf('import("./desktop-lyrics")')).toBeLessThan(mainSource.indexOf('import("./App.vue")'));
+    expect(mainSource).toContain("createDesktopLyricsWindowServices");
+    expect(mainSource.indexOf("createDesktopLyricsWindowServices")).toBeLessThan(mainSource.indexOf('import("./App.vue")'));
+    expect(containerSource).toContain('import("../desktop-lyrics")');
   });
 });
 

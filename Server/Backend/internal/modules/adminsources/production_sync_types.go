@@ -4,7 +4,7 @@ import (
 	"os"
 	"time"
 
-	"xymusic/server/internal/modules/adminmetadata"
+	"xymusic/server/internal/platform/mediafile"
 	sharedlyrics "xymusic/server/internal/shared/lyrics"
 )
 
@@ -33,20 +33,20 @@ type scannedLyric struct {
 }
 
 type standardFileMutation struct {
-	RootID              string
-	ScanRunID           string
-	TrackID             string
-	File                DiscoveredFile
-	Metadata            os.FileInfo
-	Raw                 adminmetadata.MetadataSnapshot
-	Probed              *adminmetadata.ProbedMetadataFile
-	Checksum            string
-	Existing            localSourceRecord
-	ExistingFound       bool
-	Lyrics              []scannedLyric
-	Artwork             *stagedArtwork
-	CatalogCache        *scanCatalogCache
-	SeenAt              time.Time
+	RootID        string
+	ScanRunID     string
+	TrackID       string
+	File          DiscoveredFile
+	Metadata      os.FileInfo
+	Raw           mediafile.MetadataSnapshot
+	Probed        *mediafile.ProbedMetadataFile
+	Checksum      string
+	Existing      localSourceRecord
+	ExistingFound bool
+	Lyrics        []scannedLyric
+	Artwork       *stagedArtwork
+	CatalogCache  *scanCatalogCache
+	SeenAt        time.Time
 }
 
 const localSourceColumns = `

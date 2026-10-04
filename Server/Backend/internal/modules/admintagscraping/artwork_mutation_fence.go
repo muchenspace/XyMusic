@@ -2,18 +2,16 @@ package admintagscraping
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5"
 )
 
 type artworkMutationFence interface {
-	Lock(context.Context, pgx.Tx) error
+	Lock(context.Context, MediaTx) error
 }
 
 // artistArtworkSuccessFence lets an artist batch persist its successful item
 // inside the same transaction that makes the artwork visible.
 type artistArtworkSuccessFence interface {
-	CommitSuccess(context.Context, pgx.Tx, ArtistCandidate) error
+	CommitSuccess(context.Context, MediaTx, ArtistCandidate) error
 }
 
 type artworkMutationFenceContextKey struct{}

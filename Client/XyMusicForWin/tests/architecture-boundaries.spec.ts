@@ -11,6 +11,13 @@ const forbiddenImports: Record<(typeof layerRoots)[number], ReadonlySet<string>>
   presentation: new Set(["infrastructure"]),
   "desktop-lyrics": new Set(["infrastructure", "presentation"]),
 };
+// shared may depend on domain only; everything above domain is off-limits.
+const sharedForbiddenImports: ReadonlySet<string> = new Set([
+  "application",
+  "infrastructure",
+  "presentation",
+  "desktop-lyrics",
+]);
 
 describe("source architecture boundaries", () => {
   it("keeps dependencies pointing inward", () => {
@@ -152,6 +159,92 @@ describe("source architecture boundaries", () => {
 
     expect(main).toMatch(/\bdisposePinia\(pinia\);/u);
     expect(main.indexOf("disposePinia(pinia)")).toBeLessThan(main.indexOf("services.playbackSession.dispose()"));
+  });
+
+  it("keeps shared dependencies below application and out of host APIs", () => {
+    const violations: string[] = [];
+    for (const file of sourceFiles(path.join(sourceRoot, "shared"))) {
+      const source = readFileSync(file, "utf8");
+      for (const specifier of relativeImports(source)) {
+        const target = path.resolve(path.dirname(file), specifier);
+        const targetLayer = path.relative(sourceRoot, target).split(path.sep)[0] ?? "";
+        if (sharedForbiddenImports.has(targetLayer)) {
+          violations.push(`${relative(file)} imports ${targetLayer} through ${specifier}`);
+        }
+      }
+      if (/\b(?:localStorage|sessionStorage)\b|\bfetch\s*\(|\b__TAURI_INTERNALS__\b|\bnavigator\.(?:clipboard|userAgent)\b/u.test(source)) {
+        violations.push(`${relative(file)} touches a host API`);
+      }
+      if (/from\s*["']@tauri-apps\//u.test(source) || /import\s*\(\s*["']@tauri-apps\//u.test(source)) {
+        violations.push(`${relative(file)} imports @tauri-apps`);
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  it("keeps application port contracts free of framework and outer-layer imports", () => {
+    const violations: string[] = [];
+    for (const file of sourceFiles(path.join(sourceRoot, "application/ports"))) {
+      const source = readFileSync(file, "utf8");
+      if (/from\s*["'](?:vue|pinia)["']/u.test(source)
+        || /from\s*["'][^"']*\/infrastructure(?:\/|["'])/u.test(source)
+        || /from\s*["'][^"']*\/presentation(?:\/|["'])/u.test(source)
+        || /from\s*["'][^"']*\/desktop-lyrics(?:\/|["'])/u.test(source)
+        || /from\s*["']@tauri-apps\//u.test(source)) {
+        violations.push(relative(file));
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  it("keeps infrastructure independent from presentation and desktop-lyrics", () => {
+    const violations: string[] = [];
+    for (const file of sourceFiles(path.join(sourceRoot, "infrastructure"))) {
+      const source = readFileSync(file, "utf8");
+      for (const specifier of relativeImports(source)) {
+        const target = path.resolve(path.dirname(file), specifier);
+        const targetLayer = path.relative(sourceRoot, target).split(path.sep)[0] ?? "";
+        if (targetLayer === "presentation" || targetLayer === "desktop-lyrics") {
+          violations.push(`${relative(file)} imports ${targetLayer} through ${specifier}`);
+        }
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  it("keeps dynamic imports inside the same layer boundaries", () => {
+    const violations: string[] = [];
+    const dynamicPattern = /import\s*\(\s*["'](\.{1,2}\/[^"']+)["']\s*\)/gu;
+    // The composition root may reference any layer when wiring window entries.
+    const compositionRoots = new Set(["infrastructure/container.ts"]);
+    for (const sourceLayer of layerRoots) {
+      for (const file of sourceFiles(path.join(sourceRoot, sourceLayer))) {
+        if (compositionRoots.has(relative(file))) continue;
+        const source = readFileSync(file, "utf8");
+        for (const match of source.matchAll(dynamicPattern)) {
+          const target = path.resolve(path.dirname(file), match[1]!);
+          const targetLayer = path.relative(sourceRoot, target).split(path.sep)[0] ?? "";
+          if (forbiddenImports[sourceLayer].has(targetLayer)) {
+            violations.push(`${relative(file)} dynamically imports ${targetLayer} through ${match[1]}`);
+          }
+        }
+      }
+    }
+    for (const file of sourceFiles(path.join(sourceRoot, "shared"))) {
+      const source = readFileSync(file, "utf8");
+      for (const match of source.matchAll(dynamicPattern)) {
+        const target = path.resolve(path.dirname(file), match[1]!);
+        const targetLayer = path.relative(sourceRoot, target).split(path.sep)[0] ?? "";
+        if (sharedForbiddenImports.has(targetLayer)) {
+          violations.push(`${relative(file)} dynamically imports ${targetLayer} through ${match[1]}`);
+        }
+      }
+    }
+
+    expect(violations).toEqual([]);
   });
 });
 

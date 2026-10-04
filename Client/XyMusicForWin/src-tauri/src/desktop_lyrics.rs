@@ -45,6 +45,16 @@ pub struct DesktopLyricsWindowState {
     fullscreen_behavior: FullscreenBehavior,
 }
 
+/// Owns the native side of the desktop-lyrics window contract.
+///
+/// Authority split (single source of truth): the application layer
+/// (`DesktopLyricsController`) owns the user's desired intent, optimistic
+/// revisions and rollback policy. This module only mirrors the latest desired
+/// state, applies native window primitives and reports the native state back
+/// with its own monotonic revision so the application can confirm or recover.
+/// It must not introduce additional product policy beyond the fullscreen
+/// visibility rule below, which the application configures via
+/// `fullscreen_behavior`.
 #[derive(Debug, Default)]
 struct DesktopLyricsManagerState {
     desired: DesktopLyricsState,

@@ -17,12 +17,9 @@ import (
 
 	"xymusic/server/internal/app"
 	"xymusic/server/internal/config"
-	"xymusic/server/internal/control"
-	"xymusic/server/internal/modules/adminweb"
 	"xymusic/server/internal/modules/setup"
 	"xymusic/server/internal/platform/database"
 	"xymusic/server/internal/platform/httpserver"
-	"xymusic/server/internal/platform/workerstatus"
 )
 
 const (
@@ -139,42 +136,23 @@ func runServer(
 		allowedHosts = nil
 	}
 
-	workerMonitor, err := workerstatus.New(workerstatus.Options{Path: configurationPath + ".worker-status"})
-	if err != nil {
-		logger.Error("configure worker status monitor", "error", err)
-		return 1
-	}
-	settingsStore := config.NewStore(configurationPath)
-	var manager *control.Manager
-	factory := control.RuntimeFactoryFunc(func(buildContext context.Context, candidate config.Config) (control.ManagedRuntime, error) {
-		runtime, err := app.Bootstrap(buildContext, candidate, app.Options{
-			RootDirectory: root, StartBackground: false, Logger: logger,
-			Administration: &app.AdministrationOptions{
-				Runtime: manager, Store: settingsStore, Worker: workerMonitor,
-				ConfigurationPath: configurationPath,
-				IPv4ListenerHost:  listeners.IPv4Host, IPv4ListenerPort: listeners.IPv4Port,
-				IPv6ListenerHost: listeners.IPv6Host, IPv6ListenerPort: listeners.IPv6Port,
-				ApplicationVersion: applicationVersion, StartedAt: processStartedAt,
-			},
-		})
-		if err != nil {
-			return nil, err
-		}
-		return control.RuntimeAdapter{
-			Handler:   runtime.Handler,
-			ReadyFunc: runtime.Ready,
-			CloseFunc: runtime.CloseContext,
-		}, nil
+	controlRuntime, err := app.NewControlRuntime(app.ControlRuntimeOptions{
+		RootDirectory: root, ConfigurationPath: configurationPath, Configured: configured,
+		AdminWebDirectory: adminDirectory, Listeners: listeners,
+		CORS: cors, TrustedProxies: trustedProxies, AllowedHosts: allowedHosts,
+		ApplicationVersion: applicationVersion, ProcessStartedAt: processStartedAt, Logger: logger,
 	})
-	source := setup.RuntimeSourceSetup
-	if configured {
-		source = setup.RuntimeSourceManaged
-	}
-	manager, err = control.NewManager(control.ManagerOptions{Source: source, Factory: factory})
 	if err != nil {
-		logger.Error("create runtime manager", "error", err)
+		var assemblyError *app.ControlRuntimeError
+		if errors.As(err, &assemblyError) {
+			logger.Error(assemblyError.Operation, "error", assemblyError.Err)
+		} else {
+			logger.Error("create control HTTP application", "error", err)
+		}
 		return 1
 	}
+	manager := controlRuntime.Manager
+	handler := controlRuntime.Handler
 	defer func() {
 		closeContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -184,34 +162,6 @@ func runServer(
 	}()
 	runtimeContext, cancelRuntime := context.WithCancel(ctx)
 	defer cancelRuntime()
-	setupService, err := setup.NewService(setup.Options{
-		RootDirectory:     root,
-		ConfigurationPath: configurationPath,
-		ActualListener: setup.ActualListener{
-			IPv4: setup.ListenerAddress{Host: listeners.IPv4Host, Port: listeners.IPv4Port},
-			IPv6: setup.ListenerAddress{Host: listeners.IPv6Host, Port: listeners.IPv6Port},
-		},
-		ConfiguredAtStartup: &configured,
-		Runtime:             manager,
-	})
-	if err != nil {
-		logger.Error("create setup service", "error", err)
-		return 1
-	}
-	adminAssets, err := adminweb.New(adminDirectory)
-	if err != nil {
-		logger.Error("configure admin web assets", "error", err)
-		return 1
-	}
-	handler, err := control.NewHandler(control.HandlerOptions{
-		Manager: manager, Setup: setupService, RegisterAdminRoutes: adminAssets.Register,
-		CORS: cors, RequestLimits: httpserver.DefaultRequestLimits(), TrustedProxies: trustedProxies,
-		AllowedHosts: allowedHosts, WorkerStatus: workerMonitor,
-	})
-	if err != nil {
-		logger.Error("create control HTTP application", "error", err)
-		return 1
-	}
 	if configured {
 		bootstrapContext, cancelBootstrap := context.WithTimeout(runtimeContext, managedRuntimeInitializationTimeout)
 		err := manager.Initialize(bootstrapContext, raw, setup.RuntimeSourceManaged)

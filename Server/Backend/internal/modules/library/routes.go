@@ -16,6 +16,7 @@ import (
 
 	"xymusic/server/internal/platform/httpserver"
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/httpx"
 )
 
 type API interface {
@@ -192,7 +193,7 @@ func optionalLibraryCursor(c *gin.Context) (string, error) {
 	if !exists {
 		return "", nil
 	}
-	length := javascriptStringLength(value)
+	length := httpx.JavascriptStringLength(value)
 	if length < 1 || length > 512 {
 		return "", routeLibraryValidationError()
 	}

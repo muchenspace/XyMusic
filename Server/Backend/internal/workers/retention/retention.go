@@ -7,6 +7,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"xymusic/server/internal/shared/clock"
 )
 
 const (
@@ -70,9 +72,7 @@ type Clock interface {
 	Now() time.Time
 }
 
-type SystemClock struct{}
-
-func (SystemClock) Now() time.Time { return time.Now() }
+type SystemClock = clock.System
 
 type Logger interface {
 	Info(message string, fields map[string]any)

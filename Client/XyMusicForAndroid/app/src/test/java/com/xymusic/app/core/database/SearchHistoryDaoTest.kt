@@ -5,7 +5,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import com.xymusic.app.core.database.entity.SearchHistoryEntity
-import com.xymusic.app.core.database.model.SearchScope
+import com.xymusic.app.core.model.search.SearchScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After

@@ -1,25 +1,15 @@
 package catalog
 
-type ArtworkDTO struct {
-	AssetID  string `json:"assetId"`
-	URL      string `json:"url"`
-	CacheKey string `json:"cacheKey"`
-	MimeType string `json:"mimeType"`
-	// ExpiresAt remains in API v1 for client compatibility. Stable artwork resources set it to null.
-	ExpiresAt *string `json:"expiresAt"`
-	Width     *int    `json:"width,omitempty"`
-	Height    *int    `json:"height,omitempty"`
-}
+import "xymusic/server/internal/shared/mediadto"
+
+type ArtworkDTO = mediadto.ArtworkDTO
 
 type ArtistReferenceDTO struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
 
-type AlbumReferenceDTO struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-}
+type AlbumReferenceDTO = mediadto.AlbumReferenceDTO
 
 type TrackSummaryDTO struct {
 	ID          string               `json:"id"`

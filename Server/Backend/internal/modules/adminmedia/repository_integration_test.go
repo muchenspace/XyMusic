@@ -1,4 +1,4 @@
-﻿package adminmedia
+package adminmedia
 
 import (
 	"context"
@@ -12,8 +12,8 @@ import (
 
 	"xymusic/server/internal/config"
 	"xymusic/server/internal/platform/database"
+	platformidempotency "xymusic/server/internal/platform/idempotency"
 	platformsecurity "xymusic/server/internal/platform/security"
-	sharedidempotency "xymusic/server/internal/shared/idempotency"
 	"xymusic/server/internal/testsupport"
 )
 
@@ -91,7 +91,7 @@ func TestRepositoryProductionLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	persistentIdempotency := NewPersistentIdempotency(sharedidempotency.New(pool.Pool, payloadCipher))
+	persistentIdempotency := NewPersistentIdempotency(platformidempotency.New(pool.Pool, payloadCipher))
 	_ = persistentIdempotency
 
 	repository := NewRepository(pool.Pool)

@@ -1,16 +1,22 @@
 import type { ApplicationServices } from "../application/services";
 import { CatalogUseCases } from "../application/use-cases/CatalogUseCases";
+import { FavoriteUseCases } from "../application/use-cases/FavoriteUseCases";
 import { LibraryUseCases } from "../application/use-cases/LibraryUseCases";
 import { PlaybackUseCases } from "../application/use-cases/PlaybackUseCases";
 import { PlaybackStateUseCases } from "../application/use-cases/PlaybackStateUseCases";
+import { PlaylistUseCases } from "../application/use-cases/PlaylistUseCases";
+import { QueueLoadingUseCases } from "../application/use-cases/QueueLoadingUseCases";
 import { PlaybackGrantCache } from "../application/services/PlaybackGrantCache";
 import { PlaybackDesktopIntegration } from "../application/services/PlaybackDesktopIntegration";
 import { DesktopWindowController } from "../application/services/DesktopWindowController";
 import { DesktopLyricsController } from "../application/services/DesktopLyricsController";
+import { HomeFeedService } from "../application/services/HomeFeedService";
+import { LibraryBrowserService } from "../application/services/LibraryBrowserService";
+import { LyricsCacheService } from "../application/services/LyricsCacheService";
+import { LyricsPreferencePersistence } from "../application/services/LyricsPreferencePersistence";
 import { PlaybackStatePersistence } from "../application/services/PlaybackStatePersistence";
 import { PlaybackPreferences } from "../application/services/PlaybackPreferences";
 import { PlaybackSession } from "../application/services/PlaybackSession";
-import { PlaylistUseCases } from "../application/use-cases/PlaylistUseCases";
 import { SessionUseCases } from "../application/use-cases/SessionUseCases";
 import { HtmlAudioPlayer } from "./audio/HtmlAudioPlayer";
 import { WindowsMediaBridge } from "./windows/WindowsMediaBridge";
@@ -50,28 +56,64 @@ export function createApplicationServices(): ApplicationServices {
   const desktopLyrics = new TauriDesktopLyrics();
   const uiPreferences = new LocalUserInterfacePreferences();
   const pageLifecycle = new BrowserPageLifecycle();
+  const catalogUseCases = new CatalogUseCases(catalog, playlists);
+  const libraryUseCases = new LibraryUseCases(library);
+  const playlistUseCases = new PlaylistUseCases(playlists);
+  const playbackSession = new PlaybackSession(
+    audio,
+    playbackUseCases,
+    new PlaybackGrantCache(playbackUseCases),
+    playbackPersistence,
+    new PlaybackPreferences(audio, playerPreferences, scheduler),
+    desktopPlayback,
+    desktopWindow,
+    diagnostics,
+    new TauriNotifier(),
+    scheduler,
+    pageLifecycle,
+    new BrowserSessionIdGenerator(),
+  );
   return {
-    catalog: new CatalogUseCases(catalog, playlists),
-    library: new LibraryUseCases(library),
-    playlists: new PlaylistUseCases(playlists),
-    playbackSession: new PlaybackSession(
-      audio,
-      playbackUseCases,
-      new PlaybackGrantCache(playbackUseCases),
-      playbackPersistence,
-      new PlaybackPreferences(audio, playerPreferences, scheduler),
-      desktopPlayback,
-      desktopWindow,
-      diagnostics,
-      new TauriNotifier(),
-      scheduler,
-      pageLifecycle,
-      new BrowserSessionIdGenerator(),
-    ),
+    catalog: catalogUseCases,
+    library: libraryUseCases,
+    playlists: playlistUseCases,
+    playbackSession,
     session: new SessionUseCases(new HttpSessionRepository(api)),
     desktopLyricsController: new DesktopLyricsController(desktopLyrics, uiPreferences, scheduler, pageLifecycle),
     desktopWindowController,
     diagnostics,
     uiPreferences,
+    lyricsPreferencePersistence: new LyricsPreferencePersistence(uiPreferences, scheduler, pageLifecycle),
+    homeFeed: new HomeFeedService(catalogUseCases, scheduler),
+    libraryBrowser: new LibraryBrowserService(playlistUseCases),
+    lyricsCache: new LyricsCacheService(catalog),
+    queueLoading: new QueueLoadingUseCases(playbackSession, catalogUseCases, playlistUseCases),
+    favorites: new FavoriteUseCases(libraryUseCases),
+  };
+}
+
+/**
+ * Composes the isolated desktop-lyrics window entry point so main.ts only
+ * selects a window and delegates to a single factory.
+ */
+export async function createDesktopLyricsWindowServices(): Promise<{
+  bootstrapDesktopLyricsApp: typeof import("../desktop-lyrics").bootstrapDesktopLyricsApp;
+  options: import("../desktop-lyrics").MountDesktopLyricsAppOptions;
+}> {
+  const [
+    { bootstrapDesktopLyricsApp },
+    { TauriDesktopLyricsEventBridge },
+    { TauriDesktopLyricsWindowPlacement },
+  ] = await Promise.all([
+    import("../desktop-lyrics"),
+    import("./desktop/TauriDesktopLyricsEventBridge"),
+    import("./windows/TauriDesktopLyricsWindowPlacement"),
+  ]);
+  return {
+    bootstrapDesktopLyricsApp,
+    options: {
+      bridge: new TauriDesktopLyricsEventBridge(),
+      placement: new TauriDesktopLyricsWindowPlacement(),
+    },
   };
 }

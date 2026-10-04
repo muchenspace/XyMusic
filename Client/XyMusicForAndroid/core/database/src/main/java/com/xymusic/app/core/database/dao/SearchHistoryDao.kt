@@ -5,7 +5,7 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
 import com.xymusic.app.core.database.entity.SearchHistoryEntity
-import com.xymusic.app.core.database.model.SearchScope
+import com.xymusic.app.core.model.search.SearchScope
 import kotlinx.coroutines.flow.Flow
 
 @Dao

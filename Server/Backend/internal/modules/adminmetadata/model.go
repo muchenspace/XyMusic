@@ -4,77 +4,49 @@ import (
 	"encoding/json"
 	"time"
 
-	"xymusic/server/internal/shared/lyrics"
+	"xymusic/server/internal/platform/mediafile"
+	"xymusic/server/internal/shared/requestdto"
 )
 
-type CreditRole string
+type CreditRole = mediafile.CreditRole
 
 const (
-	CreditPrimary  CreditRole = "PRIMARY"
-	CreditFeatured CreditRole = "FEATURED"
-	CreditComposer CreditRole = "COMPOSER"
-	CreditLyricist CreditRole = "LYRICIST"
-	CreditProducer CreditRole = "PRODUCER"
+	CreditPrimary  = mediafile.CreditPrimary
+	CreditFeatured = mediafile.CreditFeatured
+	CreditComposer = mediafile.CreditComposer
+	CreditLyricist = mediafile.CreditLyricist
+	CreditProducer = mediafile.CreditProducer
 )
 
-type EditableField string
+type EditableField = mediafile.EditableField
 
 const (
-	FieldTitle        EditableField = "title"
-	FieldCredits      EditableField = "credits"
-	FieldAlbumArtists EditableField = "albumArtists"
-	FieldAlbum        EditableField = "album"
-	FieldReleaseDate  EditableField = "releaseDate"
-	FieldTrackNumber  EditableField = "trackNumber"
-	FieldTrackTotal   EditableField = "trackTotal"
-	FieldDiscNumber   EditableField = "discNumber"
-	FieldDiscTotal    EditableField = "discTotal"
-	FieldGenres       EditableField = "genres"
-	FieldBPM          EditableField = "bpm"
-	FieldISRC         EditableField = "isrc"
-	FieldComment      EditableField = "comment"
-	FieldCopyright    EditableField = "copyright"
-	FieldLyrics       EditableField = "lyrics"
+	FieldTitle        = mediafile.FieldTitle
+	FieldCredits      = mediafile.FieldCredits
+	FieldAlbumArtists = mediafile.FieldAlbumArtists
+	FieldAlbum        = mediafile.FieldAlbum
+	FieldReleaseDate  = mediafile.FieldReleaseDate
+	FieldTrackNumber  = mediafile.FieldTrackNumber
+	FieldTrackTotal   = mediafile.FieldTrackTotal
+	FieldDiscNumber   = mediafile.FieldDiscNumber
+	FieldDiscTotal    = mediafile.FieldDiscTotal
+	FieldGenres       = mediafile.FieldGenres
+	FieldBPM          = mediafile.FieldBPM
+	FieldISRC         = mediafile.FieldISRC
+	FieldComment      = mediafile.FieldComment
+	FieldCopyright    = mediafile.FieldCopyright
+	FieldLyrics       = mediafile.FieldLyrics
 )
 
-var editableFields = []EditableField{
-	FieldTitle, FieldCredits, FieldAlbumArtists, FieldAlbum, FieldReleaseDate,
-	FieldTrackNumber, FieldTrackTotal, FieldDiscNumber, FieldDiscTotal,
-	FieldGenres, FieldBPM, FieldISRC, FieldComment, FieldCopyright, FieldLyrics,
-}
+var editableFields = mediafile.EditableFields
 
-type MetadataCredit struct {
-	Name string     `json:"name"`
-	Role CreditRole `json:"role"`
-}
+type MetadataCredit = mediafile.MetadataCredit
 
-type MetadataLyrics struct {
-	Content  string        `json:"content"`
-	Format   string        `json:"format"`
-	Language string        `json:"language"`
-	Timing   lyrics.Timing `json:"timing"`
-}
+type MetadataLyrics = mediafile.MetadataLyrics
 
-type MetadataSnapshot struct {
-	Title        string           `json:"title"`
-	Credits      []MetadataCredit `json:"credits"`
-	AlbumArtists []string         `json:"albumArtists"`
-	Album        *string          `json:"album"`
-	ReleaseDate  *string          `json:"releaseDate"`
-	TrackNumber  *int             `json:"trackNumber"`
-	TrackTotal   *int             `json:"trackTotal"`
-	DiscNumber   *int             `json:"discNumber"`
-	DiscTotal    *int             `json:"discTotal"`
-	Genres       []string         `json:"genres"`
-	BPM          *float64         `json:"bpm"`
-	ISRC         *string          `json:"isrc"`
-	Comment      *string          `json:"comment"`
-	Copyright    *string          `json:"copyright"`
-	Lyrics       *MetadataLyrics  `json:"lyrics"`
-	HasArtwork   bool             `json:"hasArtwork"`
-}
+type MetadataSnapshot = mediafile.MetadataSnapshot
 
-type MetadataOverrides map[string]any
+type MetadataOverrides = mediafile.MetadataOverrides
 
 type MetadataRecord struct {
 	TrackID       string
@@ -193,9 +165,7 @@ type VersionReasonInput struct {
 	Reason          string `json:"reason"`
 }
 
-type VersionInput struct {
-	ExpectedVersion int `json:"expectedVersion"`
-}
+type VersionInput = requestdto.VersionInput
 
 type BatchUpdateRecord struct {
 	TrackID       string

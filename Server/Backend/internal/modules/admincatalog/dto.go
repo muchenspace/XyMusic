@@ -1,6 +1,9 @@
 package admincatalog
 
-import "xymusic/server/internal/modules/catalog"
+import (
+	"xymusic/server/internal/modules/catalog"
+	"xymusic/server/internal/shared/mediadto"
+)
 
 type CreditDTO struct {
 	Artist    catalog.ArtistReferenceDTO `json:"artist"`
@@ -74,10 +77,7 @@ type DuplicateAlbumsDTO struct {
 	NextCursor          *string                  `json:"nextCursor,omitempty"`
 }
 
-type AlbumReferenceDTO struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-}
+type AlbumReferenceDTO = mediadto.AlbumReferenceDTO
 
 type SourceDTO struct {
 	ID                   string  `json:"id"`

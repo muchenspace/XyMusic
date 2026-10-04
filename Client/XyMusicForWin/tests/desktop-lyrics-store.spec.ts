@@ -90,6 +90,11 @@ class FakeDesktopLyricsController implements DesktopLyricsController {
   readonly subscribePlaybackRequests = vi.fn(() => () => undefined);
   readonly sendSnapshot = vi.fn(async () => undefined);
   readonly sendClock = vi.fn(async () => undefined);
+  readonly requestSnapshot = vi.fn();
+  readonly scheduleSnapshot = vi.fn();
+  readonly offerClock = vi.fn();
+  readonly discardPendingClock = vi.fn();
+  readonly cancelPendingSends = vi.fn();
   readonly dispose = vi.fn();
   readonly unsubscribe = vi.fn();
 

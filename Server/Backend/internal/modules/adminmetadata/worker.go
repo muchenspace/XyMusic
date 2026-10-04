@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"xymusic/server/internal/shared/clock"
 )
 
 const (
@@ -23,9 +25,7 @@ const (
 	maximumEmbeddedArtworkBytes = 20 << 20
 )
 
-type SystemClock struct{}
-
-func (SystemClock) Now() time.Time { return time.Now() }
+type SystemClock = clock.System
 
 type NoopLogger struct{}
 

@@ -1,6 +1,8 @@
 package com.xymusic.app.feature.player.data.media
 
 import android.app.Application
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.cache.Cache
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
@@ -15,6 +17,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
+@UnstableApi
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class)
 class OfflineMediaStoreTest {
@@ -199,11 +202,18 @@ class OfflineMediaStoreTest {
         override fun isFullyCached(cacheKey: String, contentLength: Long): Boolean =
             contentLength > 0 && cacheKey in cachedKeys
 
+        override fun cachedContentLength(cacheKey: String): Long? = null
+
+        override val cache: Cache
+            get() = error("Not used")
+
         override suspend fun remove(cacheKey: String) {
             removedKeys += cacheKey
             cachedKeys -= cacheKey
             pinnedKeys -= cacheKey
             persistentPinnedKeys -= cacheKey
         }
+
+        override suspend fun clear() = Unit
     }
 }

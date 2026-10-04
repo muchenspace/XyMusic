@@ -14,7 +14,6 @@ import com.xymusic.app.core.database.dao.CatalogRemoteKeyDao
 import com.xymusic.app.core.database.dao.SearchHistoryDao
 import com.xymusic.app.core.database.entity.SearchHistoryEntity
 import com.xymusic.app.core.database.model.CatalogItemType
-import com.xymusic.app.core.database.model.SearchScope as DatabaseSearchScope
 import com.xymusic.app.core.model.media.Album
 import com.xymusic.app.core.model.media.Artist
 import com.xymusic.app.core.model.media.Track
@@ -134,7 +133,7 @@ constructor(
                     runCatching {
                         SearchHistoryItem(
                             query = SearchQuery.from(entry.query),
-                            scope = SearchScope.valueOf(entry.scope.name),
+                            scope = entry.scope,
                             searchedAtEpochMillis = entry.searchedAtEpochMs,
                         )
                     }.getOrNull()
@@ -149,7 +148,7 @@ constructor(
                 SearchHistoryEntity(
                     ownerUserId = ownerUserId,
                     normalizedQuery = query.normalizedValue,
-                    scope = DatabaseSearchScope.valueOf(scope.name),
+                    scope = scope,
                     query = query.value,
                     searchedAtEpochMs = clock.millis(),
                 ),
@@ -161,7 +160,7 @@ constructor(
             searchHistoryDao.delete(
                 ownerUserId = ownerUserId,
                 normalizedQuery = query.normalizedValue,
-                scope = DatabaseSearchScope.valueOf(scope.name),
+                scope = scope,
             )
         }
 

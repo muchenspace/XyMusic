@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { isQuotaExceededError } from "../src/application/ports/PlaybackStateRepository";
+import { LocalPlaybackStateRepository } from "../src/infrastructure/playback/LocalPlaybackStateRepository";
 import { emptyServerConfig, ServerConfigStore } from "../src/infrastructure/server/ServerConfigStore";
 import { SessionCredentialStore } from "../src/infrastructure/session/SessionCredentialStore";
 
@@ -30,6 +32,36 @@ describe("optional browser storage resilience", () => {
     const credentials = new SessionCredentialStore(current);
 
     await expect(credentials.read()).resolves.toBeNull();
+  });
+
+  it("translates browser quota failures into the playback-state port error", () => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota", "QuotaExceededError");
+    });
+    try {
+      const repository = new LocalPlaybackStateRepository();
+
+      let thrown: unknown;
+      try {
+        repository.write({
+          ownerKey: "owner-1",
+          queue: [],
+          currentIndex: -1,
+          position: 0,
+          shuffled: false,
+          repeat: false,
+          repeatMode: "off",
+          crossfadeSeconds: 0,
+          savedAt: new Date(0).toISOString(),
+        });
+      } catch (cause) {
+        thrown = cause;
+      }
+
+      expect(isQuotaExceededError(thrown)).toBe(true);
+    } finally {
+      setItem.mockRestore();
+    }
   });
 });
 

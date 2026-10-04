@@ -42,4 +42,16 @@ class DnsSettingsTest {
         assertThat(settings.dohUrl).isEqualTo("https://dns.google/dns-query")
         assertThat(settings.disableDnsCache).isTrue()
     }
+
+    @Test
+    fun isIpAddressRecognizesIPv4AndIPv6() {
+        assertThat(isIpAddress("223.5.5.5")).isTrue()
+        assertThat(isIpAddress("127.0.0.1")).isTrue()
+        assertThat(isIpAddress("::1")).isTrue()
+        assertThat(isIpAddress("2400:3200::1")).isTrue()
+
+        assertThat(isIpAddress("dns.alidns.com")).isFalse()
+        assertThat(isIpAddress("example.com")).isFalse()
+        assertThat(isIpAddress("999.999.999.999")).isFalse()
+    }
 }

@@ -7,7 +7,7 @@ import {
   metadataStatusPresentation,
   sourceFileStatusPresentation,
   trackAudioStatusPresentation,
-} from "@/shared/presentation/audio-status";
+} from "@/features/music/presentation/audio-status";
 
 const props = defineProps<{ track: TrackSummary }>();
 const trigger = ref<HTMLElement>();

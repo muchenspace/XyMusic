@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   cyclePlayMode,
   derivePlayMode,
-  normalizeResumePosition,
   PLAY_MODE_ORDER,
   type PlayMode,
-  type RepeatMode,
   splitPlayMode,
+} from "../src/application/playbackMode";
+import {
+  normalizeResumePosition,
+  type RepeatMode,
 } from "../src/domain/playbackState";
 
 describe("playback resume position", () => {

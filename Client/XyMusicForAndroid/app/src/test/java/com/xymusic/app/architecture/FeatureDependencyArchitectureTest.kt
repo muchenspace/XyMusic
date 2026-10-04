@@ -50,7 +50,7 @@ class FeatureDependencyArchitectureTest {
     @Test
     fun crossFeatureImportsOnlyUseDomainContracts() {
         val violations =
-            featureImports()
+            (featureImports() + domainFeatureImports())
                 .filter { dependency ->
                     dependency.sourceFeature != dependency.targetFeature &&
                         featureLayer(dependency.importPath) != "domain"
@@ -99,7 +99,20 @@ class FeatureDependencyArchitectureTest {
         )
     }
 
-    private fun featureImports(): List<FeatureImport> = kotlinSourceFiles(featureSourceRoot).flatMap { sourceFile ->
+    private fun featureImports(): List<FeatureImport> = featureImportsIn(featureSourceRoot)
+
+    /**
+     * domain 模块也声明 `com.xymusic.app.feature.*.domain` 契约包，
+     * 其跨 feature 引用同样只允许指向 domain 契约；
+     * 非 feature 的 `com.xymusic.app.domain.*` 源码不属于跨 feature 检查范围。
+     */
+    private fun domainFeatureImports(): List<FeatureImport> = kotlinSourceFiles(domainFeatureSourceRoot)
+        .filter { sourceFile -> featureName(packageOf(sourceFile)) != null }
+        .let(::featureImportsFrom)
+
+    private fun featureImportsIn(root: Path): List<FeatureImport> = featureImportsFrom(kotlinSourceFiles(root))
+
+    private fun featureImportsFrom(sourceFiles: List<Path>): List<FeatureImport> = sourceFiles.flatMap { sourceFile ->
         val sourceFeature =
             featureName(packageOf(sourceFile))
                 ?: error("Source is outside a feature package: ${relativePath(sourceFile)}")
@@ -236,6 +249,8 @@ class FeatureDependencyArchitectureTest {
             projectRoot.resolve(Paths.get("app", "src", "main", "java"))
         private val featureSourceRoot: Path =
             mainSourceRoot.resolve(Paths.get("com", "xymusic", "app", "feature"))
+        private val domainFeatureSourceRoot: Path =
+            projectRoot.resolve(Paths.get("domain", "src", "main", "java", "com", "xymusic", "app", "feature"))
 
         private fun findProjectRoot(): Path {
             var currentDirectory: Path? = Paths.get("").toAbsolutePath().normalize()

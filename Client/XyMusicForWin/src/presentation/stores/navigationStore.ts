@@ -1,7 +1,7 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 import type { Album, Artist, Playlist } from "../../domain/music";
-import type { LibraryView } from "../../domain/navigation";
+import type { LibraryView } from "../../application/navigation";
 
 export type NavigationEntry =
   | { id: number; kind: "library"; view: LibraryView; scrollTop: number }

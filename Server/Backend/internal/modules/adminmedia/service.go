@@ -8,13 +8,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"time"
-	"unicode/utf16"
 
 	"github.com/google/uuid"
 
-	"xymusic/server/internal/config"
-	"xymusic/server/internal/platform/localmedia"
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/clock"
+	"xymusic/server/internal/shared/httpx"
+	"xymusic/server/internal/shared/timeformat"
 )
 
 const (
@@ -30,7 +30,7 @@ var checksumPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 type ServiceDependencies struct {
 	Repository  Store
 	Idempotency Idempotency
-	LocalMedia  *localmedia.Store
+	LocalMedia  AssetStore
 	Inspector   MediaInspector
 	Clock       Clock
 	Sleeper     Sleeper
@@ -40,7 +40,7 @@ type ServiceDependencies struct {
 type Service struct {
 	repository     Store
 	idempotency    Idempotency
-	localMedia     *localmedia.Store
+	localMedia     AssetStore
 	inspector      MediaInspector
 	clock          Clock
 	sleeper        Sleeper
@@ -49,7 +49,11 @@ type Service struct {
 	maxUploadBytes int64
 }
 
-func NewService(cfg config.Config, dependencies ServiceDependencies) (*Service, error) {
+func NewService(
+	uploadURLTTLSeconds int,
+	maxUploadBytes int64,
+	dependencies ServiceDependencies,
+) (*Service, error) {
 	if dependencies.Repository == nil {
 		return nil, errors.New("admin media repository is required")
 	}
@@ -58,6 +62,9 @@ func NewService(cfg config.Config, dependencies ServiceDependencies) (*Service, 
 	}
 	if dependencies.LocalMedia == nil {
 		return nil, errors.New("admin media local media store is required")
+	}
+	if dependencies.Inspector == nil {
+		return nil, errors.New("admin media inspector is required")
 	}
 	if dependencies.Clock == nil {
 		dependencies.Clock = systemClock{}
@@ -68,24 +75,12 @@ func NewService(cfg config.Config, dependencies ServiceDependencies) (*Service, 
 	if dependencies.IDGenerator == nil {
 		dependencies.IDGenerator = uuid.NewString
 	}
-	uploadURLTTL := time.Duration(cfg.MediaStorage.UploadTTLSeconds) * time.Second
+	uploadURLTTL := time.Duration(uploadURLTTLSeconds) * time.Second
 	if uploadURLTTL <= 0 {
 		uploadURLTTL = 300 * time.Second
 	}
-	maxUploadBytes := cfg.MediaStorage.MaxUploadBytes
 	if maxUploadBytes < 1 {
 		maxUploadBytes = 1024 * 1024 * 1024
-	}
-	if dependencies.Inspector == nil {
-		inspector, err := NewFFmpegMediaInspector(
-			dependencies.LocalMedia,
-			cfg.Media.FFprobePath,
-			cfg.Media.FFmpegPath,
-		)
-		if err != nil {
-			return nil, err
-		}
-		dependencies.Inspector = inspector
 	}
 	return &Service{
 		repository:     dependencies.Repository,
@@ -148,15 +143,14 @@ func (s *Service) CreateUpload(
 				return UploadReservationDTO{}, err
 			}
 
-			uploadPath := fmt.Sprintf("/api/v1/admin/media/uploads/%s/content", uploadID)
+			// The transport layer assembles uploadUrl/uploadPath from the
+			// reservation ID so the service stays free of HTTP route knowledge.
 			return UploadReservationDTO{
 				ID:              uploadID,
 				Purpose:         input.Purpose,
 				TargetID:        input.TargetID,
 				Status:          UploadStatusCreated,
 				Method:          "PUT",
-				UploadURL:       uploadPath,
-				UploadPath:      uploadPath,
 				RequiredHeaders: map[string]string{"Content-Type": input.ContentType},
 				ExpiresAt:       formatTime(expiresAt),
 			}, nil
@@ -358,7 +352,7 @@ func validateCreateUploadInput(input CreateUploadInput, maxBytes int64) error {
 	if _, err := uuid.Parse(input.TargetID); err != nil {
 		return apperror.Validation("targetId must be a UUID")
 	}
-	if length := javascriptStringLength(input.FileName); length < 1 || length > 255 {
+	if length := httpx.JavascriptStringLength(input.FileName); length < 1 || length > 255 {
 		return apperror.Validation("fileName must contain 1 to 255 characters")
 	}
 	maxAllowedBytes := ArtworkMaximumBytes
@@ -374,17 +368,11 @@ func validateCreateUploadInput(input CreateUploadInput, maxBytes int64) error {
 	return nil
 }
 
-func javascriptStringLength(value string) int {
-	return len(utf16.Encode([]rune(value)))
-}
-
 func formatTime(value time.Time) string {
-	return value.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+	return timeformat.Timestamp(value)
 }
 
-type systemClock struct{}
-
-func (systemClock) Now() time.Time { return time.Now() }
+type systemClock = clock.System
 
 type contextSleeper struct{}
 

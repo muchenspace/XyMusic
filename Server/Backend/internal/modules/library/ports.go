@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"xymusic/server/internal/modules/catalog"
+	"xymusic/server/internal/shared/clock"
 )
 
 type Store interface {
@@ -43,6 +44,4 @@ type Clock interface {
 	Now() time.Time
 }
 
-type SystemClock struct{}
-
-func (SystemClock) Now() time.Time { return time.Now() }
+type SystemClock = clock.System

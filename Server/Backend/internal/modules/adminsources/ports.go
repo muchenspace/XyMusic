@@ -2,9 +2,26 @@ package adminsources
 
 import (
 	"context"
-	"encoding/json"
+	"os"
 	"time"
+
+	"xymusic/server/internal/shared/idempotencyport"
 )
+
+// DirectoryBrowser lists directory entries and reads path metadata for the
+// administrator source browser.
+type DirectoryBrowser interface {
+	Stat(string) (os.FileInfo, error)
+	ReadDir(string) ([]os.DirEntry, error)
+}
+
+// RootProbe verifies that a configured music source directory is a readable
+// directory and, for read-write sources, writable.
+type RootProbe interface {
+	Stat(string) (os.FileInfo, error)
+	Readable(string) error
+	Writable(string) error
+}
 
 type Store interface {
 	ListRootViews(context.Context, RootQuery) ([]RootView, int, error)
@@ -51,23 +68,11 @@ type ScanInput struct {
 
 type WorkerAvailability func(context.Context) (bool, error)
 
-type IdempotencyInput struct {
-	ActorID string
-	Scope   string
-	Key     string
-	Payload any
-}
+type IdempotencyInput = idempotencyport.Input
 
-type IdempotencyResponse struct {
-	Status int
-	Body   json.RawMessage
-}
+type IdempotencyResponse = idempotencyport.Response
 
-type IdempotencyResult struct {
-	Status   int
-	Body     json.RawMessage
-	Replayed bool
-}
+type IdempotencyResult = idempotencyport.Result
 
 type Idempotency interface {
 	Execute(context.Context, IdempotencyInput, func() (IdempotencyResponse, error)) (IdempotencyResult, error)

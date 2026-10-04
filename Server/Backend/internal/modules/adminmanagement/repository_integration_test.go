@@ -52,9 +52,9 @@ func TestAdminManagementProductionLifecycle(t *testing.T) {
 	}
 
 	repository := NewRepository(pool.Pool)
-	service, err := NewService(ServiceDependencies{
+	service, err := NewServiceWithOptions(ServiceDependencies{
 		Store: repository, Artworks: managementArtworkStub{}, Passwords: identity.SecurityPasswordManager{},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

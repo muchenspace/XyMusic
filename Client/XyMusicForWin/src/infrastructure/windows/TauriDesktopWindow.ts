@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { DesktopTheme, DesktopWindow } from "../../application/ports/DesktopWindow";
-import { SerialTaskQueue } from "../../application/services/SerialTaskQueue";
+import { SerialTaskQueue } from "../../shared/scheduling/SerialTaskQueue";
 
 export class TauriDesktopWindow implements DesktopWindow {
   private readonly windowModeTransitions = new SerialTaskQueue();

@@ -20,7 +20,7 @@ func TestServiceListsUnifiedJobsAndPresentsSafeErrors(t *testing.T) {
 		}},
 		listTotal: 51,
 	}
-	service, err := NewService(store, &metadataMutatorStub{})
+	service, err := NewServiceWithOptions(store, &metadataMutatorStub{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestServiceDelegatesMetadataMutationsWithCurrentVersionAndDefaults(t *testi
 		},
 	}
 	metadata := &metadataMutatorStub{}
-	service, _ := NewService(store, metadata)
+	service, _ := NewServiceWithOptions(store, metadata, nil)
 	if _, err := service.Retry(context.Background(), "actor", "job-1", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestServiceDelegatesScanMutations(t *testing.T) {
 		ID: "job-2", Type: JobTypeSourceScan, Status: JobStatusQueued, Source: JobSourceScan,
 		Title: "Library", MaxAttempts: 1, CreatedAt: now, UpdatedAt: now,
 	}}
-	service, _ := NewService(store, &metadataMutatorStub{})
+	service, _ := NewServiceWithOptions(store, &metadataMutatorStub{}, nil)
 	if _, err := service.Retry(context.Background(), "actor", "job-2", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestServiceDelegatesScanMutations(t *testing.T) {
 func TestServiceBuildsEventFingerprint(t *testing.T) {
 	updatedAt := time.Date(2026, 7, 16, 2, 3, 4, 123000000, time.FixedZone("local", 8*60*60))
 	store := &jobStoreStub{eventRecord: EventRecord{UpdatedAt: &updatedAt, Active: 4}}
-	service, _ := NewService(store, &metadataMutatorStub{})
+	service, _ := NewServiceWithOptions(store, &metadataMutatorStub{}, nil)
 	state, err := service.EventState(context.Background())
 	if err != nil {
 		t.Fatal(err)

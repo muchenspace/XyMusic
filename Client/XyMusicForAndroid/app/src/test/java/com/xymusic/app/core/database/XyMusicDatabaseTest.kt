@@ -19,10 +19,10 @@ import com.xymusic.app.core.database.entity.TrackArtistCreditEntity
 import com.xymusic.app.core.database.entity.TrackEntity
 import com.xymusic.app.core.database.model.ArtistCreditRole
 import com.xymusic.app.core.database.model.CatalogItemType
-import com.xymusic.app.core.database.model.LyricsFormat
-import com.xymusic.app.core.database.model.LyricsTiming
-import com.xymusic.app.core.database.model.PlaylistVisibility
-import com.xymusic.app.core.database.model.SearchScope
+import com.xymusic.app.core.model.media.LyricsFormat
+import com.xymusic.app.core.model.media.LyricsTiming
+import com.xymusic.app.core.model.playlist.PlaylistVisibility
+import com.xymusic.app.core.model.search.SearchScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After

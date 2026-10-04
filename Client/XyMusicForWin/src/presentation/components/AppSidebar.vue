@@ -4,7 +4,7 @@ import { Disc3, Heart, Home, ListMusic, LogOut, Plus, Settings } from "@lucide/v
 import type { UserSession } from "../../application/ports/SessionRepository";
 import brandMark from "../../assets/brand-mark-512.webp";
 import type { Playlist } from "../../domain/music";
-import type { LibraryView } from "../../domain/navigation";
+import type { LibraryView } from "../../application/navigation";
 
 const props = withDefaults(defineProps<{ user: UserSession["user"]; active: LibraryView; playlists: Playlist[]; fullscreen?: boolean }>(), {
   fullscreen: false,

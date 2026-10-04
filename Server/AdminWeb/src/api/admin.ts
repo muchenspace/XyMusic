@@ -18,6 +18,7 @@ import type {
   BatchArchiveTracksResult,
   PageResult,
   PermanentDeleteTracksJob,
+  PermanentDeleteTrackResult,
   RuntimeSettings,
   RuntimeSettingsUpdate,
   SettingsValidationResult,
@@ -29,11 +30,19 @@ import type {
   TrackMetadataRecord,
   TrackMutationTarget,
   TrackSummary,
-  TrackTagValues,
+  TrackTagPatch,
   UpdateUserInput,
   UserDetail,
   UserSummary,
 } from "@/api/types";
+import type { DirectoryListing } from "@/features/sources/domain/models";
+import type {
+  BatchUpdateTrackMetadataResult,
+  MergeAlbumsCommand,
+  UpdateAlbumCommand,
+  UpdateArtistCommand,
+  UpdateTrackMetadataCommand,
+} from "@/features/music/application/music-admin-gateway";
 
 const query = (value: object) => value as unknown as Record<string, string | number | boolean | null | undefined>;
 
@@ -55,7 +64,7 @@ export const adminApi = {
   createSource: (input: LibrarySourceInput) => apiRequest<LibrarySource>("/api/v1/admin/sources", { method: "POST", body: input }),
   updateSource: (id: string, input: Partial<LibrarySourceInput> & { expectedVersion: number }) => apiRequest<LibrarySource>(`/api/v1/admin/sources/${id}`, { method: "PATCH", body: input }),
   deleteSource: (id: string, expectedVersion: number, archiveCatalog: boolean) => apiRequest<void>(`/api/v1/admin/sources/${id}`, { method: "DELETE", body: { expectedVersion, archiveCatalog } }),
-  browseSourceDirectories: (path: string, params: Pick<ListQuery, "page" | "pageSize" | "cursor" | "cursorMode">, signal?: AbortSignal) => apiRequest<{ path: string; directories: Array<{ name: string; path: string }>; page: number; pageSize: number; total: number; totalPages: number; nextCursor?: string }>("/api/v1/admin/sources/browse", { query: query({ path, ...params }), signal }),
+  browseSourceDirectories: (path: string, params: Pick<ListQuery, "page" | "pageSize" | "cursor" | "cursorMode">, signal?: AbortSignal) => apiRequest<DirectoryListing>("/api/v1/admin/sources/browse", { query: query({ path, ...params }), signal }),
   scanSource: (id: string) => apiRequest<SourceScan>(`/api/v1/admin/sources/${id}/scans`, { method: "POST" }),
   sourceProcessing: (id: string, signal?: AbortSignal) => apiRequest<SourceProcessingSummary>(`/api/v1/admin/sources/${id}/processing`, { signal }),
   scans: (sourceId: string, params: Pick<ListQuery, "page" | "pageSize" | "cursor" | "cursorMode">, signal?: AbortSignal) => apiRequest<PageResult<SourceScan>>(`/api/v1/admin/sources/${sourceId}/scans`, { query: query(params), signal }),
@@ -71,7 +80,7 @@ export const adminApi = {
     return apiRequest<TrackDetail>(`/api/v1/admin/tracks/${id}`, options);
   },
   trackMetadata: (id: string, signal?: AbortSignal) => apiRequest<TrackMetadataRecord>(`/api/v1/admin/tracks/${id}/metadata`, { signal }),
-  updateTrackMetadata: (id: string, input: { expectedVersion: number; patch: Partial<Omit<TrackTagValues, "hasArtwork">>; reason?: string }) => apiRequest<TrackMetadataRecord>(`/api/v1/admin/tracks/${id}/metadata`, { method: "PATCH", body: input }),
+  updateTrackMetadata: (id: string, input: UpdateTrackMetadataCommand) => apiRequest<TrackMetadataRecord>(`/api/v1/admin/tracks/${id}/metadata`, { method: "PATCH", body: input }),
   publishTrack: (id: string, expectedVersion: number) => apiRequest<unknown>(`/api/v1/admin/tracks/${id}/publish`, { method: "POST", body: { expectedVersion } }),
   archiveTrack: (id: string, expectedVersion: number) => apiRequest<unknown>(`/api/v1/admin/tracks/${id}/archive`, { method: "POST", body: { expectedVersion } }),
   restoreTrack: (id: string, expectedVersion: number) => apiRequest<unknown>(`/api/v1/admin/tracks/${id}/restore`, { method: "POST", body: { expectedVersion } }),
@@ -79,32 +88,17 @@ export const adminApi = {
   batchArchiveTracks: (items: TrackMutationTarget[]) => apiRequest<BatchArchiveTracksResult>("/api/v1/admin/tracks/batch/archive", { method: "POST", body: { items } }),
   createPermanentDeleteTracksJob: (items: TrackMutationTarget[]) => apiRequest<PermanentDeleteTracksJob>("/api/v1/admin/tracks/batch/delete-permanently", { method: "POST", body: { items } }),
   permanentDeleteTracksJob: (jobId: string, signal?: AbortSignal) => apiRequest<PermanentDeleteTracksJob>(`/api/v1/admin/tracks/batch/delete-permanently/${jobId}`, { signal }),
-  deleteTrackPermanently: (id: string, expectedVersion: number) => apiRequest<{
-    deleted: boolean;
-    deletedFiles: number;
-    quarantinedFiles: number;
-    scheduledObjects: number;
-  }>(`/api/v1/admin/tracks/${id}`, { method: "DELETE", body: { expectedVersion } }),
+  deleteTrackPermanently: (id: string, expectedVersion: number) => apiRequest<PermanentDeleteTrackResult>(`/api/v1/admin/tracks/${id}`, { method: "DELETE", body: { expectedVersion } }),
   writeTrackMetadata: (id: string, expectedVersion: number, reason = "") => apiRequest<{ id: string; status: string }>(`/api/v1/admin/tracks/${id}/metadata/writeback`, { method: "POST", body: { expectedVersion, reason } }),
-  bulkUpdateTracks: (items: Array<{ trackId: string; expectedVersion: number }>, patch: Partial<Omit<TrackTagValues, "hasArtwork">>, reason = "") => apiRequest<{ items: Array<{ trackId: string; version: number; changedFields: string[] }> }>("/api/v1/admin/metadata/batch", { method: "POST", body: { items, patch, reason } }),
+  bulkUpdateTracks: (items: TrackMutationTarget[], patch: TrackTagPatch, reason = "") => apiRequest<BatchUpdateTrackMetadataResult>("/api/v1/admin/metadata/batch", { method: "POST", body: { items, patch, reason } }),
 
   albums: (params: ListQuery, signal?: AbortSignal) => apiRequest<PageResult<AlbumSummary>>("/api/v1/admin/albums", { query: query(params), signal }),
   albumDuplicates: (params: Pick<ListQuery, "page" | "pageSize" | "cursor" | "cursorMode"> & { albumId?: string; albumPage?: number; albumPageSize?: number; albumCursor?: string; albumCursorMode?: "cursor" | "offset" }, signal?: AbortSignal) => apiRequest<AlbumDuplicateSummary>("/api/v1/admin/albums/duplicates", { query: query(params), signal }),
   album: (id: string, params: Pick<ListQuery, "page" | "pageSize" | "cursor" | "cursorMode">, signal?: AbortSignal) => apiRequest<AlbumDetail>(`/api/v1/admin/albums/${id}`, { query: query(params), signal }),
-  updateAlbum: (id: string, input: { expectedVersion: number; title?: string; artistCredits?: Array<{ artistId: string; role: string; sortOrder: number }>; releaseDate?: string | null; description?: string | null }) => apiRequest<unknown>(`/api/v1/admin/albums/${id}`, { method: "PATCH", body: input }),
-  mergeAlbums: (input: {
-    target: { albumId: string; expectedVersion: number };
-    sources: Array<{ albumId: string; expectedVersion: number }>;
-    fieldSources: {
-      title: string;
-      cover: string | null;
-      artistCredits: string;
-      releaseDate: string | null;
-      description: string | null;
-    };
-  }) => apiRequest<AlbumMergeResult>("/api/v1/admin/albums/merge", { method: "POST", body: input }),
+  updateAlbum: (id: string, input: Partial<UpdateAlbumCommand> & { expectedVersion: number }) => apiRequest<unknown>(`/api/v1/admin/albums/${id}`, { method: "PATCH", body: input }),
+  mergeAlbums: (input: MergeAlbumsCommand) => apiRequest<AlbumMergeResult>("/api/v1/admin/albums/merge", { method: "POST", body: input }),
   artists: (params: ListQuery, signal?: AbortSignal) => apiRequest<PageResult<ArtistSummary>>("/api/v1/admin/artists", { query: query(params), signal }),
-  updateArtist: (id: string, input: { expectedVersion: number; name?: string; description?: string | null }) => apiRequest<unknown>(`/api/v1/admin/artists/${id}`, { method: "PATCH", body: input }),
+  updateArtist: (id: string, input: Partial<UpdateArtistCommand> & { expectedVersion: number }) => apiRequest<unknown>(`/api/v1/admin/artists/${id}`, { method: "PATCH", body: input }),
 
   jobs: (params: ListQuery & { status?: string; type?: string }, signal?: AbortSignal) => apiRequest<PageResult<JobSummary>>("/api/v1/admin/jobs", { query: query(params), signal }),
   job: (id: string, signal?: AbortSignal) => apiRequest<JobDetail>(`/api/v1/admin/jobs/${id}`, { signal }),

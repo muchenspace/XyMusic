@@ -8,7 +8,6 @@ const props = defineProps<{
   pageSize: number;
   total: number;
   totalPages?: number;
-  cursor?: boolean;
 }>();
 const emit = defineEmits<{
   change: [page: number];

@@ -201,7 +201,7 @@ func (repository *Repository) FinalizeUpload(ctx context.Context, input Finalize
 	}
 
 	if input.CompletionFence != nil {
-		if err := input.CompletionFence.Lock(ctx, tx); err != nil {
+		if err := input.CompletionFence.Lock(ctx, txFenceAdapter{tx: tx}); err != nil {
 			return err
 		}
 	}
@@ -378,6 +378,20 @@ const uploadReservationColumns = `
 	expected_size, expected_checksum_sha256, expected_mime_type,
 	original_file_name, status::text, asset_id, expires_at, created_at,
 	completed_at, completion_token, completion_started_at`
+
+// txFenceAdapter narrows the concrete pgx transaction to the module Tx
+// contract passed to CompletionFence.Lock.
+type txFenceAdapter struct {
+	tx pgx.Tx
+}
+
+func (adapter txFenceAdapter) QueryRow(ctx context.Context, sql string, args ...any) Row {
+	return adapter.tx.QueryRow(ctx, sql, args...)
+}
+
+func (adapter txFenceAdapter) Exec(ctx context.Context, sql string, args ...any) (CommandTag, error) {
+	return adapter.tx.Exec(ctx, sql, args...)
+}
 
 type rowScanner interface {
 	Scan(...any) error

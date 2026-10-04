@@ -1,99 +1,18 @@
 package localassets
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
-	"strconv"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"xymusic/server/internal/platform/httpserver"
 	"xymusic/server/internal/platform/localmedia"
 	"xymusic/server/internal/shared/apperror"
 )
-
-type AssetRecord struct {
-	ID             string
-	StoragePath    string
-	Kind           string
-	MimeType       string
-	SizeBytes      int64
-	ChecksumSHA256 *string
-	Status         string
-	UpdatedAt      time.Time
-}
-
-type Store interface {
-	FindReadyAsset(ctx context.Context, assetID string) (*AssetRecord, error)
-}
-
-type Repository struct {
-	pool *pgxpool.Pool
-}
-
-func NewRepository(pool *pgxpool.Pool) *Repository {
-	return &Repository{pool: pool}
-}
-
-func (r *Repository) FindReadyAsset(ctx context.Context, assetID string) (*AssetRecord, error) {
-	var record AssetRecord
-	err := r.pool.QueryRow(ctx, `
-		SELECT id, storage_path, kind::text, mime_type, size_bytes, checksum_sha256, status::text, updated_at
-		FROM media_assets
-		WHERE id = $1 AND status = 'READY'`, assetID).Scan(
-		&record.ID,
-		&record.StoragePath,
-		&record.Kind,
-		&record.MimeType,
-		&record.SizeBytes,
-		&record.ChecksumSHA256,
-		&record.Status,
-		&record.UpdatedAt,
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("query ready media asset: %w", err)
-	}
-	return &record, nil
-}
-
-type Presenter struct{}
-
-func NewPresenter() *Presenter {
-	return &Presenter{}
-}
-
-func (p *Presenter) PresentArtwork(assetID string, checksum *string, updatedAt time.Time) (string, string, error) {
-	if strings := assetID; strings == "" {
-		return "", "", errors.New("asset ID is required")
-	}
-	version := strconv.FormatInt(updatedAt.UnixMilli(), 10)
-	if checksum != nil && *checksum != "" {
-		version = *checksum
-	}
-	url := fmt.Sprintf("/api/v1/assets/%s/%s", assetID, version)
-	cacheKey := fmt.Sprintf("%s:%s", assetID, version)
-	return url, cacheKey, nil
-}
-
-func (p *Presenter) ArtworkURL(assetID, version string) (string, error) {
-	if assetID == "" {
-		return "", errors.New("asset ID is required")
-	}
-	if version == "" {
-		version = "1"
-	}
-	return fmt.Sprintf("/api/v1/assets/%s/%s", assetID, version), nil
-}
 
 type Routes struct {
 	store Store
@@ -130,12 +49,8 @@ func (routes *Routes) serveAsset(c *gin.Context) error {
 		return apperror.NotFound("Asset was not found")
 	}
 
-	expectedVersion := strconv.FormatInt(asset.UpdatedAt.UnixMilli(), 10)
-	if asset.ChecksumSHA256 != nil && *asset.ChecksumSHA256 != "" {
-		expectedVersion = *asset.ChecksumSHA256
-	}
-
-	if version != expectedVersion && version != strconv.FormatInt(asset.UpdatedAt.UnixMilli(), 10) {
+	expectedVersion, matched := MatchAssetVersion(asset, version)
+	if !matched {
 		return apperror.NotFound("Asset version mismatch")
 	}
 

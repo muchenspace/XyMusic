@@ -2,6 +2,8 @@ package setup
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +25,24 @@ import (
 	"xymusic/server/internal/platform/security"
 	"xymusic/server/internal/shared/apperror"
 )
+
+// ProductionMigrationProbe validates migration directories with the platform
+// database migration reader.
+type ProductionMigrationProbe struct{}
+
+func (ProductionMigrationProbe) Validate(directory string) error {
+	_, err := database.ReadMigrations(directory)
+	return err
+}
+
+// ProductionSecretGenerator creates the managed-configuration secrets.
+func ProductionSecretGenerator() (string, error) {
+	bytes := make([]byte, 32)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(bytes), nil
+}
 
 var ErrInvalidConfiguration = errors.New("existing setup configuration is invalid")
 
@@ -52,6 +72,16 @@ func (repository *FileConfigurationRepository) Save(_ context.Context, candidate
 func (repository *FileConfigurationRepository) Clear(_ context.Context) error {
 	return repository.store.Clear()
 }
+
+// ProductionExecutableLocator resolves the running executable with os.Executable.
+type ProductionExecutableLocator struct{}
+
+func (ProductionExecutableLocator) Executable() (string, error) { return os.Executable() }
+
+// ProductionFileProbe inspects paths with os.Stat.
+type ProductionFileProbe struct{}
+
+func (ProductionFileProbe) Stat(path string) (os.FileInfo, error) { return os.Stat(path) }
 
 type ProductionDatabaseFactory struct{}
 

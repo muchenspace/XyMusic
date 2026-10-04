@@ -1,4 +1,5 @@
 import type { AvatarUpload as AvatarUploadInput } from "../../application/ports/SessionRepository";
+import { assertAvatarUpload } from "../../application/services/AvatarUploadMapper";
 import { ApiClient, ApiError, type CurrentUserResponse } from "../http/ApiClient";
 
 interface AvatarUploadReservation {
@@ -12,7 +13,7 @@ export class AvatarUploader {
   constructor(private readonly api: ApiClient) {}
 
   async upload(avatar: AvatarUploadInput): Promise<CurrentUserResponse> {
-    validateAvatar(avatar);
+    assertAvatarUpload(avatar);
     const sessionSignal = this.api.sessionSignal;
     throwIfAborted(sessionSignal);
     const checksumSha256 = await sha256(avatar.bytes);
@@ -93,11 +94,6 @@ function isLocalAvatarUpload(uploadUrl: string, serverUrl: string | undefined): 
   } catch {
     return false;
   }
-}
-
-function validateAvatar(avatar: AvatarUploadInput): void {
-  if (!["image/jpeg", "image/png", "image/webp"].includes(avatar.mediaType)) throw new Error("头像仅支持 JPG、PNG 或 WebP");
-  if (avatar.bytes.byteLength <= 0 || avatar.bytes.byteLength > 5 * 1024 * 1024) throw new Error("头像大小必须在 5MB 以内");
 }
 
 async function sha256(bytes: Uint8Array): Promise<string> {

@@ -7,7 +7,7 @@ import com.xymusic.app.core.data.media.remote.LyricsResourceDto
 import com.xymusic.app.core.data.media.remote.TrackDetailDto
 import com.xymusic.app.core.data.media.remote.TrackSummaryDto
 import com.xymusic.app.core.data.media.toWriteModel
-import com.xymusic.app.core.database.model.LyricsTiming
+import com.xymusic.app.core.model.media.LyricsTiming
 import org.junit.Test
 
 class CatalogMappersTest {

@@ -2,7 +2,7 @@ package com.xymusic.app.data.network.dns
 
 import com.xymusic.app.domain.settings.AppSettingsRepository
 import com.xymusic.app.domain.settings.DnsSettings
-import java.net.Inet6Address
+import com.xymusic.app.domain.settings.isIpAddress
 import java.net.InetAddress
 import java.net.UnknownHostException
 import java.util.concurrent.ConcurrentHashMap
@@ -217,22 +217,6 @@ class AppDns @Inject constructor(
 
     companion object {
         const val CACHE_TTL_MS = 5 * 60 * 1_000L // 5 minutes
-
-        fun isIpAddress(ip: String): Boolean {
-            val trimmed = ip.trim()
-            val parts = trimmed.split('.')
-            if (parts.size == 4 &&
-                parts.all { part ->
-                    part.toIntOrNull()?.let { it in 0..255 } == true
-                }
-            ) {
-                return true
-            }
-            if (trimmed.contains(':')) {
-                return runCatching { InetAddress.getByName(trimmed) is Inet6Address }.getOrDefault(false)
-            }
-            return false
-        }
     }
 
     private data class CachedDnsRecord(val addresses: List<InetAddress>, val expiresAt: Long)

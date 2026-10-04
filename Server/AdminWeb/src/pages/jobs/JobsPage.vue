@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { AlertTriangle, Ban, Clock3, Eye, FileCog, RefreshCw, RotateCcw, Search, Wifi, WifiOff } from "lucide-vue-next";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/vue-query";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { refDebounced } from "@vueuse/core";
 import { ApiError, apiErrorMessage } from "@/shared/application/api-error";
+import { invalidateAdminJobEventQueries, invalidateAdminJobQueries } from "@/app/query-client";
 import AppButton from "@/components/AppButton.vue";
 import AppPagination from "@/components/AppPagination.vue";
 import BaseDialog from "@/components/BaseDialog.vue";
@@ -13,18 +14,20 @@ import StatusBadge from "@/components/StatusBadge.vue";
 import VirtualTable from "@/components/VirtualTable.vue";
 import type { JobEventSubscription } from "@/features/jobs/application/job-admin-gateway";
 import type { JobDetail, JobSummary, MetadataWritebackJob } from "@/features/jobs/domain/models";
+import { jobQueryKeys } from "@/features/jobs/presentation/query-keys";
 import { useJobAdmin } from "@/app/services/jobs";
 import { DEFAULT_PAGE_SIZE } from "@/shared/presentation/pagination";
+import { useCursorPagination } from "@/shared/presentation/use-cursor-pagination";
 import { useUiStore } from "@/stores/ui";
 import { formatDate, humanize } from "@/utils/format";
 
-const queryClient = useQueryClient();
 const ui = useUiStore();
 const jobAdmin = useJobAdmin();
-const page = ref(1);
-const pageSize = ref(DEFAULT_PAGE_SIZE);
-const cursor = ref("");
-const cursorHistory = ref(new Map<number, string>());
+const { page, pageSize, cursor, reset: resetPaging, changePage, changePageSize } = useCursorPagination({
+  initialPageSize: DEFAULT_PAGE_SIZE,
+  isFetching: () => query.isFetching.value,
+  nextCursor: () => query.data.value?.nextCursor,
+});
 const status = ref("");
 const type = ref("");
 const search = ref("");
@@ -32,11 +35,12 @@ const debouncedSearch = refDebounced(search, 300);
 const selectedId = ref("");
 const detailOpen = ref(false);
 const streamConnected = ref(false);
-const writebackPage = ref(1);
-const writebackPageSize = ref(DEFAULT_PAGE_SIZE);
 const writebackStatus = ref("");
-const writebackCursor = ref("");
-const writebackCursorHistory = ref(new Map<number, string>());
+const { page: writebackPage, pageSize: writebackPageSize, cursor: writebackCursor, reset: resetWritebackPaging, changePage: changeWritebackPage, changePageSize: changeWritebackPageSize } = useCursorPagination({
+  initialPageSize: DEFAULT_PAGE_SIZE,
+  isFetching: () => writebackQuery.isFetching.value,
+  nextCursor: () => writebackQuery.data.value?.nextCursor,
+});
 const selectedWriteback = ref<MetadataWritebackJob>();
 const writebackAction = ref<"retry" | "cancel">("retry");
 const writebackActionOpen = ref(false);
@@ -45,42 +49,24 @@ let invalidationTimer: number | undefined;
 let allowWritebackActionClose = false;
 
 const query = useQuery({
-  queryKey: computed(() => ["admin", "jobs", { page: page.value, pageSize: pageSize.value, status: status.value, type: type.value, search: debouncedSearch.value, cursor: cursor.value }]),
+  queryKey: computed(() => jobQueryKeys.list({ page: page.value, pageSize: pageSize.value, status: status.value, type: type.value, search: debouncedSearch.value, cursor: cursor.value })),
   queryFn: ({ signal }) => jobAdmin.list({ page: page.value, pageSize: pageSize.value, status: status.value, type: type.value, search: debouncedSearch.value, sort: "createdAt", order: "desc", cursor: cursor.value || undefined, cursorMode: "cursor" }, signal),
   placeholderData: keepPreviousData,
   refetchInterval: (state) => streamConnected.value ? false : state.state.data?.items.some((job) => ["QUEUED", "RUNNING"].includes(job.status)) ? 5_000 : 60_000,
 });
 const selectedSummary = computed(() => query.data.value?.items.find((job) => job.id === selectedId.value));
 const detailQuery = useQuery({
-  queryKey: computed(() => ["admin", "jobs", "detail", selectedId.value]),
+  queryKey: computed(() => jobQueryKeys.detail(selectedId.value)),
   queryFn: ({ signal }) => jobAdmin.detail(selectedId.value, signal),
   enabled: computed(() => detailOpen.value && Boolean(selectedId.value)),
   refetchInterval: (state) => ["QUEUED", "RUNNING"].includes(state.state.data?.status ?? "") ? 5_000 : false,
 });
 const selected = computed<JobDetail | JobSummary | undefined>(() => detailQuery.data.value ?? selectedSummary.value);
-function resetPaging(): void {
-  page.value = 1;
-  cursor.value = "";
-  cursorHistory.value = new Map([[1, ""]]);
-}
-function changePage(nextPage: number): void {
-  if (query.isFetching.value || !Number.isSafeInteger(nextPage) || nextPage < 1 || nextPage === page.value) return;
-  const next = new Map(cursorHistory.value);
-  if (nextPage < page.value) cursor.value = next.get(nextPage) ?? "";
-  else {
-    const nextCursor = query.data.value?.nextCursor;
-    if (!nextCursor) return;
-    next.set(nextPage, nextCursor);
-    cursor.value = nextCursor;
-  }
-  cursorHistory.value = next;
-  page.value = nextPage;
-}
 watch([status, type, debouncedSearch], () => resetPaging());
 watch(writebackStatus, () => resetWritebackPaging());
 const running = computed(() => query.data.value?.items.filter((job) => job.status === "RUNNING").length ?? 0);
 const writebackQuery = useQuery({
-  queryKey: computed(() => ["admin", "metadata-writeback-jobs", { page: writebackPage.value, pageSize: writebackPageSize.value, status: writebackStatus.value, cursor: writebackCursor.value }]),
+  queryKey: computed(() => jobQueryKeys.writebacks({ page: writebackPage.value, pageSize: writebackPageSize.value, status: writebackStatus.value, cursor: writebackCursor.value })),
   queryFn: ({ signal }) => jobAdmin.listWritebacks({ page: writebackPage.value, pageSize: writebackPageSize.value, status: writebackStatus.value, cursor: writebackCursor.value || undefined, cursorMode: "cursor" }, signal),
   placeholderData: keepPreviousData,
   refetchInterval: (state) => state.state.data?.items.some((job) => ["PENDING", "PROCESSING"].includes(job.status)) ? 5_000 : 60_000,
@@ -89,29 +75,9 @@ const writebackQuery = useQuery({
 function jobKey(job: JobSummary): string { return job.id; }
 function writebackKey(job: MetadataWritebackJob): string { return job.id; }
 
-function resetWritebackPaging(): void {
-  writebackPage.value = 1;
-  writebackCursor.value = "";
-  writebackCursorHistory.value = new Map([[1, ""]]);
-}
-
-function changeWritebackPage(nextPage: number): void {
-  if (writebackQuery.isFetching.value || !Number.isSafeInteger(nextPage) || nextPage < 1 || nextPage === writebackPage.value) return;
-  const next = new Map(writebackCursorHistory.value);
-  if (nextPage < writebackPage.value) writebackCursor.value = next.get(nextPage) ?? "";
-  else {
-    const nextCursor = writebackQuery.data.value?.nextCursor;
-    if (!nextCursor) return;
-    next.set(nextPage, nextCursor);
-    writebackCursor.value = nextCursor;
-  }
-  writebackCursorHistory.value = next;
-  writebackPage.value = nextPage;
-}
-
 function queueRefresh(): void {
   if (invalidationTimer) return;
-  invalidationTimer = window.setTimeout(() => { invalidationTimer = undefined; void queryClient.invalidateQueries({ queryKey: ["admin", "jobs"] }); void queryClient.invalidateQueries({ queryKey: ["admin", "metadata-writeback-jobs"] }); void queryClient.invalidateQueries({ queryKey: ["admin", "dashboard"] }); }, 500);
+  invalidationTimer = window.setTimeout(() => { invalidationTimer = undefined; void invalidateAdminJobEventQueries(); }, 500);
 }
 onMounted(() => {
   eventSource = jobAdmin.watch(
@@ -122,9 +88,7 @@ onMounted(() => {
 });
 onBeforeUnmount(() => { eventSource?.close(); if (invalidationTimer) window.clearTimeout(invalidationTimer); });
 function details(job: JobSummary): void { selectedId.value = job.id; detailOpen.value = true; }
-function changePageSize(value: number): void { pageSize.value = value; resetPaging(); }
-function changeWritebackPageSize(value: number): void { writebackPageSize.value = value; resetWritebackPaging(); }
-async function refresh(): Promise<void> { await Promise.all([queryClient.invalidateQueries({ queryKey: ["admin", "jobs"] }), queryClient.invalidateQueries({ queryKey: ["admin", "dashboard"] })]); }
+async function refresh(): Promise<void> { await invalidateAdminJobQueries(); }
 const retryMutation = useMutation({ mutationFn: (job: JobSummary) => jobAdmin.retry(job.id), onSuccess: async () => { ui.notify("success", "任务已重新入队"); await refresh(); }, onError: (error) => ui.notify("error", "任务重试失败", error instanceof ApiError ? error.message : undefined) });
 const cancelMutation = useMutation({ mutationFn: (job: JobSummary) => jobAdmin.cancel(job.id), onSuccess: async () => { ui.notify("success", "任务取消请求已提交"); await refresh(); }, onError: (error) => ui.notify("error", "取消任务失败", error instanceof ApiError ? error.message : undefined) });
 function percent(job: JobSummary): number { return Math.max(0, Math.min(100, job.progress)); }
@@ -174,7 +138,7 @@ watch(writebackActionOpen, (value) => {
 <tr class="cursor-pointer" tabindex="0" :aria-label="`查看任务：${job.title}`" @click="details(job)" @keydown.enter="details(job)" @keydown.space.prevent="details(job)"><td><div class="flex items-center gap-3"><span class="grid h-10 w-10 place-items-center rounded-xl bg-[var(--surface-muted)] text-[var(--primary)]"><FileCog :size="18" /></span><div><p class="max-w-80 truncate font-semibold">{{ job.title }}</p><p class="mt-1 text-[10px] font-bold text-[var(--muted)]">{{ humanize(job.type) }} · {{ job.id.slice(0, 8) }}</p></div></div></td><td><StatusBadge :status="job.status" dot /></td><td class="w-52"><div class="flex items-center gap-3"><div class="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--surface-muted)]"><div class="progress-fill h-full rounded-full" :class="job.status === 'FAILED' ? 'bg-rose-500' : 'bg-[var(--primary)]'" :style="{ width: `${Math.max(job.status === 'QUEUED' ? 2 : 0, percent(job))}%` }" /></div><span class="w-9 text-right text-xs font-semibold">{{ Math.round(percent(job)) }}%</span></div></td><td><span class="font-semibold">{{ job.processed.toLocaleString() }}</span><span class="text-[var(--muted)]"> / {{ job.total.toLocaleString() }}</span></td><td>{{ job.attempts }}</td><td class="text-xs text-[var(--muted)]">{{ formatDate(job.createdAt) }}</td><td @click.stop @keydown.stop><div class="flex gap-1"><button class="btn btn-ghost btn-icon" type="button" :aria-label="`查看任务：${job.title}`" @click="details(job)"><Eye :size="15" /></button><button v-if="job.status === 'FAILED'" class="btn btn-ghost btn-icon" type="button" :aria-label="`重试任务：${job.title}`" :disabled="retryMutation.isPending.value" @click="retryMutation.mutate(job)"><RotateCcw :size="15" /></button><button v-if="['QUEUED','RUNNING'].includes(job.status)" class="btn btn-ghost btn-icon text-[var(--danger)]" type="button" :aria-label="`取消任务：${job.title}`" :disabled="cancelMutation.isPending.value" @click="cancelMutation.mutate(job)"><Ban :size="15" /></button></div></td></tr>
           </template>
         </VirtualTable>
-        <AppPagination :page="page" :page-size="pageSize" :total="query.data.value.total" :total-pages="query.data.value.totalPages" cursor @change="changePage" @page-size-change="changePageSize" /></template>
+        <AppPagination :page="page" :page-size="pageSize" :total="query.data.value.total" :total-pages="query.data.value.totalPages" @change="changePage" @page-size-change="changePageSize" /></template>
     </section>
 
     <section class="ui-card overflow-hidden" :class="{ 'data-refreshing': writebackQuery.isFetching.value && !writebackQuery.isPending.value }" :aria-busy="writebackQuery.isFetching.value">
@@ -195,7 +159,7 @@ watch(writebackActionOpen, (value) => {
 <tr><td><p class="font-mono text-xs font-semibold">{{ job.id.slice(0, 8) }}</p><p class="mt-1 font-mono text-[10px] text-[var(--muted)]">{{ job.trackId }}</p></td><td><StatusBadge :status="job.status" dot /></td><td>{{ job.metadataVersion }}</td><td>{{ job.attempts }} / {{ job.maxAttempts }}</td><td><p v-if="job.lastError" class="max-w-52 truncate text-xs text-[var(--danger)]" :title="job.lastError">{{ job.lastErrorCode }} · {{ job.lastError }}</p><span v-else>—</span></td><td class="text-xs text-[var(--muted)]">{{ formatDate(job.createdAt) }}</td><td><div class="flex gap-1"><button v-if="['FAILED','CANCELLED'].includes(job.status)" class="btn btn-ghost btn-icon" type="button" aria-label="重试写回" @click="askWriteback(job, 'retry')"><RotateCcw :size="15" /></button><button v-if="['PENDING','PROCESSING'].includes(job.status)" class="btn btn-ghost btn-icon text-[var(--danger)]" type="button" aria-label="取消写回" @click="askWriteback(job, 'cancel')"><Ban :size="15" /></button><span v-if="job.status === 'READY'">—</span></div></td></tr>
           </template>
         </VirtualTable>
-        <AppPagination :page="writebackPage" :page-size="writebackPageSize" :total="writebackQuery.data.value.total" :total-pages="writebackQuery.data.value.totalPages" cursor @change="changeWritebackPage" @page-size-change="changeWritebackPageSize" /></template>
+        <AppPagination :page="writebackPage" :page-size="writebackPageSize" :total="writebackQuery.data.value.total" :total-pages="writebackQuery.data.value.totalPages" @change="changeWritebackPage" @page-size-change="changeWritebackPageSize" /></template>
     </section>
 
     <BaseDialog v-model="detailOpen" title="任务详情" :description="selected ? `${humanize(selected.type)} · ${selected.id}` : ''">

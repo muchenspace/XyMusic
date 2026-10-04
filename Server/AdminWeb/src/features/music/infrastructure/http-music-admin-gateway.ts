@@ -19,13 +19,13 @@ import type {
   BatchRestoreTracksResult,
   MusicListQuery,
   MusicPage,
-  MetadataLyrics,
   PermanentDeleteTracksJob,
   TrackListQuery,
   TrackMetadataRecord,
   TrackMutationTarget,
   TrackSummary,
 } from "@/features/music/domain/models";
+import { validateTrackMetadataRecord } from "@/features/music/domain/models";
 
 export class HttpMusicAdminGateway implements MusicAdminGateway {
   listTracks(query: TrackListQuery, signal?: AbortSignal): Promise<MusicPage<TrackSummary>> {
@@ -100,18 +100,5 @@ export class HttpMusicAdminGateway implements MusicAdminGateway {
 
   async updateArtist(artistId: string, command: UpdateArtistCommand): Promise<void> {
     await adminApi.updateArtist(artistId, command);
-  }
-}
-
-function validateTrackMetadataRecord(record: TrackMetadataRecord): TrackMetadataRecord {
-  validateLyricsTiming(record.raw.lyrics);
-  validateLyricsTiming(record.effective.lyrics);
-  if (Object.prototype.hasOwnProperty.call(record.overrides, "lyrics")) validateLyricsTiming(record.overrides.lyrics);
-  return record;
-}
-
-function validateLyricsTiming(lyrics: MetadataLyrics | null | undefined): void {
-  if (lyrics && lyrics.timing !== "LINE" && lyrics.timing !== "WORD") {
-    throw new Error("Track metadata lyrics timing is invalid");
   }
 }

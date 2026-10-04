@@ -6,16 +6,23 @@ import type {
   DesktopLyricsClock,
   DesktopLyricsSnapshot,
 } from "../src/application/ports/DesktopLyrics";
+import { DESKTOP_LYRICS_PROTOCOL_VERSION } from "../src/application/ports/DesktopLyrics";
 import type {
+  DesktopLyricsClockInput,
   DesktopLyricsController,
   DesktopLyricsControllerState,
   DesktopLyricsPlaybackRequest,
+  DesktopLyricsSnapshotInput,
 } from "../src/application/ports/DesktopLyricsController";
 import type { ApplicationServices } from "../src/application/services";
 import type { Track } from "../src/domain/music";
 import { useDesktopLyricsBridge } from "../src/presentation/composables/useDesktopLyricsBridge";
 import { applicationServicesKey } from "../src/presentation/services";
+import { useLyricsStore } from "../src/presentation/stores/lyricsStore";
 import { FakePlaybackSession } from "./support/FakePlaybackSession";
+import { createTestLyricsPreferencePersistence } from "./support/lyricsPreferencePersistence";
+
+const TEST_TRANSPORT_EPOCH = "test-main-window";
 
 describe("desktop lyrics bridge", () => {
   it("routes playback requests through the player projection and cleans up its subscription", async () => {
@@ -23,7 +30,7 @@ describe("desktop lyrics bridge", () => {
     const playbackSession = new FakePlaybackSession({
       state: { queue: [track("one"), track("two")], currentIndex: 0, duration: 180 },
     });
-    const mounted = mountBridge(controller, playbackSession);
+    const { wrapper } = mountBridge(controller, playbackSession);
     try {
       await settle();
       controller.sendSnapshot.mockClear();
@@ -45,21 +52,15 @@ describe("desktop lyrics bridge", () => {
       await settle();
       expect(controller.sendSnapshot).toHaveBeenCalledTimes(snapshotsBeforeReady + 1);
     } finally {
-      mounted.unmount();
+      wrapper.unmount();
     }
 
     expect(controller.removePlaybackRequests).toHaveBeenCalledOnce();
+    expect(controller.cancelPendingSends).toHaveBeenCalledOnce();
   });
 
-  it("keeps only the latest clock while the native transport is busy", async () => {
-    const firstClock = deferred<void>();
-    let clockCalls = 0;
-    const controller = new FakeDesktopLyricsController(visibleState(), {
-      sendClock: vi.fn(() => {
-        clockCalls += 1;
-        return clockCalls === 1 ? firstClock.promise : Promise.resolve();
-      }),
-    });
+  it("forwards playback time changes to the controller clock policy", async () => {
+    const controller = new FakeDesktopLyricsController(visibleState());
     const playbackSession = new FakePlaybackSession({
       state: {
         queue: [track("one")],
@@ -69,46 +70,39 @@ describe("desktop lyrics bridge", () => {
         isPlaying: true,
       },
     });
-    const mounted = mountBridge(controller, playbackSession);
+    const { wrapper } = mountBridge(controller, playbackSession);
     try {
-      await waitFor(() => controller.sendClock.mock.calls.length === 1);
+      await waitFor(() => controller.offerClock.mock.calls.length > 0);
+      controller.offerClock.mockClear();
 
-      playbackSession.update({ currentTime: 1 });
-      playbackSession.update({ currentTime: 2 });
       playbackSession.update({ currentTime: 3 });
       await nextTick();
 
-      expect(controller.sendClock).toHaveBeenCalledOnce();
-      firstClock.resolve();
-      await waitFor(() => controller.sendClock.mock.calls.length === 2);
-
-      expect((controller.sendClock.mock.calls[1]?.[0] as DesktopLyricsClock).positionSeconds).toBe(3);
+      expect(controller.offerClock).toHaveBeenCalledOnce();
+      const clock = controller.offerClock.mock.calls[0]?.[0]();
+      expect(clock?.positionSeconds).toBe(3);
     } finally {
-      mounted.unmount();
+      wrapper.unmount();
     }
   });
 
-  it("orders snapshots and clocks in one monotonic transport stream", async () => {
-    const sent: Array<DesktopLyricsSnapshot | DesktopLyricsClock> = [];
-    const controller = new FakeDesktopLyricsController(visibleState(), {
-      sendSnapshot: vi.fn(async (snapshot: DesktopLyricsSnapshot) => { sent.push(snapshot); }),
-      sendClock: vi.fn(async (clock: DesktopLyricsClock) => { sent.push(clock); }),
-    });
+  it("requests a snapshot when the lyric projection changes", async () => {
+    const controller = new FakeDesktopLyricsController(visibleState());
     const playbackSession = new FakePlaybackSession({
-      state: { queue: [track("one")], currentIndex: 0, currentTime: 1, duration: 180, isPlaying: true },
+      state: { queue: [track("one")], currentIndex: 0, duration: 180 },
     });
-    const mounted = mountBridge(controller, playbackSession);
+    const { wrapper, pinia } = mountBridge(controller, playbackSession);
     try {
-      await waitFor(() => sent.some((message) => "track" in message) && sent.some((message) => "trackId" in message));
-      const revisions = sent.map((message) => message.revision);
-      const transportEpochs = sent.map((message) => message.transportEpoch);
+      await settle();
+      const lyricsStore = useLyricsStore(pinia);
+      controller.requestSnapshot.mockClear();
 
-      expect(revisions.every((revision) => Number.isFinite(revision))).toBe(true);
-      expect(revisions.slice(1).every((revision, index) => revision! > revisions[index]!)).toBe(true);
-      expect(new Set(transportEpochs).size).toBe(1);
-      expect(transportEpochs[0]).toMatch(/\S/u);
+      lyricsStore.showTranslation = false;
+      await nextTick();
+
+      expect(controller.requestSnapshot).toHaveBeenCalled();
     } finally {
-      mounted.unmount();
+      wrapper.unmount();
     }
   });
 
@@ -123,7 +117,7 @@ describe("desktop lyrics bridge", () => {
         isPlaying: true,
       },
     });
-    const mounted = mountBridge(controller, playbackSession);
+    const { wrapper } = mountBridge(controller, playbackSession);
     try {
       await waitFor(() => controller.sendClock.mock.calls.length > 0);
       controller.sendClock.mockClear();
@@ -136,36 +130,38 @@ describe("desktop lyrics bridge", () => {
         positionDiscontinuityVersion: 1,
       }));
     } finally {
-      mounted.unmount();
+      wrapper.unmount();
     }
   });
 });
 
 function mountBridge(controller: FakeDesktopLyricsController, playbackSession: FakePlaybackSession) {
   const pinia = createPinia();
+  const uiPreferences = {
+    readLyrics: () => ({
+      fontScale: 1,
+      showTranslation: true,
+      colors: {
+        dark: { textColor: "#8e98a3", highlightColor: "#d7e6f3" },
+        light: { textColor: "#626a74", highlightColor: "#1b4269" },
+      },
+    }),
+    writeLyricsFontScale() {},
+    writeLyricsTranslation() {},
+    writeLyricsTextColor() {},
+    writeLyricsHighlightColor() {},
+    readLyricsOffset: () => 0,
+    writeLyricsOffset() {},
+    clearLyricsOffsets() {},
+  };
   const services = {
     catalog: { lyrics: vi.fn(async () => null) },
     playbackSession,
     desktopLyricsController: controller,
-    uiPreferences: {
-      readLyrics: () => ({
-        fontScale: 1,
-        showTranslation: true,
-        colors: {
-          dark: { textColor: "#8e98a3", highlightColor: "#d7e6f3" },
-          light: { textColor: "#626a74", highlightColor: "#1b4269" },
-        },
-      }),
-      writeLyricsFontScale() {},
-      writeLyricsTranslation() {},
-      writeLyricsTextColor() {},
-      writeLyricsHighlightColor() {},
-      readLyricsOffset: () => 0,
-      writeLyricsOffset() {},
-      clearLyricsOffsets() {},
-    },
+    uiPreferences,
+    lyricsPreferencePersistence: createTestLyricsPreferencePersistence(uiPreferences),
   } as unknown as ApplicationServices;
-  return mount(defineComponent({
+  const wrapper = mount(defineComponent({
     setup() {
       useDesktopLyricsBridge();
       return () => h("div");
@@ -176,12 +172,14 @@ function mountBridge(controller: FakeDesktopLyricsController, playbackSession: F
       provide: { [applicationServicesKey as symbol]: services },
     },
   });
+  return { wrapper, pinia };
 }
 
 class FakeDesktopLyricsController implements DesktopLyricsController {
   private stateValue: DesktopLyricsControllerState;
   private readonly stateListeners = new Set<(state: DesktopLyricsControllerState) => void>();
   private playbackRequestListener: ((request: DesktopLyricsPlaybackRequest) => void) | undefined;
+  private transportRevision = 0;
   readonly removePlaybackRequests = vi.fn();
   readonly initialize = vi.fn(async () => undefined);
   readonly setVisible = vi.fn(async () => undefined);
@@ -193,6 +191,27 @@ class FakeDesktopLyricsController implements DesktopLyricsController {
   readonly setHighlightColor = vi.fn();
   readonly sendSnapshot: ReturnType<typeof vi.fn>;
   readonly sendClock: ReturnType<typeof vi.fn>;
+  readonly requestSnapshot = vi.fn((create: () => DesktopLyricsSnapshotInput) => {
+    this.sendSnapshot({
+      version: DESKTOP_LYRICS_PROTOCOL_VERSION,
+      transportEpoch: TEST_TRANSPORT_EPOCH,
+      revision: ++this.transportRevision,
+      ...create(),
+    });
+  });
+  readonly scheduleSnapshot = vi.fn((create: () => DesktopLyricsSnapshotInput) => { this.requestSnapshot(create); });
+  readonly offerClock = vi.fn((create: () => DesktopLyricsClockInput | null) => {
+    const input = create();
+    if (!input) return;
+    this.sendClock({
+      version: DESKTOP_LYRICS_PROTOCOL_VERSION,
+      transportEpoch: TEST_TRANSPORT_EPOCH,
+      revision: ++this.transportRevision,
+      ...input,
+    });
+  });
+  readonly discardPendingClock = vi.fn();
+  readonly cancelPendingSends = vi.fn();
   readonly dispose = vi.fn();
 
   constructor(
@@ -252,12 +271,6 @@ function track(id: string): Track {
     liked: false,
     publishedAt: "2026-08-02T00:00:00.000Z",
   };
-}
-
-function deferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
-  return { promise, resolve };
 }
 
 async function waitFor(condition: () => boolean): Promise<void> {

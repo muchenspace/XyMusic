@@ -11,12 +11,15 @@ import (
 
 	"xymusic/server/internal/shared/apperror"
 	"xymusic/server/internal/shared/pagination"
+	"xymusic/server/internal/shared/timeformat"
 )
 
 type ServiceDependencies struct {
 	Store              Store
 	RootDirectory      string
 	WorkerAvailability WorkerAvailability
+	DirectoryBrowser   DirectoryBrowser
+	RootProbe          RootProbe
 }
 
 type Service struct {
@@ -24,10 +27,8 @@ type Service struct {
 	rootDirectory      string
 	workerAvailability WorkerAvailability
 	cursors            *pagination.CursorCodec
-}
-
-func NewService(dependencies ServiceDependencies) (*Service, error) {
-	return NewServiceWithOptions(dependencies, nil)
+	browser            DirectoryBrowser
+	probe              RootProbe
 }
 
 func NewServiceWithOptions(dependencies ServiceDependencies, cursors *pagination.CursorCodec) (*Service, error) {
@@ -42,9 +43,16 @@ func NewServiceWithOptions(dependencies ServiceDependencies, cursors *pagination
 	if err != nil {
 		return nil, errors.New("resolve administrator source executable root: " + err.Error())
 	}
+	if dependencies.DirectoryBrowser == nil {
+		return nil, errors.New("administrator source directory browser is required")
+	}
+	if dependencies.RootProbe == nil {
+		return nil, errors.New("administrator source root probe is required")
+	}
 	return &Service{
 		store: dependencies.Store, rootDirectory: filepath.Clean(absolute),
 		workerAvailability: dependencies.WorkerAvailability, cursors: cursors,
+		browser: dependencies.DirectoryBrowser, probe: dependencies.RootProbe,
 	}, nil
 }
 
@@ -60,7 +68,7 @@ func (service *Service) Browse(_ context.Context, path string, query PageQuery) 
 		if page.Page > 1 && query.Cursor == "" {
 			return BrowseDTO{}, apperror.Validation("cursor is required for deep directory pages")
 		}
-		resolvedPath, directories, err := readBrowseDirectories(service.rootDirectory, path)
+		resolvedPath, directories, err := readBrowseDirectories(service.browser, service.rootDirectory, path)
 		if err != nil {
 			return BrowseDTO{}, err
 		}
@@ -100,7 +108,7 @@ func (service *Service) Browse(_ context.Context, path string, query PageQuery) 
 	if err != nil {
 		return BrowseDTO{}, err
 	}
-	return browseDirectory(service.rootDirectory, path, page.Page, page.PageSize, page.Offset)
+	return browseDirectory(service.browser, service.rootDirectory, path, page.Page, page.PageSize, page.Offset)
 }
 
 func (service *Service) ListRoots(ctx context.Context, query PageQuery) (RootListDTO, error) {
@@ -172,7 +180,7 @@ func (service *Service) CreateRoot(
 	if input.Enabled == nil || input.ScanOnStartup == nil || input.IncludePatterns == nil || input.ExcludePatterns == nil {
 		return RootDTO{}, contractValidationError()
 	}
-	mutation, err := validateRootInput(service.rootDirectory, RootMutation{
+	mutation, err := validateRootInput(service.rootDirectory, service.probe, RootMutation{
 		Name: input.Name, Path: input.Path, Mode: input.Mode,
 		Enabled: *input.Enabled, ScanOnStartup: *input.ScanOnStartup,
 		ScanIntervalMinutes: cloneJSONInt(input.ScanIntervalMinutes),
@@ -236,7 +244,7 @@ func (service *Service) UpdateRoot(
 	if input.ExcludePatterns.Set {
 		mutation.ExcludePatterns = cloneStrings(input.ExcludePatterns.Value)
 	}
-	mutation, err = validateRootInput(service.rootDirectory, mutation)
+	mutation, err = validateRootInput(service.rootDirectory, service.probe, mutation)
 	if err != nil {
 		return RootDTO{}, err
 	}
@@ -468,7 +476,7 @@ func presentRoot(view RootView) RootDTO {
 		LastError: userFacingOperationalError(root.LastError, nil),
 		FileCount: view.Counts.FileCount, FailedFileCount: view.Counts.FailedFileCount,
 		TrackCount: view.Counts.TrackCount,
-		LatestRun: latest, Version: root.Version,
+		LatestRun:  latest, Version: root.Version,
 		CreatedAt: formatTimestamp(root.CreatedAt), UpdatedAt: formatTimestamp(root.UpdatedAt),
 	}
 }
@@ -542,15 +550,11 @@ func presentRun(run ScanRun) ScanRunDTO {
 }
 
 func formatTimestamp(value time.Time) string {
-	return value.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+	return timeformat.Timestamp(value)
 }
 
 func formatOptionalTimestamp(value *time.Time) *string {
-	if value == nil {
-		return nil
-	}
-	formatted := formatTimestamp(*value)
-	return &formatted
+	return timeformat.OptionalTimestamp(value)
 }
 
 func cloneInt(value *int) *int {

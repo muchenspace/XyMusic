@@ -44,12 +44,6 @@ import com.xymusic.app.R
 import com.xymusic.app.core.ui.layout.isCompactLandscape
 import com.xymusic.app.ui.theme.spacing
 
-internal enum class PlaylistVisibilityOption {
-    PRIVATE,
-    UNLISTED,
-    PUBLIC,
-}
-
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 internal fun PlaylistEditorDialog(

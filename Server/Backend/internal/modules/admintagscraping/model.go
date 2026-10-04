@@ -1,9 +1,9 @@
 package admintagscraping
 
 import (
-	"encoding/json"
 	"time"
 
+	"xymusic/server/internal/shared/idempotencyport"
 	"xymusic/server/internal/shared/lyrics"
 )
 
@@ -261,20 +261,8 @@ type BatchLeaseControl struct {
 
 type MetadataPatch map[string]any
 
-type IdempotencyInput struct {
-	ActorID string
-	Scope   string
-	Key     string
-	Payload any
-}
+type IdempotencyInput = idempotencyport.Input
 
-type IdempotencyResponse struct {
-	Status int
-	Body   json.RawMessage
-}
+type IdempotencyResponse = idempotencyport.Response
 
-type IdempotencyResult struct {
-	Status   int
-	Body     json.RawMessage
-	Replayed bool
-}
+type IdempotencyResult = idempotencyport.Result

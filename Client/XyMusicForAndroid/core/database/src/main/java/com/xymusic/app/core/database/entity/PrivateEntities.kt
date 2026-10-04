@@ -5,8 +5,8 @@ import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
-import com.xymusic.app.core.database.model.PlaylistVisibility
-import com.xymusic.app.core.database.model.SearchScope
+import com.xymusic.app.core.model.playlist.PlaylistVisibility
+import com.xymusic.app.core.model.search.SearchScope
 
 @Entity(
     tableName = "favorites",

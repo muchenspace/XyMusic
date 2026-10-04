@@ -8,12 +8,6 @@ import {
 
 export { DESKTOP_LYRICS_PROTOCOL_VERSION };
 
-export const DESKTOP_LYRICS_EVENTS = {
-  state: "xy-music://desktop-lyrics/state",
-  clock: "xy-music://desktop-lyrics/clock",
-  action: "xy-music://desktop-lyrics/action",
-} as const;
-
 export type DesktopLyricsTrack = ApplicationDesktopLyricsTrack;
 export type DesktopLyricsClockPayload = DesktopLyricsClock;
 export type DesktopLyricsStatePayload = DesktopLyricsSnapshot;
@@ -46,7 +40,7 @@ export function clockFromState(state: DesktopLyricsStatePayload): DesktopLyricsC
 
 export function createDesktopLyricsAction(
   action: "ready" | "previous" | "toggle-playback" | "next" | "close",
-  issuedAtMs = Date.now(),
+  issuedAtMs: number,
 ): DesktopLyricsActionPayload {
   return { version: DESKTOP_LYRICS_PROTOCOL_VERSION, action, issuedAtMs };
 }
@@ -81,16 +75,3 @@ export function createDesktopLyricsColorAction(
     issuedAtMs,
   };
 }
-
-/** Compatibility fallback for isolated presentation mounts. */
-export function createDesktopLyricsBridge(): DesktopLyricsBridge {
-  return inertDesktopLyricsBridge;
-}
-
-const inertDesktopLyricsBridge: DesktopLyricsBridge = {
-  async onState() { return noopUnlisten; },
-  async onClock() { return noopUnlisten; },
-  async emitAction() {},
-};
-
-const noopUnlisten: DesktopLyricsUnlisten = () => undefined;

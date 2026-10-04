@@ -11,13 +11,13 @@ import (
 	"regexp"
 	"strconv"
 	"time"
-	"unicode/utf16"
 
 	"github.com/gin-gonic/gin"
 
 	"xymusic/server/internal/modules/adminauth"
 	"xymusic/server/internal/platform/httpserver"
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/httpx"
 )
 
 type ScrapingAPI interface {
@@ -512,7 +512,7 @@ func contractUUID(value string) (string, error) {
 }
 
 func contractStringLength(value string, minimum, maximum int) bool {
-	length := len(utf16.Encode([]rune(value)))
+	length := httpx.JavascriptStringLength(value)
 	return length >= minimum && length <= maximum
 }
 

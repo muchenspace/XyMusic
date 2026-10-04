@@ -10,11 +10,11 @@ import com.xymusic.app.core.data.media.remote.AlbumDetailDto
 import com.xymusic.app.core.data.media.remote.AlbumSummaryDto
 import com.xymusic.app.core.data.media.remote.ArtistDetailDto
 import com.xymusic.app.core.data.media.remote.ArtistSummaryDto
-import com.xymusic.app.core.data.media.remote.ArtworkDto
 import com.xymusic.app.core.data.media.remote.CatalogProtocolException
 import com.xymusic.app.core.data.media.remote.TrackDetailDto
 import com.xymusic.app.core.data.media.remote.TrackSummaryDto
 import com.xymusic.app.core.data.media.toDomain
+import com.xymusic.app.core.data.media.toDomainArtwork
 import com.xymusic.app.core.database.XyMusicDatabase
 import com.xymusic.app.core.database.dao.CatalogRemoteKeyDao
 import com.xymusic.app.core.database.model.CatalogItemType
@@ -22,7 +22,6 @@ import com.xymusic.app.core.model.media.Album
 import com.xymusic.app.core.model.media.AlbumReference
 import com.xymusic.app.core.model.media.Artist
 import com.xymusic.app.core.model.media.ArtistReference
-import com.xymusic.app.core.model.media.Artwork
 import com.xymusic.app.core.model.media.Track
 import com.xymusic.app.core.model.media.TrackDetail
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
@@ -246,7 +245,7 @@ private fun AlbumSummaryDto.toRandomDomain(): Album = Album(
     id = id,
     title = title,
     artists = artists.map { artist -> ArtistReference(artist.id, artist.name) },
-    cover = cover.toRandomDomain(),
+    cover = cover.toDomainArtwork(),
     releaseDateEpochMillis =
     releaseDate?.let { date ->
         LocalDate
@@ -264,24 +263,12 @@ private fun TrackSummaryDto.toRandomDomain(): Track = Track(
     title = title,
     artists = artists.map { artist -> ArtistReference(artist.id, artist.name) },
     album = album?.let { item -> AlbumReference(item.id, item.title) },
-    artwork = artwork.toRandomDomain(),
+    artwork = artwork.toDomainArtwork(),
     durationMs = durationMs,
     trackNumber = trackNumber,
     discNumber = discNumber,
     publishedAtEpochMillis = Instant.parse(publishedAt).toEpochMilli(),
 )
-
-private fun ArtworkDto?.toRandomDomain(): Artwork? = this?.let { artwork ->
-    Artwork(
-        assetId = artwork.assetId,
-        url = artwork.url,
-        cacheKey = artwork.cacheKey,
-        mimeType = artwork.mimeType,
-        expiresAtEpochMillis = artwork.expiresAt?.let(Instant::parse)?.toEpochMilli(),
-        width = artwork.width,
-        height = artwork.height,
-    )
-}
 
 private const val MIN_RANDOM_LIMIT = 1
 private const val MAX_RANDOM_LIMIT = 50

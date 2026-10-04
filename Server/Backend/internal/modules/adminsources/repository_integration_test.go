@@ -15,8 +15,8 @@ import (
 	"github.com/google/uuid"
 
 	"xymusic/server/internal/config"
-	"xymusic/server/internal/modules/adminmetadata"
 	"xymusic/server/internal/platform/database"
+	"xymusic/server/internal/platform/mediafile"
 	platformsecurity "xymusic/server/internal/platform/security"
 	"xymusic/server/internal/shared/apperror"
 	"xymusic/server/internal/shared/audiostatus"
@@ -72,7 +72,7 @@ func TestRepositoryRunsLibrarySourceLifecycleInConfiguredDatabase(t *testing.T) 
 	if err := os.Mkdir(secondDirectory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	mutation, err := validateRootInput(rootDirectory, RootMutation{
+	mutation, err := validateRootInput(rootDirectory, OSRootProbe{}, RootMutation{
 		Name: "Integration " + short, Path: rootDirectory, Mode: RootModeReadOnly,
 		Enabled: true, ScanOnStartup: false, IncludePatterns: []string{"**/*.flac"}, ExcludePatterns: []string{},
 	})
@@ -162,7 +162,7 @@ func TestRepositoryRunsLibrarySourceLifecycleInConfiguredDatabase(t *testing.T) 
 	}
 
 	interval := 60
-	updatedMutation, err := validateRootInput(rootDirectory, RootMutation{
+	updatedMutation, err := validateRootInput(rootDirectory, OSRootProbe{}, RootMutation{
 		Name: "Updated " + short, Path: secondDirectory, Mode: RootModeReadWrite,
 		Enabled: true, ScanOnStartup: true, ScanIntervalMinutes: &interval,
 		IncludePatterns: []string{"**/*.flac"}, ExcludePatterns: []string{"tmp/**"},
@@ -433,7 +433,7 @@ func TestEnsureDefaultRootSynchronizesConfiguredRoot(t *testing.T) {
 
 	directory := t.TempDir()
 	repository := &Repository{database: transaction}
-	initial, err := validateRootInput(directory, RootMutation{
+	initial, err := validateRootInput(directory, OSRootProbe{}, RootMutation{
 		Name: "Configured default", Path: directory, Mode: RootModeReadOnly, Enabled: true,
 		ScanOnStartup: true, IncludePatterns: []string{"*.mp3"}, ExcludePatterns: []string{},
 	})
@@ -457,7 +457,7 @@ func TestEnsureDefaultRootSynchronizesConfiguredRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	secondDirectory := t.TempDir()
-	secondMutation, err := validateRootInput(directory, RootMutation{
+	secondMutation, err := validateRootInput(directory, OSRootProbe{}, RootMutation{
 		Name: "Second configured root", Path: secondDirectory, Mode: RootModeReadOnly,
 		Enabled: true, ScanOnStartup: false, IncludePatterns: []string{}, ExcludePatterns: []string{},
 	})
@@ -479,7 +479,7 @@ func TestEnsureDefaultRootSynchronizesConfiguredRoot(t *testing.T) {
 		t.Fatalf("configured roots must be configuration-managed: created=%+v second=%+v", created, second)
 	}
 	thirdDirectory := t.TempDir()
-	thirdMutation, err := validateRootInput(directory, RootMutation{
+	thirdMutation, err := validateRootInput(directory, OSRootProbe{}, RootMutation{
 		Name: "Admin-managed root", Path: thirdDirectory, Mode: RootModeReadOnly,
 		Enabled: true, ScanOnStartup: false, IncludePatterns: []string{}, ExcludePatterns: []string{},
 	})
@@ -493,7 +493,7 @@ func TestEnsureDefaultRootSynchronizesConfiguredRoot(t *testing.T) {
 	if adminRoot.Root.ConfigurationManaged {
 		t.Fatalf("admin-created root unexpectedly follows runtime configuration: %+v", adminRoot.Root)
 	}
-	adminOverride, err := validateRootInput(directory, RootMutation{
+	adminOverride, err := validateRootInput(directory, OSRootProbe{}, RootMutation{
 		Name: "Must not overwrite", Path: thirdDirectory, Mode: RootModeReadWrite,
 		Enabled: true, ScanOnStartup: true, IncludePatterns: []string{"*.flac"}, ExcludePatterns: []string{"tmp/**"},
 	})
@@ -509,7 +509,7 @@ func TestEnsureDefaultRootSynchronizesConfiguredRoot(t *testing.T) {
 		preserved.ConfigurationManaged {
 		t.Fatalf("admin-managed root was overwritten by runtime synchronization: %+v", preserved)
 	}
-	updatedMutation, err := validateRootInput(directory, RootMutation{
+	updatedMutation, err := validateRootInput(directory, OSRootProbe{}, RootMutation{
 		Name: "Configured default updated", Path: directory, Mode: RootModeReadWrite, Enabled: true,
 		ScanOnStartup: false, IncludePatterns: []string{"*.flac"}, ExcludePatterns: []string{"*.tmp"},
 	})
@@ -581,7 +581,7 @@ func TestProductionSynchronizerPersistsFilesMetadataInConfiguredDatabase(t *test
 		t.Fatal(err)
 	}
 	directory := t.TempDir()
-	mutation, err := validateRootInput(directory, RootMutation{
+	mutation, err := validateRootInput(directory, OSRootProbe{}, RootMutation{
 		Name: "Sync " + short, Path: directory, Mode: RootModeReadOnly, Enabled: true,
 		IncludePatterns: []string{}, ExcludePatterns: []string{},
 	})
@@ -595,8 +595,8 @@ func TestProductionSynchronizerPersistsFilesMetadataInConfiguredDatabase(t *test
 	}
 	rootID := view.Root.ID
 	durationMS := int64(180000)
-	probe := metadataProbeStub{durationMS: &durationMS, metadata: adminmetadata.MetadataSnapshot{
-		Title: "Scanned Song", Credits: []adminmetadata.MetadataCredit{{Name: "Scan Artist", Role: adminmetadata.CreditPrimary}},
+	probe := metadataProbeStub{durationMS: &durationMS, metadata: mediafile.MetadataSnapshot{
+		Title: "Scanned Song", Credits: []mediafile.MetadataCredit{{Name: "Scan Artist", Role: mediafile.CreditPrimary}},
 		AlbumArtists: []string{"Scan Artist"}, Album: stringPointer("Scan Album"),
 		TrackNumber: intPointer(1), DiscNumber: intPointer(1), Genres: []string{},
 	}, calls: &atomic.Int32{}}
@@ -882,7 +882,7 @@ func TestProductionSynchronizerScannerPersistsDiscoveryAndPreparedFailurePaths(t
 	suffix := uuid.NewString()
 	directory := t.TempDir()
 	repository := &Repository{database: transaction}
-	mutation, err := validateRootInput(directory, RootMutation{
+	mutation, err := validateRootInput(directory, OSRootProbe{}, RootMutation{
 		Name: "Scanner failure " + suffix[:8], Path: directory,
 		Mode: RootModeReadOnly, Enabled: true,
 		IncludePatterns: []string{}, ExcludePatterns: []string{},
@@ -1007,22 +1007,22 @@ func (stub *syncStorageStub) StatObject(
 }
 
 type metadataProbeStub struct {
-	metadata   adminmetadata.MetadataSnapshot
+	metadata   mediafile.MetadataSnapshot
 	durationMS *int64
 	calls      *atomic.Int32
 }
 
-func (stub metadataProbeStub) Probe(context.Context, string) (adminmetadata.ProbedMetadataFile, error) {
+func (stub metadataProbeStub) Probe(context.Context, string) (mediafile.ProbedMetadataFile, error) {
 	if stub.calls != nil {
 		stub.calls.Add(1)
 	}
-	return adminmetadata.ProbedMetadataFile{Metadata: stub.metadata, DurationMS: stub.durationMS}, nil
+	return mediafile.ProbedMetadataFile{Metadata: stub.metadata, DurationMS: stub.durationMS}, nil
 }
 
 type metadataProbeFailureStub struct{ err error }
 
-func (stub metadataProbeFailureStub) Probe(context.Context, string) (adminmetadata.ProbedMetadataFile, error) {
-	return adminmetadata.ProbedMetadataFile{}, stub.err
+func (stub metadataProbeFailureStub) Probe(context.Context, string) (mediafile.ProbedMetadataFile, error) {
+	return mediafile.ProbedMetadataFile{}, stub.err
 }
 
 func stringPointer(value string) *string { return &value }

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+
+	"xymusic/server/internal/shared/mutationresult"
 )
 
 const AvatarMaximumBytes int64 = 5 * 1024 * 1024
@@ -75,7 +77,4 @@ type AvatarUploadDTO struct {
 
 // MutationResult carries HTTP replay metadata without coupling the service to
 // Gin. Routes expose Replayed through X-Idempotent-Replay.
-type MutationResult[T any] struct {
-	Body     T
-	Replayed bool
-}
+type MutationResult[T any] = mutationresult.Result[T]

@@ -13,21 +13,18 @@ import com.xymusic.app.core.data.media.remote.TrackSummaryDto
 import com.xymusic.app.core.database.entity.AlbumArtistCreditEntity
 import com.xymusic.app.core.database.entity.AlbumEntity
 import com.xymusic.app.core.database.entity.ArtistEntity
-import com.xymusic.app.core.database.entity.ArtworkColumns
 import com.xymusic.app.core.database.entity.LyricsEntity
 import com.xymusic.app.core.database.entity.TrackArtistCreditEntity
 import com.xymusic.app.core.database.entity.TrackEntity
 import com.xymusic.app.core.database.model.AlbumReadModel
 import com.xymusic.app.core.database.model.ArtistCreditRole
-import com.xymusic.app.core.database.model.LyricsFormat as DatabaseLyricsFormat
-import com.xymusic.app.core.database.model.LyricsTiming as DatabaseLyricsTiming
 import com.xymusic.app.core.database.model.TrackDetailReadModel
 import com.xymusic.app.core.database.model.TrackSummaryReadModel
+import com.xymusic.app.core.database.model.toDomainArtwork
 import com.xymusic.app.core.model.media.Album
 import com.xymusic.app.core.model.media.AlbumReference
 import com.xymusic.app.core.model.media.Artist
 import com.xymusic.app.core.model.media.ArtistReference
-import com.xymusic.app.core.model.media.Artwork
 import com.xymusic.app.core.model.media.Lyrics
 import com.xymusic.app.core.model.media.LyricsFormat
 import com.xymusic.app.core.model.media.LyricsTiming
@@ -62,13 +59,13 @@ internal fun ArtistReferenceDto.toReferenceEntity(cachedAtEpochMs: Long): Artist
 internal fun ArtistSummaryDto.toEntity(cachedAtEpochMs: Long): ArtistEntity {
     requireUuid(id, "artist ID")
     require(name.isNotBlank()) { "Artist name cannot be blank" }
-    return ArtistEntity(id, name, null, artwork.toColumns(), cachedAtEpochMs)
+    return ArtistEntity(id, name, null, artwork.toValidatedArtworkColumns(), cachedAtEpochMs)
 }
 
 internal fun ArtistDetailDto.toEntity(cachedAtEpochMs: Long): ArtistEntity {
     requireUuid(id, "artist ID")
     require(name.isNotBlank()) { "Artist name cannot be blank" }
-    return ArtistEntity(id, name, description, artwork.toColumns(), cachedAtEpochMs)
+    return ArtistEntity(id, name, description, artwork.toValidatedArtworkColumns(), cachedAtEpochMs)
 }
 
 internal fun AlbumReferenceDto.toReferenceEntity(cachedAtEpochMs: Long): AlbumEntity {
@@ -122,7 +119,7 @@ private fun albumWriteModel(
             description = description,
             releaseDateEpochMs = releaseDate?.let(::dateToEpochMillis),
             trackCount = trackCount,
-            cover = cover.toColumns(),
+            cover = cover.toValidatedArtworkColumns(),
             cachedAtEpochMs = cachedAtEpochMs,
         ),
         artistReferences = references,
@@ -197,7 +194,7 @@ private fun trackWriteModel(
             trackNumber = trackNumber,
             discNumber = discNumber,
             publishedAtEpochMs = Instant.parse(publishedAt).toEpochMilli(),
-            artwork = artwork.toColumns(),
+            artwork = artwork.toValidatedArtworkColumns(),
             cachedAtEpochMs = cachedAtEpochMs,
         ),
         artistReferences = references,
@@ -214,15 +211,15 @@ private fun LyricsResourceDto.toEntity(): LyricsEntity {
     requireUuid(id, "lyrics ID")
     requireUuid(trackId, "lyrics track ID")
     require(trackVersion >= 1) { "Lyrics track version must be positive" }
-    val documentFormat = LyricsFormat.valueOf(format)
-    val documentTiming = LyricsTiming.valueOf(timing)
+    val documentFormat = LyricsFormat.fromWireValue(format)
+    val documentTiming = LyricsTiming.fromWireValue(timing)
     requireValidLyricsDocument(documentFormat, documentTiming, content)
     return LyricsEntity(
         id = id,
         trackId = trackId,
         language = language,
-        format = DatabaseLyricsFormat.valueOf(documentFormat.name),
-        timing = DatabaseLyricsTiming.valueOf(documentTiming.name),
+        format = documentFormat,
+        timing = documentTiming,
         content = content,
         isDefault = true,
         trackVersion = trackVersion,
@@ -239,8 +236,8 @@ internal fun TrackDetailReadModel.toDomain(): TrackDetail = TrackDetail(
             id = lyric.id,
             trackId = lyric.trackId,
             language = lyric.language,
-            format = LyricsFormat.valueOf(lyric.format.name),
-            timing = LyricsTiming.valueOf(lyric.timing.name),
+            format = lyric.format,
+            timing = lyric.timing,
             content = lyric.content,
             trackVersion = lyric.trackVersion,
             updatedAtEpochMillis = lyric.updatedAtEpochMs,
@@ -265,7 +262,7 @@ private fun TrackEntity.toDomain(
                 artistsById[credit.artistId]?.let { ArtistReference(it.id, it.name) }
             }.distinctBy(ArtistReference::id),
         album = album?.let { AlbumReference(it.id, it.title) },
-        artwork = artwork.toDomain(),
+        artwork = artwork.toDomainArtwork(),
         durationMs = durationMs,
         trackNumber = trackNumber,
         discNumber = discNumber,
@@ -276,7 +273,7 @@ private fun TrackEntity.toDomain(
 internal fun ArtistEntity.toDomain(): Artist = Artist(
     id = id,
     name = name,
-    artwork = artwork.toDomain(),
+    artwork = artwork.toDomainArtwork(),
     description = description,
 )
 
@@ -291,38 +288,10 @@ internal fun AlbumReadModel.toDomain(): Album {
             .mapNotNull { credit ->
                 artistsById[credit.artistId]?.let { ArtistReference(it.id, it.name) }
             }.distinctBy(ArtistReference::id),
-        cover = album.cover.toDomain(),
+        cover = album.cover.toDomainArtwork(),
         releaseDateEpochMillis = album.releaseDateEpochMs,
         trackCount = album.trackCount,
         description = album.description,
-    )
-}
-
-private fun ArtworkDto?.toColumns(): ArtworkColumns? = this?.let { artwork ->
-    requireUuid(artwork.assetId, "artwork asset ID")
-    require(artwork.url.isNotBlank()) { "Artwork URL cannot be blank" }
-    require(artwork.cacheKey.isNotBlank()) { "Artwork cache key cannot be blank" }
-    require(artwork.mimeType.isNotBlank()) { "Artwork MIME type cannot be blank" }
-    ArtworkColumns(
-        assetId = artwork.assetId,
-        url = artwork.url,
-        cacheKey = artwork.cacheKey,
-        mimeType = artwork.mimeType,
-        expiresAtEpochMs = artwork.expiresAt?.let { Instant.parse(it).toEpochMilli() },
-        width = artwork.width,
-        height = artwork.height,
-    )
-}
-
-private fun ArtworkColumns?.toDomain(): Artwork? = this?.assetId?.let { assetId ->
-    Artwork(
-        assetId = assetId,
-        url = requireNotNull(url),
-        cacheKey = requireNotNull(cacheKey),
-        mimeType = requireNotNull(mimeType),
-        expiresAtEpochMillis = expiresAtEpochMs,
-        width = width,
-        height = height,
     )
 }
 

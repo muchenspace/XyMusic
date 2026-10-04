@@ -2,9 +2,11 @@ import { createApp, defineComponent, h } from "vue";
 import { createPinia } from "pinia";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ApplicationServices } from "../src/application/services";
+import { LyricsCacheService } from "../src/application/services/LyricsCacheService";
 import type { Lyrics } from "../src/domain/music";
 import { applicationServicesKey } from "../src/presentation/services";
 import { useLyricsStore } from "../src/presentation/stores/lyricsStore";
+import { createTestLyricsPreferencePersistence } from "./support/lyricsPreferencePersistence";
 
 describe("lyrics store", () => {
   const mountedApps: Array<ReturnType<typeof createApp>> = [];
@@ -111,24 +113,27 @@ function lyrics(timing: "LINE" | "WORD"): Lyrics {
 }
 
 function createServices(catalogLyrics: (trackId: string, signal?: AbortSignal) => Promise<Lyrics | null>): ApplicationServices {
+  const uiPreferences = {
+    readLyrics: () => ({
+      fontScale: 1,
+      showTranslation: true,
+      colors: {
+        dark: { textColor: "#8e98a3", highlightColor: "#d7e6f3" },
+        light: { textColor: "#626a74", highlightColor: "#1b4269" },
+      },
+    }),
+    writeLyricsFontScale() {},
+    writeLyricsTranslation() {},
+    writeLyricsTextColor() {},
+    writeLyricsHighlightColor() {},
+    readLyricsOffset: () => 0,
+    writeLyricsOffset() {},
+    clearLyricsOffsets() {},
+  };
   return {
     catalog: { lyrics: catalogLyrics },
-    uiPreferences: {
-      readLyrics: () => ({
-        fontScale: 1,
-        showTranslation: true,
-        colors: {
-          dark: { textColor: "#8e98a3", highlightColor: "#d7e6f3" },
-          light: { textColor: "#626a74", highlightColor: "#1b4269" },
-        },
-      }),
-      writeLyricsFontScale() {},
-      writeLyricsTranslation() {},
-      writeLyricsTextColor() {},
-      writeLyricsHighlightColor() {},
-      readLyricsOffset: () => 0,
-      writeLyricsOffset() {},
-      clearLyricsOffsets() {},
-    },
+    lyricsCache: new LyricsCacheService({ getLyrics: catalogLyrics }),
+    uiPreferences,
+    lyricsPreferencePersistence: createTestLyricsPreferencePersistence(uiPreferences),
   } as unknown as ApplicationServices;
 }

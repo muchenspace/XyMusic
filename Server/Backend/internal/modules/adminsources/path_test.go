@@ -14,7 +14,7 @@ func TestLibrarySourcePathsResolveRelativeToExecutableRoot(t *testing.T) {
 	if err := os.MkdirAll(child, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	mutation, err := validateRootInput(root, RootMutation{
+	mutation, err := validateRootInput(root, OSRootProbe{}, RootMutation{
 		Name: " Music ", Path: "music", Mode: RootModeReadOnly, Enabled: true,
 		IncludePatterns: []string{}, ExcludePatterns: []string{},
 	})
@@ -24,7 +24,7 @@ func TestLibrarySourcePathsResolveRelativeToExecutableRoot(t *testing.T) {
 	if mutation.Name != "Music" || mutation.Path != music || mutation.NormalizedPath != normalizeRootPath(music) {
 		t.Fatalf("validated mutation=%+v", mutation)
 	}
-	browse, err := browseDirectory(root, "music", 1, 100, 0)
+	browse, err := browseDirectory(OSDirectoryBrowser{}, root, "music", 1, 100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestBrowseDirectorySortsAndPaginatesWithoutTruncation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	browse, err := browseDirectory(root, "", 6, 100, 500)
+	browse, err := browseDirectory(OSDirectoryBrowser{}, root, "", 6, 100, 500)
 	if err != nil {
 		t.Fatal(err)
 	}

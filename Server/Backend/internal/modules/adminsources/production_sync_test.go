@@ -17,8 +17,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"xymusic/server/internal/modules/adminmetadata"
 	"xymusic/server/internal/platform/localmedia"
+	"xymusic/server/internal/platform/mediafile"
 	sharedlyrics "xymusic/server/internal/shared/lyrics"
 )
 
@@ -39,8 +39,8 @@ func TestRecordScanMetadataRejectsInvalidLyricTimingBeforeDatabase(t *testing.T)
 					t.Fatalf("recordScanMetadata panicked before validating lyrics: %v", recovered)
 				}
 			}()
-			err := recordScanMetadata(context.Background(), nil, "track", "source", adminmetadata.MetadataSnapshot{
-				Lyrics: &adminmetadata.MetadataLyrics{
+			err := recordScanMetadata(context.Background(), nil, "track", "source", mediafile.MetadataSnapshot{
+				Lyrics: &mediafile.MetadataLyrics{
 					Format: "LRC", Timing: test.timing, Content: test.content, Language: "und",
 				},
 			}, "checksum", time.Now())
@@ -182,7 +182,7 @@ func TestStageArtworkExtractsRealEmbeddedCoverWithFFmpeg(t *testing.T) {
 		t.Fatal(err)
 	}
 	synchronizer := &ProductionSynchronizer{
-		localMedia: mediaStore, ffmpegPath: ffmpeg, artworkRunner: adminmetadata.OSProcessRunner{},
+		localMedia: mediaStore, ffmpegPath: ffmpeg, artworkRunner: mediafile.OSProcessRunner{},
 		artworkGate: make(chan struct{}, 1),
 	}
 	checksum, err := fileSHA256(sourcePath)
@@ -257,15 +257,15 @@ type artworkRunnerStub struct {
 	calls   []string
 }
 
-func (runner *artworkRunnerStub) Run(_ context.Context, executable string, arguments []string, _ time.Duration) (adminmetadata.ProcessResult, error) {
+func (runner *artworkRunnerStub) Run(_ context.Context, executable string, arguments []string, _ time.Duration) (mediafile.ProcessResult, error) {
 	runner.calls = append(runner.calls, executable)
 	if len(arguments) == 0 {
-		return adminmetadata.ProcessResult{}, errors.New("missing artwork output path")
+		return mediafile.ProcessResult{}, errors.New("missing artwork output path")
 	}
 	if err := os.WriteFile(arguments[len(arguments)-1], runner.content, 0o600); err != nil {
-		return adminmetadata.ProcessResult{}, err
+		return mediafile.ProcessResult{}, err
 	}
-	return adminmetadata.ProcessResult{}, nil
+	return mediafile.ProcessResult{}, nil
 }
 
 func TestProductionSynchronizerDoesNotRequireFFmpegForSourceScan(t *testing.T) {

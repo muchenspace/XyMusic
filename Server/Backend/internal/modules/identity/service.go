@@ -10,14 +10,33 @@ import (
 
 	"github.com/google/uuid"
 
-	"xymusic/server/internal/config"
-	"xymusic/server/internal/platform/security"
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/clock"
+	"xymusic/server/internal/shared/timeformat"
 )
 
+// Principal is the signed access-token payload issued and verified by the
+// identity module.
+type Principal struct {
+	UserID      string
+	SessionID   string
+	AuthVersion int
+	Role        string
+}
+
+// ErrExpiredAccessToken lets the service distinguish an expired access token
+// from any other verification failure without importing the platform
+// implementation that reports it.
+var ErrExpiredAccessToken = errors.New("access token has expired")
+
 type AccessTokenManager interface {
-	Issue(principal security.Principal) (token string, expiresAt time.Time, err error)
-	Verify(raw string) (security.Principal, error)
+	Issue(principal Principal) (token string, expiresAt time.Time, err error)
+	Verify(raw string) (Principal, error)
+}
+
+// SecretHasher hashes opaque refresh-token material before it is persisted.
+type SecretHasher interface {
+	HashSecret(value string) string
 }
 
 type PasswordManager interface {
@@ -59,6 +78,7 @@ type ServiceDependencies struct {
 	Idempotency  RefreshIdempotency
 	ArtworkURLs  ArtworkURLProvider
 	Passwords    PasswordManager
+	Secrets      SecretHasher
 	Clock        Clock
 	IDGenerator  func() string
 	OpaqueToken  func() (string, error)
@@ -70,6 +90,7 @@ type Service struct {
 	idempotency         RefreshIdempotency
 	artworkURLs         ArtworkURLProvider
 	passwords           PasswordManager
+	secrets             SecretHasher
 	clock               Clock
 	newID               func() string
 	newOpaqueToken      func() (string, error)
@@ -78,9 +99,11 @@ type Service struct {
 	dummyPasswordHash   string
 }
 
-var _ AccessTokenManager = (*security.AccessTokenService)(nil)
-
-func NewService(cfg config.Config, dependencies ServiceDependencies) (*Service, error) {
+func NewService(
+	refreshTokenTTLSeconds int,
+	registrationEnabled bool,
+	dependencies ServiceDependencies,
+) (*Service, error) {
 	if dependencies.Repository == nil {
 		return nil, errors.New("identity repository is required")
 	}
@@ -94,7 +117,10 @@ func NewService(cfg config.Config, dependencies ServiceDependencies) (*Service, 
 		return nil, errors.New("identity artwork URL provider is required")
 	}
 	if dependencies.Passwords == nil {
-		dependencies.Passwords = SecurityPasswordManager{}
+		return nil, errors.New("identity password manager is required")
+	}
+	if dependencies.Secrets == nil {
+		return nil, errors.New("identity secret hasher is required")
 	}
 	if dependencies.Clock == nil {
 		dependencies.Clock = SystemClock{}
@@ -103,9 +129,9 @@ func NewService(cfg config.Config, dependencies ServiceDependencies) (*Service, 
 		dependencies.IDGenerator = uuid.NewString
 	}
 	if dependencies.OpaqueToken == nil {
-		dependencies.OpaqueToken = security.CreateOpaqueToken
+		return nil, errors.New("identity opaque-token generator is required")
 	}
-	refreshTokenTTL := time.Duration(cfg.Security.RefreshTokenTTLSeconds) * time.Second
+	refreshTokenTTL := time.Duration(refreshTokenTTLSeconds) * time.Second
 	if refreshTokenTTL <= 0 {
 		return nil, errors.New("identity refresh-token TTL must be positive")
 	}
@@ -119,10 +145,11 @@ func NewService(cfg config.Config, dependencies ServiceDependencies) (*Service, 
 		idempotency:         dependencies.Idempotency,
 		artworkURLs:         dependencies.ArtworkURLs,
 		passwords:           dependencies.Passwords,
+		secrets:             dependencies.Secrets,
 		clock:               dependencies.Clock,
 		newID:               dependencies.IDGenerator,
 		newOpaqueToken:      dependencies.OpaqueToken,
-		registrationEnabled: cfg.Registration.Enabled,
+		registrationEnabled: registrationEnabled,
 		refreshTokenTTL:     refreshTokenTTL,
 		dummyPasswordHash:   dummyPasswordHash,
 	}, nil
@@ -206,7 +233,7 @@ func (s *Service) Refresh(
 	if err := validateRefreshInput(refreshToken, idempotencyKey); err != nil {
 		return RefreshResult{}, err
 	}
-	tokenHash := security.HashSecret(refreshToken)
+	tokenHash := s.secrets.HashSecret(refreshToken)
 	initial, err := s.repository.FindRefreshRecord(ctx, tokenHash)
 	if errors.Is(err, ErrNotFound) {
 		return RefreshResult{}, sessionRevoked("Refresh token is invalid or revoked")
@@ -236,7 +263,7 @@ func (s *Service) Authenticate(ctx context.Context, authorization string) (Authe
 	}
 	principal, err := s.accessTokens.Verify(rawToken)
 	if err != nil {
-		if errors.Is(err, security.ErrExpiredAccessToken) {
+		if errors.Is(err, ErrExpiredAccessToken) {
 			return AuthenticatedActor{}, apperror.Unauthorized(
 				apperror.CodeAccessTokenExpired,
 				"Access token has expired",
@@ -317,7 +344,7 @@ func (s *Service) createSession(
 	session, err := s.repository.CreateSession(ctx, CreateSessionParams{
 		UserID:                user.ID,
 		Device:                device,
-		RefreshTokenHash:      security.HashSecret(rawRefreshToken),
+		RefreshTokenHash:      s.secrets.HashSecret(rawRefreshToken),
 		RefreshTokenFamilyID:  s.newID(),
 		RefreshTokenExpiresAt: refreshExpiresAt,
 	})
@@ -362,7 +389,7 @@ func (s *Service) rotateRefreshToken(ctx context.Context, tokenHash string) (Aut
 		TokenID:       record.Token.ID,
 		SessionID:     record.Session.ID,
 		FamilyID:      record.Token.FamilyID,
-		TokenHash:     security.HashSecret(rawRefreshToken),
+		TokenHash:     s.secrets.HashSecret(rawRefreshToken),
 		ParentTokenID: record.Token.ID,
 		ExpiresAt:     refreshExpiresAt,
 		ConsumedAt:    now,
@@ -397,7 +424,7 @@ func (s *Service) authSessionResponse(
 	rawRefreshToken string,
 	refreshExpiresAt time.Time,
 ) (AuthSessionDTO, error) {
-	accessToken, accessExpiresAt, err := s.accessTokens.Issue(security.Principal{
+	accessToken, accessExpiresAt, err := s.accessTokens.Issue(Principal{
 		UserID:      user.ID,
 		SessionID:   session.ID,
 		AuthVersion: user.AuthVersion,
@@ -474,21 +501,7 @@ func refreshRequestHash(tokenHash string) string {
 }
 
 func formatTimestamp(value time.Time) string {
-	return value.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+	return timeformat.Timestamp(value)
 }
 
-type SecurityPasswordManager struct{}
-
-func (SecurityPasswordManager) Hash(password string) (string, error) {
-	return security.HashPassword(password)
-}
-
-func (SecurityPasswordManager) Verify(password, encoded string) (bool, error) {
-	return security.VerifyPassword(password, encoded)
-}
-
-type SystemClock struct{}
-
-func (SystemClock) Now() time.Time {
-	return time.Now()
-}
+type SystemClock = clock.System

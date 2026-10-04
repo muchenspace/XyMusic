@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   audioStatuses,
   audioStatusPresentation,
+} from "@/shared/presentation/audio-status";
+import {
   audioTechnicalStagePresentation,
   metadataStatusPresentation,
   sourceFileStatusPresentation,
   trackAudioStatusPresentation,
-} from "@/shared/presentation/audio-status";
+} from "@/features/music/presentation/audio-status";
 
 describe("audio status presentation", () => {
   it("puts available audio first in the unified status order", () => {

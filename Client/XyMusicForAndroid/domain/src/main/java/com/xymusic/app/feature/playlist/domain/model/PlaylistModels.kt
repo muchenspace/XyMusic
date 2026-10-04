@@ -4,11 +4,7 @@ import com.xymusic.app.core.model.media.Artwork
 import com.xymusic.app.core.model.media.Track
 import java.util.UUID
 
-enum class PlaylistVisibility {
-    PRIVATE,
-    UNLISTED,
-    PUBLIC,
-}
+typealias PlaylistVisibility = com.xymusic.app.core.model.playlist.PlaylistVisibility
 
 enum class PlaylistSort {
     UPDATED_DESC,

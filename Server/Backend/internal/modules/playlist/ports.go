@@ -2,10 +2,11 @@ package playlist
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"xymusic/server/internal/modules/catalog"
+	"xymusic/server/internal/shared/clock"
+	"xymusic/server/internal/shared/idempotencyport"
 )
 
 type Store interface {
@@ -35,9 +36,7 @@ type Clock interface {
 	Now() time.Time
 }
 
-type SystemClock struct{}
-
-func (SystemClock) Now() time.Time { return time.Now() }
+type SystemClock = clock.System
 
 type Authenticator interface {
 	Authenticate(ctx context.Context, authorization string) (userID string, err error)
@@ -49,23 +48,11 @@ func (function AuthenticateFunc) Authenticate(ctx context.Context, authorization
 	return function(ctx, authorization)
 }
 
-type IdempotencyInput struct {
-	ActorID string
-	Scope   string
-	Key     string
-	Payload any
-}
+type IdempotencyInput = idempotencyport.Input
 
-type IdempotencyResponse struct {
-	Status int
-	Body   json.RawMessage
-}
+type IdempotencyResponse = idempotencyport.Response
 
-type IdempotencyResult struct {
-	Status   int
-	Body     json.RawMessage
-	Replayed bool
-}
+type IdempotencyResult = idempotencyport.Result
 
 type Idempotency interface {
 	Execute(

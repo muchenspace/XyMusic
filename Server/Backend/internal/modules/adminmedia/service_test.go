@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"xymusic/server/internal/config"
 	"xymusic/server/internal/platform/localmedia"
 	"xymusic/server/internal/shared/apperror"
 )
@@ -113,19 +112,17 @@ func newTestMediaService(
 		t.Fatal(err)
 	}
 
-	service, err := NewService(config.Config{
-		MediaStorage: config.MediaStorage{
-			UploadTTLSeconds: 300,
-			MaxUploadBytes:   1024 * 1024 * 1024,
-		},
-	}, ServiceDependencies{
-		Repository:  store,
-		Idempotency: directMediaIdempotency{},
-		LocalMedia:  mediaStore,
-		Inspector:   inspector,
-		Clock:       fixedClock{now: now},
-		IDGenerator: func() string { return "upload-1" },
-	})
+	service, err := NewService(
+		300,
+		1024*1024*1024,
+		ServiceDependencies{
+			Repository:  store,
+			Idempotency: directMediaIdempotency{},
+			LocalMedia:  mediaStore,
+			Inspector:   inspector,
+			Clock:       fixedClock{now: now},
+			IDGenerator: func() string { return "upload-1" },
+		})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +151,9 @@ func TestCreateUploadReturnsUploadPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.ID != "upload-1" || res.Method != "PUT" || res.UploadPath != "/api/v1/admin/media/uploads/upload-1/content" {
+	// The service returns only reservation data; routes assemble uploadUrl and
+	// uploadPath from the upload ID.
+	if res.ID != "upload-1" || res.Method != "PUT" || res.UploadPath != "" || res.UploadURL != "" {
 		t.Fatalf("unexpected res: %#v", res)
 	}
 	if created.ID != "upload-1" || created.StoragePath != "temp/upload_upload-1.partial" {

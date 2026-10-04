@@ -316,11 +316,11 @@ func (repository *Repository) EnqueueWriteback(
 	if metadata.Version != input.ExpectedVersion {
 		return WritebackJob{}, metadataVersionConflict(input.ExpectedVersion, metadata.Version, "")
 	}
-	if err := tagwriteback.Evaluate(tagwriteback.SourceContext{
+	if err := EvaluateWritebackEligibility(tagwriteback.SourceContext{
 		HasSource: true, TrackStatus: trackStatus, RootMode: rootMode,
 		RootEnabled: rootEnabled, ScanActive: scanActive, SourceStatus: source.Status,
 		SourcePath: source.SourcePath, MappingCount: mappingCount,
-	}).Error(trackID); err != nil {
+	}, trackID); err != nil {
 		return WritebackJob{}, err
 	}
 	var conflictingWritebackID string
@@ -603,11 +603,11 @@ func (repository *Repository) RetryWriteback(
 		from local_music_source_tracks where source_id = $1`, source.ID).Scan(&mappingCount); err != nil {
 		return WritebackJob{}, fmt.Errorf("inspect retried metadata source mappings: %w", err)
 	}
-	if err := tagwriteback.Evaluate(tagwriteback.SourceContext{
+	if err := EvaluateWritebackEligibility(tagwriteback.SourceContext{
 		HasSource: true, TrackStatus: trackStatus, RootMode: rootMode,
 		RootEnabled: rootEnabled, ScanActive: scanActive, SourceStatus: source.Status,
 		SourcePath: source.SourcePath, MappingCount: mappingCount,
-	}).Error(job.TrackID); err != nil {
+	}, job.TrackID); err != nil {
 		return WritebackJob{}, err
 	}
 	raw, err := decodeSnapshot(metadata.Raw)
@@ -1092,10 +1092,10 @@ func deleteAlbumIfEmpty(ctx context.Context, tx pgx.Tx, albumID string) error {
 }
 
 func assertWritableSource(rootMode string, enabled, scanActive bool, sourceStatus string) error {
-	return tagwriteback.Evaluate(tagwriteback.SourceContext{
+	return TranslateMetadataError(EvaluateWritebackEligibility(tagwriteback.SourceContext{
 		HasSource: true, RootMode: rootMode, RootEnabled: enabled,
 		ScanActive: scanActive, SourceStatus: sourceStatus,
-	}).Error("")
+	}, ""))
 }
 
 func metadataVersionConflict(expected, current int, trackID string) error {

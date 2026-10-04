@@ -54,9 +54,17 @@ func (routes *Routes) createUpload(c *gin.Context) error {
 	if err != nil {
 		return err
 	}
+	result.UploadURL = mediaUploadContentPath(result.ID)
+	result.UploadPath = result.UploadURL
 	c.Header("X-Idempotent-Replay", formatReplay(replayed))
 	c.JSON(http.StatusCreated, result)
 	return nil
+}
+
+// mediaUploadContentPath assembles the upload content URL in the transport
+// layer; the service returns only the reservation data.
+func mediaUploadContentPath(uploadID string) string {
+	return "/api/v1/admin/media/uploads/" + uploadID + "/content"
 }
 
 func (routes *Routes) uploadDirect(c *gin.Context) error {

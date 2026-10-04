@@ -13,6 +13,7 @@ import (
 	"xymusic/server/internal/modules/identity"
 	"xymusic/server/internal/platform/httpserver"
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/httpx"
 )
 
 type Application interface {
@@ -118,9 +119,17 @@ func (routes *Routes) createAvatarUpload(c *gin.Context) error {
 	if err != nil {
 		return err
 	}
+	result.Body.UploadURL = avatarUploadPath(result.Body.ID)
+	result.Body.UploadPath = result.Body.UploadURL
 	c.Header("X-Idempotent-Replay", formatReplay(result.Replayed))
 	c.JSON(http.StatusCreated, result.Body)
 	return nil
+}
+
+// avatarUploadPath assembles the avatar upload URL in the transport layer; the
+// service returns only the upload data.
+func avatarUploadPath(uploadID string) string {
+	return "/api/v1/users/me/avatar/uploads/" + uploadID
 }
 
 func (routes *Routes) completeAvatarUpload(c *gin.Context) error {
@@ -192,19 +201,19 @@ func validateUpdateProfileContract(input UpdateProfileInput) error {
 		return profileRouteValidationError()
 	}
 	if input.DisplayName.Set {
-		length := javascriptStringLength(input.DisplayName.Value)
+		length := httpx.JavascriptStringLength(input.DisplayName.Value)
 		if length < 1 || length > 64 {
 			return profileRouteValidationError()
 		}
 	}
-	if input.Bio.Set && input.Bio.Value != nil && javascriptStringLength(*input.Bio.Value) > 500 {
+	if input.Bio.Set && input.Bio.Value != nil && httpx.JavascriptStringLength(*input.Bio.Value) > 500 {
 		return profileRouteValidationError()
 	}
 	return nil
 }
 
 func validateCreateAvatarUploadContract(input CreateAvatarUploadInput) error {
-	fileNameLength := javascriptStringLength(input.FileName)
+	fileNameLength := httpx.JavascriptStringLength(input.FileName)
 	if fileNameLength < 1 || fileNameLength > 255 ||
 		(input.ContentType != "image/jpeg" && input.ContentType != "image/png" && input.ContentType != "image/webp") ||
 		input.SizeBytes < 1 || input.SizeBytes > AvatarMaximumBytes ||

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Diagnostics } from "../src/application/ports/Diagnostics";
+import { QuotaExceededError } from "../src/application/ports/PlaybackStateRepository";
 import type { TaskScheduler } from "../src/application/ports/TaskScheduler";
 import type { PlaybackStateUseCases } from "../src/application/use-cases/PlaybackStateUseCases";
 import { PlaybackStatePersistence } from "../src/application/services/PlaybackStatePersistence";
@@ -57,7 +58,7 @@ describe("playback state persistence", () => {
   it("falls back to the current track when a quota error prevents saving a full queue", () => {
     const scheduler = new ManualTaskScheduler();
     const state = createPlaybackState();
-    state.save.mockImplementationOnce(() => { throw new DOMException("full", "QuotaExceededError"); });
+    state.save.mockImplementationOnce(() => { throw new QuotaExceededError("full"); });
     const warn = vi.fn();
     const persistence = new PlaybackStatePersistence(state.useCases, diagnostics(warn), scheduler);
     persistence.restore("owner-1");

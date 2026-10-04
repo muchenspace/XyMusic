@@ -53,6 +53,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xymusic.app.R
 import com.xymusic.app.core.ui.layout.isWideLandscape
 import com.xymusic.app.core.ui.media.PlaylistEditorDialog
+import com.xymusic.app.core.ui.media.toPlaylistEditorOption
+import com.xymusic.app.core.ui.media.toPlaylistVisibility
 import com.xymusic.app.feature.playlist.domain.model.PlaylistSummary
 import com.xymusic.app.ui.theme.spacing
 

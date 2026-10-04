@@ -255,11 +255,11 @@ func (repository *Repository) UpdateTrack(ctx context.Context, input UpdateTrack
 	if err != nil {
 		return err
 	}
-	if state.Version != input.ExpectedVersion {
-		return versionConflict("Track", input.ExpectedVersion, state.Version, nil)
+	if err := CheckTrackVersion(input.ExpectedVersion, state.Version, ""); err != nil {
+		return err
 	}
-	if state.Status == "ARCHIVED" {
-		return invalidTrackTransition("Archived tracks cannot be edited")
+	if err := CanEditTrack(state.Status, ""); err != nil {
+		return err
 	}
 	_, err = tx.Exec(ctx, `UPDATE tracks SET title=CASE WHEN $3 THEN $4 ELSE title END,normalized_title=CASE WHEN $3 THEN $5 ELSE normalized_title END,album_id=CASE WHEN $6 THEN $7::uuid ELSE album_id END,track_number=CASE WHEN $8 THEN $9 ELSE track_number END,disc_number=CASE WHEN $10 THEN $11 ELSE disc_number END,version=version+1,updated_at=now() WHERE id=$1 AND version=$2`, input.ID, input.ExpectedVersion, input.Title != nil, input.Title, input.NormalizedTitle, input.SetAlbum, input.AlbumID, input.SetTrackNumber, input.TrackNumber, input.DiscNumber != nil, input.DiscNumber)
 	if err != nil {
@@ -297,11 +297,11 @@ func (repository *Repository) ArchiveTrack(ctx context.Context, id string, expec
 	if err != nil {
 		return err
 	}
-	if state.Version != expectedVersion {
-		return versionConflict("Track", expectedVersion, state.Version, nil)
+	if err := CheckTrackVersion(expectedVersion, state.Version, ""); err != nil {
+		return err
 	}
-	if state.Status == "ARCHIVED" {
-		return invalidTrackTransition("Track is already archived")
+	if err := CanArchiveTrack(state.Status, ""); err != nil {
+		return err
 	}
 	if err := cancelTrackWritebacksForArchive(ctx, tx, id); err != nil {
 		return err
@@ -365,18 +365,18 @@ func (repository *Repository) transitionTrackToReady(
 	if err != nil {
 		return err
 	}
-	if state.Version != expectedVersion {
-		return versionConflict("Track", expectedVersion, state.Version, nil)
+	if err := CheckTrackVersion(expectedVersion, state.Version, ""); err != nil {
+		return err
 	}
 	if restore {
-		if state.Status != "ARCHIVED" {
-			return invalidTrackTransition("Only archived tracks can be restored")
+		if err := CanRestoreTrack(state.Status, ""); err != nil {
+			return err
 		}
-	} else if state.Status == "ARCHIVED" {
-		return invalidTrackTransition("Archived tracks must be restored before publishing")
+	} else if err := CanPublishTrack(state.Status, ""); err != nil {
+		return err
 	}
-	if state.DurationMS <= 0 {
-		return apperror.Unprocessable(apperror.CodeTrackNotPlayable, "Track duration must be positive", nil)
+	if err := CheckTrackDuration(state.DurationMS, ""); err != nil {
+		return err
 	}
 	var readySource bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(
@@ -390,8 +390,8 @@ func (repository *Repository) transitionTrackToReady(
 	)`, id).Scan(&readySource); err != nil {
 		return fmt.Errorf("inspect playable source: %w", err)
 	}
-	if !readySource {
-		return apperror.Unprocessable(apperror.CodeTrackNotPlayable, "Track has no ready audio source", nil)
+	if err := RequireReadyAudioSource(readySource, ""); err != nil {
+		return err
 	}
 	command, err := tx.Exec(ctx, `UPDATE tracks SET status='READY',published_at=now(),
 		version=version+1,updated_at=now() WHERE id=$1 AND version=$2`, id, expectedVersion)
@@ -406,10 +406,6 @@ func (repository *Repository) transitionTrackToReady(
 		return fmt.Errorf("commit admin track %s: %w", operation, err)
 	}
 	return nil
-}
-
-func invalidTrackTransition(detail string) error {
-	return apperror.New(apperror.CodeInvalidStateTransition, detail)
 }
 
 func cancelTrackWritebacksForArchive(ctx context.Context, tx pgx.Tx, trackID string) error {
@@ -459,11 +455,11 @@ func (repository *Repository) UpsertLyrics(ctx context.Context, trackID string, 
 	if err != nil {
 		return StoredLyric{}, err
 	}
-	if state.Version != input.ExpectedVersion {
-		return StoredLyric{}, versionConflict("Track", input.ExpectedVersion, state.Version, nil)
+	if err := CheckTrackVersion(input.ExpectedVersion, state.Version, ""); err != nil {
+		return StoredLyric{}, err
 	}
-	if state.Status == "ARCHIVED" {
-		return StoredLyric{}, invalidTrackTransition("Archived tracks cannot edit lyrics")
+	if err := CanEditTrackLyrics(state.Status, ""); err != nil {
+		return StoredLyric{}, err
 	}
 	var trackVersion int
 	err = tx.QueryRow(ctx, `UPDATE tracks SET version=version+1,updated_at=now()

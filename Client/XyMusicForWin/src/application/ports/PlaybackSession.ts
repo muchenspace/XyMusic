@@ -1,5 +1,6 @@
 import type { ReadonlyTrack } from "../../domain/music";
-import type { PlayMode, RepeatMode } from "../../domain/playbackState";
+import type { RepeatMode } from "../../domain/playbackState";
+import type { PlayMode } from "../playbackMode";
 
 export type PlaybackTerminalEvent = "PAUSED" | "COMPLETED";
 export type PlaybackQueue = readonly ReadonlyTrack[];

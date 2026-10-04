@@ -16,10 +16,11 @@ import org.junit.Test
 class LayerDependencyArchitectureTest {
     @Test
     fun sharedCoreDoesNotDependOnFeatureImplementations() {
-        val violations = sharedSourceFiles(coreSourceRoot).flatMap { sourceFile ->
+        val violations = sharedCoreSourceFiles().flatMap { sourceFile ->
+            val sourceModule = ArchitectureModules.moduleOf(sourceFile)
             importsOf(sourceFile)
                 .filter { importPath -> importPath.startsWith(FEATURE_PACKAGE_PREFIX) }
-                .map { importPath -> "${relativePath(sourceFile)}: $importPath" }
+                .map { importPath -> "$sourceModule ${relativePath(sourceFile)}: $importPath" }
         }
 
         assertNoViolations(
@@ -77,6 +78,24 @@ class LayerDependencyArchitectureTest {
     }
 
     @Test
+    fun featureDataDoesNotDependOnOtherFeatureData() {
+        val violations =
+            sourceFilesByLayer("data").flatMap { sourceFile ->
+                val sourceFeature = featureOf(packageOf(sourceFile))
+                    ?: error("Source is outside a feature package: ${relativePath(sourceFile)}")
+                importsOf(sourceFile)
+                    .filter { importPath ->
+                        featureLayerOf(importPath) == "data" && featureOf(importPath) != sourceFeature
+                    }.map { importPath -> "${relativePath(sourceFile)}: $importPath" }
+            }
+
+        assertNoViolations(
+            "Feature data adapters must not depend on another feature's data implementation.",
+            violations,
+        )
+    }
+
+    @Test
     fun featureServicesDoNotDependOnDataImplementations() {
         val violations =
             sourceFilesByLayer("service").flatMap { sourceFile ->
@@ -114,6 +133,14 @@ class LayerDependencyArchitectureTest {
 
     private fun sharedSourceFiles(root: Path): List<Path> = kotlinSourceFiles(root)
 
+    /**
+     * Shared core spans the app-internal `core.*` packages and the standalone
+     * `:core:*` modules; their packages are split, so sources are collected by
+     * module path instead of by package prefix.
+     */
+    private fun sharedCoreSourceFiles(): List<Path> =
+        kotlinSourceFiles(coreSourceRoot) + SHARED_CORE_MODULES.flatMap(ArchitectureModules::sourceFilesOf)
+
     private fun packageOf(sourceFile: Path): String = sourceText(sourceFile)
         .lineSequence()
         .map(String::trim)
@@ -141,6 +168,14 @@ class LayerDependencyArchitectureTest {
             .split('.')
             .getOrNull(1)
             ?.takeIf(String::isNotBlank)
+    }
+
+    private fun featureOf(packageOrImport: String): String? {
+        if (!packageOrImport.startsWith(FEATURE_PACKAGE_PREFIX)) return null
+        return packageOrImport
+            .removePrefix(FEATURE_PACKAGE_PREFIX)
+            .substringBefore('.')
+            .takeIf(String::isNotBlank)
     }
 
     private fun sourceText(sourceFile: Path): String = String(Files.readAllBytes(sourceFile), StandardCharsets.UTF_8)
@@ -172,6 +207,14 @@ class LayerDependencyArchitectureTest {
         private val dataSourceRoot = mainSourceRoot.resolve(Paths.get("com", "xymusic", "app", "data"))
         private val featureSourceRoot: Path =
             mainSourceRoot.resolve(Paths.get("com", "xymusic", "app", "feature"))
+
+        private val SHARED_CORE_MODULES =
+            listOf(
+                ArchitectureModules.CORE_MODEL,
+                ArchitectureModules.CORE_DATABASE,
+                ArchitectureModules.CORE_NETWORK,
+                ArchitectureModules.CORE_UI,
+            )
 
         private fun findProjectRoot(): Path {
             var currentDirectory: Path? = Paths.get("").toAbsolutePath().normalize()

@@ -150,6 +150,17 @@ func (s *Store) Save(cfg Config) error {
 	return atomicWrite(s.Path, []byte(content.String()))
 }
 
+// ApplyEnvironment applies environment overrides on top of the environment
+// representation of cfg and parses the result. It is equivalent to
+// Parse(ToEnvironment(cfg)) with the override keys replaced.
+func ApplyEnvironment(cfg Config, overrides map[string]string) (Config, error) {
+	environment := ToEnvironment(cfg)
+	for key, value := range overrides {
+		environment[key] = value
+	}
+	return Parse(environment)
+}
+
 func ToEnvironment(cfg Config) map[string]string {
 	scanInterval := ""
 	if cfg.LocalLibrary.ScanIntervalMinutes != nil {

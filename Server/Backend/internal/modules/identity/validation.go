@@ -3,11 +3,11 @@ package identity
 import (
 	"regexp"
 	"strings"
-	"unicode/utf16"
 
 	"golang.org/x/text/unicode/norm"
 
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/httpx"
 )
 
 var (
@@ -49,7 +49,7 @@ func validateRegistration(username, password string) error {
 }
 
 func validateLogin(input LoginInput) error {
-	usernameLength := javascriptStringLength(input.Username)
+	usernameLength := httpx.JavascriptStringLength(input.Username)
 	if usernameLength < 3 || usernameLength > 32 {
 		return apperror.Validation("username must contain 3 to 32 characters")
 	}
@@ -60,7 +60,7 @@ func validateLogin(input LoginInput) error {
 }
 
 func validatePassword(password string, minimum int) error {
-	length := javascriptStringLength(password)
+	length := httpx.JavascriptStringLength(password)
 	if length < minimum || length > 128 {
 		if minimum == 8 {
 			return apperror.Validation("password must contain 8 to 128 characters")
@@ -77,11 +77,11 @@ func validateDevice(device DeviceInfoInput) error {
 	if !IsDevicePlatform(device.Platform) {
 		return apperror.Validation("device.platform must be ANDROID, WINDOWS or WEB")
 	}
-	nameLength := javascriptStringLength(trimSpace(device.Name))
+	nameLength := httpx.JavascriptStringLength(trimSpace(device.Name))
 	if nameLength < 1 || nameLength > 100 {
 		return apperror.Validation("device.name is invalid")
 	}
-	appVersionLength := javascriptStringLength(trimSpace(device.AppVersion))
+	appVersionLength := httpx.JavascriptStringLength(trimSpace(device.AppVersion))
 	if appVersionLength < 1 || appVersionLength > 40 {
 		return apperror.Validation("device.appVersion is invalid")
 	}
@@ -89,7 +89,7 @@ func validateDevice(device DeviceInfoInput) error {
 }
 
 func validateRefreshInput(refreshToken, idempotencyKey string) error {
-	length := javascriptStringLength(refreshToken)
+	length := httpx.JavascriptStringLength(refreshToken)
 	if length < 32 || length > 4096 {
 		return apperror.Validation("refreshToken is invalid")
 	}
@@ -122,10 +122,6 @@ func duplicateUsernameError() error {
 
 func sessionRevoked(detail string) error {
 	return apperror.Unauthorized(apperror.CodeSessionRevoked, detail)
-}
-
-func javascriptStringLength(value string) int {
-	return len(utf16.Encode([]rune(value)))
 }
 
 func trimSpace(value string) string {

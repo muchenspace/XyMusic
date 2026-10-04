@@ -40,7 +40,7 @@ func batchMutationFenceFromContext(ctx context.Context) *BatchMutationFence {
 // Lock serializes a batch mutation with cancellation, lease renewal, reclaim,
 // and completion. Every caller locks the job before the item to keep the
 // transaction order stable across workers.
-func (fence *BatchMutationFence) Lock(ctx context.Context, tx pgx.Tx) error {
+func (fence *BatchMutationFence) Lock(ctx context.Context, tx MediaTx) error {
 	if fence == nil {
 		return nil
 	}

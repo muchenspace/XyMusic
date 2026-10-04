@@ -2,10 +2,12 @@ import { mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia } from "pinia";
 import { nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LYRICS_PREFERENCE_PERSIST_DEBOUNCE_MS } from "../src/presentation/stores/LyricsPreferencePersistence";
+import { LYRICS_PREFERENCE_PERSIST_DEBOUNCE_MS } from "../src/application/services/LyricsPreferencePersistence";
 import type { ApplicationServices } from "../src/application/services";
+import { LyricsCacheService } from "../src/application/services/LyricsCacheService";
 import type { Lyrics, Track } from "../src/domain/music";
 import { FakePlaybackSession } from "./support/FakePlaybackSession";
+import { createTestLyricsPreferencePersistence } from "./support/lyricsPreferencePersistence";
 import LyricsView from "../src/presentation/components/LyricsView.vue";
 import { applicationServicesKey } from "../src/presentation/services";
 import { useLyricsStore } from "../src/presentation/stores/lyricsStore";
@@ -923,31 +925,34 @@ function createServices(
   writeLyricsFontScale: (value: number) => void,
   playbackSession: FakePlaybackSession,
 ): ApplicationServices {
+  const uiPreferences = {
+    readLyrics: () => ({
+      fontScale: 1,
+      showTranslation: true,
+      colors: {
+        dark: { textColor: "#8e98a3", highlightColor: "#d7e6f3" },
+        light: { textColor: "#626a74", highlightColor: "#1b4269" },
+      },
+    }),
+    writeLyricsFontScale,
+    writeLyricsTranslation() {},
+    writeLyricsTextColor() {},
+    writeLyricsHighlightColor() {},
+    readLyricsOffset: () => 0,
+    writeLyricsOffset() {},
+    clearLyricsOffsets() {},
+  };
   return {
     catalog: { lyrics: vi.fn(async () => null) },
+    lyricsCache: new LyricsCacheService({ getLyrics: vi.fn(async () => null) }),
     playbackSession,
     desktopWindowController: {
       state: () => ({ maximized: false, fullscreen: false }),
       subscribe: () => () => undefined,
       toggleMaximize: vi.fn(async () => undefined),
     },
-    uiPreferences: {
-      readLyrics: () => ({
-        fontScale: 1,
-        showTranslation: true,
-        colors: {
-          dark: { textColor: "#8e98a3", highlightColor: "#d7e6f3" },
-          light: { textColor: "#626a74", highlightColor: "#1b4269" },
-        },
-      }),
-      writeLyricsFontScale,
-      writeLyricsTranslation() {},
-      writeLyricsTextColor() {},
-      writeLyricsHighlightColor() {},
-      readLyricsOffset: () => 0,
-      writeLyricsOffset() {},
-      clearLyricsOffsets() {},
-    },
+    uiPreferences,
+    lyricsPreferencePersistence: createTestLyricsPreferencePersistence(uiPreferences),
   } as unknown as ApplicationServices;
 }
 

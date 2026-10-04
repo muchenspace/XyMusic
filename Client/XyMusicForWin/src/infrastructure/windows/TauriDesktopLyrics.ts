@@ -8,7 +8,7 @@ import {
   type DesktopLyricsSnapshot,
   type DesktopLyricsWindowState,
 } from "../../application/ports/DesktopLyrics";
-import { DESKTOP_LYRICS_EVENTS } from "../../application/ports/DesktopLyricsBridge";
+import { DESKTOP_LYRICS_EVENTS } from "../desktop/desktopLyricsEvents";
 import type { DesktopLyricsFullscreenBehavior } from "../../application/ports/UserInterfacePreferences";
 
 export class TauriDesktopLyrics implements DesktopLyrics {

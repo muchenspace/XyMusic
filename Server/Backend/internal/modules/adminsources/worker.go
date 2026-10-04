@@ -24,6 +24,7 @@ type WorkerOptions struct {
 	Scanner       Scanner
 	RootDirectory string
 	DefaultRoot   config.LocalLibrary
+	RootProbe     RootProbe
 	WorkerID      string
 	Lease         time.Duration
 	Heartbeat     time.Duration
@@ -36,6 +37,7 @@ type Worker struct {
 	scanner       Scanner
 	rootDirectory string
 	defaultRoot   config.LocalLibrary
+	rootProbe     RootProbe
 	workerID      string
 	lease         time.Duration
 	heartbeat     time.Duration
@@ -60,6 +62,9 @@ func NewWorker(options WorkerOptions) (*Worker, error) {
 	if err != nil {
 		return nil, errors.New("resolve music source scan executable root: " + err.Error())
 	}
+	if options.RootProbe == nil {
+		return nil, errors.New("music source scan root probe is required")
+	}
 	if options.WorkerID == "" {
 		options.WorkerID = "scan-" + uuid.NewString()
 	}
@@ -83,7 +88,8 @@ func NewWorker(options WorkerOptions) (*Worker, error) {
 	}
 	return &Worker{
 		store: options.Store, scanner: options.Scanner, rootDirectory: filepath.Clean(absolute),
-		defaultRoot: options.DefaultRoot, workerID: options.WorkerID, lease: options.Lease,
+		defaultRoot: options.DefaultRoot, rootProbe: options.RootProbe,
+		workerID: options.WorkerID, lease: options.Lease,
 		heartbeat: options.Heartbeat, progressWrite: options.ProgressWrite, now: options.Now,
 	}, nil
 }
@@ -104,7 +110,7 @@ func (worker *Worker) Initialize(ctx context.Context) error {
 			name = "Music"
 		}
 	}
-	mutation, err := validateRootInput(worker.rootDirectory, RootMutation{
+	mutation, err := validateRootInput(worker.rootDirectory, worker.rootProbe, RootMutation{
 		Name: name, Path: directory, Mode: RootMode(worker.defaultRoot.Mode),
 		Enabled: worker.defaultRoot.Enabled, ScanOnStartup: worker.defaultRoot.SyncOnStartup,
 		ScanIntervalMinutes: cloneInt(worker.defaultRoot.ScanIntervalMinutes),

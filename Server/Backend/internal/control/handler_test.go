@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -174,11 +175,22 @@ func TestControlHandlerRegistersRealSetupServiceWithoutEnvironmentFile(t *testin
 		return nil, errors.New("factory must not be called")
 	}))
 	configured := false
+	root := t.TempDir()
 	service, err := setup.NewService(setup.Options{
-		RootDirectory:       t.TempDir(),
-		ConfigurationPath:   "missing.env",
+		RootDirectory:       root,
 		ConfiguredAtStartup: &configured,
 		Runtime:             manager,
+		Store:               setup.NewFileConfigurationRepository(filepath.Join(root, "missing.env")),
+		Databases:           setup.ProductionDatabaseFactory{},
+		MediaStorage:        setup.ProductionMediaStorageFactory{},
+		MediaTool:           setup.CommandMediaTool{},
+		ListenerProbe:       setup.NetworkListenerProbe{},
+		SourceValidator:     setup.OSSourceValidator{},
+		Passwords:           setup.SecurityPasswordHasher{},
+		SecretGenerator:     func() (string, error) { return strings.Repeat("s", 43), nil },
+		Executables:         setup.ProductionExecutableLocator{},
+		Files:               setup.ProductionFileProbe{},
+		MigrationProbe:      setup.ProductionMigrationProbe{},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -40,7 +40,7 @@ func TestCreatePlaybackGrantRouteReturnsServiceGrant(t *testing.T) {
 	}
 
 	service, _ := NewService(&mockResolver{source: source, exists: true}, signer, 15*time.Minute)
-	routes, _ := NewRoutes(service, signer, &dummyUserCtx{userID: userID})
+	routes, _ := NewRoutes(service, signer, &dummyUserCtx{userID: userID}, nil)
 
 	engine := gin.New()
 	routes.Register(engine)
@@ -67,7 +67,7 @@ func TestCreatePlaybackGrantRouteRejectsRemovedQualitySelectors(t *testing.T) {
 		source: &ResolvedAudioSource{TrackID: trackID, SourcePath: "sample.mp3", DurationMs: 1000, Bitrate: 128000},
 		exists: true,
 	}, signer, 15*time.Minute)
-	routes, _ := NewRoutes(service, signer, &dummyUserCtx{userID: uuid.NewString()})
+	routes, _ := NewRoutes(service, signer, &dummyUserCtx{userID: uuid.NewString()}, nil)
 	engine := gin.New()
 	routes.Register(engine)
 
@@ -106,7 +106,7 @@ func TestStreamRouteWithTicketVerificationAndRange(t *testing.T) {
 
 	signer, _ := NewTicketSigner("01234567890123456789012345678901")
 	service, _ := NewService(&mockResolver{source: source, exists: true}, signer, 15*time.Minute)
-	routes, _ := NewRoutes(service, signer, &dummyUserCtx{userID: userID})
+	routes, _ := NewRoutes(service, signer, &dummyUserCtx{userID: userID}, nil)
 
 	engine := gin.New()
 	routes.Register(engine)

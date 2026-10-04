@@ -1,10 +1,19 @@
 import type { LyricLine } from "../../domain/music";
+import {
+  LYRIC_TRANSITION_LINE_DISTANCE_PX,
+  LYRIC_TRANSITION_MAX_DURATION_MS,
+  LYRIC_TRANSITION_MIN_DURATION_MS,
+  LYRIC_TRANSITION_PIXELS_PER_SECOND,
+  fastOutSlowIn,
+} from "../../shared/lyrics/transition";
 
-/** Keep these values in one place so the normal and desktop lyric surfaces can agree on motion. */
-export const LYRIC_TRANSITION_MIN_DURATION_MS = 300;
-export const LYRIC_TRANSITION_MAX_DURATION_MS = 520;
-export const LYRIC_TRANSITION_LINE_DISTANCE_PX = 56;
-export const LYRIC_TRANSITION_PIXELS_PER_SECOND = 185;
+export {
+  LYRIC_TRANSITION_LINE_DISTANCE_PX,
+  LYRIC_TRANSITION_MAX_DURATION_MS,
+  LYRIC_TRANSITION_MIN_DURATION_MS,
+  LYRIC_TRANSITION_PIXELS_PER_SECOND,
+  fastOutSlowIn,
+};
 export const LYRIC_CORRECTION_MIN_DURATION_MS = 90;
 export const LYRIC_CORRECTION_MAX_DURATION_MS = 180;
 export const DENSE_LYRIC_TIME_GAP_MS = 450;
@@ -137,19 +146,6 @@ export function smoothLyricEmphasis(value: number): number {
   return clamped * clamped * (3 - 2 * clamped);
 }
 
-/** Approximation of Compose FastOutSlowIn (cubic-bezier(0.4, 0, 0.2, 1)). */
-export function fastOutSlowIn(value: number): number {
-  const x = clamp(value, 0, 1);
-  let t = x;
-  for (let iteration = 0; iteration < 5; iteration += 1) {
-    const current = cubicBezier(t, 0, 0.4, 0.2, 1) - x;
-    const derivative = cubicBezierDerivative(t, 0, 0.4, 0.2, 1);
-    if (Math.abs(derivative) < 1e-5) break;
-    t = clamp(t - current / derivative, 0, 1);
-  }
-  return cubicBezier(t, 0, 0, 1, 1);
-}
-
 /** Compose's critically damped low-stiffness spring (damping ratio 1, stiffness 200). */
 export function noBounceSpring(elapsedSeconds: number, initialVelocity = 0): number {
   const time = Math.max(0, Number.isFinite(elapsedSeconds) ? elapsedSeconds : 0);
@@ -193,21 +189,6 @@ export function lyricLayoutDeltaHasSettled(
     && Number.isFinite(previousDelta)
     && Number.isFinite(currentDelta)
     && Math.abs(currentDelta - previousDelta) <= LYRIC_LAYOUT_STABILITY_EPSILON_PX;
-}
-
-function cubicBezier(t: number, p0: number, p1: number, p2: number, p3: number): number {
-  const inverse = 1 - t;
-  return inverse ** 3 * p0
-    + 3 * inverse ** 2 * t * p1
-    + 3 * inverse * t ** 2 * p2
-    + t ** 3 * p3;
-}
-
-function cubicBezierDerivative(t: number, p0: number, p1: number, p2: number, p3: number): number {
-  const inverse = 1 - t;
-  return 3 * inverse ** 2 * (p1 - p0)
-    + 6 * inverse * t * (p2 - p1)
-    + 3 * t ** 2 * (p3 - p2);
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

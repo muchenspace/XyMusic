@@ -23,7 +23,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { loadRouteLocation, useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { useUiStore } from "@/stores/ui";
-import { serviceReadiness } from "@/api/client";
+import { useHealth } from "@/app/services/health";
+import { appQueryKeys } from "@/app/query-keys";
 import ArtworkUploadField from "@/components/ArtworkUploadField.vue";
 import BaseDialog from "@/components/BaseDialog.vue";
 import xymusicIcon from "@/assets/xymusic.png";
@@ -32,13 +33,14 @@ const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const ui = useUiStore();
+const health = useHealth();
 const colorMode = useColorMode({ storageKey: "xymusic-theme", attribute: "class" });
 const catalogOpen = ref(true);
 const quickSearch = ref("");
 const avatarOpen = ref(false);
 const readiness = useQuery({
-  queryKey: ["service", "readiness"],
-  queryFn: ({ signal }) => serviceReadiness(signal),
+  queryKey: appQueryKeys.serviceReadiness,
+  queryFn: ({ signal }) => health.execute(signal),
   refetchInterval: 30_000,
   retry: false,
 });

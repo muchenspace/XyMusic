@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"xymusic/server/internal/modules/catalog"
+	"xymusic/server/internal/shared/requestdto"
 )
 
 type UserRole string
@@ -168,9 +169,7 @@ type PasswordInput struct {
 	Password        string `json:"password"`
 }
 
-type VersionInput struct {
-	ExpectedVersion int `json:"expectedVersion"`
-}
+type VersionInput = requestdto.VersionInput
 
 type UpdatedDTO struct {
 	Updated bool `json:"updated"`

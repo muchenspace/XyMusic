@@ -24,8 +24,6 @@ export function usePlaylistActions(reportActionError: (cause: unknown) => void) 
   const addPlaylistsRetryAvailable = ref(false);
   const addPlaylistCursor = ref<string | null>(null);
   const addPlaylistsHasMore = computed(() => Boolean(addPlaylistCursor.value));
-  let addPlaylistRequest = 0;
-  let addPlaylistController: AbortController | null = null;
   let addPlaylistRetryReset = true;
 
   function newPlaylist(): void {
@@ -115,38 +113,26 @@ export function usePlaylistActions(reportActionError: (cause: unknown) => void) 
     if (!addTrack.value || addPlaylistsLoading.value) return;
     const cursor = reset ? undefined : addPlaylistCursor.value ?? undefined;
     if (!reset && !cursor) return;
-    const controller = new AbortController();
-    addPlaylistController = controller;
-    const request = ++addPlaylistRequest;
     addPlaylistsLoading.value = true;
     addPlaylistsRetryAvailable.value = false;
     addDialogError.value = "";
     if (reset) addPlaylistCursor.value = null;
-    try {
-      const page = await services.playlists.list("UPDATED_DESC", cursor, ADD_PLAYLIST_PAGE_SIZE, controller.signal);
-      if (request !== addPlaylistRequest || controller.signal.aborted || !addTrack.value) return;
-      addPlaylists.value = reset
-        ? mergePlaylists(page.items, addPlaylists.value)
-        : mergePlaylists(addPlaylists.value, page.items);
-      addPlaylistCursor.value = page.nextCursor;
-    } catch (cause) {
-      if (request === addPlaylistRequest && !controller.signal.aborted) {
-        addDialogError.value = errorMessage(cause, "加载歌单失败");
-        addPlaylistRetryReset = reset;
-        addPlaylistsRetryAvailable.value = true;
-      }
-    } finally {
-      if (request === addPlaylistRequest) {
-        addPlaylistsLoading.value = false;
-        addPlaylistController = null;
-      }
+    const outcome = await services.playlists.listForPicker(cursor, addPlaylists.value);
+    if (outcome.kind === "stale") return;
+    addPlaylistsLoading.value = false;
+    if (!addTrack.value) return;
+    if (outcome.kind === "error") {
+      addDialogError.value = errorMessage(outcome.cause, "加载歌单失败");
+      addPlaylistRetryReset = reset;
+      addPlaylistsRetryAvailable.value = true;
+      return;
     }
+    addPlaylists.value = outcome.items;
+    addPlaylistCursor.value = outcome.nextCursor;
   }
 
   function cancelAddPlaylistLoad(): void {
-    addPlaylistRequest += 1;
-    addPlaylistController?.abort();
-    addPlaylistController = null;
+    services.playlists.cancelPickerLoad();
     addPlaylistsLoading.value = false;
     addPlaylistsRetryAvailable.value = false;
   }
@@ -195,11 +181,3 @@ export function usePlaylistActions(reportActionError: (cause: unknown) => void) 
 
   return { playlistDialogOpen, editingPlaylist, dialogBusy, dialogError, addTrack, addDialogError, addPlaylists, addPlaylistsLoading, addPlaylistsRetryAvailable, addPlaylistsHasMore, newPlaylist, editPlaylist, savePlaylist, deletePlaylist, openAddToPlaylist, closeAddToPlaylist, loadMoreAddPlaylists, retryAddPlaylists, addToPlaylist, removeEntry, removeEntries, moveEntry, reorderEntries, resetDialogs };
 }
-
-function mergePlaylists(primary: Playlist[], secondary: Playlist[]): Playlist[] {
-  const merged = new Map(primary.map((playlist) => [playlist.id, playlist]));
-  for (const playlist of secondary) if (!merged.has(playlist.id)) merged.set(playlist.id, playlist);
-  return [...merged.values()];
-}
-
-const ADD_PLAYLIST_PAGE_SIZE = 100;

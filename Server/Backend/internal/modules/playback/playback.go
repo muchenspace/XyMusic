@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/timeformat"
 )
 
 type DescriptorDTO struct {
@@ -141,5 +142,5 @@ func sourceFormatForPath(path string) sourceFormat {
 }
 
 func formatTime(value time.Time) string {
-	return value.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+	return timeformat.Timestamp(value)
 }

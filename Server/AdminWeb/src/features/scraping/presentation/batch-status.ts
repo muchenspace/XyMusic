@@ -1,4 +1,3 @@
-import { ApiError } from "@/shared/application/api-error";
 import type { BatchItemStatus, BatchJobStatus } from "@/features/scraping/domain/models";
 
 export type BatchStatusTone = "success" | "info" | "warning" | "danger" | "neutral";
@@ -59,14 +58,4 @@ export function batchItemMessage(status: BatchItemStatus, message: string | null
   }
   if (message) return knownMessages[message] ?? message;
   return itemStatusPresentations[status].label;
-}
-
-export function isNoScrapingNeededError(error: unknown): error is ApiError {
-  return error instanceof ApiError &&
-    error.problem.code === "VALIDATION_ERROR" &&
-    error.problem.detail?.includes("无需刮削") === true;
-}
-
-export function noScrapingNeededDetail(error: ApiError): string {
-  return error.problem.detail?.trim() || "所选曲目均已包含指定字段，无需刮削";
 }

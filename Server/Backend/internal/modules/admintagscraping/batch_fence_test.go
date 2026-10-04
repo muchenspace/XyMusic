@@ -6,9 +6,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestBatchMutationFenceLockUsesJobThenItemOrder(t *testing.T) {
@@ -135,7 +132,7 @@ type batchFenceRowStub struct {
 	scan          func(...any) error
 }
 
-func (tx *batchFenceTxStub) QueryRow(_ context.Context, query string, arguments ...any) pgx.Row {
+func (tx *batchFenceTxStub) QueryRow(_ context.Context, query string, arguments ...any) MediaRow {
 	tx.t.Helper()
 	if tx.index >= len(tx.rows) {
 		tx.t.Fatalf("unexpected QueryRow(%q, %#v)", compactBatchFenceSQL(query), arguments)
@@ -186,23 +183,12 @@ func compactBatchFenceSQL(query string) string {
 	return strings.Join(strings.Fields(query), " ")
 }
 
-func (*batchFenceTxStub) Begin(context.Context) (pgx.Tx, error) { panic("unexpected Begin") }
-func (*batchFenceTxStub) Commit(context.Context) error          { panic("unexpected Commit") }
-func (*batchFenceTxStub) Rollback(context.Context) error        { panic("unexpected Rollback") }
-func (*batchFenceTxStub) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFromSource) (int64, error) {
-	panic("unexpected CopyFrom")
-}
-func (*batchFenceTxStub) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults {
-	panic("unexpected SendBatch")
-}
-func (*batchFenceTxStub) LargeObjects() pgx.LargeObjects { panic("unexpected LargeObjects") }
-func (*batchFenceTxStub) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
-	panic("unexpected Prepare")
-}
-func (*batchFenceTxStub) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+func (*batchFenceTxStub) Exec(context.Context, string, ...any) (MediaCommandTag, error) {
 	panic("unexpected Exec")
 }
-func (*batchFenceTxStub) Query(context.Context, string, ...any) (pgx.Rows, error) {
-	panic("unexpected Query")
+
+type mediaCommandTag struct {
+	rowsAffected int64
 }
-func (*batchFenceTxStub) Conn() *pgx.Conn { return nil }
+
+func (tag mediaCommandTag) RowsAffected() int64 { return tag.rowsAffected }

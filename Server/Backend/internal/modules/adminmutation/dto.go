@@ -1,6 +1,9 @@
 package adminmutation
 
-import "xymusic/server/internal/modules/catalog"
+import (
+	"xymusic/server/internal/modules/catalog"
+	"xymusic/server/internal/shared/mediadto"
+)
 
 type CreditDTO struct {
 	Artist    catalog.ArtistReferenceDTO `json:"artist"`
@@ -30,10 +33,7 @@ type AlbumDTO struct {
 	UpdatedAt     string              `json:"updatedAt"`
 }
 
-type AlbumReferenceDTO struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-}
+type AlbumReferenceDTO = mediadto.AlbumReferenceDTO
 
 type TrackDTO struct {
 	ID            string              `json:"id"`

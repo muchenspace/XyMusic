@@ -23,7 +23,7 @@ import { usePlayerStore } from "./presentation/stores/playerStore";
 import { useSessionStore } from "./presentation/stores/sessionStore";
 import { useThemeStore } from "./presentation/stores/themeStore";
 import { useToastStore } from "./presentation/stores/toastStore";
-import { libraryViewRequiresHomeFeed } from "./domain/navigation";
+import { libraryViewRequiresHomeFeed } from "./application/navigation";
 
 const SettingsView = defineAsyncComponent(() => import("./presentation/components/SettingsView.vue"));
 const DiscoverView = defineAsyncComponent(() => import("./presentation/views/DiscoverView.vue"));

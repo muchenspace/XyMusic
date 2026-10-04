@@ -22,6 +22,7 @@ import com.xymusic.app.feature.player.data.media.Media3OfflineTrackRepository
 import com.xymusic.app.feature.player.data.media.OfflineMediaCache
 import com.xymusic.app.feature.player.data.media.OfflineMediaDownloader
 import com.xymusic.app.feature.player.data.media.OfflineMediaStore
+import com.xymusic.app.feature.player.data.media.OfflineMediaStorePort
 import com.xymusic.app.feature.player.data.media.PlaybackCache
 import com.xymusic.app.feature.player.data.media.PlaybackGrantRegistry
 import com.xymusic.app.feature.player.data.media.PlaybackGrantStore
@@ -87,6 +88,11 @@ abstract class PlaybackBindingModule {
     @Binds
     @Singleton
     @UnstableApi
+    abstract fun bindOfflineMediaStore(implementation: OfflineMediaStore): OfflineMediaStorePort
+
+    @Binds
+    @Singleton
+    @UnstableApi
     abstract fun bindOfflineMediaDownloader(implementation: CacheOfflineMediaDownloader): OfflineMediaDownloader
 
     @Binds
@@ -104,13 +110,13 @@ object PlaybackProviderModule {
     @UnstableApi
     fun providePlaybackDataSourceFactory(
         @MediaHttpClient mediaHttpClient: OkHttpClient,
-        playbackCache: PlaybackCache,
+        offlineMediaCache: OfflineMediaCache,
         grantRegistry: PlaybackGrantRegistry,
         networkPolicy: PlaybackNetworkPolicy,
         sessionIdentityProvider: SessionIdentityProvider,
     ): DataSource.Factory = playbackDataSourceFactory(
         mediaHttpClient,
-        playbackCache,
+        offlineMediaCache,
         grantRegistry,
         networkPolicy,
         sessionIdentityProvider,
@@ -124,7 +130,7 @@ object PlaybackProviderModule {
         @PlaybackDataSourceFactory dataSourceFactory: DataSource.Factory,
         grantRepository: PlaybackGrantRepository,
         grantRegistry: PlaybackGrantRegistry,
-        offlineMediaStore: OfflineMediaStore,
+        offlineMediaStore: OfflineMediaStorePort,
         sessionProvider: AppSessionProvider,
         sessionIdentityProvider: SessionIdentityProvider,
         sessionMutationCoordinator: SessionMutationCoordinator,

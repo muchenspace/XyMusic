@@ -123,7 +123,7 @@ func TestRepositoryProductionMetadataLifecycle(t *testing.T) {
 	}
 
 	repository := NewRepository(pool.Pool)
-	service, err := NewService(repository)
+	service, err := NewServiceWithOptions(repository, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

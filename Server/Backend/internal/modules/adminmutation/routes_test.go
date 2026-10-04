@@ -13,8 +13,8 @@ import (
 
 	"xymusic/server/internal/modules/identity"
 	"xymusic/server/internal/platform/httpserver"
+	platformidempotency "xymusic/server/internal/platform/idempotency"
 	"xymusic/server/internal/shared/apperror"
-	sharedidempotency "xymusic/server/internal/shared/idempotency"
 )
 
 func TestAdminMutationRoutesExecuteReplayAndRejectPayloadConflicts(t *testing.T) {
@@ -523,7 +523,7 @@ func newMutationIdempotencyStub() *mutationIdempotencyStub {
 }
 
 func (stub *mutationIdempotencyStub) Execute(_ context.Context, input IdempotencyInput, operation func() (IdempotencyResponse, error)) (IdempotencyResult, error) {
-	payload, err := sharedidempotency.CanonicalJSON(input.Payload)
+	payload, err := platformidempotency.CanonicalJSON(input.Payload)
 	if err != nil {
 		return IdempotencyResult{}, err
 	}

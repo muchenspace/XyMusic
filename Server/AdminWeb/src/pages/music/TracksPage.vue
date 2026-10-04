@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { AlertTriangle, Archive, Check, Disc3, FileAudio, ListFilter, Pencil, RefreshCw, RotateCcw, Save, Search, Sparkles, Tags, Trash2, Upload, X } from "lucide-vue-next";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/vue-query";
 import type { QueryFunctionContext } from "@tanstack/vue-query";
 import { refDebounced } from "@vueuse/core";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { onBeforeRouteLeave, useRoute } from "vue-router";
 import { ApiError } from "@/shared/application/api-error";
-import { invalidateAdminMusicQueries } from "@/app/query-client";
+import { invalidateAdminMusicQueries, trackCachePort } from "@/app/query-client";
 import { trackListAudioRefetchInterval } from "@/shared/application/audio-status-refresh";
 import AppButton from "@/components/AppButton.vue";
 import AppPagination from "@/components/AppPagination.vue";
@@ -19,12 +19,16 @@ import StatusBadge from "@/components/StatusBadge.vue";
 import TagScrapeDialog from "@/components/TagScrapeDialog.vue";
 import TrackStatusDisc from "@/components/TrackStatusDisc.vue";
 import VirtualTable from "@/components/VirtualTable.vue";
-import type { CreditRole, MusicPage, PermanentDeleteTrackJobItem, PermanentDeleteTracksJob, TrackMetadataRecord, TrackSummary, TrackTagValues } from "@/features/music/domain/models";
+import type { CreditRole, MusicPage, PermanentDeleteTracksJob, TrackMetadataRecord, TrackSummary, TrackTagValues } from "@/features/music/domain/models";
 import type { ApplyTagResult } from "@/features/scraping/domain/models";
-import { useMusicAdmin } from "@/app/services/music";
+import { useMusicAdmin, useTrackMetadataSave } from "@/app/services/music";
+import { TrackWritebackFailedError } from "@/features/music/application/track-metadata-save";
+import { createPermanentDeleteJobState } from "@/features/music/application/permanent-delete-job-state";
+import { musicQueryKeys } from "@/features/music/presentation/query-keys";
 import { normalizeTrackTagScalars, parseLyricsOffset, updateLyricsOffset } from "@/features/music/presentation/track-tag-form";
-import { assertWritebackAllowed, sourceWritebackCapability, writebackBlockedMessage } from "@/features/music/presentation/writeback-capability";
+import { sourceWritebackCapability, writebackBlockedMessage } from "@/features/music/presentation/writeback-capability";
 import { DEFAULT_CATALOG_PAGE_SIZE } from "@/shared/presentation/pagination";
+import { useCursorPagination } from "@/shared/presentation/use-cursor-pagination";
 import { useUiStore } from "@/stores/ui";
 import { formatDate, formatDuration } from "@/utils/format";
 
@@ -38,17 +42,18 @@ type TrackMetadataQueryKey = readonly ["admin", "track", string | undefined, "me
 interface TagForm { title: string; primary: string; albumArtists: string; featured: string; composers: string; lyricists: string; producers: string; album: string; releaseDate: string; trackNumber: string; trackTotal: string; discNumber: string; discTotal: string; genres: string; bpm: string; isrc: string; copyright: string; comment: string; lyrics: string; lyricsFormat: "PLAIN" | "LRC"; lyricsTiming: "LINE" | "WORD"; lyricsLanguage: string }
 
 const route = useRoute();
-const queryClient = useQueryClient();
 const ui = useUiStore();
 const musicAdmin = useMusicAdmin();
+const trackMetadataSave = useTrackMetadataSave();
 const search = ref(typeof route.query.search === "string" ? route.query.search : "");
 const debouncedSearch = refDebounced(search, 300);
 const status = ref("READY");
 const metadataStatus = ref("");
-const page = ref(1);
-const pageSize = ref(DEFAULT_CATALOG_PAGE_SIZE);
-const cursor = ref("");
-const cursorHistory = ref(new Map<number, string>());
+const { page, pageSize, cursor, reset: resetPaging, changePage, changePageSize } = useCursorPagination({
+  initialPageSize: DEFAULT_CATALOG_PAGE_SIZE,
+  isFetching: () => tracksQuery.isFetching.value,
+  nextCursor: () => tracksQuery.data.value?.nextCursor,
+});
 const selectedTracks = ref(new Map<string, TrackSummary>());
 const selectedIds = computed(() => new Set(selectedTracks.value.keys()));
 const selectedTrack = ref<TrackSummary>();
@@ -68,7 +73,12 @@ const batchArchiveTargets = ref<TrackSummary[]>([]);
 const batchRestoreTargets = ref<TrackSummary[]>([]);
 const permanentDeleteTargets = ref<TrackSummary[]>([]);
 const permanentDeleteConfirmation = ref("");
-const permanentDeleteJob = ref<PermanentDeleteTracksJob>();
+const permanentDeleteJobState = createPermanentDeleteJobState({
+  getSelection: () => selectedTracks.value,
+  getTargetsById: () => new Map(permanentDeleteTargets.value.map((track) => [track.id, track])),
+  getEditorTrackId: () => selectedTrack.value?.id,
+});
+const permanentDeleteJob = permanentDeleteJobState.job;
 const batchRestoreError = ref("");
 const batchArchiveError = ref("");
 const permanentDeleteError = ref("");
@@ -83,7 +93,7 @@ const bulk = reactive({ primary: "", albumArtists: "", album: "", genres: "", co
 const tags = reactive<TagForm>({ title: "", primary: "", albumArtists: "", featured: "", composers: "", lyricists: "", producers: "", album: "", releaseDate: "", trackNumber: "", trackTotal: "", discNumber: "", discTotal: "", genres: "", bpm: "", isrc: "", copyright: "", comment: "", lyrics: "", lyricsFormat: "PLAIN", lyricsTiming: "LINE", lyricsLanguage: "und" });
 
 const tracksQuery = useQuery<MusicPage<TrackSummary>, Error, MusicPage<TrackSummary>, TrackListQueryKey>({
-  queryKey: computed<TrackListQueryKey>(() => ["admin", "tracks", { page: page.value, pageSize: pageSize.value, search: debouncedSearch.value, status: status.value, metadataStatus: metadataStatus.value, cursor: cursor.value }]),
+  queryKey: computed<TrackListQueryKey>(() => musicQueryKeys.tracks({ page: page.value, pageSize: pageSize.value, search: debouncedSearch.value, status: status.value, metadataStatus: metadataStatus.value, cursor: cursor.value })),
   queryFn: ({ signal, queryKey }: QueryFunctionContext<TrackListQueryKey>) => {
     const params = queryKey[2];
     return musicAdmin.listTracks({ ...params, cursorMode: "cursor", cursor: params.cursor || undefined, sort: "updatedAt", order: "desc" }, signal);
@@ -93,14 +103,14 @@ const tracksQuery = useQuery<MusicPage<TrackSummary>, Error, MusicPage<TrackSumm
 });
 const permanentDeleteJobId = computed(() => permanentDeleteJob.value?.id ?? "");
 const permanentDeleteJobQuery = useQuery<PermanentDeleteTracksJob, Error, PermanentDeleteTracksJob, PermanentDeleteJobQueryKey>({
-  queryKey: computed<PermanentDeleteJobQueryKey>(() => ["admin", "tracks", "permanent-delete", permanentDeleteJobId.value]),
+  queryKey: computed<PermanentDeleteJobQueryKey>(() => musicQueryKeys.permanentDeleteJob(permanentDeleteJobId.value)),
   queryFn: ({ signal, queryKey }: QueryFunctionContext<PermanentDeleteJobQueryKey>) => musicAdmin.getPermanentDeleteTracksJob(queryKey[3], signal),
   enabled: computed(() => permanentDeleteOpen.value && Boolean(permanentDeleteJobId.value)),
   staleTime: 0,
-  refetchInterval: (state) => !state.state.data || deleteJobStatusActive(state.state.data.status) ? 1_000 : false,
+  refetchInterval: (state) => permanentDeleteJobState.refetchInterval(state.state.data?.status),
 });
 const metadataQuery = useQuery<TrackMetadataRecord, Error, TrackMetadataRecord, TrackMetadataQueryKey>({
-  queryKey: computed<TrackMetadataQueryKey>(() => ["admin", "track", selectedTrack.value?.id, "metadata"]),
+  queryKey: computed<TrackMetadataQueryKey>(() => musicQueryKeys.trackMetadata(selectedTrack.value?.id)),
   queryFn: ({ signal, queryKey }: QueryFunctionContext<TrackMetadataQueryKey>) => {
     const trackId = queryKey[2];
     if (!trackId) throw new Error("Track metadata query requires a track id");
@@ -192,34 +202,14 @@ function edit(track: TrackSummary): void {
   editorDirty.value = false;
   remoteChanged.value = false;
   actionError.value = "";
-  const cached = queryClient.getQueryData<TrackMetadataRecord>(["admin", "track", track.id, "metadata"]);
+  const cached = trackCachePort.getMetadataRecord(track.id);
   if (cached?.trackId === track.id) populate(cached);
   editorOpen.value = true;
 }
 function askArchive(track: TrackSummary): void { deletionTrack.value = track; actionError.value = ""; archiveOpen.value = true; }
 function askPermanentDelete(track: TrackSummary): void { openPermanentDelete([track]); }
-function resetPaging(): void {
-  page.value = 1;
-  cursor.value = "";
-  cursorHistory.value = new Map([[1, ""]]);
-}
-function changePage(nextPage: number): void {
-  if (tracksQuery.isFetching.value || !Number.isSafeInteger(nextPage) || nextPage < 1 || nextPage === page.value) return;
-  const next = new Map(cursorHistory.value);
-  if (nextPage < page.value) {
-    cursor.value = next.get(nextPage) ?? "";
-  } else {
-    const nextCursor = tracksQuery.data.value?.nextCursor;
-    if (!nextCursor) return;
-    next.set(nextPage, nextCursor);
-    cursor.value = nextCursor;
-  }
-  cursorHistory.value = next;
-  page.value = nextPage;
-}
 function trackKey(track: TrackSummary): string { return track.id; }
 function clearFilters(): void { search.value = ""; status.value = "READY"; metadataStatus.value = ""; resetPaging(); }
-function changePageSize(value: number): void { pageSize.value = value; resetPaging(); }
 function clearSelection(): void { selectedTracks.value = new Map(); }
 function removeSelected(trackIds: Iterable<string>): void {
   const next = new Map(selectedTracks.value);
@@ -296,7 +286,6 @@ watch(() => tracksQuery.data.value?.items, (items) => {
   if (removed) ui.notify("warning", "选择已更新", `${removed} 首曲目状态已变化，已移出当前选择。`);
 });
 async function refresh(): Promise<void> { await invalidateAdminMusicQueries(); }
-async function refreshLists(): Promise<void> { await invalidateAdminMusicQueries(); }
 
 function beforeUnload(event: BeforeUnloadEvent): void {
   if (!editorOpen.value || !editorDirty.value) return;
@@ -312,15 +301,6 @@ function closeEditor(): void {
   editorOpen.value = false;
 }
 
-const saveMutation = useMutation({
-  mutationFn: (input: {
-    trackId: string;
-    command: {
-      expectedVersion: number;
-      patch: Partial<Omit<TrackTagValues, "hasArtwork">>;
-    };
-  }) => musicAdmin.updateTrackMetadata(input.trackId, input.command),
-});
 async function saveMetadata(): Promise<void> {
   if (savingMetadata.value) return;
   if (selectedTrack.value?.status === "ARCHIVED") {
@@ -339,32 +319,17 @@ async function saveMetadata(): Promise<void> {
     const requestedWriteBack = writeBackAfterSave.value;
     const currentWritebackCapability = sourceWritebackCapability(record.source);
     if (requestedWriteBack && !currentWritebackCapability.canWriteBack) writeBackAfterSave.value = false;
-    assertWritebackAllowed(requestedWriteBack, currentWritebackCapability);
-    const patch = changedPatch(record);
-    const changed = Object.keys(patch).length > 0;
-    if (!changed && !requestedWriteBack) throw new Error("没有需要保存的 Tag 变化");
-    const saved = changed ? await saveMutation.mutateAsync({
-      trackId: record.trackId,
-      command: { expectedVersion: record.version, patch },
-    }) : record;
-    if (requestedWriteBack) {
-      try {
-        assertWritebackAllowed(true, sourceWritebackCapability(saved.source));
-        await musicAdmin.writeTrackMetadata(saved.trackId, saved.version);
-      } catch (error) {
-        queryClient.setQueryData(["admin", "track", saved.trackId, "metadata"], saved);
-        populate(saved);
-        writeBackAfterSave.value = false;
-        await refreshLists();
-        throw new Error(`Tag 已保存，但写回任务创建失败：${error instanceof Error ? error.message : "未知错误"}`);
-      }
-    }
-    queryClient.setQueryData(["admin", "track", saved.trackId, "metadata"], saved);
-    populate(saved);
+    const result = await trackMetadataSave.execute({ record, patch: changedPatch(record), requestedWriteBack });
+    populate(result.record);
     writeBackAfterSave.value = false;
     ui.notify("success", requestedWriteBack ? "Tag 已保存并创建写回任务" : "Tag 覆盖值已保存");
-    await refreshLists();
+    await result.refresh;
   } catch (error) {
+    if (error instanceof TrackWritebackFailedError) {
+      populate(error.saved);
+      writeBackAfterSave.value = false;
+      await error.refresh;
+    }
     actionError.value = error instanceof Error ? error.message : "Tag 保存失败";
     ui.notify("error", actionError.value.startsWith("Tag 已保存") ? "Tag 写回失败" : "Tag 保存失败", actionError.value);
   } finally {
@@ -396,56 +361,32 @@ const batchArchiveMutation = useMutation({
   onError: (error) => { batchArchiveError.value = error instanceof Error ? error.message : "批量归档失败"; },
 });
 
-function deleteJobStatusActive(status: PermanentDeleteTracksJob["status"] | undefined): boolean {
-  return status === "PENDING" || status === "RUNNING";
-}
 const deleteJobCreateMutation = useMutation({
   mutationFn: () => musicAdmin.createPermanentDeleteTracksJob(permanentDeleteTargets.value),
   onSuccess: (job) => {
     permanentDeleteJob.value = job;
-    queryClient.setQueryData(["admin", "tracks", "permanent-delete", job.id], job);
+    trackCachePort.setPermanentDeleteJob(job);
   },
   onError: (error) => { permanentDeleteError.value = error instanceof Error ? error.message : "无法创建永久删除任务"; },
 });
-const permanentDeletePending = computed(() => deleteJobCreateMutation.isPending.value || deleteJobStatusActive(permanentDeleteJob.value?.status));
+const permanentDeletePending = computed(() => deleteJobCreateMutation.isPending.value || permanentDeleteJobState.active.value);
 const selectionLocked = computed(() => batchArchiveMutation.isPending.value || batchRestoreMutation.isPending.value || permanentDeletePending.value);
-const permanentDeleteCounts = computed(() => (permanentDeleteJob.value?.items ?? []).reduce((summary, item) => ({
-  deletedFiles: summary.deletedFiles + item.deletedFiles,
-  quarantinedFiles: summary.quarantinedFiles + item.quarantinedFiles,
-  scheduledObjects: summary.scheduledObjects + item.scheduledObjects,
-}), { deletedFiles: 0, quarantinedFiles: 0, scheduledObjects: 0 }));
-const permanentDeleteFailedItems = computed(() => permanentDeleteJob.value?.items.filter((item) => item.status === "FAILED") ?? []);
+const permanentDeleteCounts = permanentDeleteJobState.counts;
+const permanentDeleteFailedItems = permanentDeleteJobState.failedItems;
 const permanentDeleteTargetById = computed(() => new Map(permanentDeleteTargets.value.map((track) => [track.id, track])));
-const finalizedPermanentDeleteJobs = new Set<string>();
 
 function permanentDeleteTargetTitle(trackId: string): string {
   return permanentDeleteTargetById.value.get(trackId)?.title ?? trackId;
 }
-function permanentDeleteItemMessage(item: PermanentDeleteTrackJobItem): string {
-  if (item.errorCode === "VERSION_CONFLICT") return "曲目版本已变化，请刷新后重新确认";
-  if (item.errorCode === "INVALID_STATE_TRANSITION") return "曲目已不在回收站，请刷新后重试";
-  if (item.errorCode === "RESOURCE_CONFLICT") return "曲目仍有音源扫描任务，请等待扫描结束后重试";
-  if (item.message?.trim()) return item.message.trim();
-  return item.errorCode ? `删除失败（${item.errorCode}）` : "删除失败";
-}
 async function finalizePermanentDeleteJob(job: PermanentDeleteTracksJob): Promise<void> {
-  if (deleteJobStatusActive(job.status) || finalizedPermanentDeleteJobs.has(job.id)) return;
-  finalizedPermanentDeleteJobs.add(job.id);
-  const succeeded = job.items.filter((item) => item.status === "SUCCEEDED");
-  const failed = job.items.filter((item) => item.status === "FAILED");
-  const succeededIds = new Set(succeeded.map((item) => item.trackId));
-  const next = new Map(selectedTracks.value);
-  for (const trackId of succeededIds) next.delete(trackId);
-  for (const item of failed) {
-    const target = permanentDeleteTargetById.value.get(item.trackId);
-    if (target) next.set(item.trackId, target);
-  }
-  selectedTracks.value = next;
-  if (selectedTrack.value && succeededIds.has(selectedTrack.value.id)) {
+  const finalized = permanentDeleteJobState.accept(job);
+  if (!finalized) return;
+  selectedTracks.value = finalized.selection;
+  if (finalized.closedEditorTrackId) {
     editorDirty.value = false;
     editorOpen.value = false;
   }
-  const counts = permanentDeleteCounts.value;
+  const counts = finalized.counts;
   const detail = `已删除本地文件 ${counts.deletedFiles} 个，待清理文件 ${counts.quarantinedFiles} 个，媒体对象 ${counts.scheduledObjects} 个进入清理队列。`;
   if (job.failed > 0) ui.notify(job.succeeded > 0 ? "warning" : "error", `永久删除完成：成功 ${job.succeeded}，失败 ${job.failed}`, detail);
   else ui.notify(counts.quarantinedFiles > 0 ? "warning" : "success", `已永久删除 ${job.succeeded} 首曲目`, detail);
@@ -516,23 +457,7 @@ function applyScrapeVersion(result?: ApplyTagResult): void {
   if (!metadata || typeof metadata.trackId !== "string" || !metadata.trackId.trim()
     || !Number.isSafeInteger(metadata.version) || metadata.version < 1) return;
   const trackId = metadata.trackId.trim();
-  const cachedMetadataKey = ["admin", "track", trackId, "metadata"];
-  queryClient.setQueryData<TrackMetadataRecord>(cachedMetadataKey, (current) => {
-    if (!current || current.trackId !== trackId || current.version >= metadata.version) return current;
-    return { ...current, version: metadata.version };
-  });
-
-  for (const [queryKey, current] of queryClient.getQueriesData<{ items: TrackSummary[] }>({ queryKey: ["admin", "tracks"] })) {
-    const isTrackList = queryKey[0] === "admin" && queryKey[1] === "tracks"
-      && typeof queryKey[2] === "object" && queryKey[2] !== null && !Array.isArray(queryKey[2]);
-    if (!isTrackList || !current || !Array.isArray(current.items)) continue;
-    queryClient.setQueryData(queryKey, {
-      ...current,
-      items: current.items.map((track) => track.id === trackId && (track.metadataVersion === null || track.metadataVersion < metadata.version)
-        ? { ...track, metadataVersion: metadata.version }
-        : track),
-    });
-  }
+  trackCachePort.applyMetadataVersion(trackId, metadata.version);
 
   if (selectedTrack.value?.id === trackId
     && (selectedTrack.value.metadataVersion === null || selectedTrack.value.metadataVersion < metadata.version)) {
@@ -598,7 +523,7 @@ watch(bulkOpen, (value) => { if (!value && bulkMutation.isPending.value && !allo
               </tr>
           </template>
         </VirtualTable>
-        <AppPagination :page="page" :page-size="pageSize" :total="tracksQuery.data.value.total" :total-pages="tracksQuery.data.value.totalPages" cursor @change="changePage" @page-size-change="changePageSize" />
+        <AppPagination :page="page" :page-size="pageSize" :total="tracksQuery.data.value.total" :total-pages="tracksQuery.data.value.totalPages" @change="changePage" @page-size-change="changePageSize" />
       </template>
     </section>
 
@@ -671,7 +596,7 @@ watch(bulkOpen, (value) => { if (!value && bulkMutation.isPending.value && !allo
       <template v-else>
         <div class="rounded-xl bg-[var(--surface-muted)] p-4" aria-live="polite"><div class="flex items-center justify-between gap-3"><StatusBadge :status="permanentDeleteJob.status" dot /><span class="font-semibold">{{ permanentDeleteJob.processed }} / {{ permanentDeleteJob.total }}</span></div><div class="mt-3 h-2 overflow-hidden rounded-full bg-[var(--surface-solid)]"><div class="progress-fill h-full rounded-full" :class="permanentDeleteJob.failed ? 'bg-amber-500' : 'bg-[var(--primary)]'" :style="{ width: `${permanentDeleteJob.total ? permanentDeleteJob.processed / permanentDeleteJob.total * 100 : 0}%` }" /></div><p class="mt-2 text-xs text-[var(--muted)]">成功 {{ permanentDeleteJob.succeeded }} · 失败 {{ permanentDeleteJob.failed }}</p></div>
         <div class="mt-4 grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--border)] text-center"><div class="bg-[var(--surface-solid)] p-3"><p class="text-lg font-bold">{{ permanentDeleteCounts.deletedFiles }}</p><p class="text-[10px] text-[var(--muted)]">已删除本地文件</p></div><div class="bg-[var(--surface-solid)] p-3"><p class="text-lg font-bold" :class="permanentDeleteCounts.quarantinedFiles ? 'text-amber-500' : undefined">{{ permanentDeleteCounts.quarantinedFiles }}</p><p class="text-[10px] text-[var(--muted)]">待清理文件</p></div><div class="bg-[var(--surface-solid)] p-3"><p class="text-lg font-bold">{{ permanentDeleteCounts.scheduledObjects }}</p><p class="text-[10px] text-[var(--muted)]">待清理媒体对象</p></div></div>
-        <div class="mt-4 max-h-72 divide-y divide-[var(--border)] overflow-y-auto rounded-xl border border-[var(--border)]"><article v-for="item in permanentDeleteJob.items" :key="item.id" class="px-4 py-3"><div class="flex items-start justify-between gap-3"><div class="min-w-0"><p class="truncate font-semibold">{{ permanentDeleteTargetTitle(item.trackId) }}</p><p v-if="item.status === 'FAILED'" class="mt-1 whitespace-pre-line text-xs leading-5 text-[var(--danger)]">{{ permanentDeleteItemMessage(item) }}</p><p v-else-if="item.status === 'SUCCEEDED'" class="mt-1 text-xs text-[var(--muted)]">本地文件 {{ item.deletedFiles }} · 待清理文件 {{ item.quarantinedFiles }} · 媒体对象 {{ item.scheduledObjects }}</p><p v-else class="mt-1 text-xs text-[var(--muted)]">尝试 {{ item.attempts }} 次</p></div><StatusBadge :status="item.status" /></div></article></div>
+        <div class="mt-4 max-h-72 divide-y divide-[var(--border)] overflow-y-auto rounded-xl border border-[var(--border)]"><article v-for="item in permanentDeleteJob.items" :key="item.id" class="px-4 py-3"><div class="flex items-start justify-between gap-3"><div class="min-w-0"><p class="truncate font-semibold">{{ permanentDeleteTargetTitle(item.trackId) }}</p><p v-if="item.status === 'FAILED'" class="mt-1 whitespace-pre-line text-xs leading-5 text-[var(--danger)]">{{ permanentDeleteJobState.itemMessage(item) }}</p><p v-else-if="item.status === 'SUCCEEDED'" class="mt-1 text-xs text-[var(--muted)]">本地文件 {{ item.deletedFiles }} · 待清理文件 {{ item.quarantinedFiles }} · 媒体对象 {{ item.scheduledObjects }}</p><p v-else class="mt-1 text-xs text-[var(--muted)]">尝试 {{ item.attempts }} 次</p></div><StatusBadge :status="item.status" /></div></article></div>
         <div v-if="permanentDeleteJobQuery.isError.value" class="mt-4 rounded-xl bg-rose-500/10 p-3 text-sm text-[var(--danger)]"><p>{{ permanentDeleteJobQuery.error.value instanceof Error ? permanentDeleteJobQuery.error.value.message : '读取删除任务失败' }}</p><AppButton class="mt-3" variant="ghost" :loading="permanentDeleteJobQuery.isFetching.value" @click="permanentDeleteJobQuery.refetch()">重新查询</AppButton></div>
         <p v-if="permanentDeleteFailedItems.length" class="mt-4 rounded-xl bg-amber-500/10 p-3 text-xs leading-5 text-amber-700 dark:text-amber-300">失败曲目会保留在当前选择中。版本或状态冲突必须刷新列表并重新确认，系统不会自动使用新版本永久删除。</p>
       </template>

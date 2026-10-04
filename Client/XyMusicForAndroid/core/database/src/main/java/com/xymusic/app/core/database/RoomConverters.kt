@@ -3,13 +3,13 @@ package com.xymusic.app.core.database
 import androidx.room.TypeConverter
 import com.xymusic.app.core.database.model.ArtistCreditRole
 import com.xymusic.app.core.database.model.CatalogItemType
-import com.xymusic.app.core.database.model.LyricsFormat
-import com.xymusic.app.core.database.model.LyricsTiming
-import com.xymusic.app.core.database.model.PlaylistVisibility
-import com.xymusic.app.core.database.model.SearchScope
 import com.xymusic.app.core.database.model.SyncOperationStatus
 import com.xymusic.app.core.database.model.SyncOperationType
 import com.xymusic.app.core.database.model.SyncTargetType
+import com.xymusic.app.core.model.media.LyricsFormat
+import com.xymusic.app.core.model.media.LyricsTiming
+import com.xymusic.app.core.model.playlist.PlaylistVisibility
+import com.xymusic.app.core.model.search.SearchScope
 
 class RoomConverters {
     @TypeConverter
@@ -22,25 +22,25 @@ class RoomConverters {
     fun lyricsFormatToString(value: LyricsFormat): String = value.name
 
     @TypeConverter
-    fun stringToLyricsFormat(value: String): LyricsFormat = LyricsFormat.valueOf(value)
+    fun stringToLyricsFormat(value: String): LyricsFormat = LyricsFormat.fromWireValue(value)
 
     @TypeConverter
     fun lyricsTimingToString(value: LyricsTiming): String = value.name
 
     @TypeConverter
-    fun stringToLyricsTiming(value: String): LyricsTiming = LyricsTiming.valueOf(value)
+    fun stringToLyricsTiming(value: String): LyricsTiming = LyricsTiming.fromWireValue(value)
 
     @TypeConverter
     fun playlistVisibilityToString(value: PlaylistVisibility): String = value.name
 
     @TypeConverter
-    fun stringToPlaylistVisibility(value: String): PlaylistVisibility = PlaylistVisibility.valueOf(value)
+    fun stringToPlaylistVisibility(value: String): PlaylistVisibility = PlaylistVisibility.fromWireValue(value)
 
     @TypeConverter
     fun searchScopeToString(value: SearchScope): String = value.name
 
     @TypeConverter
-    fun stringToSearchScope(value: String): SearchScope = SearchScope.valueOf(value)
+    fun stringToSearchScope(value: String): SearchScope = SearchScope.fromWireValue(value)
 
     @TypeConverter
     fun catalogItemTypeToString(value: CatalogItemType): String = value.name

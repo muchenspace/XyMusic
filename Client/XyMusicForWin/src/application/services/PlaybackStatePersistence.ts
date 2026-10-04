@@ -1,5 +1,6 @@
 import type { PlaybackProgressCheckpoint, PersistedPlaybackState } from "../../domain/playbackState";
 import type { Diagnostics } from "../ports/Diagnostics";
+import { isQuotaExceededError } from "../ports/PlaybackStateRepository";
 import type { TaskScheduler } from "../ports/TaskScheduler";
 import type { PlaybackStateUseCases } from "../use-cases/PlaybackStateUseCases";
 
@@ -136,7 +137,7 @@ export class PlaybackStatePersistence {
       this.lastPersistedPosition = snapshot.position;
     } catch (cause) {
       const currentTrack = snapshot.queue[snapshot.currentIndex];
-      if (currentTrack && isQuotaExceeded(cause)) {
+      if (currentTrack && isQuotaExceededError(cause)) {
         try {
           this.playbackState.save({ ...persisted, queue: [currentTrack], currentIndex: 0 });
           this.snapshotDirty = false;
@@ -182,12 +183,6 @@ export class PlaybackStatePersistence {
     this.cancelCheckpointIdle = undefined;
     this.createPendingCheckpoint = undefined;
   }
-}
-
-function isQuotaExceeded(cause: unknown): boolean {
-  if (!cause || typeof cause !== "object") return false;
-  const error = cause as { name?: unknown; code?: unknown };
-  return error.name === "QuotaExceededError" || error.code === 22 || error.code === 1014;
 }
 
 function describeError(cause: unknown): string {

@@ -15,6 +15,7 @@ import (
 	"xymusic/server/internal/modules/adminauth"
 	"xymusic/server/internal/platform/httpserver"
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/httpx"
 	"xymusic/server/internal/shared/pagination"
 )
 
@@ -270,7 +271,7 @@ func bindUserList(c *gin.Context) (ListUsersInput, error) {
 		return ListUsersInput{}, err
 	}
 	query, _ := httpserver.LastQueryValue(c, "query")
-	if javascriptStringLength(query) > 100 {
+	if httpx.JavascriptStringLength(query) > 100 {
 		return ListUsersInput{}, routeContractError()
 	}
 	roleValue, rolePresent := httpserver.LastQueryValue(c, "role")
@@ -344,7 +345,7 @@ func validateUpdateUserRoute(input UpdateUserInput) error {
 	if input.DisplayName.Set && !routeStringLength(input.DisplayName.Value, 1, 100) {
 		return routeContractError()
 	}
-	if input.Bio.Set && input.Bio.Value != nil && javascriptStringLength(*input.Bio.Value) > 500 {
+	if input.Bio.Set && input.Bio.Value != nil && httpx.JavascriptStringLength(*input.Bio.Value) > 500 {
 		return routeContractError()
 	}
 	if input.Role.Set && !validRole(input.Role.Value) {
@@ -375,7 +376,7 @@ func decodeVersion(c *gin.Context) (VersionInput, error) {
 }
 
 func routeStringLength(value string, minimum, maximum int) bool {
-	length := javascriptStringLength(value)
+	length := httpx.JavascriptStringLength(value)
 	return length >= minimum && length <= maximum
 }
 

@@ -1059,8 +1059,10 @@ func TestProductionStaleBatchAttemptCannotCommitMutations(t *testing.T) {
 			StoragePath: "artworks/stale.jpg", MIMEType: "image/jpeg", SizeBytes: 48,
 			ChecksumSHA256: strings.Repeat("b", 64),
 		},
-		CompletionFence: batchMutationFenceFromContext(staleContext),
-		Now:             now.Add(time.Second),
+		CompletionFence: integrationCompletionFenceAdapter{
+			delegate: batchMutationFenceFromContext(staleContext),
+		},
+		Now: now.Add(time.Second),
 	})
 	if !errors.Is(err, ErrBatchLeaseLost) {
 		t.Fatalf("stale artwork completion error = %v", err)
@@ -1105,18 +1107,21 @@ func TestProductionStaleBatchAttemptCannotCommitMutations(t *testing.T) {
 	generatedIDs := []string{uuid.NewString(), raceAssetID, uuid.NewString()}
 	generatedIndex := 0
 	localMediaStore, _ := localmedia.NewStore(t.TempDir(), 0)
-	mediaService, err := adminmedia.NewService(cfg, adminmedia.ServiceDependencies{
-		Repository:  mediaRepository,
-		LocalMedia:  localMediaStore,
-		Idempotency: directMediaIdempotencyStub{},
-		Inspector:   inspector,
-		Clock:       integrationMediaClock{now},
-		IDGenerator: func() string {
-			value := generatedIDs[generatedIndex]
-			generatedIndex++
-			return value
-		},
-	})
+	mediaService, err := adminmedia.NewService(
+		cfg.MediaStorage.UploadTTLSeconds,
+		cfg.MediaStorage.MaxUploadBytes,
+		adminmedia.ServiceDependencies{
+			Repository:  mediaRepository,
+			LocalMedia:  localMediaStore,
+			Idempotency: directMediaIdempotencyStub{},
+			Inspector:   inspector,
+			Clock:       integrationMediaClock{now},
+			IDGenerator: func() string {
+				value := generatedIDs[generatedIndex]
+				generatedIndex++
+				return value
+			},
+		})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1133,9 +1138,11 @@ func TestProductionStaleBatchAttemptCannotCommitMutations(t *testing.T) {
 			actorID,
 			raceUploadID,
 			"",
-			adminmedia.CompleteUploadInput{CompletionFence: &artworkCompletionFence{
-				executionContext: currentContext,
-				mutationFence:    batchMutationFenceFromContext(currentContext),
+			adminmedia.CompleteUploadInput{CompletionFence: integrationCompletionFenceAdapter{
+				delegate: &artworkCompletionFence{
+					executionContext: currentContext,
+					mutationFence:    batchMutationFenceFromContext(currentContext),
+				},
 			}},
 		)
 		completionResult <- completeErr
@@ -1195,6 +1202,31 @@ func (inspector *blockingArtworkInspector) Inspect(
 	case <-inspector.release:
 		return inspector.result, nil
 	}
+}
+
+// integrationCompletionFenceAdapter bridges this module's narrow transaction
+// fence to the adminmedia transaction contract used by repository tests.
+type integrationCompletionFenceAdapter struct {
+	delegate MediaCompletionFence
+}
+
+func (adapter integrationCompletionFenceAdapter) Lock(ctx context.Context, tx adminmedia.Tx) error {
+	if adapter.delegate == nil {
+		return nil
+	}
+	return adapter.delegate.Lock(ctx, integrationMediaTxAdapter{tx: tx})
+}
+
+type integrationMediaTxAdapter struct {
+	tx adminmedia.Tx
+}
+
+func (adapter integrationMediaTxAdapter) QueryRow(ctx context.Context, sql string, args ...any) MediaRow {
+	return adapter.tx.QueryRow(ctx, sql, args...)
+}
+
+func (adapter integrationMediaTxAdapter) Exec(ctx context.Context, sql string, args ...any) (MediaCommandTag, error) {
+	return adapter.tx.Exec(ctx, sql, args...)
 }
 
 type directMediaIdempotencyStub struct{}

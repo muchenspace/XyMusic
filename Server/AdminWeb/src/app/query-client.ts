@@ -1,5 +1,11 @@
 import { QueryCache, QueryClient, type VueQueryPluginOptions } from "@tanstack/vue-query";
+import { appQueryKeys } from "@/app/query-keys";
 import { ApiConnectionError, ApiError, apiErrorMessage } from "@/shared/application/api-error";
+import type { RuntimeSettings } from "@/features/settings/domain/models";
+import type { TrackCachePort } from "@/features/music/application/track-cache-port";
+import type { ScanCachePort } from "@/features/sources/application/scan-cache-port";
+import type { PermanentDeleteTracksJob, TrackMetadataRecord, TrackSummary } from "@/features/music/domain/models";
+import type { SourceScan, SourceScanPage } from "@/features/sources/domain/models";
 
 export const ADMIN_QUERY_ERROR_EVENT = "xymusic:query-error";
 
@@ -74,3 +80,138 @@ export async function clearAdminQueryCache(): Promise<void> {
   await queryClient.cancelQueries();
   queryClient.clear();
 }
+
+/**
+ * Semantically named cache writes used after a scrape applies a new metadata
+ * version: advance the cached version on the metadata record and on every
+ * cached track-list page, without touching entries whose version is newer.
+ */
+export function applyTrackMetadataVersion(trackId: string, version: number): void {
+  const cachedMetadataKey = ["admin", "track", trackId, "metadata"];
+  queryClient.setQueryData<TrackMetadataRecord>(cachedMetadataKey, (current) => {
+    if (!current || current.trackId !== trackId || current.version >= version) return current;
+    return { ...current, version };
+  });
+
+  for (const [queryKey, current] of queryClient.getQueriesData<{ items: TrackSummary[] }>({ queryKey: ["admin", "tracks"] })) {
+    const isTrackList = queryKey[0] === "admin" && queryKey[1] === "tracks"
+      && typeof queryKey[2] === "object" && queryKey[2] !== null && !Array.isArray(queryKey[2]);
+    if (!isTrackList || !current || !Array.isArray(current.items)) continue;
+    queryClient.setQueryData(queryKey, {
+      ...current,
+      items: current.items.map((track) => track.id === trackId && (track.metadataVersion === null || track.metadataVersion < version)
+        ? { ...track, metadataVersion: version }
+        : track),
+    });
+  }
+}
+
+/** Query-cache implementation of the music application cache port. */
+export const trackCachePort: TrackCachePort = {
+  getMetadataRecord(trackId: string): TrackMetadataRecord | undefined {
+    return queryClient.getQueryData<TrackMetadataRecord>(["admin", "track", trackId, "metadata"]);
+  },
+  setMetadataRecord(record: TrackMetadataRecord): void {
+    queryClient.setQueryData(["admin", "track", record.trackId, "metadata"], record);
+  },
+  applyMetadataVersion(trackId: string, version: number): void {
+    applyTrackMetadataVersion(trackId, version);
+  },
+  setPermanentDeleteJob(job: PermanentDeleteTracksJob): void {
+    queryClient.setQueryData(["admin", "tracks", "permanent-delete", job.id], job);
+  },
+  invalidateMusicLists(): Promise<void> {
+    return invalidateAdminMusicQueries();
+  },
+};
+
+/** Writes the freshly saved settings snapshot into the settings query cache. */
+export function applyAdminSettings(settings: RuntimeSettings): void {
+  queryClient.setQueryData(appQueryKeys.adminSettings, settings);
+}
+
+/** Marks queries that depend on applied runtime settings stale, then refreshes service readiness. */
+export async function invalidateAdminSettingsDependents(): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === "admin" && query.queryKey[1] !== "settings" }),
+    queryClient.invalidateQueries({ queryKey: ["service", "readiness"] }),
+  ]);
+}
+
+/** Marks user list and dashboard queries stale. */
+export async function invalidateAdminUserQueries(): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["admin", "users"] }),
+    queryClient.invalidateQueries({ queryKey: ["admin", "dashboard"] }),
+  ]);
+}
+
+/** Marks job list and dashboard queries stale after job mutations. */
+export async function invalidateAdminJobQueries(): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["admin", "jobs"] }),
+    queryClient.invalidateQueries({ queryKey: ["admin", "dashboard"] }),
+  ]);
+}
+
+/** Marks job list, writeback list and dashboard queries stale (SSE refresh path). */
+export async function invalidateAdminJobEventQueries(): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["admin", "jobs"] }),
+    queryClient.invalidateQueries({ queryKey: ["admin", "metadata-writeback-jobs"] }),
+    queryClient.invalidateQueries({ queryKey: ["admin", "dashboard"] }),
+  ]);
+}
+
+/** Merges an SSE scan snapshot into every cached scan list of that source. */
+export function upsertCachedScan(sourceId: string, scan: SourceScan): void {
+  queryClient.setQueriesData<SourceScanPage>({ queryKey: ["admin", "sources", sourceId, "scans"] }, (current) => {
+    if (!current) return current;
+    const found = current.items.some((item) => item.id === scan.id);
+    return {
+      ...current,
+      items: found
+        ? current.items.map((item) => item.id === scan.id ? scan : item)
+        : current.page === 1
+          ? [scan, ...current.items].slice(0, current.pageSize)
+          : current.items,
+      total: found || current.page !== 1 ? current.total : current.total + 1,
+    };
+  });
+}
+
+/** Marks source list and dashboard queries stale. */
+export async function invalidateAdminSourceQueries(): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["admin", "sources"] }),
+    queryClient.invalidateQueries({ queryKey: ["admin", "dashboard"] }),
+  ]);
+}
+
+/** Marks catalog queries stale after a scan finishes. */
+export async function invalidateAdminCatalogQueries(): Promise<void> {
+  await Promise.all([
+    invalidateAdminSourceQueries(),
+    queryClient.invalidateQueries({ queryKey: ["admin", "tracks"] }),
+    queryClient.invalidateQueries({ queryKey: ["admin", "track"] }),
+    queryClient.invalidateQueries({ queryKey: ["admin", "albums"] }),
+    queryClient.invalidateQueries({ queryKey: ["admin", "artists"] }),
+    queryClient.invalidateQueries({ queryKey: ["admin", "jobs"] }),
+  ]);
+}
+
+/** Query-cache implementation of the sources application scan cache port. */
+export const scanCachePort: ScanCachePort = {
+  upsertScan(sourceId: string, scan: SourceScan): void {
+    upsertCachedScan(sourceId, scan);
+  },
+  refresh(): Promise<void> {
+    return invalidateAdminSourceQueries();
+  },
+  refreshCatalog(): Promise<void> {
+    return invalidateAdminCatalogQueries();
+  },
+  invalidateScans(sourceId: string): Promise<void> {
+    return queryClient.invalidateQueries({ queryKey: ["admin", "sources", sourceId, "scans"] });
+  },
+};

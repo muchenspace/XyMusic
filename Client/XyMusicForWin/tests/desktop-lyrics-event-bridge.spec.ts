@@ -8,7 +8,7 @@ import type {
   DesktopLyricsClockPayload,
   DesktopLyricsStatePayload,
 } from "../src/desktop-lyrics/protocol";
-import { DESKTOP_LYRICS_EVENTS } from "../src/desktop-lyrics/protocol";
+import { DESKTOP_LYRICS_EVENTS } from "../src/infrastructure/desktop/desktopLyricsEvents";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
 
@@ -193,6 +193,7 @@ describe("desktop lyrics event adapter", () => {
     const placementAdapterSource = readSource("src/infrastructure/windows/TauriDesktopLyricsWindowPlacement.ts");
     const desktopLyricsAdapterSource = readSource("src/infrastructure/windows/TauriDesktopLyrics.ts");
     const mainSource = readSource("src/main.ts");
+    const containerSource = readSource("src/infrastructure/container.ts");
 
     expect(bridgeSource).not.toContain("@tauri-apps/api/event");
     expect(bridgeSource).not.toContain("window.addEventListener");
@@ -200,17 +201,18 @@ describe("desktop lyrics event adapter", () => {
     expect(placementSource).not.toContain("@tauri-apps/api/window");
     expect(placementSource).not.toContain("localStorage");
     expect(adapterSource).toContain('from "@tauri-apps/api/event"');
-    expect(desktopLyricsAdapterSource).toContain('from "../../application/ports/DesktopLyricsBridge"');
+    expect(desktopLyricsAdapterSource).toContain('from "../desktop/desktopLyricsEvents"');
     expect(desktopLyricsAdapterSource).toContain("DESKTOP_LYRICS_EVENTS.state");
     expect(desktopLyricsAdapterSource).toContain("DESKTOP_LYRICS_EVENTS.clock");
     expect(desktopLyricsAdapterSource).toContain("DESKTOP_LYRICS_EVENTS.action");
     expect(desktopLyricsAdapterSource).not.toContain("xy-music://desktop-lyrics/state");
     expect(placementAdapterSource).toContain('@tauri-apps/api/window');
     expect(placementAdapterSource).toContain("localStorage");
-    expect(mainSource).toContain('import("./infrastructure/desktop/TauriDesktopLyricsEventBridge")');
-    expect(mainSource).toContain('import("./infrastructure/windows/TauriDesktopLyricsWindowPlacement")');
-    expect(mainSource).toContain("bridge: new TauriDesktopLyricsEventBridge()");
-    expect(mainSource).toContain("placement: new TauriDesktopLyricsWindowPlacement()");
+    expect(mainSource).toContain("createDesktopLyricsWindowServices");
+    expect(containerSource).toContain('import("./desktop/TauriDesktopLyricsEventBridge")');
+    expect(containerSource).toContain('import("./windows/TauriDesktopLyricsWindowPlacement")');
+    expect(containerSource).toContain("bridge: new TauriDesktopLyricsEventBridge()");
+    expect(containerSource).toContain("placement: new TauriDesktopLyricsWindowPlacement()");
   });
 });
 

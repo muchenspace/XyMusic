@@ -1,3 +1,5 @@
+import type { Page, PageQuery } from "@/shared/domain/pagination";
+
 export interface LibrarySourceInput {
   name: string;
   path: string;
@@ -46,30 +48,14 @@ export interface LibrarySource {
   updatedAt: string;
 }
 
-export interface SourcePageQuery {
+export type SourcePageQuery = PageQuery & {
   page: number;
   pageSize: number;
-  cursor?: string;
-  cursorMode?: "cursor" | "offset";
-}
+};
 
-export interface SourceScanPage {
-  items: SourceScan[];
-  page: number;
-  pageSize: number;
-  total: number;
-  totalPages?: number;
-  nextCursor?: string;
-}
+export type SourceScanPage = Page<SourceScan>;
 
-export interface SourcePage {
-  items: LibrarySource[];
-  page: number;
-  pageSize: number;
-  total: number;
-  totalPages?: number;
-  nextCursor?: string;
-}
+export type SourcePage = Page<LibrarySource>;
 
 export interface SourceProcessingJob {
   id: string;

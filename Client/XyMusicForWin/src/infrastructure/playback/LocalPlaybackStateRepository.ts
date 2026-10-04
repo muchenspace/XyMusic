@@ -1,4 +1,5 @@
 import type { PlaybackStateRepository } from "../../application/ports/PlaybackStateRepository";
+import { QuotaExceededError } from "../../application/ports/PlaybackStateRepository";
 import type { PersistedPlaybackState, PlaybackProgressCheckpoint } from "../../domain/playbackState";
 
 export class LocalPlaybackStateRepository implements PlaybackStateRepository {
@@ -12,18 +13,32 @@ export class LocalPlaybackStateRepository implements PlaybackStateRepository {
   }
 
   write(state: PersistedPlaybackState): void {
-    localStorage.setItem(SNAPSHOT_STORAGE_KEY, JSON.stringify(encodeSnapshot(state)));
+    writeStorage(SNAPSHOT_STORAGE_KEY, JSON.stringify(encodeSnapshot(state)));
     localStorage.removeItem(CHECKPOINT_STORAGE_KEY);
   }
 
   writeCheckpoint(checkpoint: PlaybackProgressCheckpoint): void {
-    localStorage.setItem(CHECKPOINT_STORAGE_KEY, JSON.stringify(checkpoint));
+    writeStorage(CHECKPOINT_STORAGE_KEY, JSON.stringify(checkpoint));
   }
 
   clear(ownerKey: string): void {
     removeOwnedValue(SNAPSHOT_STORAGE_KEY, ownerKey);
     removeOwnedValue(CHECKPOINT_STORAGE_KEY, ownerKey);
   }
+}
+
+function writeStorage(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch (cause) {
+    throw isQuotaError(cause) ? new QuotaExceededError(cause instanceof Error ? cause.message : undefined, cause) : cause;
+  }
+}
+
+function isQuotaError(cause: unknown): boolean {
+  if (!cause || typeof cause !== "object") return false;
+  const error = cause as { name?: unknown; code?: unknown };
+  return error.name === "QuotaExceededError" || error.code === 22 || error.code === 1014;
 }
 
 function readSnapshot(key: string, ownerKey: string): PersistedPlaybackState | null {

@@ -7,11 +7,12 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode/utf16"
 	"unicode/utf8"
 
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/httpx"
 	"xymusic/server/internal/shared/pagination"
+	"xymusic/server/internal/shared/timeformat"
 )
 
 const defaultRetryReason = "Retried by an administrator from the job center"
@@ -20,10 +21,6 @@ type Service struct {
 	store    Store
 	metadata MetadataMutator
 	cursors  *pagination.CursorCodec
-}
-
-func NewService(store Store, metadata MetadataMutator) (*Service, error) {
-	return NewServiceWithOptions(store, metadata, nil)
 }
 
 func NewServiceWithOptions(store Store, metadata MetadataMutator, cursors *pagination.CursorCodec) (*Service, error) {
@@ -39,7 +36,7 @@ func NewServiceWithOptions(store Store, metadata MetadataMutator, cursors *pagin
 func (service *Service) List(ctx context.Context, input ListInput) (JobPageDTO, error) {
 	search := strings.TrimSpace(input.Search)
 	input.Search = search
-	if javascriptStringLength(search) > 200 || !validStatusFilter(input.Status) ||
+	if httpx.JavascriptStringLength(search) > 200 || !validStatusFilter(input.Status) ||
 		!validTypeFilter(input.Type) || !validSort(input.Sort) || !validOrder(input.Order) {
 		return JobPageDTO{}, apperror.Validation("Job filters are invalid")
 	}
@@ -221,7 +218,7 @@ func optionalReason(value *string) (*string, error) {
 		return nil, nil
 	}
 	trimmed := strings.TrimSpace(*value)
-	if trimmed == "" || javascriptStringLength(trimmed) > 500 {
+	if trimmed == "" || httpx.JavascriptStringLength(trimmed) > 500 {
 		return nil, apperror.Validation("reason is invalid")
 	}
 	return &trimmed, nil
@@ -246,19 +243,11 @@ func validOrder(value SortOrder) bool {
 }
 
 func formatTimestamp(value time.Time) string {
-	return value.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+	return timeformat.Timestamp(value)
 }
 
 func formatOptionalTimestamp(value *time.Time) *string {
-	if value == nil {
-		return nil
-	}
-	formatted := formatTimestamp(*value)
-	return &formatted
-}
-
-func javascriptStringLength(value string) int {
-	return len(utf16.Encode([]rune(value)))
+	return timeformat.OptionalTimestamp(value)
 }
 
 func userFacingOperationalError(message, code *string) *string {

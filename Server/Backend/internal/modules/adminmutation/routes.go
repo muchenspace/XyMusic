@@ -9,13 +9,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf16"
 
 	"github.com/gin-gonic/gin"
 
 	"xymusic/server/internal/modules/adminauth"
 	"xymusic/server/internal/platform/httpserver"
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/httpx"
 )
 
 type API interface {
@@ -263,8 +263,8 @@ func (routes *Routes) upsertLyrics(c *gin.Context) error {
 	if err := httpserver.DecodeJSON(c, &input); err != nil {
 		return err
 	}
-	if input.ExpectedVersion < 1 || !routeText(input.Language, 2, 35) || (input.Format != "LRC" && input.Format != "PLAIN") || (input.Timing != "LINE" && input.Timing != "WORD") || !input.Content.Set || routeLength(input.Content.Value) > 1000000 || !input.IsDefault.Set {
-		return mutationContractError()
+	if err := validateLyricsContract(input); err != nil {
+		return err
 	}
 	return routes.execute(c, "admin.track.lyrics:"+id+":"+input.Language, lyricsPayload(input), http.StatusOK, func(string) (any, error) {
 		return routes.service.UpsertLyrics(c.Request.Context(), id, input)
@@ -383,7 +383,7 @@ func mutationUUID(value string) (string, error) {
 	return value, nil
 }
 func isMutationUUID(value string) bool { return mutationUUIDPattern.MatchString(value) }
-func routeLength(value string) int     { return len(utf16.Encode([]rune(value))) }
+func routeLength(value string) int     { return httpx.JavascriptStringLength(value) }
 func routeText(value string, min, max int) bool {
 	length := routeLength(value)
 	return length >= min && length <= max

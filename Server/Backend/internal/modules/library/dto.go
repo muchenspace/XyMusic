@@ -1,6 +1,9 @@
 package library
 
-import "xymusic/server/internal/modules/catalog"
+import (
+	"xymusic/server/internal/modules/catalog"
+	"xymusic/server/internal/shared/mutationresult"
+)
 
 type ListFavoritesInput struct {
 	Cursor string
@@ -44,7 +47,4 @@ type HistoryPageDTO struct {
 	NextCursor *string          `json:"nextCursor"`
 }
 
-type MutationResult[T any] struct {
-	Body     T
-	Replayed bool
-}
+type MutationResult[T any] = mutationresult.Result[T]

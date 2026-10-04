@@ -5,8 +5,8 @@ import com.xymusic.app.core.database.entity.LyricsEntity
 import com.xymusic.app.core.database.entity.TrackArtistCreditEntity
 import com.xymusic.app.core.database.entity.TrackEntity
 import com.xymusic.app.core.database.model.ArtistCreditRole
-import com.xymusic.app.core.database.model.LyricsFormat
-import com.xymusic.app.core.database.model.LyricsTiming
+import com.xymusic.app.core.model.media.LyricsFormat
+import com.xymusic.app.core.model.media.LyricsTiming
 
 internal suspend fun XyMusicDatabase.seedTrack(
     trackId: String,

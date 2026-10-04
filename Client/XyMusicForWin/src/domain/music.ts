@@ -1,6 +1,5 @@
 
 export interface Artwork { url: string; cacheKey: string }
-export interface UserProfile { id: string; username: string; displayName: string; avatarUrl?: string }
 export interface Artist { id: string; name: string; artwork?: Artwork; description?: string }
 
 export interface Track {
@@ -70,9 +69,4 @@ export interface PlaybackGrant {
   mimeType?: string;
   container?: string;
   codec?: string;
-}
-
-export interface AppPreferences {
-  serverUrl: string;
-  theme: "system" | "dark" | "light";
 }

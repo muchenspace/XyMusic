@@ -13,6 +13,8 @@ import VirtualTable from "@/components/VirtualTable.vue";
 import { useMusicAdmin } from "@/app/services/music";
 import type { AlbumMergeResult, AlbumSummary } from "@/features/music/domain/models";
 import { DEFAULT_CATALOG_PAGE_SIZE } from "@/shared/presentation/pagination";
+import { useCursorPagination } from "@/shared/presentation/use-cursor-pagination";
+import { musicQueryKeys } from "@/features/music/presentation/query-keys";
 import { useUiStore } from "@/stores/ui";
 import { formatDuration } from "@/utils/format";
 
@@ -24,39 +26,22 @@ const albumId = computed(() => String(route.params.id));
 const mergeOpen = ref(false);
 const mergeLoading = ref(false);
 const mergeCandidates = ref<AlbumSummary[]>([]);
-const trackPage = ref(1);
-const trackPageSize = ref(DEFAULT_CATALOG_PAGE_SIZE);
-const trackCursor = ref("");
-const trackCursorHistory = ref(new Map<number, string>());
+const { page: trackPage, pageSize: trackPageSize, cursor: trackCursor, reset: resetTrackPaging, changePage: changeTrackPage, changePageSize: changeTrackPageSize } = useCursorPagination({
+  initialPageSize: DEFAULT_CATALOG_PAGE_SIZE,
+  isFetching: () => query.isFetching.value,
+  nextCursor: () => query.data.value?.nextCursor,
+});
 const query = useQuery({
-  queryKey: computed(() => ["admin", "album", albumId.value, { page: trackPage.value, pageSize: trackPageSize.value, cursor: trackCursor.value }]),
+  queryKey: computed(() => musicQueryKeys.album(albumId.value, { page: trackPage.value, pageSize: trackPageSize.value, cursor: trackCursor.value })),
   queryFn: ({ signal }) => musicAdmin.getAlbum(albumId.value, { page: trackPage.value, pageSize: trackPageSize.value, cursor: trackCursor.value || undefined, cursorMode: "cursor" }, signal),
 });
 const duplicatesQuery = useQuery({
-  queryKey: computed(() => ["admin", "albums", "duplicates", { albumId: albumId.value }]),
+  queryKey: computed(() => musicQueryKeys.albumDuplicateGroup(albumId.value)),
   queryFn: ({ signal }) => musicAdmin.getAlbumDuplicates({ page: 1, pageSize: 1, albumId: albumId.value }, signal),
 });
 const duplicateGroup = computed(() => duplicatesQuery.data.value?.groups[0]);
 
 watch(albumId, () => { resetTrackPaging(); mergeCandidates.value = []; mergeOpen.value = false; });
-function resetTrackPaging(): void {
-  trackPage.value = 1;
-  trackCursor.value = "";
-  trackCursorHistory.value = new Map([[1, ""]]);
-}
-function changeTrackPage(nextPage: number): void {
-  if (query.isFetching.value || !Number.isSafeInteger(nextPage) || nextPage < 1 || nextPage === trackPage.value) return;
-  const next = new Map(trackCursorHistory.value);
-  if (nextPage < trackPage.value) trackCursor.value = next.get(nextPage) ?? "";
-  else {
-    const nextCursor = query.data.value?.nextCursor;
-    if (!nextCursor) return;
-    next.set(nextPage, nextCursor);
-    trackCursor.value = nextCursor;
-  }
-  trackCursorHistory.value = next;
-  trackPage.value = nextPage;
-}
 
 async function openMerge(): Promise<void> {
   if (!duplicateGroup.value) {
@@ -92,11 +77,6 @@ function albumTrackKey(track: { id: string }): string { return track.id; }
 function trackPosition(discNumber: number, trackNumber: number | null): string {
   if (trackNumber === null) return "—";
   return discNumber > 1 ? `${discNumber}-${trackNumber}` : String(trackNumber);
-}
-
-function changeTrackPageSize(value: number): void {
-  trackPageSize.value = value;
-  resetTrackPaging();
 }
 </script>
 
@@ -167,7 +147,6 @@ function changeTrackPageSize(value: number): void {
           :page-size="trackPageSize"
           :total="query.data.value.trackTotal"
           :total-pages="query.data.value.trackTotalPages"
-          cursor
           @change="changeTrackPage"
           @page-size-change="changeTrackPageSize"
         />

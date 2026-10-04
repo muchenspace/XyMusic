@@ -8,7 +8,9 @@ import LyricsView from "../src/presentation/components/LyricsView.vue";
 import { applicationServicesKey } from "../src/presentation/services";
 import { useLyricsStore } from "../src/presentation/stores/lyricsStore";
 import { usePlayerStore } from "../src/presentation/stores/playerStore";
+import { LyricsCacheService } from "../src/application/services/LyricsCacheService";
 import { FakePlaybackSession } from "./support/FakePlaybackSession";
+import { createTestLyricsPreferencePersistence } from "./support/lyricsPreferencePersistence";
 
 const renderList = vi.hoisted(() => vi.fn());
 const originalScrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollIntoView");
@@ -167,31 +169,34 @@ describe("word-timed lyric rendering", () => {
 });
 
 function services(playbackSession: FakePlaybackSession): ApplicationServices {
+  const uiPreferences = {
+    readLyrics: () => ({
+      fontScale: 1,
+      showTranslation: true,
+      colors: {
+        dark: { textColor: "#8e98a3", highlightColor: "#d7e6f3" },
+        light: { textColor: "#626a74", highlightColor: "#1b4269" },
+      },
+    }),
+    writeLyricsFontScale() {},
+    writeLyricsTranslation() {},
+    writeLyricsTextColor() {},
+    writeLyricsHighlightColor() {},
+    readLyricsOffset: () => 0,
+    writeLyricsOffset() {},
+    clearLyricsOffsets() {},
+  };
   return {
     catalog: { lyrics: vi.fn(async () => null) },
+    lyricsCache: new LyricsCacheService({ getLyrics: vi.fn(async () => null) }),
     playbackSession,
     desktopWindowController: {
       state: () => ({ maximized: false, fullscreen: false }),
       subscribe: () => () => undefined,
       toggleMaximize: vi.fn(async () => undefined),
     },
-    uiPreferences: {
-      readLyrics: () => ({
-        fontScale: 1,
-        showTranslation: true,
-        colors: {
-          dark: { textColor: "#8e98a3", highlightColor: "#d7e6f3" },
-          light: { textColor: "#626a74", highlightColor: "#1b4269" },
-        },
-      }),
-      writeLyricsFontScale() {},
-      writeLyricsTranslation() {},
-      writeLyricsTextColor() {},
-      writeLyricsHighlightColor() {},
-      readLyricsOffset: () => 0,
-      writeLyricsOffset() {},
-      clearLyricsOffsets() {},
-    },
+    uiPreferences,
+    lyricsPreferencePersistence: createTestLyricsPreferencePersistence(uiPreferences),
   } as unknown as ApplicationServices;
 }
 

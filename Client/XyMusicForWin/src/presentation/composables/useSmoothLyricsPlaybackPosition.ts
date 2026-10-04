@@ -7,6 +7,7 @@ import {
   type LyricPlaybackClock,
   type LyricPlaybackRenderPlan,
 } from "../../domain/lyricsTimeline";
+import { sampleLyricCorrection } from "../../shared/lyrics/transition";
 
 interface PlaybackSource {
   currentTime: () => number;
@@ -169,13 +170,14 @@ export function useSmoothLyricsPlaybackPosition(source: PlaybackSource) {
     const basePosition = interpolateLyricPlaybackSeconds(clock, nowMs);
     const activeCorrection = correction;
     if (!activeCorrection) return Math.max(displayedPosition.value, basePosition);
-    const progress = Math.max(
-      0,
-      Math.min(1, (nowMs - activeCorrection.startedAtMs) / LYRIC_PLAYBACK_POSITION_CORRECTION_MS),
+    const sampled = sampleLyricCorrection(
+      activeCorrection.offsetSeconds,
+      activeCorrection.startedAtMs,
+      nowMs,
+      LYRIC_PLAYBACK_POSITION_CORRECTION_MS,
     );
-    const remainingOffset = activeCorrection.offsetSeconds * (1 - fastOutSlowIn(progress));
-    if (progress >= 1) correction = null;
-    return Math.max(displayedPosition.value, basePosition + remainingOffset);
+    if (sampled.finished) correction = null;
+    return Math.max(displayedPosition.value, basePosition + sampled.remainingOffsetSeconds);
   }
 
   function scheduleWake(nextChangeAtSeconds: number | null, positionSeconds: number): void {
@@ -222,26 +224,6 @@ function areRenderPlanDependenciesEqual(
 ): boolean {
   return current.length === previous.length
     && current.every((dependency, index) => Object.is(dependency, previous[index]));
-}
-
-/** Material/Compose FastOutSlowInEasing: cubic-bezier(0.4, 0, 0.2, 1). */
-function fastOutSlowIn(value: number): number {
-  const input = Math.max(0, Math.min(1, value));
-  let lower = 0;
-  let upper = 1;
-  for (let iteration = 0; iteration < 16; iteration += 1) {
-    const candidate = (lower + upper) / 2;
-    if (cubicBezierCoordinate(candidate, 0.4, 0.2) < input) lower = candidate;
-    else upper = candidate;
-  }
-  return cubicBezierCoordinate((lower + upper) / 2, 0, 1);
-}
-
-function cubicBezierCoordinate(time: number, firstControl: number, secondControl: number): number {
-  const inverse = 1 - time;
-  return 3 * inverse * inverse * time * firstControl
-    + 3 * inverse * time * time * secondControl
-    + time * time * time;
 }
 
 function monotonicNow(): number {

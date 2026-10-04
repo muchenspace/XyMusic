@@ -1,5 +1,4 @@
 export {
-  DESKTOP_LYRICS_EVENTS,
   DESKTOP_LYRICS_PROTOCOL_VERSION,
   clockFromState,
   createDesktopLyricsAction,

@@ -7,14 +7,12 @@ import androidx.lifecycle.viewModelScope
 import com.xymusic.app.R
 import com.xymusic.app.core.common.DefaultDispatcher
 import com.xymusic.app.core.common.runCatchingPreservingCancellation
-import com.xymusic.app.core.model.media.Track
-import com.xymusic.app.core.ui.media.CatalogAlbumLinkUi
-import com.xymusic.app.core.ui.media.CatalogArtistLinkUi
 import com.xymusic.app.core.ui.media.CatalogArtworkUi
 import com.xymusic.app.core.ui.media.CatalogTrackUi
+import com.xymusic.app.core.ui.media.toPlayerQueueItem
+import com.xymusic.app.core.ui.media.toUi
 import com.xymusic.app.feature.player.domain.PlayerResult
 import com.xymusic.app.feature.player.domain.PlayerUseCases
-import com.xymusic.app.feature.player.domain.model.PlayerQueueItem
 import com.xymusic.app.feature.playlist.domain.PlaylistResult
 import com.xymusic.app.feature.playlist.domain.PlaylistUseCases
 import com.xymusic.app.feature.playlist.domain.model.PlaylistDetail
@@ -351,7 +349,7 @@ private fun PlaylistDetail.toUi(): PlaylistDetailUi = PlaylistDetailUi(
     name = playlist.name,
     description = playlist.description,
     visibility = playlist.visibility,
-    cover = playlist.cover?.let { CatalogArtworkUi(it.url, it.cacheKey) },
+    cover = playlist.cover?.toUi(),
     trackCount = playlist.trackCount,
     version = playlist.version,
     entries =
@@ -359,7 +357,7 @@ private fun PlaylistDetail.toUi(): PlaylistDetailUi = PlaylistDetailUi(
         PlaylistEntryUi(
             entryId = entry.id,
             position = entry.position,
-            track = entry.track.toCatalogUi(),
+            track = entry.track.toUi(),
         )
     },
 )
@@ -369,26 +367,4 @@ private data class PlaylistLoadingState(
     val refreshFailed: Boolean,
     val loadingMore: Boolean,
     val loadMoreFailed: Boolean,
-)
-
-private fun Track.toCatalogUi(): CatalogTrackUi = CatalogTrackUi(
-    id = id,
-    title = title,
-    artists = artists.map { CatalogArtistLinkUi(it.id, it.name) },
-    album = album?.let { CatalogAlbumLinkUi(it.id, it.title) },
-    artwork = artwork?.let { CatalogArtworkUi(it.url, it.cacheKey) },
-    durationMs = durationMs,
-    discNumber = discNumber,
-    trackNumber = trackNumber,
-)
-
-private fun CatalogTrackUi.toPlayerQueueItem(queueItemId: String): PlayerQueueItem = PlayerQueueItem(
-    queueItemId = queueItemId,
-    trackId = id,
-    title = title,
-    artistNames = artists.map(CatalogArtistLinkUi::name),
-    albumTitle = album?.title,
-    artworkUrl = artwork?.url,
-    artworkCacheKey = artwork?.cacheKey,
-    durationMs = durationMs,
 )

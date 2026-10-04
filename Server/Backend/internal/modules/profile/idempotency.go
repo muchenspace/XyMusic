@@ -6,18 +6,18 @@ import (
 	"time"
 
 	"xymusic/server/internal/modules/identity"
-	sharedidempotency "xymusic/server/internal/shared/idempotency"
+	platformidempotency "xymusic/server/internal/platform/idempotency"
 )
 
 // PersistentIdempotency reuses the encrypted PostgreSQL idempotency store and
 // keeps typed replay payloads for both profile and avatar mutations.
 type PersistentIdempotency struct {
-	service *sharedidempotency.Service
+	service *platformidempotency.Service
 }
 
 var _ Idempotency = (*PersistentIdempotency)(nil)
 
-func NewPersistentIdempotency(service *sharedidempotency.Service) *PersistentIdempotency {
+func NewPersistentIdempotency(service *platformidempotency.Service) *PersistentIdempotency {
 	return &PersistentIdempotency{service: service}
 }
 
@@ -30,15 +30,15 @@ func (adapter *PersistentIdempotency) ExecuteCurrentUser(
 	if adapter == nil || adapter.service == nil {
 		return MutationResult[identity.CurrentUserDTO]{}, errors.New("profile idempotency service is required")
 	}
-	result, err := sharedidempotency.Execute(ctx, adapter.service, sharedidempotency.Input{
+	result, err := platformidempotency.Execute(ctx, adapter.service, platformidempotency.Input{
 		ActorID: input.ActorID,
 		Scope:   input.Scope,
 		Key:     input.Key,
 		Payload: input.Payload,
 		TTL:     24 * time.Hour,
-	}, func() (sharedidempotency.HTTPResult[identity.CurrentUserDTO], error) {
+	}, func() (platformidempotency.HTTPResult[identity.CurrentUserDTO], error) {
 		body, err := operation()
-		return sharedidempotency.HTTPResult[identity.CurrentUserDTO]{Status: status, Body: body}, err
+		return platformidempotency.HTTPResult[identity.CurrentUserDTO]{Status: status, Body: body}, err
 	})
 	if err != nil {
 		return MutationResult[identity.CurrentUserDTO]{}, err
@@ -55,15 +55,15 @@ func (adapter *PersistentIdempotency) ExecuteAvatarUpload(
 	if adapter == nil || adapter.service == nil {
 		return MutationResult[AvatarUploadDTO]{}, errors.New("profile idempotency service is required")
 	}
-	result, err := sharedidempotency.Execute(ctx, adapter.service, sharedidempotency.Input{
+	result, err := platformidempotency.Execute(ctx, adapter.service, platformidempotency.Input{
 		ActorID: input.ActorID,
 		Scope:   input.Scope,
 		Key:     input.Key,
 		Payload: input.Payload,
 		TTL:     24 * time.Hour,
-	}, func() (sharedidempotency.HTTPResult[AvatarUploadDTO], error) {
+	}, func() (platformidempotency.HTTPResult[AvatarUploadDTO], error) {
 		body, err := operation()
-		return sharedidempotency.HTTPResult[AvatarUploadDTO]{Status: status, Body: body}, err
+		return platformidempotency.HTTPResult[AvatarUploadDTO]{Status: status, Body: body}, err
 	})
 	if err != nil {
 		return MutationResult[AvatarUploadDTO]{}, err

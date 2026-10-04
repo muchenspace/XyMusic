@@ -12,13 +12,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf16"
 
 	"github.com/gin-gonic/gin"
 
 	"xymusic/server/internal/modules/adminauth"
 	"xymusic/server/internal/platform/httpserver"
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/httpx"
 	"xymusic/server/internal/shared/pagination"
 	"xymusic/server/internal/shared/sse"
 )
@@ -621,7 +621,7 @@ func validFileStatus(status SourceFileStatus) bool {
 		status == SourceFileFailed || status == SourceFileMissing
 }
 
-func javascriptLength(value string) int { return len(utf16.Encode([]rune(value))) }
+func javascriptLength(value string) int { return httpx.JavascriptStringLength(value) }
 
 func routeContractError() error {
 	return apperror.Validation("\u8bf7\u6c42\u53c2\u6570\u4e0d\u7b26\u5408\u63a5\u53e3\u8981\u6c42")

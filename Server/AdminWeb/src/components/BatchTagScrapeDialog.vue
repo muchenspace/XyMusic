@@ -21,9 +21,9 @@ import {
   batchItemMessage,
   batchItemStatusPresentation,
   batchJobStatusPresentation,
-  isNoScrapingNeededError,
-  noScrapingNeededDetail,
 } from "@/features/scraping/presentation/batch-status";
+import { isNoScrapingNeededError, noScrapingNeededDetail } from "@/features/scraping/application/no-scraping-needed";
+import { useBatchPolling } from "@/features/scraping/presentation/use-batch-polling";
 import { useTagScraping } from "@/app/services/scraping";
 
 const open = defineModel<boolean>({ required: true });
@@ -52,48 +52,32 @@ const notice = ref("");
 const submittedCount = ref(0);
 const submittedTrackTitles = ref(new Map<string, string>());
 const conditionExcluded = ref(0);
-let timer: ReturnType<typeof setTimeout> | undefined;
-let pollController: AbortController | undefined;
-let pollGeneration = 0;
-let pollFailures = 0;
-let completedEmitted = false;
 let actionGeneration = 0;
+const polling = useBatchPolling<TagScrapingBatch>({
+  isOpen: () => open.value,
+  fetchBatch: (id, updatedAt, signal) => scraping.batch(id, updatedAt, signal),
+  isTerminal: (update) => !["PENDING", "RUNNING"].includes(update.status),
+  applyBatch: (update) => { job.value = update; },
+  currentBatch: () => job.value,
+  onCompleted: () => emit("completed"),
+  onSuccess: () => { error.value = ""; },
+  onError: (cause) => { error.value = cause instanceof Error ? cause.message : "读取任务失败"; },
+  mergeBatch: (current, update) => {
+    if (!current || !update.partialItems) return update;
+    const changed = new Map(update.items.map((item) => [item.id, item]));
+    return { ...update, items: current.items.map((item) => changed.get(item.id) ?? item) };
+  },
+});
 const sourceOptions: Array<{ value: TagSource; label: string }> = [{ value: "qmusic", label: "QQ 音乐" }, { value: "netease", label: "网易云" }, { value: "kugou", label: "酷狗" }];
 const visibleSourceOptions = computed(() => sourceOptions);
 
 
 watch(open, (value) => {
   actionGeneration += 1;
-  stopPolling();
-  if (value) { job.value = undefined; verbatim.value = false; writeBack.value = false; error.value = ""; notice.value = ""; submittedCount.value = 0; submittedTrackTitles.value = new Map(); conditionExcluded.value = 0; completedEmitted = false; }
+  polling.stop();
+  if (value) { job.value = undefined; verbatim.value = false; writeBack.value = false; error.value = ""; notice.value = ""; submittedCount.value = 0; submittedTrackTitles.value = new Map(); conditionExcluded.value = 0; polling.resetCompletion(); }
 });
-onUnmounted(() => {
-  actionGeneration += 1;
-  stopPolling();
-});
-function stopPolling() {
-  pollGeneration += 1;
-  if (timer) clearTimeout(timer);
-  timer = undefined;
-  pollController?.abort();
-  pollController = undefined;
-}
-function schedulePolling(id: string, generation: number, delay = 2000) {
-  if (!open.value || generation !== pollGeneration) return;
-  if (timer) clearTimeout(timer);
-  timer = setTimeout(() => void refresh(id, generation), delay);
-}
-function beginPolling(id: string) {
-  stopPolling();
-  completedEmitted = false;
-  pollFailures = 0;
-  schedulePolling(id, pollGeneration);
-}
-function finishIfTerminal(update: TagScrapingBatch): boolean {
-  if (["PENDING", "RUNNING"].includes(update.status)) return false;
-  if (!completedEmitted) { completedEmitted = true; emit("completed"); }
-  return true;
-}
+onUnmounted(() => { actionGeneration += 1; });
 function submittedTrackTitle(trackId: string): string {
   return submittedTrackTitles.value.get(trackId) ?? "未知曲目";
 }
@@ -124,32 +108,6 @@ function buildBatchItems(): Array<{ trackId: string; expectedVersion: number }> 
   }
   return items;
 }
-async function refresh(id = job.value?.id, generation = pollGeneration) {
-  if (!id || generation !== pollGeneration || !open.value) return;
-  if (timer) clearTimeout(timer);
-  timer = undefined;
-  const controller = new AbortController();
-  pollController = controller;
-  try {
-    const current = job.value;
-    const update = await scraping.batch(id, current?.updatedAt, controller.signal);
-    if (generation !== pollGeneration || !open.value) return;
-    pollFailures = 0;
-    error.value = "";
-    if (current && update.partialItems) {
-      const changed = new Map(update.items.map((item) => [item.id, item]));
-      job.value = { ...update, items: current.items.map((item) => changed.get(item.id) ?? item) };
-    } else job.value = update;
-    if (!finishIfTerminal(job.value)) schedulePolling(id, generation);
-  } catch (cause) {
-    if (controller.signal.aborted || generation !== pollGeneration || !open.value) return;
-    error.value = cause instanceof Error ? cause.message : "读取任务失败";
-    pollFailures += 1;
-    schedulePolling(id, generation, Math.min(10_000, 2_000 * 2 ** pollFailures));
-  } finally {
-    if (pollController === controller) pollController = undefined;
-  }
-}
 async function start() {
   if (archivedTrack.value) { error.value = `已归档曲目“${archivedTrack.value.title}”需先恢复后才能批量刮削`; return; }
   if (!sources.value.length) { error.value = "至少选择一个来源"; return; }
@@ -163,7 +121,7 @@ async function start() {
     return;
   }
   loading.value = true; error.value = ""; notice.value = ""; conditionExcluded.value = 0;
-  const generation = pollGeneration;
+  const generation = polling.generation();
   const action = ++actionGeneration;
   const selectedCount = items.length;
   submittedCount.value = selectedCount;
@@ -181,10 +139,10 @@ async function start() {
         reason: "",
       },
     });
-    if (generation !== pollGeneration || action !== actionGeneration || !open.value) return;
+    if (generation !== polling.generation() || action !== actionGeneration || !open.value) return;
     conditionExcluded.value = Math.max(0, selectedCount - created.total);
     job.value = created;
-    if (!finishIfTerminal(created)) beginPolling(created.id);
+    if (!polling.finishIfTerminal(created)) polling.begin(created.id);
   } catch (cause) {
     if (action === actionGeneration && open.value) {
       if (isNoScrapingNeededError(cause)) {
@@ -200,14 +158,14 @@ async function cancel() {
   if (!job.value) return;
   const id = job.value.id;
   loading.value = true;
-  stopPolling();
-  const generation = pollGeneration;
+  polling.stop();
+  const generation = polling.generation();
   const action = ++actionGeneration;
   try {
     const update = await scraping.cancelBatch(id);
-    if (generation !== pollGeneration || action !== actionGeneration || !open.value) return;
+    if (generation !== polling.generation() || action !== actionGeneration || !open.value) return;
     job.value = update;
-    if (!finishIfTerminal(update)) beginPolling(id);
+    if (!polling.finishIfTerminal(update)) polling.begin(id);
   } catch (cause) {
     if (action === actionGeneration && open.value) error.value = cause instanceof Error ? cause.message : "取消任务失败";
   } finally {
@@ -218,14 +176,14 @@ async function retry() {
   if (!job.value) return;
   const id = job.value.id;
   loading.value = true;
-  stopPolling();
-  const generation = pollGeneration;
+  polling.stop();
+  const generation = polling.generation();
   const action = ++actionGeneration;
   try {
     const update = await scraping.retryBatch(id);
-    if (generation !== pollGeneration || action !== actionGeneration || !open.value) return;
+    if (generation !== polling.generation() || action !== actionGeneration || !open.value) return;
     job.value = update;
-    if (!finishIfTerminal(update)) beginPolling(id);
+    if (!polling.finishIfTerminal(update)) polling.begin(id);
   } catch (cause) {
     if (action === actionGeneration && open.value) error.value = cause instanceof Error ? cause.message : "重试失败";
   } finally {

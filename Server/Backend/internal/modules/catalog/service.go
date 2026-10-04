@@ -10,13 +10,14 @@ import (
 	"math/rand"
 	"strings"
 	"time"
-	"unicode/utf16"
 
 	"golang.org/x/text/unicode/norm"
 
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/httpx"
 	sharedlyrics "xymusic/server/internal/shared/lyrics"
 	"xymusic/server/internal/shared/pagination"
+	"xymusic/server/internal/shared/timeformat"
 )
 
 const (
@@ -344,7 +345,7 @@ func (s *Service) GetAlbum(ctx context.Context, albumID string) (AlbumDetailDTO,
 
 func (s *Service) Search(ctx context.Context, userID string, input SearchInput) (SearchResultDTO, error) {
 	query := strings.TrimSpace(input.Query)
-	if query == "" || javascriptStringLength(query) > 200 {
+	if query == "" || httpx.JavascriptStringLength(query) > 200 {
 		return SearchResultDTO{}, apperror.Validation("q must contain 1 to 200 characters")
 	}
 	if !validSearchScope(input.Scope) {
@@ -413,7 +414,7 @@ func (s *Service) searchTracks(ctx context.Context, userID, query, encoded strin
 		UserID:          userID,
 		NormalizedQuery: normalized,
 		Pattern:         pattern,
-		UseTrigram:      javascriptStringLength(normalized) >= 3,
+		UseTrigram:      httpx.JavascriptStringLength(normalized) >= 3,
 		After:           cursor,
 		Limit:           limit + 1,
 	})
@@ -447,7 +448,7 @@ func (s *Service) searchArtists(ctx context.Context, query, encoded string, limi
 	rows, err := s.repository.SearchArtists(ctx, SearchQuery{
 		NormalizedQuery: normalized,
 		Pattern:         pattern,
-		UseTrigram:      javascriptStringLength(normalized) >= 3,
+		UseTrigram:      httpx.JavascriptStringLength(normalized) >= 3,
 		After:           cursor,
 		Limit:           limit + 1,
 	})
@@ -481,7 +482,7 @@ func (s *Service) searchAlbums(ctx context.Context, query, encoded string, limit
 	rows, err := s.repository.SearchAlbums(ctx, SearchQuery{
 		NormalizedQuery: normalized,
 		Pattern:         pattern,
-		UseTrigram:      javascriptStringLength(normalized) >= 3,
+		UseTrigram:      httpx.JavascriptStringLength(normalized) >= 3,
 		After:           cursor,
 		Limit:           limit + 1,
 	})
@@ -811,14 +812,6 @@ func normalizedSearch(value string) (string, string) {
 	return normalized, "%" + replacer.Replace(normalized) + "%"
 }
 
-func javascriptStringLength(value string) int {
-	length := 0
-	for _, character := range value {
-		length += utf16.RuneLen(character)
-	}
-	return length
-}
-
 func searchCursorScope(scope SearchScope, normalizedQuery string) string {
 	digest := sha256.Sum256([]byte(normalizedQuery))
 	return fmt.Sprintf("search:%s:%s", scope, hex.EncodeToString(digest[:]))
@@ -834,5 +827,5 @@ func validDate(value string) bool {
 }
 
 func formatTimestamp(value time.Time) string {
-	return value.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+	return timeformat.Timestamp(value)
 }

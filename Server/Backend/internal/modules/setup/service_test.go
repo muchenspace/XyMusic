@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"xymusic/server/internal/config"
+	"xymusic/server/internal/platform/database"
 	"xymusic/server/internal/shared/apperror"
 )
 
@@ -692,11 +693,64 @@ func validSetupInput() SetupInput {
 
 func mustService(t *testing.T, options Options) *Service {
 	t.Helper()
+	// The constructor no longer installs production defaults, so tests inject
+	// every port explicitly. Tests that need specific behavior pass their own
+	// fake before this helper fills in the remaining defaults.
+	if options.Store == nil {
+		options.Store = &fakeStore{}
+	}
+	if options.Databases == nil {
+		options.Databases = &fakeDatabaseFactory{database: &fakeDatabase{}}
+	}
+	if options.MediaStorage == nil {
+		options.MediaStorage = &fakeStorageFactory{storage: &fakeStorage{}}
+	}
+	if options.MediaTool == nil {
+		options.MediaTool = &fakeMediaTool{}
+	}
+	if options.ListenerProbe == nil {
+		options.ListenerProbe = &fakeListener{}
+	}
+	if options.SourceValidator == nil {
+		options.SourceValidator = OSSourceValidator{}
+	}
+	if options.Passwords == nil {
+		options.Passwords = fakePasswords{}
+	}
+	if options.SecretGenerator == nil {
+		options.SecretGenerator = fixedSecret
+	}
+	if options.Executables == nil {
+		options.Executables = testExecutableLocator{}
+	}
+	if options.Files == nil {
+		options.Files = testFileProbe{}
+	}
+	if options.MigrationProbe == nil {
+		options.MigrationProbe = testMigrationProbe{}
+	}
 	service, err := NewService(options)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return service
+}
+
+type testExecutableLocator struct{}
+
+func (testExecutableLocator) Executable() (string, error) {
+	return "", errors.New("setup test executable locator was called without an explicit root directory")
+}
+
+type testFileProbe struct{}
+
+func (testFileProbe) Stat(path string) (os.FileInfo, error) { return os.Stat(path) }
+
+type testMigrationProbe struct{}
+
+func (testMigrationProbe) Validate(directory string) error {
+	_, err := database.ReadMigrations(directory)
+	return err
 }
 
 func fixedSecret() (string, error) { return strings.Repeat("s", 43), nil }

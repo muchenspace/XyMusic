@@ -5,13 +5,12 @@ import { DEFAULT_PLAYBACK_LYRICS_COLORS } from "../../application/ports/UserInte
 import type { Lyrics } from "../../domain/music";
 import { useApplicationServices } from "../services";
 import { errorMessage } from "../utils/errorMessage";
-import { LyricsPreferencePersistence } from "./LyricsPreferencePersistence";
 
 export const useLyricsStore = defineStore("lyrics", () => {
   const services = useApplicationServices();
-  const catalog = services.catalog;
+  const lyricsCache = services.lyricsCache;
   const uiPreferences = services.uiPreferences;
-  const preferencePersistence = new LyricsPreferencePersistence(uiPreferences);
+  const preferencePersistence = services.lyricsPreferencePersistence;
   const storedPreferences = uiPreferences.readLyrics();
   const lyrics = ref<Lyrics | null>(null);
   const loading = ref(false);
@@ -24,40 +23,24 @@ export const useLyricsStore = defineStore("lyrics", () => {
     light: { ...storedPreferences.colors.light },
   });
   let currentTrackId = "";
-  let requestId = 0;
-  let requestController: AbortController | null = null;
-  const lyricsCache = new Map<string, Lyrics | null>();
 
   async function load(trackId: string) {
-    if (currentTrackId === trackId && requestController) return;
-    requestController?.abort();
-    requestController = null;
-    const currentRequest = ++requestId;
+    if (lyricsCache.isDuplicate(trackId)) return;
     currentTrackId = trackId;
     error.value = "";
     offset.value = uiPreferences.readLyricsOffset(trackId);
-    const restoredFromCache = restoreCachedLyrics(trackId);
-    if (!restoredFromCache) lyrics.value = null;
-    loading.value = !restoredFromCache;
-
-    const controller = new AbortController();
-    requestController = controller;
-    try {
-      const result = await catalog.lyrics(trackId, controller.signal);
-      if (currentRequest !== requestId || controller.signal.aborted) return;
-      lyrics.value = result;
-      rememberLyrics(trackId, result);
-    } catch (cause) {
-      if (currentRequest !== requestId || controller.signal.aborted) return;
+    const restored = lyricsCache.restore(trackId);
+    lyrics.value = restored.value;
+    loading.value = !restored.found;
+    const outcome = await lyricsCache.load(trackId);
+    if (outcome.kind === "stale") return;
+    loading.value = false;
+    if (outcome.kind === "error") {
       lyrics.value = null;
-      lyricsCache.delete(trackId);
-      error.value = errorMessage(cause, "歌词加载失败");
-    } finally {
-      if (currentRequest === requestId) {
-        loading.value = false;
-        requestController = null;
-      }
+      error.value = errorMessage(outcome.cause, "歌词加载失败");
+      return;
     }
+    lyrics.value = outcome.value;
   }
 
   function adjustOffset(delta: number) {
@@ -100,9 +83,7 @@ export const useLyricsStore = defineStore("lyrics", () => {
   }
 
   function reset() {
-    requestId += 1;
-    requestController?.abort();
-    requestController = null;
+    lyricsCache.reset();
     currentTrackId = "";
     lyrics.value = null;
     loading.value = false;
@@ -116,34 +97,13 @@ export const useLyricsStore = defineStore("lyrics", () => {
     uiPreferences.clearLyricsOffsets();
   }
 
-  function restoreCachedLyrics(trackId: string): boolean {
-    if (!lyricsCache.has(trackId)) return false;
-    const cached = lyricsCache.get(trackId) ?? null;
-    lyricsCache.delete(trackId);
-    lyricsCache.set(trackId, cached);
-    lyrics.value = cached;
-    return true;
-  }
-
-  function rememberLyrics(trackId: string, value: Lyrics | null): void {
-    lyricsCache.delete(trackId);
-    lyricsCache.set(trackId, value);
-    while (lyricsCache.size > MAX_LYRICS_CACHE_ENTRIES) lyricsCache.delete(lyricsCache.keys().next().value!);
-  }
-
-  window.addEventListener("pagehide", flushPreferences);
   onScopeDispose(() => {
-    requestId += 1;
-    requestController?.abort();
-    requestController = null;
+    lyricsCache.reset();
     flushPreferences();
-    window.removeEventListener("pagehide", flushPreferences);
   });
 
   return { lyrics, loading, error, offset, showTranslation, fontScale, colors, load, adjustOffset, adjustFont, setFontScale, setTranslationVisible, setTextColor, setHighlightColor, flushPreferences, resetOffset, reset, clearServerCache };
 });
-
-const MAX_LYRICS_CACHE_ENTRIES = 30;
 
 function normalizeColor(value: string, fallback: string): string {
   return /^#[0-9a-f]{6}$/iu.test(value) ? value.toLowerCase() : fallback;

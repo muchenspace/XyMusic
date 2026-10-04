@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/vue-query";
 import { computed } from "vue";
 import { apiErrorMessage } from "@/shared/application/api-error";
 import { dashboardAudioRefetchInterval } from "@/shared/application/audio-status-refresh";
+import { appQueryKeys } from "@/app/query-keys";
 import AppButton from "@/components/AppButton.vue";
 import AnimatedNumber from "@/components/AnimatedNumber.vue";
 import AudioStatusBadge from "@/components/AudioStatusBadge.vue";
@@ -16,12 +17,12 @@ import type { AudioStatus } from "@/shared/domain/audio-status";
 import {
   audioStatuses,
   audioStatusPresentation,
-  sourceFileStatusPresentation,
 } from "@/shared/presentation/audio-status";
+import { sourceFileStatusPresentation } from "@/features/music/presentation/audio-status";
 
 const dashboard = useDashboard();
 const query = useQuery({
-  queryKey: ["admin", "dashboard"],
+  queryKey: appQueryKeys.dashboard,
   queryFn: ({ signal }) => dashboard.execute(signal),
   refetchInterval: (state) => dashboardAudioRefetchInterval(state.state.data),
 });

@@ -16,6 +16,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/httpx"
 	"xymusic/server/internal/shared/lyrics"
 )
 
@@ -848,15 +849,7 @@ func uniqueStrings(values []string) []string {
 }
 
 func javascriptLength(value string) int {
-	length := 0
-	for _, character := range value {
-		if character > 0xffff {
-			length += 2
-		} else {
-			length++
-		}
-	}
-	return length
+	return httpx.JavascriptStringLength(value)
 }
 
 func floatPointer(value float64) *float64 { return &value }

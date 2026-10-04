@@ -11,11 +11,11 @@ import com.xymusic.app.core.database.entity.PlaybackQueueEntity
 import com.xymusic.app.core.database.entity.PlaylistEntity
 import com.xymusic.app.core.database.entity.PlaylistEntryEntity
 import com.xymusic.app.core.database.entity.SearchHistoryEntity
-import com.xymusic.app.core.database.model.PlaylistVisibility
-import com.xymusic.app.core.database.model.SearchScope
 import com.xymusic.app.core.database.model.SyncOperationStatus
 import com.xymusic.app.core.database.model.SyncOperationType
 import com.xymusic.app.core.database.model.SyncTargetType
+import com.xymusic.app.core.model.playlist.PlaylistVisibility
+import com.xymusic.app.core.model.search.SearchScope
 import dagger.Lazy
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest

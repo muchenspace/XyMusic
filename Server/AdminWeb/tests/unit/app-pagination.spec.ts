@@ -38,7 +38,7 @@ describe("AppPagination", () => {
 
   it("keeps the full logical range for cursor pagination", async () => {
     const wrapper = mount(AppPagination, {
-      props: { page: 10_000, pageSize: 100, total: 2_000_000, totalPages: 20_000, cursor: true },
+      props: { page: 10_000, pageSize: 100, total: 2_000_000, totalPages: 20_000 },
     });
 
     await wrapper.vm.$nextTick();

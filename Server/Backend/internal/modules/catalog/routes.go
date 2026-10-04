@@ -15,6 +15,7 @@ import (
 
 	"xymusic/server/internal/platform/httpserver"
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/httpx"
 )
 
 type API interface {
@@ -305,7 +306,7 @@ func bindListAlbums(c *gin.Context) (ListAlbumsInput, error) {
 
 func bindSearch(c *gin.Context) (SearchInput, error) {
 	query, exists := httpserver.LastQueryValue(c, "q")
-	if !exists || query == "" || javascriptStringLength(query) > 200 {
+	if !exists || query == "" || httpx.JavascriptStringLength(query) > 200 {
 		return SearchInput{}, routeValidationError()
 	}
 	rawScope, exists := httpserver.LastQueryValue(c, "scope")
@@ -355,7 +356,7 @@ func optionalCursor(c *gin.Context) (string, error) {
 	if !exists {
 		return "", nil
 	}
-	length := javascriptStringLength(value)
+	length := httpx.JavascriptStringLength(value)
 	if length < 1 || length > 512 {
 		return "", routeValidationError()
 	}

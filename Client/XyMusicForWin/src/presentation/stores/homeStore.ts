@@ -1,11 +1,12 @@
 import { computed, onScopeDispose, ref } from "vue";
 import { defineStore } from "pinia";
 import type { Album, HomeFeed, Playlist, SearchResults, SearchScope, Track } from "../../domain/music";
+import type { SearchProjection } from "../../application/services/HomeFeedService";
 import { useApplicationServices } from "../services";
 import { errorMessage } from "../utils/errorMessage";
 
 export const useHomeStore = defineStore("home", () => {
-  const catalog = useApplicationServices().catalog;
+  const { homeFeed } = useApplicationServices();
   const feed = ref<HomeFeed | null>(null);
   const randomAlbums = ref<Album[]>([]);
   const randomTracks = ref<Track[]>([]);
@@ -22,219 +23,89 @@ export const useHomeStore = defineStore("home", () => {
   const randomTracksError = ref("");
   const searchError = ref("");
   const error = computed(() => search.value.trim() ? searchError.value : feedError.value);
-  let searchTimer: number | undefined;
-  let searchController: AbortController | null = null;
-  let loadController: AbortController | null = null;
-  let randomAlbumsController: AbortController | null = null;
-  let randomTracksController: AbortController | null = null;
-  let loadRequest = 0;
-  let randomAlbumsRequest = 0;
-  let randomTracksRequest = 0;
-  let failedSearchScope: SearchScope | "initial" | null = null;
-  const searchCache = new Map<string, SearchResults>();
   const favoriteOverrides = new Map<string, boolean>();
 
   const filteredTracks = computed(() => searchResults.value?.tracks ?? (search.value.trim() ? [] : feed.value?.tracks ?? []));
 
+  const projection: SearchProjection = {
+    query: () => search.value.trim(),
+    results: () => searchResults.value,
+    resultsQuery: () => searchResultsQuery.value,
+    applyResults: (results, query) => {
+      searchResults.value = results;
+      searchResultsQuery.value = query;
+    },
+    clearResults: () => {
+      searchResults.value = null;
+      searchResultsQuery.value = "";
+    },
+    setSearching: (value) => { searching.value = value; },
+    setLoadingScope: (scope) => { searchLoadingScope.value = scope; },
+    isSearching: () => searching.value,
+    loadingScope: () => searchLoadingScope.value,
+    showError: (cause, fallback) => { searchError.value = errorMessage(cause, fallback); },
+    clearError: () => { searchError.value = ""; },
+    applyFavoriteOverrides: (tracks) => applyFavoriteOverrides(tracks),
+  };
+
   async function load() {
     void loadRandomAlbums();
     void loadRandomTracks();
-    const request = ++loadRequest;
-    loadController?.abort();
-    const controller = new AbortController();
-    loadController = controller;
     loading.value = true;
     feedError.value = "";
-    try {
-      const loaded = await catalog.home(controller.signal);
-      if (request !== loadRequest || controller.signal.aborted) return;
-      applyFavoriteOverrides(loaded.tracks);
-      feed.value = loaded;
+    const outcome = await homeFeed.loadHome();
+    if (outcome.kind === "stale") return;
+    if (outcome.kind === "error") {
+      feedError.value = errorMessage(outcome.cause, "加载失败");
+      loading.value = false;
+      return;
     }
-    catch (cause) {
-      if (request === loadRequest && !controller.signal.aborted) feedError.value = errorMessage(cause, "加载失败");
-    }
-    finally {
-      if (request === loadRequest) {
-        loading.value = false;
-        loadController = null;
-      }
-    }
+    applyFavoriteOverrides(outcome.value.tracks);
+    feed.value = outcome.value;
+    loading.value = false;
   }
 
   async function loadRandomAlbums(): Promise<void> {
-    const request = ++randomAlbumsRequest;
-    randomAlbumsController?.abort();
-    const controller = new AbortController();
-    randomAlbumsController = controller;
     randomAlbumsLoading.value = true;
     randomAlbumsError.value = "";
-    try {
-      const albums = await catalog.randomAlbums(5, controller.signal);
-      if (request === randomAlbumsRequest && !controller.signal.aborted) randomAlbums.value = albums;
-    } catch (cause) {
-      if (request === randomAlbumsRequest && !controller.signal.aborted) randomAlbumsError.value = errorMessage(cause, "随机专辑加载失败");
-    } finally {
-      if (request === randomAlbumsRequest) {
-        randomAlbumsLoading.value = false;
-        randomAlbumsController = null;
-      }
+    const outcome = await homeFeed.loadRandomAlbums();
+    if (outcome.kind === "stale") return;
+    if (outcome.kind === "error") {
+      randomAlbumsError.value = errorMessage(outcome.cause, "随机专辑加载失败");
+      randomAlbumsLoading.value = false;
+      return;
     }
+    randomAlbums.value = outcome.value;
+    randomAlbumsLoading.value = false;
   }
 
   async function loadRandomTracks(): Promise<void> {
-    const request = ++randomTracksRequest;
-    randomTracksController?.abort();
-    const controller = new AbortController();
-    randomTracksController = controller;
     randomTracksLoading.value = true;
     randomTracksError.value = "";
-    try {
-      const tracks = await catalog.randomTracks(10, controller.signal);
-      if (request === randomTracksRequest && !controller.signal.aborted) {
-        applyFavoriteOverrides(tracks);
-        randomTracks.value = tracks;
-      }
-    } catch (cause) {
-      if (request === randomTracksRequest && !controller.signal.aborted) randomTracksError.value = errorMessage(cause, "随机歌曲加载失败");
-    } finally {
-      if (request === randomTracksRequest) {
-        randomTracksLoading.value = false;
-        randomTracksController = null;
-      }
+    const outcome = await homeFeed.loadRandomTracks();
+    if (outcome.kind === "stale") return;
+    if (outcome.kind === "error") {
+      randomTracksError.value = errorMessage(outcome.cause, "随机歌曲加载失败");
+      randomTracksLoading.value = false;
+      return;
     }
+    applyFavoriteOverrides(outcome.value);
+    randomTracks.value = outcome.value;
+    randomTracksLoading.value = false;
   }
 
   function updateSearch(value: string) {
     search.value = value;
     searchError.value = "";
-    window.clearTimeout(searchTimer);
-    searchController?.abort();
-    searchController = null;
-    searchLoadingScope.value = null;
-    failedSearchScope = null;
-    const query = value.trim();
-    if (!query) {
-      searchResults.value = null;
-      searchResultsQuery.value = "";
-      searching.value = false;
-      return;
-    }
-    const cacheKey = normalizedSearchKey(query);
-    const cached = searchCache.get(cacheKey);
-    if (cached) {
-      searchCache.delete(cacheKey);
-      searchCache.set(cacheKey, cached);
-      searchResults.value = cached;
-      searchResultsQuery.value = query;
-      searching.value = false;
-      return;
-    }
-    searching.value = true;
-    searchTimer = window.setTimeout(() => void performSearch(query, cacheKey), 250);
-  }
-
-  async function performSearch(query: string, cacheKey: string): Promise<void> {
-    const controller = new AbortController();
-    searchController = controller;
-    try {
-      const result = await catalog.search(query, controller.signal);
-      if (searchController === controller && search.value.trim() === query) {
-        const normalized = { ...result, nextCursors: result.nextCursors ?? emptySearchCursors() };
-        applyFavoriteOverrides(normalized.tracks);
-        searchResults.value = normalized;
-        searchResultsQuery.value = query;
-        failedSearchScope = null;
-        rememberSearchResult(cacheKey, normalized);
-      }
-    }
-    catch (cause) {
-      if (!controller.signal.aborted && search.value.trim() === query) {
-        failedSearchScope = "initial";
-        searchError.value = errorMessage(cause, "搜索失败");
-      }
-    }
-    finally {
-      if (searchController === controller) {
-        searchController = null;
-        searching.value = false;
-      }
-    }
+    homeFeed.updateSearch(value, projection);
   }
 
   function retrySearch(): void {
-    const query = search.value.trim();
-    const failedScope = failedSearchScope;
-    if (!query || !failedScope) return;
-    searchError.value = "";
-    failedSearchScope = null;
-    if (failedScope !== "initial") {
-      void loadMoreSearch(failedScope);
-      return;
-    }
-    window.clearTimeout(searchTimer);
-    searchController?.abort();
-    searchController = null;
-    searching.value = true;
-    void performSearch(query, normalizedSearchKey(query));
+    homeFeed.retrySearch(projection);
   }
 
   async function loadMoreSearch(scope: SearchScope): Promise<void> {
-    const query = search.value.trim();
-    const result = searchResults.value;
-    const cursor = result?.nextCursors?.[scope];
-    if (!query || searchResultsQuery.value !== query || !result || !cursor || searching.value || searchLoadingScope.value) return;
-    const controller = new AbortController();
-    searchController?.abort();
-    searchController = controller;
-    searchLoadingScope.value = scope;
-    searchError.value = "";
-    failedSearchScope = null;
-    try {
-      if (scope === "tracks") {
-        const page = await catalog.searchTracks(query, cursor, 50, controller.signal);
-        if (isCurrentSearch(controller, query, result)) {
-          applyFavoriteOverrides(page.items);
-          result.tracks = appendUnique(result.tracks, page.items);
-          result.nextCursors!.tracks = page.nextCursor;
-          rememberSearchResult(normalizedSearchKey(query), result);
-        }
-      } else if (scope === "artists") {
-        const page = await catalog.searchArtists(query, cursor, 50, controller.signal);
-        if (isCurrentSearch(controller, query, result)) {
-          result.artists = appendUnique(result.artists, page.items);
-          result.nextCursors!.artists = page.nextCursor;
-          rememberSearchResult(normalizedSearchKey(query), result);
-        }
-      } else {
-        const page = await catalog.searchAlbums(query, cursor, 50, controller.signal);
-        if (isCurrentSearch(controller, query, result)) {
-          result.albums = appendUnique(result.albums, page.items);
-          result.nextCursors!.albums = page.nextCursor;
-          rememberSearchResult(normalizedSearchKey(query), result);
-        }
-      }
-    } catch (cause) {
-      if (!controller.signal.aborted) {
-        failedSearchScope = scope;
-        searchError.value = errorMessage(cause, "加载更多搜索结果失败");
-      }
-    } finally {
-      if (searchController === controller) {
-        searchController = null;
-        searchLoadingScope.value = null;
-      }
-    }
-  }
-
-  function isCurrentSearch(controller: AbortController, query: string, result: SearchResults): boolean {
-    return searchController === controller && !controller.signal.aborted && search.value.trim() === query && searchResults.value === result;
-  }
-
-  function rememberSearchResult(key: string, result: SearchResults): void {
-    searchCache.delete(key);
-    searchCache.set(key, result);
-    while (searchCache.size > MAX_SEARCH_CACHE_ENTRIES) searchCache.delete(searchCache.keys().next().value!);
+    await homeFeed.loadMoreSearch(scope, projection);
   }
 
   function setFavorite(trackId: string, favorite: boolean) {
@@ -246,7 +117,7 @@ export const useHomeStore = defineStore("home", () => {
     if (feed.value) update(feed.value.tracks);
     update(randomTracks.value);
     if (searchResults.value) update(searchResults.value.tracks);
-    for (const result of searchCache.values()) update(result.tracks);
+    homeFeed.updateCachedFavorites(trackId, favorite);
   }
 
   function setPlaylists(playlists: Playlist[]) {
@@ -270,25 +141,12 @@ export const useHomeStore = defineStore("home", () => {
     randomAlbumsError.value = "";
     randomTracksError.value = "";
     searchError.value = "";
-    failedSearchScope = null;
-    searchCache.clear();
+    homeFeed.clearSearchCache();
     favoriteOverrides.clear();
   }
 
   function cancelPendingRequests(): void {
-    loadRequest += 1;
-    loadController?.abort();
-    loadController = null;
-    randomAlbumsRequest += 1;
-    randomAlbumsController?.abort();
-    randomAlbumsController = null;
-    randomTracksRequest += 1;
-    randomTracksController?.abort();
-    randomTracksController = null;
-    searchController?.abort();
-    searchController = null;
-    window.clearTimeout(searchTimer);
-    searchTimer = undefined;
+    homeFeed.cancelPending();
   }
 
   onScopeDispose(cancelPendingRequests);
@@ -302,14 +160,3 @@ export const useHomeStore = defineStore("home", () => {
 
   return { feed, randomAlbums, randomTracks, search, searchResults, searchResultsQuery, loading, randomAlbumsLoading, randomTracksLoading, searching, searchLoadingScope, feedError, randomAlbumsError, randomTracksError, searchError, error, filteredTracks, load, loadRandomAlbums, loadRandomTracks, updateSearch, retrySearch, loadMoreSearch, setFavorite, setPlaylists, reset };
 });
-
-function emptySearchCursors() { return { tracks: null, artists: null, albums: null }; }
-
-function appendUnique<T extends { id: string }>(current: T[], incoming: T[]): T[] {
-  const seen = new Set(current.map((item) => item.id));
-  return [...current, ...incoming.filter((item) => !seen.has(item.id) && seen.add(item.id))];
-}
-
-function normalizedSearchKey(query: string): string { return query.trim().toLocaleLowerCase(); }
-
-const MAX_SEARCH_CACHE_ENTRIES = 10;

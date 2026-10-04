@@ -5,14 +5,15 @@ import (
 	"errors"
 	"strings"
 	"time"
-	"unicode/utf16"
 
 	"github.com/google/uuid"
 	"golang.org/x/text/unicode/norm"
 
 	"xymusic/server/internal/modules/catalog"
 	"xymusic/server/internal/shared/apperror"
+	"xymusic/server/internal/shared/httpx"
 	sharedlyrics "xymusic/server/internal/shared/lyrics"
+	"xymusic/server/internal/shared/timeformat"
 )
 
 type Service struct {
@@ -239,7 +240,7 @@ func (service *Service) UpdateTrack(ctx context.Context, id string, input Update
 		params.DiscNumber = &input.DiscNumber.Value
 	}
 	if err := service.store.UpdateTrack(ctx, params); err != nil {
-		return TrackDTO{}, err
+		return TrackDTO{}, TranslateMutationError(err)
 	}
 	return service.track(ctx, id)
 }
@@ -249,7 +250,7 @@ func (service *Service) PublishTrack(ctx context.Context, id string, expectedVer
 		return TrackDTO{}, apperror.Validation("expectedVersion is invalid")
 	}
 	if err := service.store.PublishTrack(ctx, id, expectedVersion); err != nil {
-		return TrackDTO{}, err
+		return TrackDTO{}, TranslateMutationError(err)
 	}
 	return service.track(ctx, id)
 }
@@ -259,7 +260,7 @@ func (service *Service) ArchiveTrack(ctx context.Context, id string, expectedVer
 		return TrackDTO{}, apperror.Validation("expectedVersion is invalid")
 	}
 	if err := service.store.ArchiveTrack(ctx, id, expectedVersion); err != nil {
-		return TrackDTO{}, err
+		return TrackDTO{}, TranslateMutationError(err)
 	}
 	return service.track(ctx, id)
 }
@@ -273,7 +274,7 @@ func (service *Service) ArchiveTracksBatch(
 	}
 	records, err := service.store.ArchiveTracksBatch(ctx, input.Items)
 	if err != nil {
-		return BatchArchiveDTO{}, err
+		return BatchArchiveDTO{}, TranslateMutationError(err)
 	}
 	items := make([]BatchArchiveItemDTO, 0, len(records))
 	for _, record := range records {
@@ -289,7 +290,7 @@ func (service *Service) RestoreTrack(ctx context.Context, id string, expectedVer
 		return TrackDTO{}, apperror.Validation("expectedVersion is invalid")
 	}
 	if err := service.store.RestoreTrack(ctx, id, expectedVersion); err != nil {
-		return TrackDTO{}, err
+		return TrackDTO{}, TranslateMutationError(err)
 	}
 	return service.track(ctx, id)
 }
@@ -303,7 +304,7 @@ func (service *Service) RestoreTracksBatch(
 	}
 	records, err := service.store.RestoreTracksBatch(ctx, input.Items)
 	if err != nil {
-		return BatchRestoreDTO{}, err
+		return BatchRestoreDTO{}, TranslateMutationError(err)
 	}
 	items := make([]BatchRestoreItemDTO, 0, len(records))
 	for _, record := range records {
@@ -323,7 +324,7 @@ func (service *Service) CreatePermanentDeleteBatch(
 	}
 	job, items, err := service.store.CreatePermanentDeleteBatch(ctx, input.Items)
 	if err != nil {
-		return PermanentDeleteBatchDTO{}, err
+		return PermanentDeleteBatchDTO{}, TranslateMutationError(err)
 	}
 	return presentPermanentDeleteBatch(job, items), nil
 }
@@ -342,7 +343,7 @@ func (service *Service) DeleteTrackPermanently(ctx context.Context, id string, e
 	}
 	result, err := service.store.DeleteTrackPermanently(ctx, id, expectedVersion, service.defaultLibraryDirectory)
 	if err != nil {
-		return DeleteTrackDTO{}, err
+		return DeleteTrackDTO{}, TranslateMutationError(err)
 	}
 	return DeleteTrackDTO{Deleted: true, DeletedFiles: result.DeletedFiles, QuarantinedFiles: result.QuarantinedFiles, ScheduledObjects: result.ScheduledObjects}, nil
 }
@@ -391,16 +392,31 @@ func presentPermanentDeleteBatch(
 }
 
 func optionalBatchTimestamp(value *time.Time) *string {
-	if value == nil {
-		return nil
+	return timeformat.OptionalTimestamp(value)
+}
+
+// validateLyricsContract is the lyrics request contract check shared by the
+// transport route and the service. It lives in the service layer so the route
+// only decodes JSON; the HTTP layer still invokes it before authentication to
+// preserve the existing pre-auth rejection contract.
+func validateLyricsContract(input LyricsInput) error {
+	if input.ExpectedVersion < 1 || !validLyricLanguage(input.Language) ||
+		(input.Format != "LRC" && input.Format != "PLAIN") ||
+		(input.Timing != "LINE" && input.Timing != "WORD") ||
+		!input.Content.Set || javascriptLength(input.Content.Value) > 1000000 || !input.IsDefault.Set {
+		return mutationContractError()
 	}
-	formatted := formatTimestamp(*value)
-	return &formatted
+	return nil
+}
+
+func validLyricLanguage(value string) bool {
+	length := javascriptLength(value)
+	return length >= 2 && length <= 35
 }
 
 func (service *Service) UpsertLyrics(ctx context.Context, trackID string, input LyricsInput) (LyricDTO, error) {
-	if input.ExpectedVersion < 1 || (input.Format != "LRC" && input.Format != "PLAIN") || !input.Content.Set || !input.IsDefault.Set {
-		return LyricDTO{}, apperror.Validation("Lyrics request is invalid")
+	if err := validateLyricsContract(input); err != nil {
+		return LyricDTO{}, err
 	}
 	if !sharedlyrics.ValidTiming(input.Timing) {
 		return LyricDTO{}, apperror.Validation("Lyrics timing is invalid")
@@ -418,7 +434,7 @@ func (service *Service) UpsertLyrics(ctx context.Context, trackID string, input 
 	input.Language = strings.ToLower(language)
 	stored, err := service.store.UpsertLyrics(ctx, trackID, input)
 	if err != nil {
-		return LyricDTO{}, err
+		return LyricDTO{}, TranslateMutationError(err)
 	}
 	return LyricDTO{ID: stored.ID, TrackID: trackID, Language: stored.Language, Format: stored.Format, Timing: stored.Timing, Content: stored.Content,
 		IsDefault: stored.IsDefault, TrackVersion: stored.TrackVersion, UpdatedAt: formatTimestamp(stored.UpdatedAt)}, nil
@@ -604,7 +620,7 @@ func validCreditRole(role CreditRole) bool {
 	}
 	return false
 }
-func javascriptLength(value string) int { return len(utf16.Encode([]rune(value))) }
+func javascriptLength(value string) int { return httpx.JavascriptStringLength(value) }
 func formatTimestamp(value time.Time) string {
-	return value.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+	return timeformat.Timestamp(value)
 }

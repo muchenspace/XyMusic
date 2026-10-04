@@ -1,6 +1,5 @@
 import { onBeforeUnmount, watch } from "vue";
-import { DESKTOP_LYRICS_PROTOCOL_VERSION, type DesktopLyricsClock, type DesktopLyricsSnapshot } from "../../application/ports/DesktopLyrics";
-import type { DesktopLyricsPlaybackRequest } from "../../application/ports/DesktopLyricsController";
+import type { DesktopLyricsClockInput, DesktopLyricsSnapshotInput } from "../../application/ports/DesktopLyricsController";
 import { useApplicationServices } from "../services";
 import { useDesktopLyricsStore } from "../stores/desktopLyricsStore";
 import { useLyricsStore } from "../stores/lyricsStore";
@@ -12,22 +11,36 @@ export function useDesktopLyricsBridge(): void {
   const lyricsStore = useLyricsStore();
   const player = usePlayerStore();
   const removePlaybackRequests = controller.subscribePlaybackRequests(handlePlaybackRequest);
-  let disposed = false;
-  let lastClockAt = 0;
-  let lastClockPosition = -1;
-  let lastClockTrackId: string | null = null;
-  let lastClockPlaying = false;
-  let lastClockDiscontinuityVersion = -1;
-  // 初始化为时间戳，避免主窗口 F5 刷新后 revision 从 0 重新计数，
-  // 导致歌词窗口（未刷新）保留的旧 revision 比新 revision 大而丢弃新快照。
-  let snapshotSending = false;
-  let snapshotPending = false;
-  let snapshotTimer = 0;
-  let clockSending = false;
-  let pendingClock: DesktopLyricsClock | null = null;
 
-  void requestSnapshot(true);
-  if (desktopLyrics.actuallyVisible) void sendClock(createClock());
+  const createSnapshot = (): DesktopLyricsSnapshotInput => {
+    const track = player.currentTrack;
+    return {
+      track: track ? { id: track.id, title: track.title, artist: track.artist } : null,
+      lyrics: track && lyricsStore.lyrics?.trackId === track.id ? lyricsStore.lyrics : null,
+      isPlaying: player.isPlaying,
+      renderActive: desktopLyrics.actuallyVisible,
+      positionSeconds: finitePosition(player.currentTime),
+      anchoredAtMs: Date.now(),
+      positionDiscontinuityVersion: player.positionDiscontinuityVersion,
+      offsetSeconds: lyricsStore.offset,
+      showTranslation: lyricsStore.showTranslation,
+      locked: desktopLyrics.locked,
+      fontScale: desktopLyrics.fontScale,
+      textColor: desktopLyrics.textColor,
+      highlightColor: desktopLyrics.highlightColor,
+    };
+  };
+
+  const createClock = (): DesktopLyricsClockInput => ({
+    trackId: player.currentTrack?.id ?? null,
+    isPlaying: player.isPlaying,
+    positionSeconds: finitePosition(player.currentTime),
+    anchoredAtMs: Date.now(),
+    positionDiscontinuityVersion: player.positionDiscontinuityVersion,
+  });
+
+  controller.requestSnapshot(createSnapshot, true);
+  if (desktopLyrics.actuallyVisible) controller.sendClock(createClock);
 
   watch([
     () => player.currentTrack,
@@ -38,12 +51,12 @@ export function useDesktopLyricsBridge(): void {
     () => desktopLyrics.visible,
     () => desktopLyrics.actuallyVisible,
   ], () => {
-    if (desktopLyrics.visible || desktopLyrics.actuallyVisible) void requestSnapshot();
+    if (desktopLyrics.visible || desktopLyrics.actuallyVisible) controller.requestSnapshot(createSnapshot);
   }, { immediate: true });
 
   watch(() => desktopLyrics.actuallyVisible, (visible, previous) => {
-    if (visible || previous) void requestSnapshot(true);
-    if (!visible) pendingClock = null;
+    if (visible || previous) controller.requestSnapshot(createSnapshot, true);
+    if (!visible) controller.discardPendingClock();
   });
 
   watch([
@@ -51,7 +64,7 @@ export function useDesktopLyricsBridge(): void {
     () => desktopLyrics.textColor,
     () => desktopLyrics.highlightColor,
   ], () => {
-    if (desktopLyrics.visible) scheduleSnapshot();
+    if (desktopLyrics.visible) controller.scheduleSnapshot(createSnapshot);
   });
 
   watch(
@@ -65,140 +78,28 @@ export function useDesktopLyricsBridge(): void {
       : null,
     (visiblePlayback) => {
       if (!visiblePlayback) return;
-      const clock = createClock();
-      const stateChanged = clock.trackId !== lastClockTrackId
-        || clock.isPlaying !== lastClockPlaying
-        || clock.positionDiscontinuityVersion !== lastClockDiscontinuityVersion;
-      const jumped = Math.abs(clock.positionSeconds - lastClockPosition) >= CLOCK_JUMP_SECONDS;
-      if (stateChanged || jumped || !clock.isPlaying || clock.anchoredAtMs - lastClockAt >= CLOCK_INTERVAL_MS) {
-        void sendClock(clock);
-      }
+      controller.offerClock(createClock);
     },
     { immediate: true },
   );
 
   onBeforeUnmount(() => {
-    disposed = true;
-    if (snapshotTimer) window.clearTimeout(snapshotTimer);
+    controller.cancelPendingSends();
     removePlaybackRequests();
   });
 
-  function handlePlaybackRequest(request: DesktopLyricsPlaybackRequest): void {
+  function handlePlaybackRequest(request: "ready" | "previous" | "toggle-playback" | "next"): void {
     if (request === "ready") {
-      void requestSnapshot(true);
-      if (desktopLyrics.actuallyVisible) void sendClock(createClock());
+      controller.requestSnapshot(createSnapshot, true);
+      if (desktopLyrics.actuallyVisible) controller.sendClock(createClock);
       return;
     }
     if (request === "previous") void player.previous();
     if (request === "toggle-playback") void player.toggle();
     if (request === "next") void player.next();
   }
-
-  function scheduleSnapshot(): void {
-    if (snapshotTimer) window.clearTimeout(snapshotTimer);
-    snapshotTimer = window.setTimeout(() => {
-      snapshotTimer = 0;
-      void requestSnapshot();
-    }, SNAPSHOT_STYLE_DEBOUNCE_MS);
-  }
-
-  async function requestSnapshot(force = false): Promise<void> {
-    if ((!desktopLyrics.visible && !force) || disposed) return;
-    if (snapshotSending) {
-      snapshotPending = true;
-      return;
-    }
-    snapshotSending = true;
-    do {
-      snapshotPending = false;
-      await sendSnapshotNow();
-    } while (snapshotPending && !disposed);
-    snapshotSending = false;
-  }
-
-  async function sendSnapshotNow(): Promise<void> {
-    const track = player.currentTrack;
-    const lyrics = track && lyricsStore.lyrics?.trackId === track.id ? lyricsStore.lyrics : null;
-    const snapshot: DesktopLyricsSnapshot = {
-      version: DESKTOP_LYRICS_PROTOCOL_VERSION,
-      transportEpoch: DESKTOP_LYRICS_TRANSPORT_EPOCH,
-      revision: ++desktopLyricsTransportRevision,
-      track: track ? { id: track.id, title: track.title, artist: track.artist } : null,
-      lyrics,
-      isPlaying: player.isPlaying,
-      renderActive: desktopLyrics.actuallyVisible,
-      positionSeconds: finitePosition(player.currentTime),
-      anchoredAtMs: Date.now(),
-      positionDiscontinuityVersion: player.positionDiscontinuityVersion,
-      offsetSeconds: lyricsStore.offset,
-      showTranslation: lyricsStore.showTranslation,
-      locked: desktopLyrics.locked,
-      fontScale: desktopLyrics.fontScale,
-      textColor: desktopLyrics.textColor,
-      highlightColor: desktopLyrics.highlightColor,
-    };
-    try {
-      await controller.sendSnapshot(snapshot);
-    } catch {
-      // A hidden or restarting lyric window can temporarily miss a snapshot; ready will request another.
-    }
-  }
-
-  function createClock(): DesktopLyricsClock {
-    return {
-      version: DESKTOP_LYRICS_PROTOCOL_VERSION,
-      transportEpoch: DESKTOP_LYRICS_TRANSPORT_EPOCH,
-      revision: ++desktopLyricsTransportRevision,
-      trackId: player.currentTrack?.id ?? null,
-      isPlaying: player.isPlaying,
-      positionSeconds: finitePosition(player.currentTime),
-      anchoredAtMs: Date.now(),
-      positionDiscontinuityVersion: player.positionDiscontinuityVersion,
-    };
-  }
-
-  async function sendClock(clock: DesktopLyricsClock): Promise<void> {
-    if (disposed || !desktopLyrics.actuallyVisible) return;
-    pendingClock = clock;
-    if (clockSending) return;
-    clockSending = true;
-    try {
-      while (pendingClock && !disposed && desktopLyrics.actuallyVisible) {
-        const nextClock = pendingClock;
-        pendingClock = null;
-        lastClockAt = nextClock.anchoredAtMs;
-        lastClockPosition = nextClock.positionSeconds;
-        lastClockTrackId = nextClock.trackId;
-        lastClockPlaying = nextClock.isPlaying;
-        lastClockDiscontinuityVersion = nextClock.positionDiscontinuityVersion ?? -1;
-        try {
-          await controller.sendClock(nextClock);
-        } catch {
-          // The next periodic anchor or ready handshake will repair transient delivery failures.
-        }
-      }
-    } finally {
-      clockSending = false;
-    }
-  }
 }
 
 function finitePosition(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0;
 }
-
-const CLOCK_INTERVAL_MS = 250;
-const CLOCK_JUMP_SECONDS = 0.75;
-const SNAPSHOT_STYLE_DEBOUNCE_MS = 120;
-
-function createDesktopLyricsTransportEpoch(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `desktop-lyrics-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-}
-
-// Module scope keeps this stable if the root component remounts, while a main
-// window reload creates a new module instance and therefore a new epoch.
-const DESKTOP_LYRICS_TRANSPORT_EPOCH = createDesktopLyricsTransportEpoch();
-let desktopLyricsTransportRevision = 0;

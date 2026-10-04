@@ -272,6 +272,7 @@ func isMetadataWritebackConflict(err error) bool {
 }
 
 func permanentDeleteError(err error) (string, string) {
+	err = TranslateMutationError(err)
 	if applicationError, ok := apperror.As(err); ok {
 		return string(applicationError.Code), truncatePermanentDeleteMessage(applicationError.Detail)
 	}

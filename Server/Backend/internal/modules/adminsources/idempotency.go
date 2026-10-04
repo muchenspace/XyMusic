@@ -5,14 +5,14 @@ import (
 	"errors"
 	"time"
 
-	sharedidempotency "xymusic/server/internal/shared/idempotency"
+	platformidempotency "xymusic/server/internal/platform/idempotency"
 )
 
 type PersistentIdempotency struct {
-	service *sharedidempotency.Service
+	service *platformidempotency.Service
 }
 
-func NewPersistentIdempotency(service *sharedidempotency.Service) *PersistentIdempotency {
+func NewPersistentIdempotency(service *platformidempotency.Service) *PersistentIdempotency {
 	return &PersistentIdempotency{service: service}
 }
 
@@ -24,12 +24,12 @@ func (adapter *PersistentIdempotency) Execute(
 	if adapter == nil || adapter.service == nil {
 		return IdempotencyResult{}, errors.New("administrator source idempotency service is required")
 	}
-	result, err := sharedidempotency.Execute(ctx, adapter.service, sharedidempotency.Input{
+	result, err := platformidempotency.Execute(ctx, adapter.service, platformidempotency.Input{
 		ActorID: input.ActorID, Scope: input.Scope, Key: input.Key,
 		Payload: input.Payload, TTL: 24 * time.Hour,
-	}, func() (sharedidempotency.HTTPResult[rawJSON], error) {
+	}, func() (platformidempotency.HTTPResult[rawJSON], error) {
 		response, err := operation()
-		return sharedidempotency.HTTPResult[rawJSON]{Status: response.Status, Body: rawJSON(response.Body)}, err
+		return platformidempotency.HTTPResult[rawJSON]{Status: response.Status, Body: rawJSON(response.Body)}, err
 	})
 	if err != nil {
 		return IdempotencyResult{}, err

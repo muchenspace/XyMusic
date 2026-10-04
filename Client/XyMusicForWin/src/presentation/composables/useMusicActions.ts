@@ -13,11 +13,6 @@ interface CollectionSeed {
   nextCursor: string | null;
 }
 
-interface CollectionPage {
-  tracks: Track[];
-  nextCursor: string | null;
-}
-
 export function useMusicActions() {
   const services = useApplicationServices();
   const home = useHomeStore();
@@ -25,22 +20,17 @@ export function useMusicActions() {
   const navigation = useNavigationStore();
   const player = usePlayerStore();
   const toast = useToastStore();
+  const queueLoading = services.queueLoading;
+  const favorites = services.favorites;
   const actionError = ref("");
   const albumPlayLoadingId = ref("");
   const playlistPlayLoadingId = ref("");
-  let collectionController: AbortController | null = null;
-  let collectionRequest = 0;
-  let collectionQueueRevision: number | null = null;
-  let collectionPlaybackIntentRevision: number | null = null;
-  let collectionStarted = false;
-  const favoriteQueues = new Map<string, Promise<void>>();
-  const favoriteIntents = new Map<string, boolean>();
 
   watch(() => player.queueVersion, (revision) => {
-    if (collectionController && collectionQueueRevision !== null && revision !== collectionQueueRevision) cancelCollectionLoad();
+    if (queueLoading.handleQueueVersionChange(revision)) clearCollectionLoadingIds();
   });
   watch(() => player.playbackIntentVersion, (revision) => {
-    if (collectionController && !collectionStarted && collectionPlaybackIntentRevision !== null && revision !== collectionPlaybackIntentRevision) cancelCollectionLoad();
+    if (queueLoading.handlePlaybackIntentChange(revision)) clearCollectionLoadingIds();
   });
 
   function play(track: Track, tracks: Track[]): void {
@@ -71,116 +61,50 @@ export function useMusicActions() {
   }
 
   async function playAlbum(album: Album, seed?: CollectionSeed): Promise<void> {
-    await playPagedCollection({
-      kind: "album",
-      id: album.id,
-      emptyMessage: "该专辑暂无可播放歌曲",
+    cancelCollectionLoad();
+    actionError.value = "";
+    albumPlayLoadingId.value = album.id;
+    const outcome = await queueLoading.playAlbum(album.id, {
       seed,
-      loadPage: async (cursor, signal) => {
-        const page = await services.catalog.albumTracksPage(album.id, cursor, COLLECTION_PAGE_SIZE, signal);
-        return { tracks: page.items, nextCursor: page.nextCursor };
-      },
+      onAudioSettled: () => { if (albumPlayLoadingId.value === album.id) albumPlayLoadingId.value = ""; },
     });
+    if (outcome.kind === "empty" && outcome.current) toast.show("该专辑暂无可播放歌曲", "info");
+    else if (outcome.kind === "partial" && outcome.current) toast.show("已开始播放，但后续歌曲未能完整加入队列", "warning", 5200);
+    else if (outcome.kind === "failed" && outcome.current) reportActionError(outcome.cause);
+    if (outcome.current && albumPlayLoadingId.value === album.id) albumPlayLoadingId.value = "";
   }
 
   async function playPlaylist(playlist: Playlist, seed?: CollectionSeed): Promise<void> {
-    await playPagedCollection({
-      kind: "playlist",
-      id: playlist.id,
-      emptyMessage: "该歌单暂无歌曲",
+    cancelCollectionLoad();
+    actionError.value = "";
+    playlistPlayLoadingId.value = playlist.id;
+    const outcome = await queueLoading.playPlaylist(playlist.id, {
       seed,
-      loadPage: async (cursor, signal) => {
-        const page = await services.playlists.getPage(playlist.id, cursor, COLLECTION_PAGE_SIZE, signal);
-        return { tracks: page.entries.map((entry) => entry.track), nextCursor: page.nextCursor ?? null };
-      },
+      onAudioSettled: () => { if (playlistPlayLoadingId.value === playlist.id) playlistPlayLoadingId.value = ""; },
     });
-  }
-
-  async function playPagedCollection(options: {
-    kind: "album" | "playlist";
-    id: string;
-    emptyMessage: string;
-    seed?: CollectionSeed;
-    loadPage: (cursor: string | undefined, signal: AbortSignal) => Promise<CollectionPage>;
-  }): Promise<void> {
-    const { request, controller, queueVersion, playbackIntentVersion } = beginCollectionLoad(options.kind, options.id);
-    let playbackStarted = false;
-    let startedRevision: number | null = null;
-    try {
-      const first = options.seed ?? await options.loadPage(undefined, controller.signal);
-      if (!isCurrentCollectionRequest(request, controller) || player.queueVersion !== queueVersion || player.playbackIntentVersion !== playbackIntentVersion) return;
-      if (!first.tracks.length) {
-        toast.show(options.emptyMessage, "info");
-        return;
-      }
-
-      const started = player.startQueue(first.tracks, 0);
-      if (!started || !isCurrentCollectionRequest(request, controller)) return;
-      startedRevision = started.revision;
-      collectionQueueRevision = started.revision;
-      collectionStarted = true;
-      player.setQueueExtending(started.revision, Boolean(first.nextCursor));
-      const audioStarted = await started.playback;
-      clearCollectionLoading(options.kind, options.id, request);
-      if (!isCurrentCollectionRequest(request, controller) || !audioStarted) return;
-      playbackStarted = true;
-
-      let cursor = first.nextCursor;
-      let pageCount = 1;
-      let itemCount = first.tracks.length;
-      const seenCursors = new Set<string>();
-      while (cursor) {
-        if (!isCurrentCollectionRequest(request, controller)) return;
-        if (seenCursors.has(cursor)) throw new Error("服务器返回了重复的分页游标");
-        if (pageCount >= MAX_COLLECTION_PAGES || itemCount >= MAX_COLLECTION_TRACKS) throw new Error("集合歌曲数量超过客户端安全上限");
-        seenCursors.add(cursor);
-        const page = await options.loadPage(cursor, controller.signal);
-        if (!isCurrentCollectionRequest(request, controller)) return;
-        itemCount += page.tracks.length;
-        if (itemCount > MAX_COLLECTION_TRACKS) throw new Error("集合歌曲数量超过客户端安全上限");
-        if (!player.appendToQueue(started.revision, page.tracks)) {
-          controller.abort();
-          return;
-        }
-        pageCount += 1;
-        cursor = page.nextCursor;
-      }
-    } catch (cause) {
-      if (controller.signal.aborted || request !== collectionRequest) return;
-      if (playbackStarted) toast.show("已开始播放，但后续歌曲未能完整加入队列", "warning", 5200);
-      else reportActionError(cause);
-    } finally {
-      if (startedRevision !== null) player.setQueueExtending(startedRevision, false);
-      clearCollectionLoading(options.kind, options.id, request);
-      if (collectionController === controller) collectionController = null;
-    }
+    if (outcome.kind === "empty" && outcome.current) toast.show("该歌单暂无歌曲", "info");
+    else if (outcome.kind === "partial" && outcome.current) toast.show("已开始播放，但后续歌曲未能完整加入队列", "warning", 5200);
+    else if (outcome.kind === "failed" && outcome.current) reportActionError(outcome.cause);
+    if (outcome.current && playlistPlayLoadingId.value === playlist.id) playlistPlayLoadingId.value = "";
   }
 
   async function toggleFavorite(track: Track): Promise<void> {
     actionError.value = "";
     const favorite = !track.liked;
-    favoriteIntents.set(track.id, favorite);
     player.setFavorite(track.id, favorite);
     home.setFavorite(track.id, favorite);
     library.setFavorite(track.id, favorite);
-    const previous = favoriteQueues.get(track.id) ?? Promise.resolve();
-    const operation = previous.catch(() => undefined).then(() => services.library.favorite(track.id, favorite));
-    favoriteQueues.set(track.id, operation);
-    try {
-      await operation;
-      if (favoriteIntents.get(track.id) !== favorite) return;
-      if (!favorite && library.activeView === "favorites") library.removeFavorite(track.id);
-      toast.show(favorite ? "已添加到喜欢的音乐" : "已取消收藏", "success");
-    } catch (cause) {
-      if (favoriteIntents.get(track.id) !== favorite) return;
+    const outcome = await favorites.setFavorite(track.id, favorite);
+    if (outcome.kind === "superseded") return;
+    if (outcome.kind === "error") {
       player.setFavorite(track.id, !favorite);
       home.setFavorite(track.id, !favorite);
       library.setFavorite(track.id, !favorite);
-      reportActionError(cause);
-    } finally {
-      if (favoriteQueues.get(track.id) === operation) favoriteQueues.delete(track.id);
-      if (favoriteIntents.get(track.id) === favorite) favoriteIntents.delete(track.id);
+      reportActionError(outcome.cause);
+      return;
     }
+    if (!favorite && library.activeView === "favorites") library.removeFavorite(track.id);
+    toast.show(favorite ? "已添加到喜欢的音乐" : "已取消收藏", "success");
   }
 
   function reportActionError(cause: unknown): void {
@@ -190,43 +114,15 @@ export function useMusicActions() {
 
   function clearActionError(): void { actionError.value = ""; }
 
-  function beginCollectionLoad(kind: "album" | "playlist", id: string): { request: number; controller: AbortController; queueVersion: number; playbackIntentVersion: number } {
-    cancelCollectionLoad();
-    actionError.value = "";
-    const controller = new AbortController();
-    collectionController = controller;
-    collectionQueueRevision = player.queueVersion;
-    collectionPlaybackIntentRevision = player.playbackIntentVersion;
-    collectionStarted = false;
-    if (kind === "album") albumPlayLoadingId.value = id;
-    else playlistPlayLoadingId.value = id;
-    return { request: collectionRequest, controller, queueVersion: player.queueVersion, playbackIntentVersion: player.playbackIntentVersion };
+  function cancelCollectionLoad(): void {
+    queueLoading.cancel();
+    clearCollectionLoadingIds();
   }
 
-  function cancelCollectionLoad(): void {
-    collectionRequest += 1;
-    collectionController?.abort();
-    collectionController = null;
-    collectionQueueRevision = null;
-    collectionPlaybackIntentRevision = null;
-    collectionStarted = false;
+  function clearCollectionLoadingIds(): void {
     albumPlayLoadingId.value = "";
     playlistPlayLoadingId.value = "";
   }
 
-  function isCurrentCollectionRequest(request: number, controller: AbortController): boolean {
-    return request === collectionRequest && collectionController === controller && !controller.signal.aborted;
-  }
-
-  function clearCollectionLoading(kind: "album" | "playlist", id: string, request: number): void {
-    if (request !== collectionRequest) return;
-    if (kind === "album" && albumPlayLoadingId.value === id) albumPlayLoadingId.value = "";
-    if (kind === "playlist" && playlistPlayLoadingId.value === id) playlistPlayLoadingId.value = "";
-  }
-
   return { actionError, albumPlayLoadingId, playlistPlayLoadingId, play, playAt, playVisible, playDiscoveryTrack, playAlbum, playPlaylist, toggleFavorite, reportActionError, clearActionError };
 }
-
-const COLLECTION_PAGE_SIZE = 100;
-const MAX_COLLECTION_PAGES = 100;
-const MAX_COLLECTION_TRACKS = 10_000;

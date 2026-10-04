@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgconn"
-
 	"xymusic/server/internal/modules/catalog"
 	"xymusic/server/internal/shared/apperror"
 )
@@ -105,7 +103,7 @@ func TestUserPaginatesSessionsAndReturnsTotals(t *testing.T) {
 
 func TestCreateUserMapsWrappedUniqueViolation(t *testing.T) {
 	store := &managementStoreStub{createUser: func(context.Context, CreateUserParams) (string, error) {
-		return "", fmt.Errorf("insert: %w", &pgconn.PgError{Code: "23505"})
+		return "", fmt.Errorf("insert: %w", ErrDuplicateUsername)
 	}}
 	service := newManagementService(t, store)
 	_, err := service.CreateUser(context.Background(), CreateUserInput{
@@ -123,9 +121,9 @@ func newManagementService(t *testing.T, store Store) *Service {
 
 func newManagementServiceWithHasher(t *testing.T, store Store, hasher PasswordHasher) *Service {
 	t.Helper()
-	service, err := NewService(ServiceDependencies{
+	service, err := NewServiceWithOptions(ServiceDependencies{
 		Store: store, Artworks: managementArtworkStub{}, Passwords: hasher,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

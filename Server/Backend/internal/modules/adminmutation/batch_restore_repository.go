@@ -34,22 +34,14 @@ func (repository *Repository) RestoreTracksBatch(
 		if err != nil {
 			return nil, err
 		}
-		if state.Version != item.ExpectedVersion {
-			return nil, versionConflict("Track", item.ExpectedVersion, state.Version, map[string]any{"trackId": item.TrackID})
+		if err := CheckTrackVersion(item.ExpectedVersion, state.Version, item.TrackID); err != nil {
+			return nil, err
 		}
-		if state.Status != "ARCHIVED" {
-			return nil, apperror.New(
-				apperror.CodeInvalidStateTransition,
-				"Only archived tracks can be restored",
-				apperror.WithMetadata(map[string]any{"trackId": item.TrackID}),
-			)
+		if err := CanRestoreTrack(state.Status, item.TrackID); err != nil {
+			return nil, err
 		}
-		if state.DurationMS <= 0 {
-			return nil, apperror.Unprocessable(
-				apperror.CodeTrackNotPlayable,
-				"Track duration must be positive",
-				map[string]any{"trackId": item.TrackID},
-			)
+		if err := CheckTrackDuration(state.DurationMS, item.TrackID); err != nil {
+			return nil, err
 		}
 		var playable bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(
@@ -63,12 +55,8 @@ func (repository *Repository) RestoreTracksBatch(
 		)`, item.TrackID).Scan(&playable); err != nil {
 			return nil, fmt.Errorf("inspect batch restore playable source: %w", err)
 		}
-		if !playable {
-			return nil, apperror.Unprocessable(
-				apperror.CodeTrackNotPlayable,
-				"Track has no ready audio source",
-				map[string]any{"trackId": item.TrackID},
-			)
+		if err := RequireReadyAudioSource(playable, item.TrackID); err != nil {
+			return nil, err
 		}
 		prepared = append(prepared, preparedRestore{item: item, state: state})
 	}

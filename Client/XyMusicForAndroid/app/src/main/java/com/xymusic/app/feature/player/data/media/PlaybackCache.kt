@@ -55,7 +55,7 @@ constructor(
             ).also { created -> evictor.onCacheCreated(created) }
         }
 
-    val cache: Cache
+    override val cache: Cache
         get() = cacheDelegate.value
 
     init {
@@ -92,7 +92,7 @@ constructor(
     override fun isFullyCached(cacheKey: String, contentLength: Long): Boolean =
         contentLength > 0 && cache.isCached(cacheKey, 0, contentLength)
 
-    fun cachedContentLength(cacheKey: String): Long? {
+    override fun cachedContentLength(cacheKey: String): Long? {
         val length = cache.getContentMetadata(cacheKey).get(ContentMetadata.KEY_CONTENT_LENGTH, C.LENGTH_UNSET.toLong())
         return length.takeIf { it > 0 }
     }
@@ -107,7 +107,7 @@ constructor(
         }
     }
 
-    suspend fun clear() = withContext(ioDispatcher) {
+    override suspend fun clear() = withContext(ioDispatcher) {
         clearMutex.withLock {
             evictor.clearPins()
             cache.keys.toList().forEach { key ->
@@ -262,7 +262,7 @@ internal class AdjustableLeastRecentlyUsedCacheEvictor : CacheEvictor {
 @UnstableApi
 fun playbackDataSourceFactory(
     @MediaHttpClient mediaHttpClient: OkHttpClient,
-    playbackCache: PlaybackCache,
+    offlineMediaCache: OfflineMediaCache,
     grantRegistry: PlaybackGrantRegistry,
     networkPolicy: PlaybackNetworkPolicy,
     sessionIdentityProvider: SessionIdentityProvider,
@@ -274,12 +274,12 @@ fun playbackDataSourceFactory(
         )
     val onlineFactory =
         deferredCacheDataSourceFactory(
-            cacheProvider = { playbackCache.cache },
+            cacheProvider = { offlineMediaCache.cache },
             upstreamFactory = networkFactory,
         )
     val offlineFactory =
         deferredReadOnlyCacheDataSourceFactory(
-            cacheProvider = { playbackCache.cache },
+            cacheProvider = { offlineMediaCache.cache },
         )
     return GrantResolvingDataSourceFactory(
         onlineFactory = onlineFactory,

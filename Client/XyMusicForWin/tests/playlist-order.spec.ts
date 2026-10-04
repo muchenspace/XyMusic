@@ -2,6 +2,7 @@ import { createPinia } from "pinia";
 import { createApp, defineComponent, h } from "vue";
 import { describe, expect, it, vi } from "vitest";
 import type { ApplicationServices } from "../src/application/services";
+import { LibraryBrowserService } from "../src/application/services/LibraryBrowserService";
 import type { Playlist, PlaylistDetail, PlaylistEntry, Track } from "../src/domain/music";
 import { applicationServicesKey } from "../src/presentation/services";
 import { useLibraryStore } from "../src/presentation/stores/libraryStore";
@@ -17,6 +18,7 @@ describe("playlist newest-first order", () => {
       catalog: {},
       library: {},
       playlists: { getPage, reorder },
+      libraryBrowser: new LibraryBrowserService({ getPage, reorder } as never),
     } as unknown as ApplicationServices;
     let store!: ReturnType<typeof useLibraryStore>;
     const Root = defineComponent({

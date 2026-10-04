@@ -17,6 +17,8 @@ import StatePanel from "@/components/StatePanel.vue";
 import type { AlbumDuplicateGroup, AlbumDuplicateSummary, AlbumSummary, CreditRole, MusicPage } from "@/features/music/domain/models";
 import { useMusicAdmin } from "@/app/services/music";
 import { DEFAULT_CATALOG_PAGE_SIZE } from "@/shared/presentation/pagination";
+import { useCursorPagination } from "@/shared/presentation/use-cursor-pagination";
+import { musicQueryKeys } from "@/features/music/presentation/query-keys";
 import { useUiStore } from "@/stores/ui";
 import { formatDate } from "@/utils/format";
 
@@ -28,14 +30,16 @@ const ui = useUiStore();
 const musicAdmin = useMusicAdmin();
 const search = ref("");
 const debounced = refDebounced(search, 300);
-const page = ref(1);
-const pageSize = ref(DEFAULT_CATALOG_PAGE_SIZE);
-const cursor = ref("");
-const cursorHistory = ref(new Map<number, string>());
-const duplicatePage = ref(1);
-const duplicatePageSize = ref(DEFAULT_CATALOG_PAGE_SIZE);
-const duplicateCursor = ref("");
-const duplicateCursorHistory = ref(new Map<number, string>());
+const { page, pageSize, cursor, reset: resetPaging, changePage, changePageSize } = useCursorPagination({
+  initialPageSize: DEFAULT_CATALOG_PAGE_SIZE,
+  isFetching: () => query.isFetching.value,
+  nextCursor: () => query.data.value?.nextCursor,
+});
+const { page: duplicatePage, pageSize: duplicatePageSize, cursor: duplicateCursor, reset: resetDuplicatePaging, changePage: changeDuplicatePage, changePageSize: changeDuplicatePageSize } = useCursorPagination({
+  initialPageSize: DEFAULT_CATALOG_PAGE_SIZE,
+  isFetching: () => duplicatesQuery.isFetching.value,
+  nextCursor: () => duplicatesQuery.data.value?.nextCursor,
+});
 const selected = ref<AlbumSummary>();
 const editorOpen = ref(false);
 const duplicatesOpen = ref(false);
@@ -49,7 +53,7 @@ const actionError = ref("");
 let allowEditorClose = false;
 const form = reactive({ title: "", releaseDate: "", description: "", credits: [] as Array<{ artistId: string; name: string; role: CreditRole; sortOrder: number }> });
 const query = useQuery<MusicPage<AlbumSummary>, Error, MusicPage<AlbumSummary>, AlbumListQueryKey>({
-  queryKey: computed<AlbumListQueryKey>(() => ["admin", "albums", { page: page.value, pageSize: pageSize.value, search: debounced.value, cursor: cursor.value }]),
+  queryKey: computed<AlbumListQueryKey>(() => musicQueryKeys.albums({ page: page.value, pageSize: pageSize.value, search: debounced.value, cursor: cursor.value })),
   queryFn: ({ signal, queryKey }: QueryFunctionContext<AlbumListQueryKey>) => {
     const params = queryKey[2];
     return musicAdmin.listAlbums({ ...params, cursorMode: "cursor", cursor: params.cursor || undefined, sort: "updatedAt", order: "desc" }, signal);
@@ -57,7 +61,7 @@ const query = useQuery<MusicPage<AlbumSummary>, Error, MusicPage<AlbumSummary>, 
   placeholderData: keepPreviousData,
 });
 const duplicatesQuery = useQuery<AlbumDuplicateSummary, Error, AlbumDuplicateSummary, AlbumDuplicatesQueryKey>({
-  queryKey: computed<AlbumDuplicatesQueryKey>(() => ["admin", "albums", "duplicates", { page: duplicatePage.value, pageSize: duplicatePageSize.value, cursor: duplicateCursor.value }]),
+  queryKey: computed<AlbumDuplicatesQueryKey>(() => musicQueryKeys.albumDuplicates({ page: duplicatePage.value, pageSize: duplicatePageSize.value, cursor: duplicateCursor.value })),
   queryFn: ({ signal, queryKey }: QueryFunctionContext<AlbumDuplicatesQueryKey>) => {
     const params = queryKey[3];
     return musicAdmin.getAlbumDuplicates({ ...params, cursor: params.cursor || undefined, cursorMode: "cursor" }, signal);
@@ -65,45 +69,7 @@ const duplicatesQuery = useQuery<AlbumDuplicateSummary, Error, AlbumDuplicateSum
   placeholderData: keepPreviousData,
 });
 watch(debounced, () => resetPaging());
-function resetPaging(): void {
-  page.value = 1;
-  cursor.value = "";
-  cursorHistory.value = new Map([[1, ""]]);
-}
-function changePage(nextPage: number): void {
-  if (query.isFetching.value || !Number.isSafeInteger(nextPage) || nextPage < 1 || nextPage === page.value) return;
-  const next = new Map(cursorHistory.value);
-  if (nextPage < page.value) cursor.value = next.get(nextPage) ?? "";
-  else {
-    const nextCursor = query.data.value?.nextCursor;
-    if (!nextCursor) return;
-    next.set(nextPage, nextCursor);
-    cursor.value = nextCursor;
-  }
-  cursorHistory.value = next;
-  page.value = nextPage;
-}
 function albumKey(album: AlbumSummary): string { return album.id; }
-function changePageSize(value: number): void { pageSize.value = value; resetPaging(); }
-function resetDuplicatePaging(): void {
-  duplicatePage.value = 1;
-  duplicateCursor.value = "";
-  duplicateCursorHistory.value = new Map([[1, ""]]);
-}
-function changeDuplicatePage(nextPage: number): void {
-  if (duplicatesQuery.isFetching.value || !Number.isSafeInteger(nextPage) || nextPage < 1 || nextPage === duplicatePage.value) return;
-  const next = new Map(duplicateCursorHistory.value);
-  if (nextPage < duplicatePage.value) duplicateCursor.value = next.get(nextPage) ?? "";
-  else {
-    const nextCursor = duplicatesQuery.data.value?.nextCursor;
-    if (!nextCursor) return;
-    next.set(nextPage, nextCursor);
-    duplicateCursor.value = nextCursor;
-  }
-  duplicateCursorHistory.value = next;
-  duplicatePage.value = nextPage;
-}
-function changeDuplicatePageSize(value: number): void { duplicatePageSize.value = value; resetDuplicatePaging(); }
 function openAlbum(album: AlbumSummary): void { void router.push({ name: "album-detail", params: { id: album.id } }); }
 function edit(album: AlbumSummary): void { selected.value = album; Object.assign(form, { title: album.title, releaseDate: album.releaseDate ?? "", description: album.description ?? "", credits: album.artistCredits.map((credit) => ({ artistId: credit.artist.id, name: credit.artist.name, role: credit.role, sortOrder: credit.sortOrder })) }); actionError.value = ""; editorOpen.value = true; }
 async function refresh(): Promise<void> { await invalidateAdminMusicQueries(); }
@@ -179,9 +145,9 @@ watch(editorOpen, (value) => { if (!value && saveMutation.isPending.value && !al
             <article class="group media-tile flex h-full cursor-pointer gap-4 bg-[var(--surface-solid)] p-4 hover:bg-[var(--surface-muted)]" role="link" tabindex="0" @click="openAlbum(album)" @keydown.enter.self="openAlbum(album)" @keydown.space.prevent.self="openAlbum(album)"><span class="grid h-20 w-20 shrink-0 place-items-center overflow-hidden rounded-xl bg-[var(--surface-muted)]"><img v-if="album.artwork" :src="album.artwork.url" :alt="`${album.title} 封面`" class="media-artwork h-full w-full object-cover" width="80" height="80" decoding="async" /><AlbumIcon v-else :size="24" /></span><div class="min-w-0 flex-1"><div class="flex items-start justify-between"><div class="min-w-0"><h3 class="truncate font-bold">{{ album.title }}</h3><p class="mt-1 truncate text-xs text-[var(--muted)]">{{ album.artistCredits.map((credit) => credit.artist.name).join('、') || '未知艺术家' }}</p></div><button class="btn btn-ghost btn-icon" type="button" aria-label="编辑专辑" @click.stop="edit(album)"><Pencil :size="15" /></button></div><div class="mt-4 flex items-center justify-end"><span class="text-xs text-[var(--muted)]">{{ album.trackCount }} 首</span></div></div></article>
           </template>
         </VirtualGrid>
-        <AppPagination :page="page" :page-size="pageSize" :total="query.data.value.total" :total-pages="query.data.value.totalPages" cursor @change="changePage" @page-size-change="changePageSize" /></template></section>
+        <AppPagination :page="page" :page-size="pageSize" :total="query.data.value.total" :total-pages="query.data.value.totalPages" @change="changePage" @page-size-change="changePageSize" /></template></section>
     <BaseDialog v-model="editorOpen" title="编辑专辑" :description="selected ? `更新于 ${formatDate(selected.updatedAt)}` : ''" width="lg"><div v-if="selected" class="grid gap-6 sm:grid-cols-[120px_1fr]"><ArtworkUploadField :target-id="selected.id" purpose="ALBUM_ARTWORK" :image-url="selected.artwork?.url" alt="专辑封面" @completed="artworkUploaded"><AlbumIcon :size="30" /></ArtworkUploadField><div class="space-y-5"><div><label class="ui-label">专辑标题</label><input v-model="form.title" class="ui-input" /></div><div><label class="ui-label">发行日期</label><input v-model="form.releaseDate" class="ui-input" type="date" /></div><div><label class="ui-label">艺术家署名</label><div class="space-y-2"><div v-for="(credit, index) in form.credits" :key="`${credit.artistId}:${index}`" class="flex items-center gap-2 rounded-xl bg-[var(--surface-muted)] p-2"><span class="min-w-0 flex-1 truncate font-semibold">{{ credit.name }}</span><select v-model="credit.role" class="ui-select !w-40"><option value="PRIMARY">主要艺术家</option><option value="FEATURED">合作艺术家</option><option value="COMPOSER">作曲</option><option value="LYRICIST">作词</option><option value="PRODUCER">制作人</option></select></div></div></div><div><label class="ui-label">专辑简介</label><textarea v-model="form.description" class="ui-textarea" /></div></div></div><p v-if="actionError" class="mt-5 rounded-xl bg-rose-500/10 p-3 text-sm text-[var(--danger)]">{{ actionError }}</p><template #footer><AppButton :loading="selectedDuplicateLoading" @click="openSelectedMerge"><template #icon><GitMerge :size="15" /></template>合并同名专辑</AppButton><span class="flex-1" /><AppButton @click="editorOpen = false">取消</AppButton><AppButton variant="primary" :loading="saveMutation.isPending.value" @click="saveMutation.mutate()">保存专辑</AppButton></template></BaseDialog>
-    <BaseDialog v-model="duplicatesOpen" title="同名专辑" :description="duplicatesQuery.data.value ? `${duplicatesQuery.data.value.groupCount} 组同名专辑` : ''" width="2xl"><div class="space-y-4"><article v-for="group in duplicatesQuery.data.value?.groups ?? []" :key="group.key" class="rounded-xl border border-[var(--border)] p-4"><div class="flex flex-col gap-3 sm:flex-row sm:items-start"><div class="min-w-0 flex-1"><h3 class="font-bold">{{ group.title }}</h3><p class="mt-1 text-xs text-[var(--muted)]">涉及艺术家：{{ group.primaryArtists.map((artist) => artist.name).join('、') || '无主要艺术家' }}</p><p v-if="group.albumTotal > group.albums.length" class="mt-1 text-xs text-[var(--muted)]">当前展示 {{ group.albums.length }} / {{ group.albumTotal }} 张；打开合并时会按页加载完整候选。</p></div><AppButton :loading="groupMergeLoadingKey === group.key" @click="openGroupMerge(group)"><template #icon><GitMerge :size="15" /></template>选择并合并</AppButton></div><div class="mt-3 grid gap-2 md:grid-cols-2"><div v-for="album in group.albums" :key="album.id" class="rounded-xl bg-[var(--surface-muted)] p-3"><p class="truncate font-semibold">{{ album.title }}</p><p class="mt-1 truncate text-xs text-[var(--muted)]">{{ album.artistCredits.map((credit) => credit.artist.name).join('、') || '无艺术家' }}</p><p class="mt-1 text-xs text-[var(--muted)]">{{ album.trackCount }} 首 · 创建于 {{ formatDate(album.createdAt) }} · {{ album.id.slice(0, 8) }}</p></div></div></article></div><AppPagination v-if="duplicatesQuery.data.value?.total" :page="duplicatePage" :page-size="duplicatePageSize" :total="duplicatesQuery.data.value.total" :total-pages="duplicatesQuery.data.value.totalPages" cursor @change="changeDuplicatePage" @page-size-change="changeDuplicatePageSize" /><template #footer><AppButton @click="duplicatesOpen = false">关闭</AppButton></template></BaseDialog>
+    <BaseDialog v-model="duplicatesOpen" title="同名专辑" :description="duplicatesQuery.data.value ? `${duplicatesQuery.data.value.groupCount} 组同名专辑` : ''" width="2xl"><div class="space-y-4"><article v-for="group in duplicatesQuery.data.value?.groups ?? []" :key="group.key" class="rounded-xl border border-[var(--border)] p-4"><div class="flex flex-col gap-3 sm:flex-row sm:items-start"><div class="min-w-0 flex-1"><h3 class="font-bold">{{ group.title }}</h3><p class="mt-1 text-xs text-[var(--muted)]">涉及艺术家：{{ group.primaryArtists.map((artist) => artist.name).join('、') || '无主要艺术家' }}</p><p v-if="group.albumTotal > group.albums.length" class="mt-1 text-xs text-[var(--muted)]">当前展示 {{ group.albums.length }} / {{ group.albumTotal }} 张；打开合并时会按页加载完整候选。</p></div><AppButton :loading="groupMergeLoadingKey === group.key" @click="openGroupMerge(group)"><template #icon><GitMerge :size="15" /></template>选择并合并</AppButton></div><div class="mt-3 grid gap-2 md:grid-cols-2"><div v-for="album in group.albums" :key="album.id" class="rounded-xl bg-[var(--surface-muted)] p-3"><p class="truncate font-semibold">{{ album.title }}</p><p class="mt-1 truncate text-xs text-[var(--muted)]">{{ album.artistCredits.map((credit) => credit.artist.name).join('、') || '无艺术家' }}</p><p class="mt-1 text-xs text-[var(--muted)]">{{ album.trackCount }} 首 · 创建于 {{ formatDate(album.createdAt) }} · {{ album.id.slice(0, 8) }}</p></div></div></article></div><AppPagination v-if="duplicatesQuery.data.value?.total" :page="duplicatePage" :page-size="duplicatePageSize" :total="duplicatesQuery.data.value.total" :total-pages="duplicatesQuery.data.value.totalPages" @change="changeDuplicatePage" @page-size-change="changeDuplicatePageSize" /><template #footer><AppButton @click="duplicatesOpen = false">关闭</AppButton></template></BaseDialog>
     <AlbumMergeDialog v-model="mergeOpen" :albums="mergeCandidates" :preferred-album-id="mergePreferredId" @merged="merged" />
   </div>
 </template>
