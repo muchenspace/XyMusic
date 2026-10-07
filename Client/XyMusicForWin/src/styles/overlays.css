@@ -177,6 +177,7 @@
 }
 .lyrics-loading { display: grid; align-content: center; justify-items: center; gap: 15px; padding-inline: var(--lyrics-loading-padding); }
 .lyrics-loading span { height: 18px; border-radius: var(--radius-sm); background: var(--surface-raised); animation: skeleton-breathe 1.2s ease-in-out infinite alternate; }
+[data-theme="light"] .lyrics-loading span { background: var(--surface); }
 .lyrics-loading span:nth-child(1) { width: 74%; }
 .lyrics-loading span:nth-child(2) { width: 92%; animation-delay: 100ms; }
 .lyrics-loading span:nth-child(3) { width: 61%; animation-delay: 200ms; }

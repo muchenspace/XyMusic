@@ -19,7 +19,7 @@ const visibilityLabels = { PRIVATE: "私密", UNLISTED: "不公开列出", PUBLI
     <div v-if="playlists.length" class="playlist-library-grid">
       <article v-for="playlist in playlists" :key="playlist.id" class="playlist-library-card">
         <button type="button" class="playlist-art" :aria-label="`打开歌单《${playlist.title}》`" @click="$emit('open', playlist)">
-          <ArtworkImage :src="playlist.coverUrl" :alt="`${playlist.title}歌单封面`" />
+          <ArtworkImage :src="playlist.coverUrl" :alt="`${playlist.title}歌单封面`" kind="playlist" />
         </button>
         <div class="playlist-library-copy">
           <button type="button" class="playlist-title" @click="$emit('open', playlist)">{{ playlist.title }}</button>

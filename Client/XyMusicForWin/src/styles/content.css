@@ -49,7 +49,7 @@
 .album-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)); gap: 30px 22px; }
 .album-card { position: relative; min-width: 0; }
 .album-card-main { display: block; width: 100%; padding: 0; border: 0; color: inherit; background: transparent; cursor: pointer; text-align: left; }
-.album-cover-wrap { position: relative; display: block; aspect-ratio: 1; overflow: hidden; border-radius: var(--radius-sm); background: var(--surface); }
+.album-cover-wrap { position: relative; display: block; aspect-ratio: 1; overflow: hidden; border-radius: var(--radius-md); background: var(--surface); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04); }
 .album-cover-wrap::after { content: ""; position: absolute; z-index: 1; inset: 0; background: var(--media-overlay); opacity: 0; pointer-events: none; transition: opacity var(--motion-base) var(--ease-standard); }
 .album-cover-wrap .artwork-image { transition: transform var(--motion-slow) var(--ease-emphasized); }
 .album-card:hover .album-cover-wrap::after, .album-card:focus-within .album-cover-wrap::after { opacity: 1; }
@@ -58,10 +58,10 @@
 .album-card-copy strong, .album-card-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .album-card-copy strong { color: var(--text); font-size: 14px; font-weight: 620; }
 .album-card-copy small { margin-top: 4px; color: var(--text-muted); font-size: 13px; }
-.cover-play { position: absolute; z-index: 2; display: grid; width: 38px; height: 38px; place-items: center; padding: 0 0 0 2px; border: 0; border-radius: 50%; color: var(--accent-contrast); background: var(--accent); cursor: pointer; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28); opacity: 0; transform: translateY(5px); transition: opacity var(--motion-base) var(--ease-standard), transform var(--motion-base) var(--ease-emphasized); }
+.cover-play { position: absolute; z-index: 2; display: grid; width: 38px; height: 38px; place-items: center; padding: 0 0 0 2px; border: 0; border-radius: 50%; color: var(--accent-contrast); background: var(--accent); cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16); opacity: 0; transform: translateY(5px); transition: opacity var(--motion-base) var(--ease-standard), transform var(--motion-base) var(--ease-emphasized), background var(--motion-fast); }
 .album-card .cover-play { right: 10px; bottom: 47px; }
 .album-card:hover .cover-play, .album-card:focus-within .cover-play, .mood-card:hover .cover-play, .mood-card:focus-within .cover-play { opacity: 1; transform: translateY(0) scale(1); }
-.cover-play:hover:not(:disabled) { transform: scale(1.07) !important; }
+.cover-play:hover:not(:disabled) { transform: scale(1.08) !important; background: var(--accent-hover); }
 
 .artist-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(142px, 1fr)); gap: 28px 24px; }
 .artist-card { display: grid; min-width: 0; justify-items: center; padding: 0; border: 0; color: inherit; background: transparent; cursor: pointer; }
@@ -104,7 +104,7 @@
 .random-track-duration { display: flex; align-items: center; justify-content: flex-end; gap: 5px; min-width: 54px; margin-right: 5px; color: var(--text-muted); font-size: 13px; }
 .random-track-actions button { display: grid; width: 30px; height: 30px; place-items: center; padding: 0; border: 0; border-radius: 8px; color: var(--text-muted); background: transparent; cursor: pointer; }
 .random-track-actions button:hover { color: var(--text); background: var(--surface-hover); }
-.random-track-actions button.liked { color: var(--accent); }
+.random-track-actions button.liked { color: var(--danger); }
 .random-track-empty { grid-column: 1 / -1; }
 
 .track-table { overflow: hidden; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line); background: transparent; }
@@ -145,14 +145,14 @@
 .track-actions { display: flex; align-items: center; justify-content: flex-end; gap: 2px; }
 .track-actions button { display: grid; width: 26px; height: 26px; flex: 0 0 26px; place-items: center; padding: 0; border: 0; border-radius: 7px; color: var(--text-muted); background: transparent; cursor: pointer; transition: transform 120ms var(--ease-standard), color 120ms var(--ease-standard), background 120ms var(--ease-standard); }
 .track-actions button:hover { color: var(--text); background: var(--surface-hover); }
-.track-actions button.liked { color: var(--accent); }
+.track-actions button.liked { color: var(--danger); }
 .track-actions .drag-handle { cursor: grab; touch-action: none; user-select: none; -webkit-user-drag: none; }
 .track-actions .drag-handle:active, .track-row.dragging .drag-handle { cursor: grabbing; }
 html.track-reordering, html.track-reordering * { cursor: grabbing !important; user-select: none !important; }
 
 .playlist-library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 32px 22px; }
 .playlist-library-card { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px 6px; }
-.playlist-art { width: 100%; aspect-ratio: 1; grid-column: 1 / -1; overflow: hidden; padding: 0; border: 0; border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; }
+.playlist-art { width: 100%; aspect-ratio: 1; grid-column: 1 / -1; overflow: hidden; padding: 0; border: 0; border-radius: var(--radius-md); background: var(--surface); cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04); }
 .playlist-art .artwork-image { transition: opacity var(--motion-base) var(--ease-standard), transform var(--motion-slow) var(--ease-emphasized); }
 .playlist-library-card:hover .playlist-art .artwork-image, .playlist-library-card:focus-within .playlist-art .artwork-image { opacity: 0.9; transform: scale(1.02); }
 .playlist-library-copy { min-width: 0; }
@@ -225,11 +225,14 @@ html.track-reordering, html.track-reordering * { cursor: grabbing !important; us
 
 .login-view { display: grid; width: 100%; height: 100%; grid-template-columns: minmax(300px, 0.78fr) minmax(500px, 1.22fr); overflow: hidden; background: var(--bg); }
 .login-brand-panel { display: grid; min-width: 0; place-items: center; overflow: hidden; padding: 40px; border-right: 1px solid rgba(255, 255, 255, 0.1); color: var(--media-text); background: var(--media-surface); }
+[data-theme="light"] .login-brand-panel { border-right-color: var(--line); color: var(--text); background: var(--bg-elevated); }
 .login-brand { display: grid; justify-items: center; gap: 22px; text-align: center; }
 .login-brand-mark { display: block; width: 136px; height: 136px; border-radius: var(--radius-lg); object-fit: cover; }
 .login-brand > div strong, .login-brand > div span { display: block; }
 .login-brand > div strong { color: var(--media-text); font-size: 34px; font-weight: 650; line-height: 1.1; }
 .login-brand > div span { margin-top: 9px; color: var(--media-text-muted); font-size: 12px; }
+[data-theme="light"] .login-brand > div strong { color: var(--text); }
+[data-theme="light"] .login-brand > div span { color: var(--text-muted); }
 .login-form-panel { display: grid; min-width: 0; min-height: 0; place-items: center; overflow: hidden; padding: 30px 52px; }
 .login-card { display: grid; width: min(100%, 420px); max-height: 100%; gap: 16px; overflow-y: auto; padding: 2px 8px 2px 0; background: transparent; scrollbar-gutter: stable; }
 .auth-mode-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
@@ -337,6 +340,7 @@ html.track-reordering, html.track-reordering * { cursor: grabbing !important; us
   .server-config-fields .server-port { grid-column: 1 / -1; }
   .login-view { grid-template-columns: 1fr; grid-template-rows: calc(var(--titlebar-height) + 76px) minmax(0, 1fr); }
   .login-brand-panel { justify-items: start; padding: calc(var(--titlebar-height) + 10px) 20px 10px; border-right: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+  [data-theme="light"] .login-brand-panel { border-bottom-color: var(--line); }
   .login-brand { display: flex; gap: 12px; text-align: left; }
   .login-brand-mark { width: 48px; height: 48px; }
   .login-brand > div strong { font-size: 22px; }

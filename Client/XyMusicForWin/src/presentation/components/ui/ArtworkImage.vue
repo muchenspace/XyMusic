@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Disc3, ImageOff, Mic2, Music2 } from "@lucide/vue";
+import { Disc3, ImageOff, ListMusic, Mic2, Music2 } from "@lucide/vue";
 
 const props = withDefaults(defineProps<{
   src?: string | null;
   alt?: string;
-  kind?: "album" | "artist" | "track" | "brand";
+  kind?: "album" | "artist" | "track" | "brand" | "playlist";
   loading?: "eager" | "lazy";
 }>(), {
   src: "",
@@ -21,6 +21,7 @@ const icon = computed(() => {
   if (props.kind === "artist") return Mic2;
   if (props.kind === "brand") return Music2;
   if (props.kind === "track") return Disc3;
+  if (props.kind === "playlist") return ListMusic;
   return ImageOff;
 });
 

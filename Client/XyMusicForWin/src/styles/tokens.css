@@ -73,6 +73,8 @@
   --radius-md: 6px;
   --radius-lg: 8px;
   --radius-xl: 8px;
+  --radius-full: 9999px;
+  --sidebar-bg: #111215;
   --motion-fast: 130ms;
   --motion-base: 180ms;
   --motion-slow: 260ms;
@@ -83,43 +85,50 @@
 
 [data-theme="light"] {
   color-scheme: light;
-  --bg: #f4f5f6;
-  --bg-elevated: #eeeeef;
-  --surface: #e8eaec;
+  --bg: #ffffff;
+  --bg-elevated: #fafafa;
+  --sidebar-bg: #eceef2;
+  --surface: #f4f5f7;
   --surface-solid: #ffffff;
   --surface-raised: #ffffff;
-  --surface-hover: rgba(15, 16, 18, 0.055);
-  --surface-input: #ffffff;
-  --overlay: rgba(10, 11, 13, 0.38);
+  --surface-hover: rgba(24, 24, 27, 0.05);
+  --surface-input: #e9ebef;
+  --overlay: rgba(15, 23, 42, 0.38);
 
-  --text: #17181a;
-  --text-secondary: #494c51;
-  --text-muted: #6b6f75;
-  --text-disabled: #92959a;
-  --line: rgba(15, 16, 18, 0.1);
-  --line-strong: rgba(15, 16, 18, 0.18);
+  --text: #18181b;
+  --text-secondary: #4b5563;
+  --text-muted: #8b929d;
+  --text-disabled: #cbd5e1;
+  --line: rgba(24, 24, 27, 0.06);
+  --line-strong: rgba(24, 24, 27, 0.12);
 
-  --accent: #17181a;
+  --accent: #18181b;
   --accent-hover: #000000;
-  --accent-pressed: #34363a;
-  --accent-soft: rgba(23, 24, 26, 0.085);
+  --accent-pressed: #27272a;
+  --accent-soft: rgba(24, 24, 27, 0.05);
   --accent-contrast: #ffffff;
-  --success: #2f764a;
-  --success-soft: rgba(47, 118, 74, 0.1);
-  --danger: #a4434c;
-  --danger-soft: rgba(164, 67, 76, 0.1);
-  --warning: #8c6228;
-  --warning-soft: rgba(140, 98, 40, 0.1);
+  --success: #22c55e;
+  --success-soft: rgba(34, 197, 94, 0.1);
+  --danger: #ef4444;
+  --danger-soft: rgba(239, 68, 68, 0.1);
+  --warning: #f59e0b;
+  --warning-soft: rgba(245, 158, 11, 0.1);
 
   --control-bg: #ffffff;
-  --control-bg-hover: #f7f7f8;
-  --control-border: rgba(15, 16, 18, 0.18);
-  --control-track: rgba(15, 16, 18, 0.16);
-  --control-highlight: rgba(255, 255, 255, 0.72);
-  --control-shadow: 0 1px 2px rgba(15, 16, 18, 0.08);
+  --control-bg-hover: #fafafa;
+  --control-border: rgba(24, 24, 27, 0.1);
+  --control-track: rgba(24, 24, 27, 0.08);
+  --control-highlight: rgba(255, 255, 255, 0.85);
+  --control-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 
-  --focus: rgba(23, 24, 26, 0.7);
-  --shadow-sm: 0 1px 2px rgba(15, 16, 18, 0.07);
-  --shadow-md: 0 10px 28px rgba(15, 16, 18, 0.1);
-  --shadow-lg: 0 24px 60px rgba(15, 16, 18, 0.16);
+  --focus: rgba(24, 24, 27, 0.3);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.1);
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
 }
