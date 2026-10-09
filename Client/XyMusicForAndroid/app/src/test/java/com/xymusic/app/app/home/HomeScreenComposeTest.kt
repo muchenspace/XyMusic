@@ -210,6 +210,37 @@ class HomeScreenComposeTest {
         composeRule.onNodeWithText("Track One").assertIsDisplayed()
     }
 
+    @Test
+    @Config(qualifiers = "w800dp-h1280dp-port")
+    fun portraitTabletHomeShowsFeaturedAlbumsAndTracks() {
+        composeRule.setHomeContent()
+
+        composeRule.onNodeWithTag(HomeTestTags.featuredAlbum("album-1")).assertIsDisplayed()
+        composeRule.onNodeWithText("Track One").assertIsDisplayed()
+        composeRule.onNodeWithText("Track Two").assertIsDisplayed()
+    }
+
+    @Test
+    @Config(qualifiers = "w1280dp-h800dp-land")
+    fun landscapeTabletHomeShowsFeaturedGridAndRecommendations() {
+        composeRule.setHomeContent()
+
+        val featuredBounds =
+            composeRule.onNodeWithTag(
+                HomeTestTags.LandscapeFeaturedPane,
+            ).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val recommendedBounds =
+            composeRule
+                .onNodeWithTag(HomeTestTags.LandscapeRecommendedPane)
+                .assertIsDisplayed()
+                .fetchSemanticsNode()
+                .boundsInRoot
+
+        assertThat(featuredBounds.right).isLessThan(recommendedBounds.left)
+        composeRule.onNodeWithTag(HomeTestTags.featuredAlbum("album-1")).assertIsDisplayed()
+        composeRule.onNodeWithText("Track One").assertIsDisplayed()
+    }
+
     private fun ComposeContentTestRule.setHomeContent(
         tracks: List<CatalogTrackUi> =
             listOf(

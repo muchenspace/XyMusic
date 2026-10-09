@@ -10,3 +10,10 @@ internal fun isWideLandscape(width: Dp, height: Dp): Boolean = width > height &&
 
 internal fun isCompactLandscape(width: Dp, height: Dp): Boolean =
     isWideLandscape(width, height) && height < CompactLandscapeMaxHeight
+
+internal val MediumScreenWidth = 600.dp
+internal val ExpandedScreenWidth = 840.dp
+
+internal fun isMediumOrExpandedWidth(width: Dp): Boolean = width >= MediumScreenWidth
+
+internal fun isExpandedWidth(width: Dp): Boolean = width >= ExpandedScreenWidth

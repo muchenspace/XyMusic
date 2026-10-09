@@ -127,7 +127,7 @@ constructor(private val useCases: CatalogUseCases) : ViewModel() {
     }
 
     private companion object {
-        const val RANDOM_ALBUM_LIMIT = 2
+        const val RANDOM_ALBUM_LIMIT = 10
         const val RANDOM_TRACK_LIMIT = 16
     }
 }

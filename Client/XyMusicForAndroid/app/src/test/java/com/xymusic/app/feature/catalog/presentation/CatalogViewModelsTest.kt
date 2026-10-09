@@ -50,7 +50,7 @@ class CatalogViewModelsTest {
             )
         advanceUntilIdle()
 
-        assertThat(repository.randomAlbumRequestLimits).containsExactly(2)
+        assertThat(repository.randomAlbumRequestLimits).containsExactly(10)
         assertThat(repository.randomTrackRequestLimits).containsExactly(16)
         assertThat(
             viewModel.randomUiState.value.featuredAlbums
@@ -85,7 +85,7 @@ class CatalogViewModelsTest {
         viewModel.retryRandomTracks()
         advanceUntilIdle()
 
-        assertThat(repository.randomAlbumRequestLimits).containsExactly(2)
+        assertThat(repository.randomAlbumRequestLimits).containsExactly(10)
         assertThat(repository.randomTrackRequestLimits).containsExactly(16)
         assertThat(
             viewModel.randomUiState.value.featuredAlbums
@@ -129,7 +129,7 @@ class CatalogViewModelsTest {
         viewModel.retryRandomTracks()
         advanceUntilIdle()
 
-        assertThat(repository.randomAlbumRequestLimits).containsExactly(2, 2).inOrder()
+        assertThat(repository.randomAlbumRequestLimits).containsExactly(10, 10).inOrder()
         assertThat(repository.randomTrackRequestLimits).containsExactly(16)
         assertThat(
             viewModel.randomUiState.value.featuredAlbums
@@ -169,7 +169,7 @@ class CatalogViewModelsTest {
         viewModel.retryRandomAlbums()
         advanceUntilIdle()
 
-        assertThat(repository.randomAlbumRequestLimits).containsExactly(2)
+        assertThat(repository.randomAlbumRequestLimits).containsExactly(10)
         assertThat(repository.randomTrackRequestLimits).containsExactly(16, 16).inOrder()
         assertThat(
             viewModel.randomUiState.value.featuredAlbums

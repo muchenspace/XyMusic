@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -39,6 +40,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -48,6 +50,7 @@ import com.xymusic.app.core.ui.component.ErrorState
 import com.xymusic.app.core.ui.component.LoadingState
 import com.xymusic.app.core.ui.component.MediaArtwork
 import com.xymusic.app.core.ui.layout.isCompactLandscape
+import com.xymusic.app.core.ui.layout.isMediumOrExpandedWidth
 import com.xymusic.app.core.ui.layout.isWideLandscape
 import com.xymusic.app.core.ui.media.CatalogAlbumShelfCard
 import com.xymusic.app.core.ui.media.CatalogAlbumUi
@@ -174,22 +177,27 @@ private fun DiscoverContent(
         )
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        if (isWideLandscape(maxWidth, maxHeight)) {
+        val wideLandscape = isWideLandscape(maxWidth, maxHeight)
+        val compactLandscape = isCompactLandscape(maxWidth, maxHeight)
+        val isTablet = isMediumOrExpandedWidth(maxWidth)
+        if (wideLandscape) {
             LandscapeDiscoverContent(
                 featuredAlbums = featuredAlbums,
                 recommendedTracks = recommendedTracks,
                 randomUiState = randomUiState,
                 profileUiState = profileUiState,
-                compact = isCompactLandscape(maxWidth, maxHeight),
+                compact = compactLandscape,
                 actions = actions,
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
             PortraitDiscoverContent(
                 featuredAlbums = featuredAlbums,
+                recommendedTracks = recommendedTracks,
                 recommendedPages = recommendedPages,
                 randomUiState = randomUiState,
                 profileUiState = profileUiState,
+                isTablet = isTablet,
                 actions = actions,
                 modifier = Modifier.fillMaxSize(),
             )
@@ -200,12 +208,15 @@ private fun DiscoverContent(
 @Composable
 private fun PortraitDiscoverContent(
     featuredAlbums: List<CatalogAlbumUi>,
+    recommendedTracks: List<CatalogTrackUi>,
     recommendedPages: List<List<CatalogTrackUi>>,
     randomUiState: CatalogRandomUiState,
     profileUiState: HomeProfileUiState,
+    isTablet: Boolean,
     actions: HomeActions,
     modifier: Modifier = Modifier,
 ) {
+    val horizontalPadding = if (isTablet) 24.dp else 20.dp
     LazyColumn(
         modifier = modifier.testTag(HomeTestTags.DiscoverList),
         contentPadding = PaddingValues(bottom = 32.dp),
@@ -215,19 +226,21 @@ private fun PortraitDiscoverContent(
                 profileUiState = profileUiState,
                 onSearchClick = actions.onSearchClick,
                 onProfileClick = actions.onProfileClick,
+                isTablet = isTablet,
             )
         }
         item(key = "featured-heading") {
             HomeSectionHeader(
                 title = stringResource(R.string.home_featured),
+                horizontalPadding = horizontalPadding,
             )
         }
         when {
             featuredAlbums.isNotEmpty() ->
                 item(key = "featured-albums") {
                     LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        contentPadding = PaddingValues(horizontal = horizontalPadding),
+                        horizontalArrangement = Arrangement.spacedBy(if (isTablet) 18.dp else 14.dp),
                     ) {
                         items(
                             items = featuredAlbums,
@@ -238,7 +251,7 @@ private fun PortraitDiscoverContent(
                                 album = album,
                                 onClick = { actions.onAlbumClick(album.id) },
                                 modifier = Modifier.testTag(HomeTestTags.featuredAlbum(album.id)),
-                                width = 174.dp,
+                                width = if (isTablet) 188.dp else 174.dp,
                             )
                         }
                     }
@@ -259,33 +272,66 @@ private fun PortraitDiscoverContent(
         item(key = "tracks-heading") {
             HomeSectionHeader(
                 title = stringResource(R.string.home_new_tracks),
+                horizontalPadding = horizontalPadding,
             )
         }
         when {
-            recommendedPages.isNotEmpty() ->
-                item(key = "recommended-tracks") {
-                    val pagerState = rememberPagerState(pageCount = { recommendedPages.size })
-                    HorizontalPager(
-                        state = pagerState,
-                        modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .height(RECOMMENDED_PAGE_HEIGHT)
-                            .testTag(HomeTestTags.RecommendationsPager),
-                        key = { page -> recommendedPages[page].first().id },
-                    ) { page ->
-                        Column(modifier = Modifier.fillMaxSize()) {
-                            recommendedPages[page].forEach { track ->
-                                CatalogTrackRow(
-                                    track = track,
-                                    onClick = { actions.onTrackPlay(track) },
-                                    onPlayClick = { actions.onTrackPlay(track) },
-                                    onMoreClick = { actions.onTrackMore(track.id) },
-                                )
+            recommendedTracks.isNotEmpty() -> {
+                if (isTablet) {
+                    val trackPairs = recommendedTracks.chunked(2)
+                    items(
+                        items = trackPairs,
+                        key = { pair -> "track-pair-" + pair.first().id },
+                        contentType = { "tablet-track-pair" },
+                    ) { pair ->
+                        Row(
+                            modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = horizontalPadding, vertical = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(20.dp),
+                        ) {
+                            pair.forEach { track ->
+                                Box(modifier = Modifier.weight(1f)) {
+                                    CatalogTrackRow(
+                                        track = track,
+                                        onClick = { actions.onTrackPlay(track) },
+                                        onPlayClick = { actions.onTrackPlay(track) },
+                                        onMoreClick = { actions.onTrackMore(track.id) },
+                                    )
+                                }
+                            }
+                            if (pair.size == 1) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                } else {
+                    item(key = "recommended-tracks") {
+                        val pagerState = rememberPagerState(pageCount = { recommendedPages.size })
+                        HorizontalPager(
+                            state = pagerState,
+                            modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .height(RECOMMENDED_PAGE_HEIGHT)
+                                .testTag(HomeTestTags.RecommendationsPager),
+                            key = { page -> recommendedPages[page].first().id },
+                        ) { page ->
+                            Column(modifier = Modifier.fillMaxSize()) {
+                                recommendedPages[page].forEach { track ->
+                                    CatalogTrackRow(
+                                        track = track,
+                                        onClick = { actions.onTrackPlay(track) },
+                                        onPlayClick = { actions.onTrackPlay(track) },
+                                        onMoreClick = { actions.onTrackMore(track.id) },
+                                    )
+                                }
                             }
                         }
                     }
                 }
+            }
             randomUiState.recommendedLoading ->
                 item(key = "recommended-loading") {
                     LoadingState(modifier = Modifier.fillMaxWidth().height(220.dp))
@@ -313,13 +359,13 @@ private fun LandscapeDiscoverContent(
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier.testTag(HomeTestTags.DiscoverList).padding(horizontal = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = modifier.testTag(HomeTestTags.DiscoverList).padding(horizontal = if (compact) 12.dp else 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 16.dp else 24.dp),
     ) {
         LazyColumn(
             modifier =
             Modifier
-                .weight(0.9f)
+                .weight(1f)
                 .fillMaxHeight()
                 .testTag(HomeTestTags.LandscapeFeaturedPane),
             contentPadding = PaddingValues(bottom = 16.dp),
@@ -329,33 +375,64 @@ private fun LandscapeDiscoverContent(
                     profileUiState = profileUiState,
                     onSearchClick = actions.onSearchClick,
                     onProfileClick = actions.onProfileClick,
-                    compact = true,
+                    compact = compact,
                 )
             }
             item(key = "featured-heading") {
                 HomeSectionHeader(
                     title = stringResource(R.string.home_featured),
-                    compact = true,
+                    compact = compact,
+                    horizontalPadding = if (compact) 8.dp else 12.dp,
                 )
             }
             when {
                 featuredAlbums.isNotEmpty() ->
-                    item(key = "featured-albums") {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            items(
-                                items = featuredAlbums,
-                                key = CatalogAlbumUi::id,
-                                contentType = { "featured-album" },
-                            ) { album ->
-                                CatalogAlbumShelfCard(
-                                    album = album,
-                                    onClick = { actions.onAlbumClick(album.id) },
-                                    modifier = Modifier.testTag(HomeTestTags.featuredAlbum(album.id)),
-                                    width = if (compact) 132.dp else 154.dp,
-                                )
+                    if (compact) {
+                        item(key = "featured-albums") {
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                items(
+                                    items = featuredAlbums,
+                                    key = CatalogAlbumUi::id,
+                                    contentType = { "featured-album" },
+                                ) { album ->
+                                    CatalogAlbumShelfCard(
+                                        album = album,
+                                        onClick = { actions.onAlbumClick(album.id) },
+                                        modifier = Modifier.testTag(HomeTestTags.featuredAlbum(album.id)),
+                                        width = 132.dp,
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        val albumPairs = featuredAlbums.chunked(2)
+                        items(
+                            items = albumPairs,
+                            key = { pair -> "featured-pair-" + pair.first().id },
+                            contentType = { "featured-album-pair" },
+                        ) { pair ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            ) {
+                                pair.forEach { album ->
+                                    CatalogAlbumShelfCard(
+                                        album = album,
+                                        onClick = { actions.onAlbumClick(album.id) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag(HomeTestTags.featuredAlbum(album.id)),
+                                        width = Dp.Unspecified,
+                                    )
+                                }
+                                if (pair.size == 1) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
                             }
                         }
                     }
@@ -376,7 +453,7 @@ private fun LandscapeDiscoverContent(
         LazyColumn(
             modifier =
             Modifier
-                .weight(1.1f)
+                .weight(1f)
                 .fillMaxHeight()
                 .testTag(HomeTestTags.LandscapeRecommendedPane),
             contentPadding = PaddingValues(bottom = 16.dp),
@@ -384,7 +461,8 @@ private fun LandscapeDiscoverContent(
             item(key = "tracks-heading") {
                 HomeSectionHeader(
                     title = stringResource(R.string.home_new_tracks),
-                    compact = true,
+                    compact = compact,
+                    horizontalPadding = if (compact) 8.dp else 12.dp,
                 )
             }
             when {
@@ -424,16 +502,33 @@ private fun HomeHeader(
     onSearchClick: () -> Unit,
     onProfileClick: () -> Unit,
     compact: Boolean = false,
+    isTablet: Boolean = false,
 ) {
     Row(
         modifier =
         Modifier
             .fillMaxWidth()
             .padding(
-                start = if (compact) 8.dp else 20.dp,
-                end = if (compact) 4.dp else 12.dp,
-                top = if (compact) 4.dp else 16.dp,
-                bottom = if (compact) 0.dp else 8.dp,
+                start = when {
+                    compact -> 8.dp
+                    isTablet -> 24.dp
+                    else -> 20.dp
+                },
+                end = when {
+                    compact -> 4.dp
+                    isTablet -> 20.dp
+                    else -> 12.dp
+                },
+                top = when {
+                    compact -> 4.dp
+                    isTablet -> 20.dp
+                    else -> 16.dp
+                },
+                bottom = when {
+                    compact -> 0.dp
+                    isTablet -> 12.dp
+                    else -> 8.dp
+                },
             ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -479,13 +574,17 @@ private fun HomeHeader(
 }
 
 @Composable
-private fun HomeSectionHeader(title: String, compact: Boolean = false) {
+private fun HomeSectionHeader(
+    title: String,
+    compact: Boolean = false,
+    horizontalPadding: Dp = if (compact) 8.dp else 20.dp,
+) {
     Row(
         modifier =
         Modifier
             .fillMaxWidth()
             .padding(
-                start = if (compact) 8.dp else 20.dp,
+                start = horizontalPadding,
                 end = if (compact) 4.dp else 12.dp,
                 top = if (compact) 8.dp else 20.dp,
                 bottom = if (compact) 6.dp else 8.dp,

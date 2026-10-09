@@ -19,4 +19,18 @@ class AdaptiveLayoutTest {
         assertThat(isCompactLandscape(740.dp, 480.dp)).isFalse()
         assertThat(isCompactLandscape(479.dp, 320.dp)).isFalse()
     }
+
+    @Test
+    fun mediumOrExpandedWidthChecksBreakpoint() {
+        assertThat(isMediumOrExpandedWidth(600.dp)).isTrue()
+        assertThat(isMediumOrExpandedWidth(840.dp)).isTrue()
+        assertThat(isMediumOrExpandedWidth(599.dp)).isFalse()
+    }
+
+    @Test
+    fun expandedWidthChecksBreakpoint() {
+        assertThat(isExpandedWidth(840.dp)).isTrue()
+        assertThat(isExpandedWidth(1200.dp)).isTrue()
+        assertThat(isExpandedWidth(839.dp)).isFalse()
+    }
 }

@@ -52,6 +52,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isSpecified
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import com.xymusic.app.R
@@ -271,7 +272,7 @@ internal fun CatalogAlbumShelfCard(
     Column(
         modifier =
         modifier
-            .width(width)
+            .then(if (width.isSpecified) Modifier.width(width) else Modifier)
             .clickable(role = Role.Button, onClick = onClick),
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
