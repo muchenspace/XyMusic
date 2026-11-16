@@ -8,6 +8,7 @@ import androidx.media3.common.Player
 import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaMetadata
 import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaUri
 import com.xymusic.app.feature.player.domain.StoredPlaybackQueueItem
+import com.xymusic.app.feature.player.domain.resolveResumePositionMs
 import java.util.UUID
 
 internal class PlaybackQueueRestorer(private val player: Player) {
@@ -82,10 +83,7 @@ internal fun selectRestorablePlaybackQueue(storedItems: List<StoredPlaybackQueue
     )
 }
 
-private fun StoredPlaybackQueueItem.restorablePositionMs(): Long {
-    val nonNegativePosition = resumePositionMs.coerceAtLeast(0)
-    val completedBoundaryMs = (durationMs - RESTORE_COMPLETION_TOLERANCE_MS).coerceAtLeast(0)
-    return if (durationMs > 0 && nonNegativePosition >= completedBoundaryMs) 0 else nonNegativePosition
-}
-
-private const val RESTORE_COMPLETION_TOLERANCE_MS = 1_000L
+private fun StoredPlaybackQueueItem.restorablePositionMs(): Long = resolveResumePositionMs(
+    positionMs = resumePositionMs,
+    durationMs = durationMs,
+)

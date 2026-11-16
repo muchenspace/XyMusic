@@ -1,6 +1,7 @@
 package com.xymusic.app.feature.library.domain.model
 
 import com.xymusic.app.core.model.media.Track
+import com.xymusic.app.feature.player.domain.resolveResumePositionMs
 import java.util.UUID
 
 data class PlaybackHistoryItem(
@@ -10,7 +11,14 @@ data class PlaybackHistoryItem(
     val lastPlayedAtEpochMillis: Long,
     val completed: Boolean,
     val updatedAtEpochMillis: Long,
-)
+) {
+    /** Returns the safe start position when replaying this history entry. */
+    fun resumePositionMs(): Long = resolveResumePositionMs(
+        positionMs = lastPositionMs,
+        durationMs = track.durationMs,
+        completed = completed,
+    )
+}
 
 enum class FavoriteSort {
     FAVORITED_DESC,

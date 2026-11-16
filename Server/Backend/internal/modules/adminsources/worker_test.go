@@ -3,6 +3,7 @@ package adminsources
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -26,11 +27,62 @@ func TestWorkerInitializesDefaultAndStartupSources(t *testing.T) {
 	if err := worker.Initialize(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if store.initializeCalls != 1 || store.defaultMutation.Path != directory || store.defaultMutation.Status != RootStatusUnknown {
-		t.Fatalf("initialization=%d mutation=%+v", store.initializeCalls, store.defaultMutation)
+	if store.initializeCalls != 1 || store.ensureCalls != 1 || store.defaultMutation.Path != directory || store.defaultMutation.Status != RootStatusUnknown {
+		t.Fatalf("initialization=%d ensure=%d mutation=%+v", store.initializeCalls, store.ensureCalls, store.defaultMutation)
 	}
 	if len(store.enqueued) != 1 || store.enqueued[0].RootID != testRootID || !store.enqueued[0].Deduplicate {
 		t.Fatalf("enqueued=%+v", store.enqueued)
+	}
+}
+
+func TestWorkerInitializeSkipsDismissedDefaultRootEvenWhenDirectoryIsMissing(t *testing.T) {
+	rootDirectory := t.TempDir()
+	missingDirectory := filepath.Join(rootDirectory, "deleted-music")
+	store := &workerStoreStub{
+		dismissedPaths: map[string]bool{normalizeRootPath(missingDirectory): true},
+		startupIDs:     []string{testRootID},
+	}
+	worker, err := NewWorker(WorkerOptions{
+		Store: store, Scanner: scannerFunc(func(context.Context, ScanInput) (ScanResult, error) { return ScanResult{}, nil }),
+		RootDirectory: rootDirectory, RootProbe: OSRootProbe{},
+		DefaultRoot: config.LocalLibrary{
+			Name: "Local", Directory: "deleted-music", Mode: string(RootModeReadOnly), Enabled: true,
+			SyncOnStartup: true, IncludePatterns: []string{}, ExcludePatterns: []string{},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if store.ensureCalls != 0 {
+		t.Fatalf("expected dismissed default root not to call EnsureDefaultRoot, got %d", store.ensureCalls)
+	}
+	if len(store.enqueued) != 1 || store.enqueued[0].RootID != testRootID {
+		t.Fatalf("expected remaining startup roots to still enqueue, got %+v", store.enqueued)
+	}
+}
+
+func TestWorkerInitializeTreatsErrDefaultRootDismissedAsNoOp(t *testing.T) {
+	directory := t.TempDir()
+	store := &workerStoreStub{ensureErr: ErrDefaultRootDismissed}
+	worker, err := NewWorker(WorkerOptions{
+		Store: store, Scanner: scannerFunc(func(context.Context, ScanInput) (ScanResult, error) { return ScanResult{}, nil }),
+		RootDirectory: directory, RootProbe: OSRootProbe{},
+		DefaultRoot: config.LocalLibrary{
+			Name: "Local", Directory: directory, Mode: string(RootModeReadOnly), Enabled: true,
+			SyncOnStartup: true, IncludePatterns: []string{}, ExcludePatterns: []string{},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.Initialize(context.Background()); err != nil {
+		t.Fatalf("expected ErrDefaultRootDismissed to be ignored cleanly, got %v", err)
+	}
+	if store.ensureCalls != 1 {
+		t.Fatalf("expected EnsureDefaultRoot to be attempted once, got %d", store.ensureCalls)
 	}
 }
 
@@ -181,8 +233,11 @@ func (function scannerFunc) Scan(ctx context.Context, input ScanInput) (ScanResu
 
 type workerStoreStub struct {
 	initializeCalls  int
+	ensureCalls      int
 	scheduleCalls    int
 	defaultMutation  RootMutation
+	dismissedPaths   map[string]bool
+	ensureErr        error
 	startupIDs       []string
 	enqueued         []EnqueueScanCommand
 	claim            *ClaimedScan
@@ -200,8 +255,15 @@ func (stub *workerStoreStub) InitializeScans(context.Context, time.Time) error {
 	stub.initializeCalls++
 	return nil
 }
+func (stub *workerStoreStub) IsDefaultRootDismissed(_ context.Context, normalizedPath string) (bool, error) {
+	return stub.dismissedPaths[normalizedPath], nil
+}
 func (stub *workerStoreStub) EnsureDefaultRoot(_ context.Context, mutation RootMutation) (Root, error) {
+	stub.ensureCalls++
 	stub.defaultMutation = mutation
+	if stub.ensureErr != nil {
+		return Root{}, stub.ensureErr
+	}
 	return Root{ID: testRootID}, nil
 }
 func (stub *workerStoreStub) StartupRootIDs(context.Context) ([]string, error) {

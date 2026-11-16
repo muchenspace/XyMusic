@@ -535,6 +535,48 @@ func TestEnsureDefaultRootSynchronizesConfiguredRoot(t *testing.T) {
 	if unchanged.Version != updated.Version {
 		t.Fatalf("unchanged root version=%d, want %d", unchanged.Version, updated.Version)
 	}
+
+	if err := repository.DeleteRoot(ctx, DeleteRootCommand{
+		RootID:          updated.ID,
+		ExpectedVersion: updated.Version,
+	}); err != nil {
+		t.Fatalf("delete configured default root: %v", err)
+	}
+	dismissed, err := repository.IsDefaultRootDismissed(ctx, updated.NormalizedPath)
+	if err != nil || !dismissed {
+		t.Fatalf("expected deleted default root to be marked dismissed: dismissed=%v err=%v", dismissed, err)
+	}
+	if _, err := repository.EnsureDefaultRoot(ctx, updatedMutation); !errors.Is(err, ErrDefaultRootDismissed) {
+		t.Fatalf("expected deleted default root not to be resurrected, got err=%v", err)
+	}
+	if _, err := repository.FindRoot(ctx, updated.ID); !apperror.IsCode(err, apperror.CodeResourceNotFound) {
+		t.Fatalf("expected deleted default root to remain absent, got err=%v", err)
+	}
+
+	// Moving a configuration-managed root via UpdateRoot also dismisses its old path.
+	movedDirectory := t.TempDir()
+	movedSource, err := validateRootInput(directory, OSRootProbe{}, RootMutation{
+		Name: "Moved configured root", Path: secondDirectory, Mode: RootModeReadOnly,
+		Enabled: true, ScanOnStartup: false, IncludePatterns: []string{}, ExcludePatterns: []string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	movedTarget, err := validateRootInput(directory, OSRootProbe{}, RootMutation{
+		Name: "Moved destination", Path: movedDirectory, Mode: RootModeReadOnly,
+		Enabled: true, ScanOnStartup: false, IncludePatterns: []string{}, ExcludePatterns: []string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.UpdateRoot(ctx, UpdateRootCommand{
+		RootID: second.ID, ExpectedVersion: second.Version, Mutation: movedTarget,
+	}); err != nil {
+		t.Fatalf("move configured root: %v", err)
+	}
+	if _, err := repository.EnsureDefaultRoot(ctx, movedSource); !errors.Is(err, ErrDefaultRootDismissed) {
+		t.Fatalf("expected old path of moved default root to be dismissed, got err=%v", err)
+	}
 }
 
 func TestProductionSynchronizerPersistsFilesMetadataInConfiguredDatabase(t *testing.T) {

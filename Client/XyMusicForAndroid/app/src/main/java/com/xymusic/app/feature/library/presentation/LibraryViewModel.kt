@@ -54,6 +54,7 @@ enum class LibraryTab { Favorites, Playlists, History, Downloads }
 data class LibraryHistoryUi(
     val track: CatalogTrackUi,
     val lastPositionMs: Long,
+    val resumePositionMs: Long,
     val playCount: Long,
     val completed: Boolean,
 )
@@ -321,6 +322,7 @@ constructor(
 private fun PlaybackHistoryItem.toUi(): LibraryHistoryUi = LibraryHistoryUi(
     track = track.toUi(),
     lastPositionMs = lastPositionMs,
+    resumePositionMs = resumePositionMs(),
     playCount = playCount,
     completed = completed,
 )

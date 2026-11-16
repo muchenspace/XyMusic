@@ -40,6 +40,7 @@ type Store interface {
 
 type WorkerStore interface {
 	InitializeScans(context.Context, time.Time) error
+	IsDefaultRootDismissed(context.Context, string) (bool, error)
 	EnsureDefaultRoot(context.Context, RootMutation) (Root, error)
 	StartupRootIDs(context.Context) ([]string, error)
 	EnqueueScan(context.Context, EnqueueScanCommand) (ScanRun, error)

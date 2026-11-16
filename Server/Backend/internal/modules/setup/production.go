@@ -204,7 +204,7 @@ func (connection *productionInstallationDatabase) Reset(ctx context.Context) err
 	const statement = `truncate table
 		tag_scraping_job_items, tag_scraping_jobs,
 		metadata_writeback_jobs, track_metadata,
-		library_scan_runs, local_music_source_tracks, library_roots, local_music_sources,
+		library_scan_runs, local_music_source_tracks, dismissed_default_library_roots, library_roots, local_music_sources,
 		media_uploads, play_history, favorite_tracks,
 		playlist_tracks, playlists, lyrics, track_artists, tracks,
 		album_artists, albums, artists, user_profiles, media_assets,
@@ -348,6 +348,9 @@ func (connection *productionInstallationDatabase) Provision(
 			return ProvisionedInstallation{}, fmt.Errorf("create music source: %w", err)
 		}
 		createdLibraryRoot = true
+		if _, err := tx.Exec(ctx, "delete from dismissed_default_library_roots where normalized_path = $1", input.Source.NormalizedPath); err != nil {
+			return ProvisionedInstallation{}, fmt.Errorf("clear dismissed music source: %w", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return ProvisionedInstallation{}, fmt.Errorf("commit installation transaction: %w", err)

@@ -121,6 +121,69 @@ class LibraryScreenComposeTest {
     }
 
     @Test
+    fun historyPlayActionRestartsCompletedAndNearEndTracksFromBeginning() {
+        val playerRepository = RecordingPlayerRepository()
+        val first =
+            PlaybackHistoryItem(
+                track = track().copy(id = "track-1", title = "Completed Track"),
+                lastPositionMs = 180_000,
+                playCount = 2,
+                lastPlayedAtEpochMillis = 3_000,
+                completed = true,
+                updatedAtEpochMillis = 3_000,
+            )
+        val second =
+            PlaybackHistoryItem(
+                track = track().copy(id = "track-2", title = "Near End Track"),
+                lastPositionMs = 179_500,
+                playCount = 1,
+                lastPlayedAtEpochMillis = 2_000,
+                completed = false,
+                updatedAtEpochMillis = 2_000,
+            )
+        composeRule.setLibraryContent(
+            initialTab = LibraryTab.History,
+            history = listOf(first, second),
+            playerRepository = playerRepository,
+        )
+
+        composeRule.waitForIdle()
+        composeRule
+            .onNodeWithContentDescription(
+                context.getString(R.string.player_play_track, second.track.title),
+            ).assertIsDisplayed()
+            .performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            playerRepository.lastStartPositionMs != null
+        }
+
+        assertThat(playerRepository.lastStartPositionMs).isEqualTo(0L)
+        val startedTrackId =
+            playerRepository.lastQueue
+                .firstOrNull { it.queueItemId == playerRepository.lastStartQueueItemId }
+                ?.trackId
+        assertThat(startedTrackId).isEqualTo(second.track.id)
+
+        playerRepository.lastStartPositionMs = null
+        playerRepository.lastStartQueueItemId = null
+        composeRule
+            .onNodeWithContentDescription(
+                context.getString(R.string.player_play_track, first.track.title),
+            ).assertIsDisplayed()
+            .performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            playerRepository.lastStartPositionMs != null
+        }
+
+        assertThat(playerRepository.lastStartPositionMs).isEqualTo(0L)
+        val restartedTrackId =
+            playerRepository.lastQueue
+                .firstOrNull { it.queueItemId == playerRepository.lastStartQueueItemId }
+                ?.trackId
+        assertThat(restartedTrackId).isEqualTo(first.track.id)
+    }
+
+    @Test
     fun secondaryLibraryBackInvokesCallback() {
         var backed = false
         composeRule.setLibraryContent(
@@ -353,6 +416,7 @@ private class RecordingPlayerRepository : PlayerRepository {
     private val mutableState = MutableStateFlow(PlayerState())
     override val state: StateFlow<PlayerState> = mutableState
     var lastQueue: List<PlayerQueueItem> = emptyList()
+    var lastStartQueueItemId: String? = null
     var lastStartPositionMs: Long? = null
 
     override suspend fun connect(): PlayerResult<Unit> = PlayerResult.Success(Unit)
@@ -366,6 +430,7 @@ private class RecordingPlayerRepository : PlayerRepository {
         playWhenReady: Boolean,
     ): PlayerResult<Unit> {
         lastQueue = items
+        lastStartQueueItemId = startQueueItemId
         lastStartPositionMs = startPositionMs
         return PlayerResult.Success(Unit)
     }

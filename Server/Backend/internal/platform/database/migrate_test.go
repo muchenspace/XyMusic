@@ -11,8 +11,8 @@ func TestMigrationsCanBeRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(migrations) != 2 {
-		t.Fatalf("expected baseline plus one migration, got %d", len(migrations))
+	if len(migrations) != 3 {
+		t.Fatalf("expected baseline plus two migrations, got %d", len(migrations))
 	}
 	if migrations[0].Tag != "0000_initial" {
 		t.Fatalf("unexpected migration tag: %s", migrations[0].Tag)
@@ -56,6 +56,14 @@ func TestMigrationsCanBeRead(t *testing.T) {
 	if !strings.Contains(batchSQL, "DROP CONSTRAINT IF EXISTS TAG_SCRAPING_JOBS_TOTAL_CHECK") ||
 		!strings.Contains(batchSQL, "CHECK (TOTAL >= 1)") {
 		t.Fatalf("tag scraping batch migration does not remove the upper bound: %s", batchSQL)
+	}
+	if migrations[2].Tag != "0002_dismissed_default_library_roots" {
+		t.Fatalf("unexpected dismissed default library roots migration: %#v", migrations[2])
+	}
+	dismissedSQL := strings.ToUpper(strings.Join(migrations[2].SQL, "\n"))
+	if !strings.Contains(dismissedSQL, "CREATE TABLE DISMISSED_DEFAULT_LIBRARY_ROOTS") ||
+		!strings.Contains(dismissedSQL, "NORMALIZED_PATH") {
+		t.Fatalf("dismissed default library roots migration missing table definition: %s", dismissedSQL)
 	}
 }
 

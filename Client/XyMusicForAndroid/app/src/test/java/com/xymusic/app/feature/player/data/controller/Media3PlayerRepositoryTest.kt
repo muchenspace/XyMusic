@@ -293,6 +293,16 @@ class Media3PlayerRepositoryTest {
         assertThat(isValidPlayerQueue(listOf(first), "first", -1)).isFalse()
     }
 
+    @Test
+    fun queueStartPositionResetsCompletedOrNearEndPositions() {
+        val track = queueItem("item-1", "00000000-0000-0000-0000-000000000001").copy(durationMs = 180_000)
+
+        assertThat(resolveQueueStartPositionMs(listOf(track), 0, 42_000)).isEqualTo(42_000)
+        assertThat(resolveQueueStartPositionMs(listOf(track), 0, 179_000)).isEqualTo(0)
+        assertThat(resolveQueueStartPositionMs(listOf(track), 0, 180_000)).isEqualTo(0)
+        assertThat(resolveQueueStartPositionMs(listOf(track), 0, 185_000)).isEqualTo(0)
+    }
+
     private fun queueItem(queueItemId: String, trackId: String) = PlayerQueueItem(
         queueItemId = queueItemId,
         trackId = trackId,

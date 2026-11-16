@@ -100,28 +100,38 @@ func (worker *Worker) Initialize(ctx context.Context) error {
 		return err
 	}
 	directory := worker.defaultRoot.Directory
-	if !filepath.IsAbs(directory) {
+	if strings.TrimSpace(directory) != "" && !filepath.IsAbs(directory) {
 		directory = filepath.Join(worker.rootDirectory, directory)
 	}
-	name := worker.defaultRoot.Name
-	if strings.TrimSpace(name) == "" {
-		name = filepath.Base(filepath.Clean(directory))
-		if name == "." || name == string(filepath.Separator) || name == "" {
-			name = "Music"
+	dismissed := false
+	if strings.TrimSpace(directory) != "" {
+		var err error
+		dismissed, err = worker.store.IsDefaultRootDismissed(ctx, normalizeRootPath(directory))
+		if err != nil {
+			return err
 		}
 	}
-	mutation, err := validateRootInput(worker.rootDirectory, worker.rootProbe, RootMutation{
-		Name: name, Path: directory, Mode: RootMode(worker.defaultRoot.Mode),
-		Enabled: worker.defaultRoot.Enabled, ScanOnStartup: worker.defaultRoot.SyncOnStartup,
-		ScanIntervalMinutes: cloneInt(worker.defaultRoot.ScanIntervalMinutes),
-		IncludePatterns:     cloneStrings(worker.defaultRoot.IncludePatterns),
-		ExcludePatterns:     cloneStrings(worker.defaultRoot.ExcludePatterns),
-	})
-	if err != nil {
-		return err
-	}
-	if _, err := worker.store.EnsureDefaultRoot(ctx, mutation); err != nil {
-		return err
+	if !dismissed {
+		name := worker.defaultRoot.Name
+		if strings.TrimSpace(name) == "" {
+			name = filepath.Base(filepath.Clean(directory))
+			if name == "." || name == string(filepath.Separator) || name == "" {
+				name = "Music"
+			}
+		}
+		mutation, err := validateRootInput(worker.rootDirectory, worker.rootProbe, RootMutation{
+			Name: name, Path: directory, Mode: RootMode(worker.defaultRoot.Mode),
+			Enabled: worker.defaultRoot.Enabled, ScanOnStartup: worker.defaultRoot.SyncOnStartup,
+			ScanIntervalMinutes: cloneInt(worker.defaultRoot.ScanIntervalMinutes),
+			IncludePatterns:     cloneStrings(worker.defaultRoot.IncludePatterns),
+			ExcludePatterns:     cloneStrings(worker.defaultRoot.ExcludePatterns),
+		})
+		if err != nil {
+			return err
+		}
+		if _, err := worker.store.EnsureDefaultRoot(ctx, mutation); err != nil && !errors.Is(err, ErrDefaultRootDismissed) {
+			return err
+		}
 	}
 	rootIDs, err := worker.store.StartupRootIDs(ctx)
 	if err != nil {

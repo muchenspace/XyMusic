@@ -138,17 +138,40 @@ internal class PlaybackMediaSessionCallback(
         if (controller.packageName != appPackageName) {
             return Futures.immediateFuture(emptyList())
         }
-        val validItems =
-            mediaItems.all { mediaItem ->
-                mediaItem.mediaId.isNotBlank() &&
-                    runCatching {
-                        PlaybackMediaUri.trackId(requireNotNull(mediaItem.localConfiguration).uri)
-                    }.isSuccess
-            }
-        return if (validItems) {
+        return if (hasValidMediaItems(mediaItems)) {
             Futures.immediateFuture(mediaItems)
         } else {
             Futures.immediateFailedFuture(IllegalArgumentException("Invalid playback item"))
+        }
+    }
+
+    override fun onSetMediaItems(
+        mediaSession: MediaSession,
+        controller: MediaSession.ControllerInfo,
+        mediaItems: List<MediaItem>,
+        startIndex: Int,
+        startPositionMs: Long,
+    ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+        if (controller.packageName != appPackageName) {
+            return Futures.immediateFuture(
+                MediaSession.MediaItemsWithStartPosition(emptyList(), startIndex, startPositionMs),
+            )
+        }
+        if (!hasValidMediaItems(mediaItems)) {
+            return Futures.immediateFailedFuture(IllegalArgumentException("Invalid playback item"))
+        }
+        if (initialSessionReady.isCompleted) {
+            return Futures.immediateFuture(
+                MediaSession.MediaItemsWithStartPosition(mediaItems, startIndex, startPositionMs),
+            )
+        }
+        return launchSessionFuture {
+            awaitInitialSessionReady()
+            MediaSession.MediaItemsWithStartPosition(
+                mediaItems,
+                startIndex,
+                startPositionMs,
+            )
         }
     }
 
@@ -164,33 +187,45 @@ internal class PlaybackMediaSessionCallback(
         isForPlayback: Boolean,
     ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = createPlaybackResumptionFuture()
 
-    private fun createPlaybackResumptionFuture(): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
-        val future = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
+    private fun createPlaybackResumptionFuture(): ListenableFuture<MediaSession.MediaItemsWithStartPosition> =
+        launchSessionFuture {
+            awaitInitialSessionReady()
+            check(player.mediaItemCount > 0) { "No resumable playback queue" }
+            val currentIndex =
+                player.currentMediaItemIndex
+                    .takeIf { it in 0 until player.mediaItemCount }
+                    ?: 0
+            val mediaItems = List(player.mediaItemCount, player::getMediaItemAt)
+            MediaSession.MediaItemsWithStartPosition(
+                mediaItems,
+                currentIndex,
+                player.currentPosition.coerceAtLeast(0),
+            )
+        }
+
+    private fun hasValidMediaItems(mediaItems: List<MediaItem>): Boolean = mediaItems.all { mediaItem ->
+        mediaItem.mediaId.isNotBlank() &&
+            runCatching {
+                PlaybackMediaUri.trackId(requireNotNull(mediaItem.localConfiguration).uri)
+            }.isSuccess
+    }
+
+    private suspend fun awaitInitialSessionReady() {
+        val ready =
+            initialSessionReady.isCompleted ||
+                withTimeoutOrNull(PLAYBACK_RESUMPTION_TIMEOUT_MS) {
+                    initialSessionReady.await()
+                    true
+                } == true
+        check(ready) { "Playback session restoration timed out" }
+    }
+
+    private fun <T> launchSessionFuture(block: suspend () -> T): ListenableFuture<T> {
+        val future = SettableFuture.create<T>()
         val job =
             serviceScope.launch {
                 try {
-                    val ready =
-                        initialSessionReady.isCompleted ||
-                            withTimeoutOrNull(
-                                PLAYBACK_RESUMPTION_TIMEOUT_MS,
-                            ) {
-                                initialSessionReady.await()
-                                true
-                            } == true
-                    check(ready) { "Playback session restoration timed out" }
-                    check(player.mediaItemCount > 0) { "No resumable playback queue" }
-                    val currentIndex =
-                        player.currentMediaItemIndex
-                            .takeIf { it in 0 until player.mediaItemCount }
-                            ?: 0
-                    val mediaItems = List(player.mediaItemCount, player::getMediaItemAt)
-                    future.set(
-                        MediaSession.MediaItemsWithStartPosition(
-                            mediaItems,
-                            currentIndex,
-                            player.currentPosition.coerceAtLeast(0),
-                        ),
-                    )
+                    future.set(block())
                 } catch (failure: CancellationException) {
                     future.cancel(false)
                     throw failure

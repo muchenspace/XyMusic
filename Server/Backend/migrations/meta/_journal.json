@@ -15,6 +15,13 @@
       "when": 1788300000000,
       "tag": "0001_remove_tag_scraping_batch_limit",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794800000000,
+      "tag": "0002_dismissed_default_library_roots",
+      "breakpoints": true
     }
   ]
 }

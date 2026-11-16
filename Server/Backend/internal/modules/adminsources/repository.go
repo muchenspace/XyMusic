@@ -17,6 +17,8 @@ import (
 	"xymusic/server/internal/shared/pagination"
 )
 
+var ErrDefaultRootDismissed = errors.New("configured default music source was dismissed")
+
 type Repository struct {
 	database repositoryDatabase
 }
@@ -235,6 +237,11 @@ func (repository *Repository) UpdateRoot(ctx context.Context, command UpdateRoot
 		}
 		return RootView{}, fmt.Errorf("update music source: %w", err)
 	}
+	if locked.ConfigurationManaged && locked.NormalizedPath != command.Mutation.NormalizedPath {
+		if err := dismissDefaultRootPath(ctx, transaction, locked.NormalizedPath); err != nil {
+			return RootView{}, fmt.Errorf("dismiss replaced default music source path: %w", err)
+		}
+	}
 	if err := transaction.Commit(ctx); err != nil {
 		return RootView{}, fmt.Errorf("commit music source update: %w", err)
 	}
@@ -292,6 +299,9 @@ func (repository *Repository) DeleteRoot(ctx context.Context, command DeleteRoot
 	}
 	if _, err := deleteOrphanedTracks(ctx, transaction, rootTrackIDs); err != nil {
 		return fmt.Errorf("delete music source catalog: %w", err)
+	}
+	if err := dismissDefaultRootPath(ctx, transaction, root.NormalizedPath); err != nil {
+		return fmt.Errorf("record dismissed music source path: %w", err)
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return fmt.Errorf("commit music source deletion: %w", err)
@@ -611,6 +621,10 @@ func (repository *Repository) InitializeScans(ctx context.Context, now time.Time
 	}
 	return nil
 }
+func (repository *Repository) IsDefaultRootDismissed(ctx context.Context, normalizedPath string) (bool, error) {
+	return isDefaultRootPathDismissed(ctx, repository.database, normalizedPath)
+}
+
 func (repository *Repository) EnsureDefaultRoot(ctx context.Context, mutation RootMutation) (Root, error) {
 	includePatterns, excludePatterns, err := encodePatterns(mutation)
 	if err != nil {
@@ -633,6 +647,13 @@ func (repository *Repository) EnsureDefaultRoot(ctx context.Context, mutation Ro
 		return Root{}, fmt.Errorf("find existing default music source: %w", err)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
+		dismissed, dismissedErr := isDefaultRootPathDismissed(ctx, transaction, mutation.NormalizedPath)
+		if dismissedErr != nil {
+			return Root{}, dismissedErr
+		}
+		if dismissed {
+			return Root{}, ErrDefaultRootDismissed
+		}
 		root, err = scanRoot(transaction.QueryRow(ctx, `INSERT INTO library_roots(
 			name,path,normalized_path,mode,configuration_managed,enabled,scan_on_startup,
 			scan_interval_minutes,include_patterns,exclude_patterns,status
@@ -1238,6 +1259,31 @@ func encodePatterns(mutation RootMutation) (string, string, error) {
 func isUniqueViolation(err error) bool {
 	var databaseError *pgconn.PgError
 	return errors.As(err, &databaseError) && databaseError.Code == "23505"
+}
+
+func dismissDefaultRootPath(ctx context.Context, transaction pgx.Tx, normalizedPath string) error {
+	_, err := transaction.Exec(ctx, `
+		INSERT INTO dismissed_default_library_roots (normalized_path)
+		VALUES ($1)
+		ON CONFLICT (normalized_path) DO NOTHING`, normalizedPath)
+	return err
+}
+
+func isDefaultRootPathDismissed(
+	ctx context.Context,
+	querier interface {
+		QueryRow(context.Context, string, ...any) pgx.Row
+	},
+	normalizedPath string,
+) (bool, error) {
+	var dismissed bool
+	if err := querier.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM dismissed_default_library_roots WHERE normalized_path=$1)`,
+		normalizedPath,
+	).Scan(&dismissed); err != nil {
+		return false, fmt.Errorf("check dismissed default music source: %w", err)
+	}
+	return dismissed, nil
 }
 
 const rootColumns = `

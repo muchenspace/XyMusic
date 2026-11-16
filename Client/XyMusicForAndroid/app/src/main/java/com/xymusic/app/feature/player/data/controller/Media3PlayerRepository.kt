@@ -27,6 +27,7 @@ import com.xymusic.app.feature.player.domain.model.PlayerFailure
 import com.xymusic.app.feature.player.domain.model.PlayerQueueItem
 import com.xymusic.app.feature.player.domain.model.PlayerState
 import com.xymusic.app.feature.player.domain.model.RepeatMode
+import com.xymusic.app.feature.player.domain.resolveResumePositionMs
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -144,14 +145,29 @@ constructor(
         startPositionMs: Long,
         playWhenReady: Boolean,
     ): PlayerResult<Unit> {
-        val mediaItems =
+        val prepared =
             withContext(defaultDispatcher) {
                 if (isValidPlayerQueue(items, startQueueItemId, startPositionMs)) {
-                    items.map(PlayerQueueItem::toMedia3MediaItem)
+                    val startIndex =
+                        startQueueItemId?.let { id ->
+                            items.indexOfFirst { it.queueItemId == id }
+                        } ?: 0
+                    val resolvedStartPositionMs =
+                        resolveQueueStartPositionMs(
+                            items = items,
+                            startIndex = startIndex,
+                            startPositionMs = startPositionMs,
+                        )
+                    Triple(
+                        items.map(PlayerQueueItem::toMedia3MediaItem),
+                        startIndex,
+                        resolvedStartPositionMs,
+                    )
                 } else {
                     null
                 }
             } ?: return PlayerResult.Failure(PlayerFailure.InvalidQueue)
+        val (mediaItems, startIndex, resolvedStartPositionMs) = prepared
         return withController(
             rebuildQueueAfterCommand = true,
             positionDiscontinuity = { true },
@@ -160,11 +176,7 @@ constructor(
             if (mediaItems.isEmpty()) {
                 controller.clearMediaItems()
             } else {
-                val startIndex =
-                    startQueueItemId?.let { id ->
-                        items.indexOfFirst { it.queueItemId == id }
-                    } ?: 0
-                controller.setMediaItems(mediaItems, startIndex, startPositionMs)
+                controller.setMediaItems(mediaItems, startIndex, resolvedStartPositionMs)
                 controller.prepare()
                 controller.playWhenReady = playWhenReady
             }
@@ -874,3 +886,11 @@ internal fun isValidPlayerQueue(
     }
     require(startQueueItemId == null || items.any { it.queueItemId == startQueueItemId })
 }.isSuccess
+
+internal fun resolveQueueStartPositionMs(items: List<PlayerQueueItem>, startIndex: Int, startPositionMs: Long): Long {
+    val startItem = items.getOrNull(startIndex) ?: return startPositionMs.coerceAtLeast(0L)
+    return resolveResumePositionMs(
+        positionMs = startPositionMs,
+        durationMs = startItem.durationMs,
+    )
+}

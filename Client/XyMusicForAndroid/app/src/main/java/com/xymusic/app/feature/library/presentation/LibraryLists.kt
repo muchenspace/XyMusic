@@ -279,8 +279,8 @@ internal fun History(
         itemContent = { item ->
             CatalogTrackRow(
                 track = item.track,
-                onClick = { onPlay(loadedTracks, item.track, item.lastPositionMs) },
-                onPlayClick = { onPlay(loadedTracks, item.track, item.lastPositionMs) },
+                onClick = { onPlay(loadedTracks, item.track, item.resumePositionMs) },
+                onPlayClick = { onPlay(loadedTracks, item.track, item.resumePositionMs) },
                 onMoreClick = { onTrackMore(item.track.id) },
             )
         },
