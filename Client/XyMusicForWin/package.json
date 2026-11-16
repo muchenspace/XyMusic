@@ -11,7 +11,9 @@
     "test:performance-smoke": "python scripts/playback-performance-smoke.py",
     "test:e2e:isolated": "node scripts/e2e-isolated.mjs",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:exe": "tauri build --no-bundle",
+    "build:bundle": "tauri build"
   },
   "dependencies": {
     "@lucide/vue": "^1.24.0",

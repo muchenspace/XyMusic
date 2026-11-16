@@ -131,6 +131,7 @@ coverage.out
 /Server/xymusic-it-*/
 /Server/Backend/release/
 /Server/Backend/release-*/
+/Client/XyMusicForWin/dist-release/
 /Server/Backend/.xymusic-ffmpeg-staging-*/
 /Server/Backend/xymusic-linux-*.tar.gz
 /Server/Backend/admin/
