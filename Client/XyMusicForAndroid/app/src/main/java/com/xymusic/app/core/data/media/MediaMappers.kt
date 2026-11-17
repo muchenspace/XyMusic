@@ -65,7 +65,14 @@ internal fun ArtistSummaryDto.toEntity(cachedAtEpochMs: Long): ArtistEntity {
 internal fun ArtistDetailDto.toEntity(cachedAtEpochMs: Long): ArtistEntity {
     requireUuid(id, "artist ID")
     require(name.isNotBlank()) { "Artist name cannot be blank" }
-    return ArtistEntity(id, name, description, artwork.toValidatedArtworkColumns(), cachedAtEpochMs)
+    return ArtistEntity(
+        id = id,
+        name = name,
+        description = description,
+        artwork = artwork.toValidatedArtworkColumns(),
+        cachedAtEpochMs = cachedAtEpochMs,
+        detailCachedAtEpochMs = cachedAtEpochMs,
+    )
 }
 
 internal fun AlbumReferenceDto.toReferenceEntity(cachedAtEpochMs: Long): AlbumEntity {
@@ -83,6 +90,7 @@ internal fun AlbumSummaryDto.toWriteModel(cachedAtEpochMs: Long): AlbumWriteMode
     trackCount = trackCount,
     description = null,
     cachedAtEpochMs = cachedAtEpochMs,
+    detailCachedAtEpochMs = null,
 )
 
 internal fun AlbumDetailDto.toWriteModel(cachedAtEpochMs: Long): AlbumWriteModel = albumWriteModel(
@@ -94,6 +102,7 @@ internal fun AlbumDetailDto.toWriteModel(cachedAtEpochMs: Long): AlbumWriteModel
     trackCount = trackCount,
     description = description,
     cachedAtEpochMs = cachedAtEpochMs,
+    detailCachedAtEpochMs = cachedAtEpochMs,
 )
 
 private fun albumWriteModel(
@@ -105,6 +114,7 @@ private fun albumWriteModel(
     trackCount: Int,
     description: String?,
     cachedAtEpochMs: Long,
+    detailCachedAtEpochMs: Long?,
 ): AlbumWriteModel {
     requireUuid(id, "album ID")
     require(title.isNotBlank()) { "Album title cannot be blank" }
@@ -121,6 +131,7 @@ private fun albumWriteModel(
             trackCount = trackCount,
             cover = cover.toValidatedArtworkColumns(),
             cachedAtEpochMs = cachedAtEpochMs,
+            detailCachedAtEpochMs = detailCachedAtEpochMs,
         ),
         artistReferences = references,
         credits =

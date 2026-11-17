@@ -75,7 +75,7 @@ onBeforeUnmount(() => previouslyFocused?.focus());
       <header>
         <div><p>播放队列</p><span>共 {{ player.queue.length }} 首歌曲</span></div>
         <div>
-          <button type="button" class="icon-button" title="仅保留当前歌曲" aria-label="仅保留当前歌曲" :disabled="player.queue.length <= 1" @click="player.clearQueue"><Trash2 :size="17" /></button>
+          <button type="button" class="icon-button" title="仅保留当前歌曲" aria-label="仅保留当前歌曲" :disabled="player.queue.length <= 1" @click="player.keepCurrentTrack"><Trash2 :size="17" /></button>
           <button type="button" class="icon-button" title="关闭队列" aria-label="关闭队列" @click="close"><X :size="19" /></button>
         </div>
       </header>

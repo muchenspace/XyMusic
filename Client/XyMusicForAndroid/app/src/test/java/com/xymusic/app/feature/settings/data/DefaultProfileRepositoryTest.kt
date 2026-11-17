@@ -9,12 +9,12 @@ import com.xymusic.app.core.session.SessionInvalidator
 import com.xymusic.app.core.session.SessionMutationCoordinator
 import com.xymusic.app.data.network.ProblemResponseParser
 import com.xymusic.app.data.network.auth.IdempotencyKeyGenerator
+import com.xymusic.app.domain.server.ServerConfigRepository
 import com.xymusic.app.feature.settings.data.remote.AvatarUploadDto
 import com.xymusic.app.feature.settings.data.remote.CompleteAvatarUploadRequestDto
 import com.xymusic.app.feature.settings.data.remote.CreateAvatarUploadRequestDto
 import com.xymusic.app.feature.settings.data.remote.CurrentUserDto
 import com.xymusic.app.feature.settings.data.remote.ProfileApi
-import com.xymusic.app.domain.server.ServerConfigRepository
 import com.xymusic.app.feature.settings.domain.SettingsResult
 import com.xymusic.app.feature.settings.domain.model.AvatarUploadCommand
 import com.xymusic.app.support.InMemoryServerConfigRepository
@@ -212,21 +212,20 @@ class DefaultProfileRepositoryTest {
                 .writeTimeout(1, TimeUnit.DAYS)
                 .callTimeout(0, TimeUnit.MILLISECONDS)
                 .build(),
-    ) =
-        DefaultProfileRepository(
-            api = api,
-            problemResponseParser = ProblemResponseParser(Json, ProblemMapper()),
-            idempotencyKeyGenerator = IdempotencyKeyGenerator { "test-idempotency-key" },
-            sessionProvider = session,
-            sessionInvalidator = SessionInvalidator { },
-            sessionMutationCoordinator = SessionMutationCoordinator(),
-            profileMemoryCache = ProfileMemoryCache(runtime),
-            serverRuntimeCoordinator = runtime,
-            serverConfigRepository = serverConfigRepository,
-            mediaHttpClient = mediaHttpClient,
-            apiHttpClient = apiHttpClient,
-            ioDispatcher = Dispatchers.IO,
-        )
+    ) = DefaultProfileRepository(
+        api = api,
+        problemResponseParser = ProblemResponseParser(Json, ProblemMapper()),
+        idempotencyKeyGenerator = IdempotencyKeyGenerator { "test-idempotency-key" },
+        sessionProvider = session,
+        sessionInvalidator = SessionInvalidator { },
+        sessionMutationCoordinator = SessionMutationCoordinator(),
+        profileMemoryCache = ProfileMemoryCache(runtime),
+        serverRuntimeCoordinator = runtime,
+        serverConfigRepository = serverConfigRepository,
+        mediaHttpClient = mediaHttpClient,
+        apiHttpClient = apiHttpClient,
+        ioDispatcher = Dispatchers.IO,
+    )
 
     private fun unresponsiveServer(): MockWebServer = MockWebServer().apply {
         enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))

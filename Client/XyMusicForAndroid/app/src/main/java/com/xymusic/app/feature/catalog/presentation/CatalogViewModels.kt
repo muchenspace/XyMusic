@@ -172,10 +172,14 @@ constructor(
             .cachedIn(viewModelScope)
 
     init {
-        refresh()
+        refresh(forceRefresh = false)
     }
 
     fun refresh() {
+        refresh(forceRefresh = true)
+    }
+
+    private fun refresh(forceRefresh: Boolean) {
         if (refreshJob?.isActive == true) return
         refreshJob =
             viewModelScope.launch {
@@ -183,7 +187,7 @@ constructor(
                 refreshFailed.value = false
                 refreshFailed.value =
                     try {
-                        useCases.refreshAlbum(albumId) is CatalogResult.Failure
+                        useCases.refreshAlbum(albumId, forceRefresh = forceRefresh) is CatalogResult.Failure
                     } catch (cancellation: CancellationException) {
                         throw cancellation
                     } catch (_: Exception) {
@@ -245,10 +249,14 @@ constructor(
             .cachedIn(viewModelScope)
 
     init {
-        refresh()
+        refresh(forceRefresh = false)
     }
 
     fun refresh() {
+        refresh(forceRefresh = true)
+    }
+
+    private fun refresh(forceRefresh: Boolean) {
         if (refreshJob?.isActive == true) return
         refreshJob =
             viewModelScope.launch {
@@ -256,7 +264,7 @@ constructor(
                 refreshFailed.value = false
                 refreshFailed.value =
                     try {
-                        useCases.refreshArtist(artistId) is CatalogResult.Failure
+                        useCases.refreshArtist(artistId, forceRefresh = forceRefresh) is CatalogResult.Failure
                     } catch (cancellation: CancellationException) {
                         throw cancellation
                     } catch (_: Exception) {

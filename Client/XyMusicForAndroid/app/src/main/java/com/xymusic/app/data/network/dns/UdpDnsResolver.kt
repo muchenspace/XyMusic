@@ -10,12 +10,14 @@ import java.nio.ByteBuffer
 object UdpDnsResolver {
     private const val DNS_PORT = 53
     private const val DEFAULT_TIMEOUT_MS = 3_000
+    private const val DNS_HEADER_BYTES = 12
+    private const val DNS_QUESTION_TRAILER_BYTES = 4
+    private const val DNS_ANSWER_HEADER_BYTES = 10
+    private const val TYPE_A = 1
+    private const val CLASS_IN = 1
+    private const val IPV4_ADDRESS_BYTES = 4
 
-    fun resolve(
-        hostname: String,
-        serverIp: String,
-        timeoutMs: Int = DEFAULT_TIMEOUT_MS,
-    ): List<InetAddress> {
+    fun resolve(hostname: String, serverIp: String, timeoutMs: Int = DEFAULT_TIMEOUT_MS): List<InetAddress> {
         val serverAddr = InetAddress.getByName(serverIp)
         val query = buildQuery(hostname)
         DatagramSocket().use { socket ->
@@ -38,10 +40,10 @@ object UdpDnsResolver {
         // 12-byte DNS header
         dos.writeShort(id.toInt())
         dos.writeShort(0x0100) // Standard query with recursion desired (RD=1)
-        dos.writeShort(1)      // QDCOUNT: 1 question
-        dos.writeShort(0)      // ANCOUNT: 0
-        dos.writeShort(0)      // NSCOUNT: 0
-        dos.writeShort(0)      // ARCOUNT: 0
+        dos.writeShort(1) // QDCOUNT: 1 question
+        dos.writeShort(0) // ANCOUNT: 0
+        dos.writeShort(0) // NSCOUNT: 0
+        dos.writeShort(0) // ARCOUNT: 0
 
         // Question: QNAME
         for (label in hostname.split('.')) {
@@ -51,15 +53,15 @@ object UdpDnsResolver {
         }
         dos.writeByte(0) // Root null label
 
-        dos.writeShort(1) // QTYPE: A (IPv4)
-        dos.writeShort(1) // QCLASS: IN (Internet)
+        dos.writeShort(TYPE_A) // QTYPE: A (IPv4)
+        dos.writeShort(CLASS_IN) // QCLASS: IN (Internet)
 
         dos.flush()
         return baos.toByteArray()
     }
 
     internal fun parseResponse(buffer: ByteArray, length: Int, hostname: String): List<InetAddress> {
-        if (length < 12) return emptyList()
+        if (length < DNS_HEADER_BYTES) return emptyList()
         val byteBuffer = ByteBuffer.wrap(buffer, 0, length)
         byteBuffer.short // id
         val flags = byteBuffer.short.toInt() and 0xFFFF
@@ -74,54 +76,66 @@ object UdpDnsResolver {
         // Skip Question section
         for (i in 0 until qdCount) {
             skipName(byteBuffer)
-            if (byteBuffer.remaining() < 4) return emptyList()
+            if (byteBuffer.remaining() < DNS_QUESTION_TRAILER_BYTES) return emptyList()
             byteBuffer.short // qtype
             byteBuffer.short // qclass
         }
 
         val addresses = mutableListOf<InetAddress>()
         // Parse Answer section
-        for (i in 0 until anCount) {
-            if (!byteBuffer.hasRemaining()) break
-            skipName(byteBuffer)
-            if (byteBuffer.remaining() < 10) break
-            val type = byteBuffer.short.toInt() and 0xFFFF
-            val clazz = byteBuffer.short.toInt() and 0xFFFF
-            byteBuffer.int // ttl
-            val rdLength = byteBuffer.short.toInt() and 0xFFFF
-
-            if (byteBuffer.remaining() < rdLength) break
-
-            if (type == 1 && clazz == 1 && rdLength == 4) {
-                // Type A (IPv4)
-                val ipBytes = ByteArray(4)
-                byteBuffer.get(ipBytes)
-                runCatching {
-                    addresses.add(InetAddress.getByAddress(hostname, ipBytes))
-                }
-            } else {
-                byteBuffer.position(byteBuffer.position() + rdLength)
-            }
+        var answerIndex = 0
+        while (answerIndex < anCount && parseAnswerRecord(byteBuffer, hostname, addresses)) {
+            answerIndex++
         }
 
         return addresses
     }
 
+    private fun parseAnswerRecord(
+        byteBuffer: ByteBuffer,
+        hostname: String,
+        addresses: MutableList<InetAddress>,
+    ): Boolean {
+        if (!byteBuffer.hasRemaining()) return false
+        skipName(byteBuffer)
+        if (byteBuffer.remaining() < DNS_ANSWER_HEADER_BYTES) return false
+        val type = byteBuffer.short.toInt() and 0xFFFF
+        val clazz = byteBuffer.short.toInt() and 0xFFFF
+        byteBuffer.int // ttl
+        val rdLength = byteBuffer.short.toInt() and 0xFFFF
+        if (byteBuffer.remaining() < rdLength) return false
+
+        if (type == TYPE_A && clazz == CLASS_IN && rdLength == IPV4_ADDRESS_BYTES) {
+            val ipBytes = ByteArray(IPV4_ADDRESS_BYTES)
+            byteBuffer.get(ipBytes)
+            runCatching {
+                addresses.add(InetAddress.getByAddress(hostname, ipBytes))
+            }
+        } else {
+            byteBuffer.position(byteBuffer.position() + rdLength)
+        }
+        return true
+    }
+
     private fun skipName(buffer: ByteBuffer) {
-        while (buffer.hasRemaining()) {
+        var readingLabels = true
+        while (readingLabels && buffer.hasRemaining()) {
             val len = buffer.get().toInt() and 0xFF
-            if (len == 0) break
-            if ((len and 0xC0) == 0xC0) {
-                // Compression offset (2 bytes)
-                if (buffer.hasRemaining()) buffer.get()
-                break
-            } else {
-                val target = buffer.position() + len
-                if (target <= buffer.limit()) {
-                    buffer.position(target)
-                } else {
-                    buffer.position(buffer.limit())
-                    break
+            when {
+                len == 0 -> readingLabels = false
+                (len and 0xC0) == 0xC0 -> {
+                    // Compression offset (2 bytes)
+                    if (buffer.hasRemaining()) buffer.get()
+                    readingLabels = false
+                }
+                else -> {
+                    val target = buffer.position() + len
+                    if (target <= buffer.limit()) {
+                        buffer.position(target)
+                    } else {
+                        buffer.position(buffer.limit())
+                        readingLabels = false
+                    }
                 }
             }
         }

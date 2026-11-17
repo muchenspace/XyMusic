@@ -89,24 +89,23 @@ internal data class PlayerLayoutSpec(
         get() = if (compactControls) 30.dp else 32.dp
 }
 
-internal fun playerLayoutSpec(width: Dp, height: Dp): PlayerLayoutSpec =
-    PlayerLayoutSpec(
-        width = width,
-        height = height,
-        isLandscape = width > height,
-        widthClass =
-        when {
-            width < PLAYER_MEDIUM_WIDTH -> PlayerWindowWidthClass.Compact
-            width < PLAYER_EXPANDED_WIDTH -> PlayerWindowWidthClass.Medium
-            else -> PlayerWindowWidthClass.Expanded
-        },
-        heightClass =
-        when {
-            height < PLAYER_MEDIUM_HEIGHT -> PlayerWindowHeightClass.Compact
-            height < PLAYER_EXPANDED_HEIGHT -> PlayerWindowHeightClass.Medium
-            else -> PlayerWindowHeightClass.Expanded
-        },
-    )
+internal fun playerLayoutSpec(width: Dp, height: Dp): PlayerLayoutSpec = PlayerLayoutSpec(
+    width = width,
+    height = height,
+    isLandscape = width > height,
+    widthClass =
+    when {
+        width < PLAYER_MEDIUM_WIDTH -> PlayerWindowWidthClass.Compact
+        width < PLAYER_EXPANDED_WIDTH -> PlayerWindowWidthClass.Medium
+        else -> PlayerWindowWidthClass.Expanded
+    },
+    heightClass =
+    when {
+        height < PLAYER_MEDIUM_HEIGHT -> PlayerWindowHeightClass.Compact
+        height < PLAYER_EXPANDED_HEIGHT -> PlayerWindowHeightClass.Medium
+        else -> PlayerWindowHeightClass.Expanded
+    },
+)
 
 /**
  * Text adapts to the lyric pane rather than device identity. Font sizes remain in sp so Android's

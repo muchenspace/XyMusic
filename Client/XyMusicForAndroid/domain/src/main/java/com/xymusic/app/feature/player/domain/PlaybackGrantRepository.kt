@@ -1,10 +1,7 @@
 package com.xymusic.app.feature.player.domain
 
 interface PlaybackGrantRepository {
-    suspend fun get(
-        trackId: String,
-        forceRefresh: Boolean = false,
-    ): PlayerResult<PlaybackGrant>
+    suspend fun get(trackId: String, forceRefresh: Boolean = false): PlayerResult<PlaybackGrant>
 
     fun invalidate(trackId: String)
 

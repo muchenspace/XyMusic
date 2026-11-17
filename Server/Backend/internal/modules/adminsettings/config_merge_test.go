@@ -243,6 +243,24 @@ func TestMergeMediaToolsAllowsBlankDirectoryForSystemPath(t *testing.T) {
 	}
 }
 
+func TestMergeStorageUpdatesMaxUploadBytesStandaloneAndCombined(t *testing.T) {
+	current := settingsTestConfig(t)
+	nextLimit := int64(64 * 1024 * 1024)
+	candidate, err := mergeSettings(current, UpdateInput{
+		ExpectedVersion: 1,
+		Storage:         &StorageInput{MaxUploadBytes: &nextLimit},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if candidate.MediaStorage.MaxUploadBytes != nextLimit {
+		t.Fatalf("maxUploadBytes = %d, want %d", candidate.MediaStorage.MaxUploadBytes, nextLimit)
+	}
+	if fields := changedFields(current, candidate); !reflect.DeepEqual(fields, []string{"storage.maxUploadBytes"}) {
+		t.Fatalf("changedFields = %v, want [storage.maxUploadBytes]", fields)
+	}
+}
+
 func TestPresentSettingsHidesSecretsAndReportsRestartFields(t *testing.T) {
 	cfg := settingsTestConfig(t)
 	result, err := presentSettings(cfg, 7, "managed", ListenerDTO{

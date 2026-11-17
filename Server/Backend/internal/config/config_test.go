@@ -45,9 +45,6 @@ func TestDevelopmentDefaultsAreCompatible(t *testing.T) {
 	if cfg.Media.Mode != "ADVANCED" || cfg.Media.FFmpegPath != "ffmpeg" || cfg.Media.FFprobePath != "ffprobe" {
 		t.Fatalf("expected PATH-based media defaults: %#v", cfg.Media)
 	}
-	if cfg.Media.FFmpegThreads != 0 {
-		t.Fatalf("unexpected automatic FFmpeg thread setting: %#v", cfg.Media)
-	}
 	if cfg.LocalLibrary.ScanCommitWorkers < 1 || cfg.LocalLibrary.ScanCommitBatchSize < 1 || cfg.LocalLibrary.ScanProbeWorkers < 1 {
 		t.Fatalf("unexpected scan stage defaults: %#v", cfg.LocalLibrary)
 	}
@@ -61,7 +58,6 @@ func TestPerformanceWorkerLimitsAreConfigurable(t *testing.T) {
 		"LOCAL_MUSIC_SCAN_COMMIT_WORKERS":    "3",
 		"LOCAL_MUSIC_SCAN_COMMIT_BATCH_SIZE": "11",
 		"LOCAL_MUSIC_SCAN_PROBE_WORKERS":     "5",
-		"MEDIA_FFMPEG_THREADS":               "2",
 		"TAG_SCRAPING_WORKERS":               "4",
 		"TAG_SCRAPING_CLAIM_WINDOW":          "17",
 		"TAG_SCRAPING_ARTWORK_WORKERS":       "3",
@@ -72,13 +68,12 @@ func TestPerformanceWorkerLimitsAreConfigurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.LocalLibrary.ScanCommitWorkers != 3 || cfg.LocalLibrary.ScanCommitBatchSize != 11 || cfg.LocalLibrary.ScanProbeWorkers != 5 ||
-		cfg.Media.FFmpegThreads != 2 ||
 		cfg.Scraping.BatchWorkers != 4 || cfg.Scraping.BatchClaimWindow != 17 || cfg.Scraping.ArtworkWorkers != 3 || cfg.Scraping.ArtworkClaimWindow != 13 || cfg.Scraping.WritebackWorkers != 4 {
-		t.Fatalf("performance limits = %#v/%#v", cfg.LocalLibrary, cfg.Media)
+		t.Fatalf("performance limits = %#v/%#v", cfg.LocalLibrary, cfg.Scraping)
 	}
 	environment := ToEnvironment(cfg)
 	if environment["LOCAL_MUSIC_SCAN_COMMIT_WORKERS"] != "3" || environment["LOCAL_MUSIC_SCAN_COMMIT_BATCH_SIZE"] != "11" ||
-		environment["LOCAL_MUSIC_SCAN_PROBE_WORKERS"] != "5" || environment["MEDIA_FFMPEG_THREADS"] != "2" ||
+		environment["LOCAL_MUSIC_SCAN_PROBE_WORKERS"] != "5" ||
 		environment["TAG_SCRAPING_WORKERS"] != "4" || environment["TAG_SCRAPING_CLAIM_WINDOW"] != "17" ||
 		environment["TAG_SCRAPING_ARTWORK_WORKERS"] != "3" || environment["TAG_SCRAPING_ARTWORK_CLAIM_WINDOW"] != "13" || environment["TAG_WRITEBACK_WORKERS"] != "4" {
 		t.Fatalf("performance limits were not persisted: %#v", environment)

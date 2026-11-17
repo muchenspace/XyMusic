@@ -29,12 +29,7 @@ class DatabaseMigrationTest {
                 TEST_DATABASE,
                 XyMusicDatabase.VERSION,
                 true,
-                DatabaseMigrations.MIGRATION_1_2,
-                DatabaseMigrations.MIGRATION_2_3,
-                DatabaseMigrations.MIGRATION_3_4,
-                DatabaseMigrations.MIGRATION_4_5,
-                DatabaseMigrations.MIGRATION_5_6,
-                DatabaseMigrations.MIGRATION_6_7,
+                *DatabaseMigrations.ALL,
             ).close()
     }
 
@@ -93,6 +88,8 @@ class DatabaseMigrationTest {
                 DatabaseMigrations.MIGRATION_4_5,
                 DatabaseMigrations.MIGRATION_5_6,
                 DatabaseMigrations.MIGRATION_6_7,
+                DatabaseMigrations.MIGRATION_7_8,
+                DatabaseMigrations.MIGRATION_8_9,
             ).use { database ->
                 database
                     .query(
@@ -136,6 +133,8 @@ class DatabaseMigrationTest {
                 DatabaseMigrations.MIGRATION_4_5,
                 DatabaseMigrations.MIGRATION_5_6,
                 DatabaseMigrations.MIGRATION_6_7,
+                DatabaseMigrations.MIGRATION_7_8,
+                DatabaseMigrations.MIGRATION_8_9,
             ).use { database ->
                 database.query("SELECT COUNT(*) FROM offline_tracks").use { cursor ->
                     assertThat(cursor.moveToFirst()).isTrue()
@@ -203,6 +202,8 @@ class DatabaseMigrationTest {
                 true,
                 DatabaseMigrations.MIGRATION_5_6,
                 DatabaseMigrations.MIGRATION_6_7,
+                DatabaseMigrations.MIGRATION_7_8,
+                DatabaseMigrations.MIGRATION_8_9,
             ).use { database ->
                 assertCount(database, "playlists", "id = 'playlist'", 0)
                 assertCount(database, "playlist_entries", "playlist_id = 'playlist'", 0)
@@ -250,6 +251,8 @@ class DatabaseMigrationTest {
                 XyMusicDatabase.VERSION,
                 true,
                 DatabaseMigrations.MIGRATION_6_7,
+                DatabaseMigrations.MIGRATION_7_8,
+                DatabaseMigrations.MIGRATION_8_9,
             ).use { database ->
                 database.query("SELECT COUNT(*) FROM lyrics").use { cursor ->
                     assertThat(cursor.moveToFirst()).isTrue()

@@ -67,6 +67,16 @@ class DatabaseSchemaTest {
                 }
             assertThat(columns).contains("owner_user_id")
         }
+
+        listOf("artists", "albums").forEach { table ->
+            val columns =
+                entities.getValue(table).jsonObject.getValue("fields").jsonArray.map {
+                    it.jsonObject
+                        .getValue("columnName")
+                        .jsonPrimitive.content
+                }
+            assertThat(columns).contains("detail_cached_at_epoch_ms")
+        }
     }
 
     @Test

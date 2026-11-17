@@ -41,16 +41,14 @@ class PlaybackMediaPositionTest {
         assertThat(item.globalPlaybackDurationMs(0)).isEqualTo(180_000L)
     }
 
-    private fun mediaItem(durationMs: Long): MediaItem {
-        return MediaItem
-            .Builder()
-            .setMediaId("queue-1")
-            .setMediaMetadata(
-                MediaMetadata
-                    .Builder()
-                    .setDurationMs(durationMs)
-                    .build(),
-            )
-            .build()
-    }
+    private fun mediaItem(durationMs: Long): MediaItem = MediaItem
+        .Builder()
+        .setMediaId("queue-1")
+        .setMediaMetadata(
+            MediaMetadata
+                .Builder()
+                .setDurationMs(durationMs)
+                .build(),
+        )
+        .build()
 }

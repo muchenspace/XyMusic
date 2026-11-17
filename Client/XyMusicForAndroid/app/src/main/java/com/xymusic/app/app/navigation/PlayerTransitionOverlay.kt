@@ -72,9 +72,6 @@ private class PlayerOverlayMotion(initialVisible: Boolean) {
     val startDragImmediately: Boolean
         get() = offsetY.isRunning
 
-    val immersiveLandscape: Boolean
-        get() = phase == PlayerOverlayPhase.Visible
-
     suspend fun updateVisibility(visible: Boolean, metrics: PlayerOverlayMetrics) {
         when {
             visible && phase == PlayerOverlayPhase.Hidden -> enterFromHidden(metrics)
@@ -236,7 +233,6 @@ internal fun PlayerTransitionOverlay(
     content: @Composable (
         onDismiss: () -> Unit,
         dismissGestureModifier: Modifier,
-        immersiveLandscape: Boolean,
     ) -> Unit,
 ) {
     val density = LocalDensity.current
@@ -292,7 +288,6 @@ internal fun PlayerTransitionOverlay(
                         )
                     },
                     dragModifier,
-                    motion.immersiveLandscape,
                 )
             }
         }

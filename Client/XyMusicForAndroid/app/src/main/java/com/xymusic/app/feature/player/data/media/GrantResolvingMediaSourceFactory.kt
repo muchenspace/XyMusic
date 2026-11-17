@@ -1,12 +1,11 @@
 package com.xymusic.app.feature.player.data.media
 
 import android.net.Uri
-import android.os.Handler
-import android.os.Looper
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.util.Util
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.TransferListener
 import androidx.media3.exoplayer.drm.DrmSessionManagerProvider
@@ -24,7 +23,6 @@ import com.xymusic.app.core.session.SessionIdentityProvider
 import com.xymusic.app.core.session.SessionMutationCoordinator
 import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaUri
 import com.xymusic.app.feature.player.adapter.media3.globalPlaybackDurationMs
-import com.xymusic.app.feature.player.domain.PlaybackGrant
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
 import com.xymusic.app.feature.player.domain.PlayerResult
 import java.io.IOException
@@ -80,8 +78,7 @@ constructor(
         )
     }
 
-    override fun getSupportedTypes(): IntArray =
-        intArrayOf(C.CONTENT_TYPE_OTHER)
+    override fun getSupportedTypes(): IntArray = intArrayOf(C.CONTENT_TYPE_OTHER)
 
     override fun setDrmSessionManagerProvider(provider: DrmSessionManagerProvider): MediaSource.Factory {
         progressiveFactory.setDrmSessionManagerProvider(provider)
@@ -95,7 +92,7 @@ constructor(
 }
 
 @UnstableApi
-private class GrantResolvingMediaSource(
+internal class GrantResolvingMediaSource(
     private val mediaItem: MediaItem,
     private val trackId: String,
     private val grantRepository: PlaybackGrantRepository,
@@ -119,7 +116,7 @@ private class GrantResolvingMediaSource(
 
     override fun prepareSourceInternal(mediaTransferListener: TransferListener?) {
         super.prepareSourceInternal(mediaTransferListener)
-        val handler = Handler(Looper.getMainLooper())
+        val handler = Util.createHandlerForCurrentLooper()
         resolutionJob = scope.launch {
             try {
                 val resolved = resolveSource()
@@ -163,11 +160,7 @@ private class GrantResolvingMediaSource(
         checkNotNull(resolvedChild) { "Playback source has not been resolved" }.releasePeriod(mediaPeriod)
     }
 
-    override fun onChildSourceInfoRefreshed(
-        id: Unit,
-        mediaSource: MediaSource,
-        timeline: Timeline,
-    ) {
+    override fun onChildSourceInfoRefreshed(id: Unit, mediaSource: MediaSource, timeline: Timeline) {
         refreshSourceInfo(
             resolvedPublishedMediaItem?.let(timeline::withMediaItem) ?: timeline,
         )
@@ -223,20 +216,14 @@ private class GrantResolvingMediaSource(
     private fun Exception.asPlaybackIOException(): IOException =
         this as? IOException ?: IOException("Playback source resolution failed", this)
 
-    private data class ResolvedPlaybackSource(
-        val mediaItem: MediaItem,
-        val publishedMediaItem: MediaItem,
-    )
+    private data class ResolvedPlaybackSource(val mediaItem: MediaItem, val publishedMediaItem: MediaItem)
 
     private companion object {
         val CHILD_SOURCE_ID = Unit
     }
 }
 
-private fun MediaItem.withUri(
-    uri: Uri,
-    mimeType: String? = null,
-): MediaItem = buildUpon()
+private fun MediaItem.withUri(uri: Uri, mimeType: String? = null): MediaItem = buildUpon()
     .setUri(uri)
     .apply {
         mimeType?.takeIf(String::isNotBlank)?.let(::setMimeType)

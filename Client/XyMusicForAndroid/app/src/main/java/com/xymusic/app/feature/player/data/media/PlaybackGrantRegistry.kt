@@ -58,9 +58,7 @@ constructor() {
         val ticket: String,
     )
 
-    private data class PlaybackRequest(
-        val trackId: String,
-    ) {
+    private data class PlaybackRequest(val trackId: String) {
         companion object {
             fun parse(uri: Uri): PlaybackRequest? {
                 val pathSegments = uri.pathSegments
@@ -79,10 +77,9 @@ constructor() {
         const val STREAMS_PATH_SEGMENT = "streams"
         const val TICKET_QUERY_PARAMETER = "ticket"
 
-        fun sameOrigin(left: Uri, right: Uri): Boolean =
-            left.scheme.equals(right.scheme, ignoreCase = true) &&
-                left.host.equals(right.host, ignoreCase = true) &&
-                effectivePort(left) == effectivePort(right)
+        fun sameOrigin(left: Uri, right: Uri): Boolean = left.scheme.equals(right.scheme, ignoreCase = true) &&
+            left.host.equals(right.host, ignoreCase = true) &&
+            effectivePort(left) == effectivePort(right)
 
         fun effectivePort(uri: Uri): Int = when {
             uri.port >= 0 -> uri.port
@@ -93,7 +90,4 @@ constructor() {
     }
 }
 
-data class PlaybackResource(
-    val uri: Uri,
-    val cacheKey: String,
-)
+data class PlaybackResource(val uri: Uri, val cacheKey: String)

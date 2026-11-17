@@ -236,8 +236,20 @@ func (repository *Repository) FinalizeUpload(ctx context.Context, input Finalize
 	}
 
 	// Update corresponding target table
+	var previousAssetID *string
 	switch upload.Purpose {
 	case PurposeTrackSource:
+		err = tx.QueryRow(ctx, `
+			select source_asset_id
+			from tracks
+			where id = $1
+			for update`, upload.TargetID).Scan(&previousAssetID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apperror.NotFound("Track was not found")
+		}
+		if err != nil {
+			return fmt.Errorf("lock track source asset: %w", err)
+		}
 		duration := int64(0)
 		if input.Inspected.DurationMs != nil {
 			duration = *input.Inspected.DurationMs
@@ -250,6 +262,17 @@ func (repository *Repository) FinalizeUpload(ctx context.Context, input Finalize
 			return fmt.Errorf("update track source asset: %w", err)
 		}
 	case PurposeArtistArtwork:
+		err = tx.QueryRow(ctx, `
+			select artwork_asset_id
+			from artists
+			where id = $1
+			for update`, upload.TargetID).Scan(&previousAssetID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apperror.NotFound("Artist was not found")
+		}
+		if err != nil {
+			return fmt.Errorf("lock artist artwork: %w", err)
+		}
 		command, err := tx.Exec(ctx, `
 			update artists
 			set artwork_asset_id = $2, version = version + 1, updated_at = $3
@@ -261,6 +284,17 @@ func (repository *Repository) FinalizeUpload(ctx context.Context, input Finalize
 			return apperror.NotFound("Artist was not found")
 		}
 	case PurposeAlbumArtwork:
+		err = tx.QueryRow(ctx, `
+			select cover_asset_id
+			from albums
+			where id = $1
+			for update`, upload.TargetID).Scan(&previousAssetID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apperror.NotFound("Album was not found")
+		}
+		if err != nil {
+			return fmt.Errorf("lock album cover: %w", err)
+		}
 		command, err := tx.Exec(ctx, `
 			update albums
 			set cover_asset_id = $2, version = version + 1, updated_at = $3
@@ -272,7 +306,6 @@ func (repository *Repository) FinalizeUpload(ctx context.Context, input Finalize
 			return apperror.NotFound("Album was not found")
 		}
 	case PurposeUserAvatar:
-		var previousAssetID *string
 		err = tx.QueryRow(ctx, `
 			select avatar_asset_id
 			from user_profiles
@@ -300,17 +333,9 @@ func (repository *Repository) FinalizeUpload(ctx context.Context, input Finalize
 		if command.RowsAffected() != 1 {
 			return apperror.NotFound("User no longer exists")
 		}
-		if previousAssetID != nil && *previousAssetID != input.AssetID {
-			_, _ = tx.Exec(ctx, `
-				update media_assets
-				set status = 'DELETE_PENDING', updated_at = $2
-				where id = $1
-				  and not exists (select 1 from artists where artwork_asset_id = media_assets.id)
-				  and not exists (select 1 from albums where cover_asset_id = media_assets.id)
-				  and not exists (select 1 from playlists where cover_asset_id = media_assets.id)
-				  and not exists (select 1 from user_profiles where avatar_asset_id = media_assets.id)`,
-				*previousAssetID, input.Now)
-		}
+	}
+	if previousAssetID != nil && *previousAssetID != input.AssetID {
+		markReplacedAssetPendingDelete(ctx, tx, *previousAssetID, input.Now)
 	}
 
 	command, err := tx.Exec(ctx, `
@@ -421,4 +446,19 @@ func scanUploadReservation(row rowScanner) (UploadReservation, error) {
 	)
 	upload.TrackID = trackID
 	return upload, err
+}
+
+func markReplacedAssetPendingDelete(ctx context.Context, tx pgx.Tx, assetID string, now time.Time) {
+	_, _ = tx.Exec(ctx, `
+		update media_assets
+		set status = 'DELETE_PENDING', updated_at = $2
+		where id = $1
+		  and not exists (select 1 from tracks where source_asset_id = media_assets.id)
+		  and not exists (select 1 from local_music_sources where source_asset_id = media_assets.id)
+		  and not exists (select 1 from lyrics where asset_id = media_assets.id)
+		  and not exists (select 1 from artists where artwork_asset_id = media_assets.id)
+		  and not exists (select 1 from albums where cover_asset_id = media_assets.id)
+		  and not exists (select 1 from playlists where cover_asset_id = media_assets.id)
+		  and not exists (select 1 from user_profiles where avatar_asset_id = media_assets.id)`,
+		assetID, now)
 }

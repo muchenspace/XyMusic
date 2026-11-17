@@ -63,7 +63,6 @@ android {
 
     sourceSets {
         getByName("debug").assets.srcDir("$projectDir/schemas")
-        getByName("release").assets.srcDir("$projectDir/schemas")
         getByName("androidTest").assets.srcDir("$projectDir/schemas")
     }
 
@@ -97,12 +96,6 @@ composeCompiler {
     stabilityConfigurationFiles.add(
         rootProject.layout.projectDirectory.file("config/compose-stability.conf"),
     )
-}
-
-ksp {
-    arg("room.schemaLocation", "$projectDir/schemas")
-    arg("room.incremental", "true")
-    arg("room.generateKotlin", "true")
 }
 
 baselineProfile {
@@ -148,7 +141,6 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     implementation(libs.androidx.room.paging)
-    ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.paging.runtime)
     implementation(libs.androidx.paging.compose)
     implementation(libs.androidx.datastore.preferences)

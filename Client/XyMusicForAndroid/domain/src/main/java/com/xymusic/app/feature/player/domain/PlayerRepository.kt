@@ -54,7 +54,6 @@ interface PlayerRepository {
 
 sealed interface PlayerEvent
 
-
 sealed interface PlayerResult<out T> {
     data class Success<T>(val value: T) : PlayerResult<T>
 

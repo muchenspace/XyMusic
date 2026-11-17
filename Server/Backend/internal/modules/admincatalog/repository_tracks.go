@@ -343,23 +343,90 @@ func (repository *Repository) enrichTrackCredits(
 	return closeRows(creditRows, "iterate admin track credits")
 }
 
+type trackWritebackSnapshot struct {
+	id              string
+	status          string
+	metadataVersion int
+	lastErrorCode   *string
+	lastError       *string
+}
+
 func (repository *Repository) enrichTrackAttributes(
 	ctx context.Context,
 	ids []string,
 	byID map[string]*TrackRecord,
 ) error {
+	var (
+		sources          map[string]SourceRecord
+		metadataVersions map[string]int
+		writebacks       map[string]trackWritebackSnapshot
+	)
 	group, groupCtx := errgroup.WithContext(ctx)
-	group.Go(func() error { return repository.enrichTrackSources(groupCtx, ids, byID) })
-	group.Go(func() error { return repository.enrichTrackMetadata(groupCtx, ids, byID) })
-	group.Go(func() error { return repository.enrichTrackWritebacks(groupCtx, ids, byID) })
-	return group.Wait()
+	group.Go(func() error {
+		var err error
+		sources, err = repository.queryTrackSources(groupCtx, ids)
+		return err
+	})
+	group.Go(func() error {
+		var err error
+		metadataVersions, err = repository.queryTrackMetadataVersions(groupCtx, ids)
+		return err
+	})
+	group.Go(func() error {
+		var err error
+		writebacks, err = repository.queryTrackWritebacks(groupCtx, ids)
+		return err
+	})
+	if err := group.Wait(); err != nil {
+		return err
+	}
+	applyTrackAttributes(byID, sources, metadataVersions, writebacks)
+	return nil
 }
 
-func (repository *Repository) enrichTrackSources(
+func applyTrackAttributes(
+	byID map[string]*TrackRecord,
+	sources map[string]SourceRecord,
+	metadataVersions map[string]int,
+	writebacks map[string]trackWritebackSnapshot,
+) {
+	for trackID, source := range sources {
+		if record := byID[trackID]; record != nil {
+			copy := source
+			record.Source = &copy
+		}
+	}
+	for trackID, version := range metadataVersions {
+		if record := byID[trackID]; record != nil {
+			versionCopy := version
+			record.MetadataVersion = &versionCopy
+		}
+	}
+	for trackID, writeback := range writebacks {
+		record := byID[trackID]
+		if record == nil {
+			continue
+		}
+		if writeback.status == "PENDING" || writeback.status == "PROCESSING" {
+			idCopy := writeback.id
+			record.MetadataStatus = MetadataPendingWrite
+			record.ActiveWritebackJobID = &idCopy
+			continue
+		}
+		if writebackHasTerminalError(writeback.status, writeback.lastErrorCode, writeback.lastError) {
+			record.LatestWritebackErrorCode = writeback.lastErrorCode
+			record.LatestWritebackError = writeback.lastError
+			if record.MetadataVersion != nil && *record.MetadataVersion == writeback.metadataVersion {
+				record.MetadataStatus = MetadataWriteFailed
+			}
+		}
+	}
+}
+
+func (repository *Repository) queryTrackSources(
 	ctx context.Context,
 	ids []string,
-	byID map[string]*TrackRecord,
-) error {
+) (map[string]SourceRecord, error) {
 	sourceRows, err := repository.pool.Query(ctx, `
 		WITH chosen AS (
 			SELECT DISTINCT ON (mapped.track_id)
@@ -387,8 +454,9 @@ func (repository *Repository) enrichTrackSources(
 		ORDER BY chosen.track_id
 	`, ids)
 	if err != nil {
-		return fmt.Errorf("query admin track sources: %w", err)
+		return nil, fmt.Errorf("query admin track sources: %w", err)
 	}
+	sources := make(map[string]SourceRecord, len(ids))
 	for sourceRows.Next() {
 		var trackID string
 		var source SourceRecord
@@ -398,47 +466,47 @@ func (repository *Repository) enrichTrackSources(
 			&source.ScanActive, &source.MappingCount,
 		); err != nil {
 			sourceRows.Close()
-			return fmt.Errorf("scan admin track source: %w", err)
+			return nil, fmt.Errorf("scan admin track source: %w", err)
 		}
-		if record := byID[trackID]; record != nil {
-			copy := source
-			record.Source = &copy
-		}
+		sources[trackID] = source
 	}
-	return closeRows(sourceRows, "iterate admin track sources")
+	if err := closeRows(sourceRows, "iterate admin track sources"); err != nil {
+		return nil, err
+	}
+	return sources, nil
 }
 
-func (repository *Repository) enrichTrackMetadata(
+func (repository *Repository) queryTrackMetadataVersions(
 	ctx context.Context,
 	ids []string,
-	byID map[string]*TrackRecord,
-) error {
+) (map[string]int, error) {
 	metadataRows, err := repository.pool.Query(ctx, `
 		SELECT track_id, version FROM track_metadata
 		WHERE track_id = ANY($1::uuid[])
 	`, ids)
 	if err != nil {
-		return fmt.Errorf("query admin track metadata: %w", err)
+		return nil, fmt.Errorf("query admin track metadata: %w", err)
 	}
+	versions := make(map[string]int, len(ids))
 	for metadataRows.Next() {
 		var trackID string
 		var version int
 		if err := metadataRows.Scan(&trackID, &version); err != nil {
 			metadataRows.Close()
-			return fmt.Errorf("scan admin track metadata: %w", err)
+			return nil, fmt.Errorf("scan admin track metadata: %w", err)
 		}
-		if record := byID[trackID]; record != nil {
-			record.MetadataVersion = &version
-		}
+		versions[trackID] = version
 	}
-	return closeRows(metadataRows, "iterate admin track metadata")
+	if err := closeRows(metadataRows, "iterate admin track metadata"); err != nil {
+		return nil, err
+	}
+	return versions, nil
 }
 
-func (repository *Repository) enrichTrackWritebacks(
+func (repository *Repository) queryTrackWritebacks(
 	ctx context.Context,
 	ids []string,
-	byID map[string]*TrackRecord,
-) error {
+) (map[string]trackWritebackSnapshot, error) {
 	writebackRows, err := repository.pool.Query(ctx, `
 		SELECT DISTINCT ON (track_id) id, track_id, status::text, metadata_version,
 		       last_error_code,last_error
@@ -447,31 +515,23 @@ func (repository *Repository) enrichTrackWritebacks(
 		ORDER BY track_id, created_at DESC, id DESC
 	`, ids)
 	if err != nil {
-		return fmt.Errorf("query admin track writebacks: %w", err)
+		return nil, fmt.Errorf("query admin track writebacks: %w", err)
 	}
+	writebacks := make(map[string]trackWritebackSnapshot, len(ids))
 	for writebackRows.Next() {
-		var id, trackID, status string
-		var metadataVersion int
-		var lastErrorCode, lastError *string
+		var trackID string
+		var snapshot trackWritebackSnapshot
 		if err := writebackRows.Scan(
-			&id, &trackID, &status, &metadataVersion, &lastErrorCode, &lastError,
+			&snapshot.id, &trackID, &snapshot.status, &snapshot.metadataVersion,
+			&snapshot.lastErrorCode, &snapshot.lastError,
 		); err != nil {
 			writebackRows.Close()
-			return fmt.Errorf("scan admin track writeback: %w", err)
+			return nil, fmt.Errorf("scan admin track writeback: %w", err)
 		}
-		if record := byID[trackID]; record != nil {
-			if status == "PENDING" || status == "PROCESSING" {
-				record.MetadataStatus = MetadataPendingWrite
-				record.ActiveWritebackJobID = &id
-			} else if writebackHasTerminalError(status, lastErrorCode, lastError) {
-				record.LatestWritebackErrorCode = lastErrorCode
-				record.LatestWritebackError = lastError
-			}
-			if writebackHasTerminalError(status, lastErrorCode, lastError) &&
-				record.MetadataVersion != nil && *record.MetadataVersion == metadataVersion {
-				record.MetadataStatus = MetadataWriteFailed
-			}
-		}
+		writebacks[trackID] = snapshot
 	}
-	return closeRows(writebackRows, "iterate admin track writebacks")
+	if err := closeRows(writebackRows, "iterate admin track writebacks"); err != nil {
+		return nil, err
+	}
+	return writebacks, nil
 }

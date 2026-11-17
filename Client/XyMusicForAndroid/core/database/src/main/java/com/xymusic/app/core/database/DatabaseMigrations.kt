@@ -224,6 +224,16 @@ object DatabaseMigrations {
             }
         }
 
+    val MIGRATION_8_9 =
+        object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Summary and reference merges update cached_at_epoch_ms without full detail
+                // fields; isolate detail TTL tracking in a dedicated nullable column.
+                db.execSQL("ALTER TABLE artists ADD COLUMN detail_cached_at_epoch_ms INTEGER")
+                db.execSQL("ALTER TABLE albums ADD COLUMN detail_cached_at_epoch_ms INTEGER")
+            }
+        }
+
     val ALL =
         arrayOf(
             MIGRATION_1_2,
@@ -233,5 +243,6 @@ object DatabaseMigrations {
             MIGRATION_5_6,
             MIGRATION_6_7,
             MIGRATION_7_8,
+            MIGRATION_8_9,
         )
 }

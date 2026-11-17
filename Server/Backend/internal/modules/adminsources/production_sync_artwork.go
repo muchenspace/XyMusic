@@ -61,6 +61,7 @@ func attachAlbumArtwork(
 			WHERE asset.id = $1
 			  AND NOT EXISTS (SELECT 1 FROM artists WHERE artwork_asset_id = asset.id)
 			  AND NOT EXISTS (SELECT 1 FROM albums WHERE cover_asset_id = asset.id)
+			  AND NOT EXISTS (SELECT 1 FROM playlists WHERE cover_asset_id = asset.id)
 			  AND NOT EXISTS (SELECT 1 FROM user_profiles WHERE avatar_asset_id = asset.id)`, *current)
 	}
 	return true, nil
@@ -187,16 +188,6 @@ func (synchronizer *ProductionSynchronizer) stageArtwork(
 		return nil, fmt.Errorf("checksum extracted artwork: %w", err)
 	}
 	relativePath := filepath.ToSlash(filepath.Join("artworks", checksum+".jpg"))
-	if existing, statErr := synchronizer.localMedia.StatAsset(relativePath); statErr == nil && existing.Size() == info.Size() && existing.Size() > 0 {
-		artwork := &stagedArtwork{
-			StoragePath: relativePath, SourceChecksum: sourceChecksum,
-			SizeBytes: existing.Size(), Checksum: checksum, MIMEType: "image/jpeg",
-		}
-		if snapshot := sourceScanSnapshotFromContext(ctx); snapshot != nil {
-			snapshot.rememberArtwork(sourceChecksum, artwork)
-		}
-		return artwork, nil
-	}
 	committedPath, err := synchronizer.localMedia.CommitUpload(ctx, tempPath, relativePath)
 	if err != nil {
 		return nil, fmt.Errorf("commit extracted artwork: %w", err)
@@ -333,7 +324,9 @@ func deleteAlbumIfEmpty(
 	if coverID != nil {
 		_, _ = transaction.Exec(ctx, `UPDATE media_assets asset SET status='DELETE_PENDING',updated_at=now()
 			WHERE id=$1 AND NOT EXISTS(SELECT 1 FROM artists WHERE artwork_asset_id=asset.id)
-			AND NOT EXISTS(SELECT 1 FROM albums WHERE cover_asset_id=asset.id)`, *coverID)
+			AND NOT EXISTS(SELECT 1 FROM albums WHERE cover_asset_id=asset.id)
+			AND NOT EXISTS(SELECT 1 FROM playlists WHERE cover_asset_id=asset.id)
+			AND NOT EXISTS(SELECT 1 FROM user_profiles WHERE avatar_asset_id=asset.id)`, *coverID)
 	}
 	return nil
 }

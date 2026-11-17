@@ -228,19 +228,21 @@ class Media3OfflineTrackRepositoryTest {
         ioDispatcher = dispatcher,
     )
 
-private open class FakeCatalogRepository : CatalogRepository {
-    override fun pagedTracks(query: TrackQuery): PagedStream<Track> = error("Not used")
-    override fun pagedArtists(query: ArtistQuery): PagedStream<Artist> = error("Not used")
-    override fun pagedAlbums(query: AlbumQuery): PagedStream<Album> = error("Not used")
-    override suspend fun randomAlbums(limit: Int): CatalogResult<List<Album>> = error("Not used")
-    override suspend fun randomTracks(limit: Int): CatalogResult<List<Track>> = error("Not used")
-    override fun observeTrack(trackId: String): Flow<TrackDetail?> = flowOf(null)
-    override fun observeArtist(artistId: String): Flow<Artist?> = flowOf(null)
-    override fun observeAlbum(albumId: String): Flow<Album?> = flowOf(null)
-    override suspend fun refreshTrack(trackId: String): CatalogResult<Unit> = CatalogResult.Success(Unit)
-    override suspend fun refreshArtist(artistId: String): CatalogResult<Unit> = CatalogResult.Success(Unit)
-    override suspend fun refreshAlbum(albumId: String): CatalogResult<Unit> = CatalogResult.Success(Unit)
-}
+    private open class FakeCatalogRepository : CatalogRepository {
+        override fun pagedTracks(query: TrackQuery): PagedStream<Track> = error("Not used")
+        override fun pagedArtists(query: ArtistQuery): PagedStream<Artist> = error("Not used")
+        override fun pagedAlbums(query: AlbumQuery): PagedStream<Album> = error("Not used")
+        override suspend fun randomAlbums(limit: Int): CatalogResult<List<Album>> = error("Not used")
+        override suspend fun randomTracks(limit: Int): CatalogResult<List<Track>> = error("Not used")
+        override fun observeTrack(trackId: String): Flow<TrackDetail?> = flowOf(null)
+        override fun observeArtist(artistId: String): Flow<Artist?> = flowOf(null)
+        override fun observeAlbum(albumId: String): Flow<Album?> = flowOf(null)
+        override suspend fun refreshTrack(trackId: String): CatalogResult<Unit> = CatalogResult.Success(Unit)
+        override suspend fun refreshArtist(artistId: String, forceRefresh: Boolean): CatalogResult<Unit> =
+            CatalogResult.Success(Unit)
+        override suspend fun refreshAlbum(albumId: String, forceRefresh: Boolean): CatalogResult<Unit> =
+            CatalogResult.Success(Unit)
+    }
 
     private class FakeSessionProvider(userId: String, sessionId: String) :
         AppSessionProvider,
@@ -268,10 +270,7 @@ private open class FakeCatalogRepository : CatalogRepository {
         val requestStarted = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
 
-        override suspend fun get(
-            trackId: String,
-            forceRefresh: Boolean,
-        ): PlayerResult<PlaybackGrant> {
+        override suspend fun get(trackId: String, forceRefresh: Boolean): PlayerResult<PlaybackGrant> {
             requestStarted.complete(Unit)
             release.await()
             return PlayerResult.Success(grant(trackId))
@@ -283,10 +282,8 @@ private open class FakeCatalogRepository : CatalogRepository {
     }
 
     private class ImmediateGrantRepository : PlaybackGrantRepository {
-        override suspend fun get(
-            trackId: String,
-            forceRefresh: Boolean,
-        ): PlayerResult<PlaybackGrant> = PlayerResult.Success(grant(trackId))
+        override suspend fun get(trackId: String, forceRefresh: Boolean): PlayerResult<PlaybackGrant> =
+            PlayerResult.Success(grant(trackId))
 
         override fun invalidate(trackId: String) = Unit
 

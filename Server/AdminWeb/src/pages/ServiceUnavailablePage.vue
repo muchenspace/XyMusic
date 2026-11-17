@@ -8,10 +8,12 @@ import { appQueryKeys } from "@/app/query-keys";
 import AppButton from "@/components/AppButton.vue";
 import { useSetup } from "@/app/services/setup";
 import xymusicIcon from "@/assets/xymusic.png";
+import { useAuthStore } from "@/stores/auth";
 
 const route = useRoute();
 const router = useRouter();
 const setup = useSetup();
+const auth = useAuthStore();
 const navigating = ref(false);
 
 const statusQuery = useQuery({
@@ -36,7 +38,12 @@ watch(() => statusQuery.dataUpdatedAt.value, async (updatedAt) => {
   navigating.value = true;
   cacheSetupState(status);
   try {
+    if (!status.setupRequired) {
+      await auth.ensureSession(true);
+    }
     await router.replace(status.setupRequired ? { name: "setup" } : redirectTarget.value);
+  } catch {
+    // Keep rendering the unavailable state while the admin session endpoint is still failing.
   } finally {
     navigating.value = false;
   }

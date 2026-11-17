@@ -1,20 +1,61 @@
 import { onMounted, onUnmounted } from "vue";
 import { usePlayerStore } from "../stores/playerStore";
 
+const FOCUS_NAVIGATION_KEYS = new Set([
+  "Tab",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+  "F6",
+]);
+
+const NON_TEXT_INPUT_TYPES = new Set([
+  "range",
+  "button",
+  "reset",
+  "submit",
+  "image",
+]);
+
 export function usePlaybackShortcuts(): void {
   const player = usePlayerStore();
+  let lastInputModality: "keyboard" | "pointer" = "pointer";
+  let keyboardFocusedElement: Element | null = null;
+
+  function handlePointerDown(): void {
+    lastInputModality = "pointer";
+    keyboardFocusedElement = null;
+  }
+
+  function handleFocusIn(event: FocusEvent): void {
+    keyboardFocusedElement =
+      lastInputModality === "keyboard" && event.target instanceof Element
+        ? event.target
+        : null;
+  }
 
   function handleShortcut(event: KeyboardEvent): void {
+    if (FOCUS_NAVIGATION_KEYS.has(event.key) && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      lastInputModality = "keyboard";
+    }
     if (event.isComposing) return;
 
     if (event.code === "Space" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
-      if (!player.currentTrack || event.repeat) return;
+      if (shouldYieldSpaceToTarget(event.target, keyboardFocusedElement)) return;
+      if (!player.currentTrack) return;
       event.preventDefault();
-      void player.toggle();
+      if (!event.repeat) {
+        void player.toggle();
+      }
       return;
     }
 
-    if (isInteractiveTarget(event.target)) return;
+    if (isEditableOrModalTarget(event.target)) return;
 
     if (event.key === "MediaPlayPause") {
       event.preventDefault();
@@ -47,10 +88,42 @@ export function usePlaybackShortcuts(): void {
     }
   }
 
-  onMounted(() => window.addEventListener("keydown", handleShortcut, true));
-  onUnmounted(() => window.removeEventListener("keydown", handleShortcut, true));
+  onMounted(() => {
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("mousedown", handlePointerDown, true);
+    window.addEventListener("focusin", handleFocusIn, true);
+    window.addEventListener("keydown", handleShortcut, true);
+  });
+  onUnmounted(() => {
+    window.removeEventListener("pointerdown", handlePointerDown, true);
+    window.removeEventListener("mousedown", handlePointerDown, true);
+    window.removeEventListener("focusin", handleFocusIn, true);
+    window.removeEventListener("keydown", handleShortcut, true);
+  });
 }
 
-function isInteractiveTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, button, a, [contenteditable='true'], [role='textbox']"));
+function shouldYieldSpaceToTarget(
+  target: EventTarget | null,
+  keyboardFocusedElement: Element | null,
+): boolean {
+  if (isEditableOrModalTarget(target)) return true;
+  if (!(target instanceof HTMLElement)) return false;
+  const activatable = target.closest("button, a[href], summary, [role='button'], [role='link'], [role='tab']");
+  if (!activatable) return false;
+  return keyboardFocusedElement !== null && activatable === keyboardFocusedElement;
+}
+
+function isEditableOrModalTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  if (
+    target.closest(
+      "textarea, select, [contenteditable='true'], [role='textbox'], [role='combobox'], [role='listbox'], [role='menu'], [role='menuitem'], [role='menuitemcheckbox'], [role='menuitemradio'], .app-dialog",
+    )
+  ) {
+    return true;
+  }
+  const input = target.closest("input");
+  if (!input) return false;
+  return !NON_TEXT_INPUT_TYPES.has(input.type.toLowerCase());
 }

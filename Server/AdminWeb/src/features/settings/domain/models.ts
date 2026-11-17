@@ -120,7 +120,6 @@ export interface SystemInformation {
     memory: { rssBytes: number; heapUsedBytes: number; heapTotalBytes: number; externalBytes: number };
   } | null;
   queues: {
-    media: number;
     scans: number;
     cleanup: number;
     writeback: number;

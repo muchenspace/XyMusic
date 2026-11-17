@@ -35,8 +35,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -123,6 +125,7 @@ fun AlbumDetailScreen(
     modifier: Modifier = Modifier,
     onTrackPlay: ((List<CatalogTrackUi>, CatalogTrackUi) -> Unit)? = null,
 ) {
+    var refreshTracks by remember { mutableStateOf<(() -> Unit)?>(null) }
     BoxWithConstraints(modifier = modifier) {
         val wideLandscape = isWideLandscape(maxWidth, maxHeight)
         val compactLandscape = isCompactLandscape(maxWidth, maxHeight)
@@ -130,21 +133,31 @@ fun AlbumDetailScreen(
             title = stringResource(R.string.catalog_album_detail_title),
             isRefreshing = uiState.isRefreshing,
             onBack = onBack,
-            onRefresh = onRefresh,
+            onRefresh = {
+                onRefresh()
+                refreshTracks?.invoke()
+            },
             horizontalSafeDrawing = wideLandscape,
             modifier = Modifier.fillMaxSize(),
         ) {
             val detail = uiState.item
             when {
-                detail == null && uiState.refreshFailed ->
+                detail == null && uiState.refreshFailed -> {
+                    SideEffect { refreshTracks = null }
                     ErrorState(
                         onRetry = onRefresh,
                         modifier = Modifier.fillMaxSize(),
                     )
+                }
 
-                detail == null -> LoadingState()
+                detail == null -> {
+                    SideEffect { refreshTracks = null }
+                    LoadingState()
+                }
+
                 else -> {
                     val pagingItems = tracks.collectAsLazyPagingItems()
+                    SideEffect { refreshTracks = pagingItems::refresh }
                     if (wideLandscape) {
                         AlbumLandscapeDetail(
                             detail = detail,
@@ -215,6 +228,7 @@ fun ArtistDetailScreen(
     onTrackPlay: ((List<CatalogTrackUi>, CatalogTrackUi) -> Unit)? = null,
 ) {
     var selectedTab by rememberSaveable { mutableStateOf(ArtistDetailTab.Albums) }
+    var refreshActiveCollection by remember { mutableStateOf<(() -> Unit)?>(null) }
     BoxWithConstraints(modifier = modifier) {
         val wideLandscape = isWideLandscape(maxWidth, maxHeight)
         val compactLandscape = isCompactLandscape(maxWidth, maxHeight)
@@ -222,19 +236,28 @@ fun ArtistDetailScreen(
             title = stringResource(R.string.catalog_artist_detail_title),
             isRefreshing = uiState.isRefreshing,
             onBack = onBack,
-            onRefresh = onRefresh,
+            onRefresh = {
+                onRefresh()
+                refreshActiveCollection?.invoke()
+            },
             horizontalSafeDrawing = wideLandscape,
             modifier = Modifier.fillMaxSize(),
         ) {
             val detail = uiState.item
             when {
-                detail == null && uiState.refreshFailed ->
+                detail == null && uiState.refreshFailed -> {
+                    SideEffect { refreshActiveCollection = null }
                     ErrorState(
                         onRetry = onRefresh,
                         modifier = Modifier.fillMaxSize(),
                     )
+                }
 
-                detail == null -> LoadingState()
+                detail == null -> {
+                    SideEffect { refreshActiveCollection = null }
+                    LoadingState()
+                }
+
                 wideLandscape ->
                     ArtistLandscapeDetail(
                         detail = detail,
@@ -253,6 +276,7 @@ fun ArtistDetailScreen(
                             onAlbumClick = onAlbumClick,
                             onTrackMore = onTrackMore,
                             onTrackPlay = onTrackPlay,
+                            onActiveRefreshChanged = { refreshActiveCollection = it },
                         )
                     }
 
@@ -268,6 +292,7 @@ fun ArtistDetailScreen(
                         onAlbumClick = onAlbumClick,
                         onTrackMore = onTrackMore,
                         onTrackPlay = onTrackPlay,
+                        onActiveRefreshChanged = { refreshActiveCollection = it },
                     )
             }
         }
@@ -286,10 +311,12 @@ private fun ArtistDetailCollection(
     onAlbumClick: (String) -> Unit,
     onTrackMore: (String) -> Unit,
     onTrackPlay: ((List<CatalogTrackUi>, CatalogTrackUi) -> Unit)?,
+    onActiveRefreshChanged: ((() -> Unit)?) -> Unit,
 ) {
     when (selectedTab) {
         ArtistDetailTab.Albums -> {
             val pagingItems = albums.collectAsLazyPagingItems()
+            SideEffect { onActiveRefreshChanged(pagingItems::refresh) }
             CatalogPagedList(
                 items = pagingItems,
                 emptyTitle = stringResource(R.string.catalog_albums_empty_title),
@@ -316,6 +343,7 @@ private fun ArtistDetailCollection(
 
         ArtistDetailTab.Tracks -> {
             val pagingItems = tracks.collectAsLazyPagingItems()
+            SideEffect { onActiveRefreshChanged(pagingItems::refresh) }
             val loadedTracks = pagingItems.itemSnapshotList.items
             CatalogPagedList(
                 items = pagingItems,

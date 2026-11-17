@@ -114,10 +114,8 @@ class PlaybackMediaReloadCoordinatorTest {
     private class RecordingGrantRepository : PlaybackGrantRepository {
         val invalidatedTrackIds = mutableListOf<String>()
 
-        override suspend fun get(
-            trackId: String,
-            forceRefresh: Boolean,
-        ): PlayerResult<PlaybackGrant> = error("Not used")
+        override suspend fun get(trackId: String, forceRefresh: Boolean): PlayerResult<PlaybackGrant> =
+            error("Not used")
 
         override fun invalidate(trackId: String) {
             invalidatedTrackIds += trackId

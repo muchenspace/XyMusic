@@ -25,13 +25,12 @@ internal class PlaybackMediaReloadCoordinator(
     private var internalPlayerOperation = false
     private var reloadJob: Job? = null
 
-    suspend fun seekTo(queueItemId: String, globalPositionMs: Long): Boolean =
-        mutationMutex.withLock {
-            if (globalPositionMs < 0) return@withLock false
-            val index = indexOf(queueItemId)
-            if (index < 0) return@withLock false
-            seekInternal(index, globalPositionMs)
-        }
+    suspend fun seekTo(queueItemId: String, globalPositionMs: Long): Boolean = mutationMutex.withLock {
+        if (globalPositionMs < 0) return@withLock false
+        val index = indexOf(queueItemId)
+        if (index < 0) return@withLock false
+        seekInternal(index, globalPositionMs)
+    }
 
     fun reloadCurrent(
         globalPositionMs: Long,

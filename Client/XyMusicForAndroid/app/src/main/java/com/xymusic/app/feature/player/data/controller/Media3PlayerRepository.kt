@@ -45,8 +45,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 @Singleton
 class Media3PlayerRepository
@@ -82,11 +82,7 @@ constructor(
                         updateSleepTimerDeadline(PlaybackSessionCommands.sleepTimerDeadline(args))
                         true
                     }
-                    else -> {
-                        val event = playerEventForCustomAction(command.customAction) ?: return false
-                        mutableEvents.tryEmit(event)
-                        true
-                    }
+                    else -> false
                 }
             }
         }
@@ -779,8 +775,6 @@ internal class PendingRestoredMediaItemSeek {
     private data class Request(val expectedQueueItemId: String?, val positionMs: Long)
 }
 
-internal fun playerEventForCustomAction(customAction: String): PlayerEvent? = null
-
 internal fun shouldSamplePlaybackPosition(isPlaying: Boolean, hasCurrentMediaItem: Boolean): Boolean =
     isPlaying && hasCurrentMediaItem
 
@@ -846,7 +840,11 @@ internal fun playerStateWithPublishedPosition(
             explicitDiscontinuity = positionDiscontinuity || queueItemChanged,
         ),
         bufferedPositionMs =
-        if (retainPreviousItem) previous.bufferedPositionMs else if (queueItemChanged) 0L else controllerState.bufferedPositionMs,
+        when {
+            retainPreviousItem -> previous.bufferedPositionMs
+            queueItemChanged -> 0L
+            else -> controllerState.bufferedPositionMs
+        },
         durationMs = if (retainPreviousItem) previous.durationMs else controllerState.durationMs,
     )
 }

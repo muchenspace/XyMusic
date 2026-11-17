@@ -52,12 +52,62 @@ class LyricsTimingDatabaseMigrationTest {
         helper
             .runMigrationsAndValidate(
                 XyMusicDatabase.VERSION,
-                listOf(DatabaseMigrations.MIGRATION_6_7, DatabaseMigrations.MIGRATION_7_8),
+                listOf(
+                    DatabaseMigrations.MIGRATION_6_7,
+                    DatabaseMigrations.MIGRATION_7_8,
+                    DatabaseMigrations.MIGRATION_8_9,
+                ),
             ).use { database ->
                 database.prepare("SELECT COUNT(*) FROM lyrics").use { statement ->
                     assertThat(statement.step()).isTrue()
                     assertThat(statement.getLong(0)).isEqualTo(0)
                 }
+            }
+    }
+
+    @Test
+    fun migrationEightToNineAddsNullableDetailTimestampsWithoutOverwritingCatalogRows() {
+        helper.createDatabase(8).apply {
+            execSQL(
+                """
+                INSERT INTO artists(id, name, description, cached_at_epoch_ms)
+                VALUES ('artist-legacy', 'Legacy Artist', 'Existing bio', 1234)
+                """.trimIndent(),
+            )
+            execSQL(
+                """
+                INSERT INTO albums(id, title, description, track_count, cached_at_epoch_ms)
+                VALUES ('album-legacy', 'Legacy Album', NULL, 8, 5678)
+                """.trimIndent(),
+            )
+            close()
+        }
+
+        helper
+            .runMigrationsAndValidate(
+                XyMusicDatabase.VERSION,
+                listOf(DatabaseMigrations.MIGRATION_8_9),
+            ).use { database ->
+                database
+                    .prepare(
+                        "SELECT description, cached_at_epoch_ms, detail_cached_at_epoch_ms " +
+                            "FROM artists WHERE id = 'artist-legacy'",
+                    ).use { statement ->
+                        assertThat(statement.step()).isTrue()
+                        assertThat(statement.getText(0)).isEqualTo("Existing bio")
+                        assertThat(statement.getLong(1)).isEqualTo(1234L)
+                        assertThat(statement.isNull(2)).isTrue()
+                    }
+                database
+                    .prepare(
+                        "SELECT title, cached_at_epoch_ms, detail_cached_at_epoch_ms " +
+                            "FROM albums WHERE id = 'album-legacy'",
+                    ).use { statement ->
+                        assertThat(statement.step()).isTrue()
+                        assertThat(statement.getText(0)).isEqualTo("Legacy Album")
+                        assertThat(statement.getLong(1)).isEqualTo(5678L)
+                        assertThat(statement.isNull(2)).isTrue()
+                    }
             }
     }
 

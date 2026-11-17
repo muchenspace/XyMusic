@@ -56,6 +56,7 @@ export interface PlaybackSession {
   seekTo(seconds: number): void;
   removeFromQueue(trackId: string): void;
   removeFromQueueAt(index: number): void;
+  keepCurrentTrack(): void;
   clearQueue(): void;
   stopPlayback(terminalEvent?: PlaybackTerminalEvent | null): void;
   reset(): void;

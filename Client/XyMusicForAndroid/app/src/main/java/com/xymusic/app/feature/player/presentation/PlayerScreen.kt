@@ -61,7 +61,6 @@ fun PlayerScreen(
     playbackPosition: State<Float>? = null,
     isFavorite: Boolean = false,
     dismissGestureModifier: Modifier = Modifier,
-    immersiveLandscape: Boolean = true,
 ) {
     val portraitPagerState =
         rememberPagerState(

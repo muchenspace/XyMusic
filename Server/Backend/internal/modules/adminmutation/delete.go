@@ -47,13 +47,13 @@ func (repository *Repository) DeleteTrackPermanently(
 	}
 
 	type sourceRecord struct {
-		id               string
-		rootID, rootPath *string
-		sourcePath       string
-		trackCount       int
+		id                         string
+		rootID, rootPath, rootMode *string
+		sourcePath                 string
+		trackCount                 int
 	}
 	rows, err := repository.pool.Query(ctx, `
-		SELECT source.id,source.root_id,root.path,source.source_path,
+		SELECT source.id,source.root_id,root.path,root.mode::text,source.source_path,
 		       (SELECT count(*)::int FROM local_music_source_tracks all_mappings WHERE all_mappings.source_id=source.id)
 		FROM local_music_source_tracks mapped
 		JOIN local_music_sources source ON source.id=mapped.source_id
@@ -68,7 +68,7 @@ func (repository *Repository) DeleteTrackPermanently(
 	seenRoots := map[string]struct{}{}
 	for rows.Next() {
 		var source sourceRecord
-		if err := rows.Scan(&source.id, &source.rootID, &source.rootPath, &source.sourcePath, &source.trackCount); err != nil {
+		if err := rows.Scan(&source.id, &source.rootID, &source.rootPath, &source.rootMode, &source.sourcePath, &source.trackCount); err != nil {
 			rows.Close()
 			return DeleteResult{}, err
 		}
@@ -110,6 +110,12 @@ func (repository *Repository) DeleteTrackPermanently(
 		path, err := secureSourcePath(root, source.sourcePath)
 		if err != nil {
 			return DeleteResult{}, err
+		}
+		if err := checkSourceDeletionMode(source.rootMode, path); err != nil {
+			return DeleteResult{}, err
+		}
+		if source.rootMode != nil && *source.rootMode == "READ_ONLY" {
+			continue
 		}
 		sourceFiles = append(sourceFiles, path)
 	}
@@ -272,7 +278,7 @@ func (repository *Repository) DeleteTrackPermanently(
 	}
 	scheduled := 0
 	if len(assetIDs) > 0 {
-		assetRows, err := tx.Query(ctx, `UPDATE media_assets asset SET status='DELETE_PENDING',updated_at=now() WHERE id=ANY($1::uuid[]) AND NOT EXISTS(SELECT 1 FROM local_music_sources WHERE source_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM lyrics WHERE asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM media_uploads WHERE asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM artists WHERE artwork_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM albums WHERE cover_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM user_profiles WHERE avatar_asset_id=asset.id) RETURNING storage_path`, assetIDs)
+		assetRows, err := tx.Query(ctx, `UPDATE media_assets asset SET status='DELETE_PENDING',updated_at=now() WHERE id=ANY($1::uuid[]) AND NOT EXISTS(SELECT 1 FROM tracks WHERE source_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM local_music_sources WHERE source_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM lyrics WHERE asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM media_uploads WHERE asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM artists WHERE artwork_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM albums WHERE cover_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM playlists WHERE cover_asset_id=asset.id) AND NOT EXISTS(SELECT 1 FROM user_profiles WHERE avatar_asset_id=asset.id) RETURNING storage_path`, assetIDs)
 		if err != nil {
 			return restoreOnError(err)
 		}
@@ -333,8 +339,18 @@ func lockTrackWritebacksForDeletion(
 	return records, nil
 }
 
+func checkSourceDeletionMode(rootMode *string, resolvedPath string) error {
+	if rootMode == nil || *rootMode != "READ_ONLY" {
+		return nil
+	}
+	if _, err := os.Lstat(resolvedPath); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return apperror.Forbidden("只读音源不允许永久删除原始音频文件，请保持归档状态或将音源切换为读写模式")
+}
+
 func queryTrackAssetIDs(ctx context.Context, tx pgx.Tx, trackID string) ([]string, error) {
-	rows, err := tx.Query(ctx, `SELECT source.source_asset_id FROM local_music_source_tracks mapped JOIN local_music_sources source ON source.id=mapped.source_id WHERE mapped.track_id=$1 UNION SELECT asset_id FROM lyrics WHERE track_id=$1 UNION SELECT asset_id FROM media_uploads WHERE track_id=$1`, trackID)
+	rows, err := tx.Query(ctx, `SELECT source_asset_id FROM tracks WHERE id=$1 UNION SELECT source.source_asset_id FROM local_music_source_tracks mapped JOIN local_music_sources source ON source.id=mapped.source_id WHERE mapped.track_id=$1 UNION SELECT asset_id FROM lyrics WHERE track_id=$1 UNION SELECT asset_id FROM media_uploads WHERE track_id=$1`, trackID)
 	if err != nil {
 		return nil, err
 	}

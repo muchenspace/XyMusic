@@ -56,10 +56,10 @@ class UdpDnsResolverTest {
         // Header: 12 bytes
         dos.writeShort(0x1234)
         dos.writeShort(0x8180) // Standard query response, No error
-        dos.writeShort(1)      // QDCOUNT: 1
-        dos.writeShort(1)      // ANCOUNT: 1
-        dos.writeShort(0)      // NSCOUNT: 0
-        dos.writeShort(0)      // ARCOUNT: 0
+        dos.writeShort(1) // QDCOUNT: 1
+        dos.writeShort(1) // ANCOUNT: 1
+        dos.writeShort(0) // NSCOUNT: 0
+        dos.writeShort(0) // ARCOUNT: 0
 
         // Question: example.com
         dos.writeByte(7)
@@ -72,21 +72,26 @@ class UdpDnsResolverTest {
 
         // Answer: pointer 0xC00C to question name
         dos.writeShort(0xC00C)
-        dos.writeShort(1)  // TYPE: A
-        dos.writeShort(1)  // CLASS: IN
-        dos.writeInt(300)  // TTL
-        dos.writeShort(4)  // RDLENGTH: 4
+        dos.writeShort(1) // TYPE: A
+        dos.writeShort(1) // CLASS: IN
+        dos.writeInt(300) // TTL
+        dos.writeShort(4) // RDLENGTH: 4
         dos.writeByte(93)
         dos.writeByte(184)
         dos.writeByte(216)
-        dos.writeByte(34)  // 93.184.216.34
+        dos.writeByte(34) // 93.184.216.34
 
         dos.flush()
         val responseBytes = baos.toByteArray()
 
         val addresses = UdpDnsResolver.parseResponse(responseBytes, responseBytes.size, "example.com")
         assertThat(addresses).hasSize(1)
-        assertThat(addresses[0]).isEqualTo(InetAddress.getByAddress("example.com", byteArrayOf(93.toByte(), 184.toByte(), 216.toByte(), 34.toByte())))
+        assertThat(addresses[0]).isEqualTo(
+            InetAddress.getByAddress(
+                "example.com",
+                byteArrayOf(93.toByte(), 184.toByte(), 216.toByte(), 34.toByte()),
+            ),
+        )
     }
 
     @Test

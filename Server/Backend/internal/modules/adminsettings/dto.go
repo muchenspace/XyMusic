@@ -222,7 +222,6 @@ type IdempotentSettingsResult struct {
 }
 
 type QueueDTO struct {
-	Media     int `json:"media"`
 	Scans     int `json:"scans"`
 	Cleanup   int `json:"cleanup"`
 	Writeback int `json:"writeback"`

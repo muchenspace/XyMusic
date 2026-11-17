@@ -225,9 +225,9 @@ class HttpPlaybackGrantRepositoryTest {
         store = store,
         problemResponseParser = ProblemResponseParser(Json, ProblemMapper()),
         serverConfigRepository =
-            InMemoryServerConfigRepository.from(
-                serverBaseUrl.toHttpUrl(),
-            ),
+        InMemoryServerConfigRepository.from(
+            serverBaseUrl.toHttpUrl(),
+        ),
         sessionIdentityProvider = sessionIdentityProvider,
         clock = clock,
         grantRegistry = grantRegistry,

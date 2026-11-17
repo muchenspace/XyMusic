@@ -11,8 +11,8 @@ func TestMigrationsCanBeRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(migrations) != 3 {
-		t.Fatalf("expected baseline plus two migrations, got %d", len(migrations))
+	if len(migrations) != 4 {
+		t.Fatalf("expected baseline plus three migrations, got %d", len(migrations))
 	}
 	if migrations[0].Tag != "0000_initial" {
 		t.Fatalf("unexpected migration tag: %s", migrations[0].Tag)
@@ -64,6 +64,23 @@ func TestMigrationsCanBeRead(t *testing.T) {
 	if !strings.Contains(dismissedSQL, "CREATE TABLE DISMISSED_DEFAULT_LIBRARY_ROOTS") ||
 		!strings.Contains(dismissedSQL, "NORMALIZED_PATH") {
 		t.Fatalf("dismissed default library roots migration missing table definition: %s", dismissedSQL)
+	}
+	if migrations[3].Tag != "0003_asset_reference_indexes" {
+		t.Fatalf("unexpected asset reference indexes migration: %#v", migrations[3])
+	}
+	assetIndexesSQL := strings.ToUpper(strings.Join(migrations[3].SQL, "\n"))
+	for _, expectedIndex := range []string{
+		"LOCAL_MUSIC_SOURCES_SOURCE_ASSET_INDEX",
+		"LYRICS_ASSET_ID_INDEX",
+		"MEDIA_UPLOADS_ASSET_ID_INDEX",
+		"ARTISTS_ARTWORK_ASSET_ID_INDEX",
+		"ALBUMS_COVER_ASSET_ID_INDEX",
+		"PLAYLISTS_COVER_ASSET_ID_INDEX",
+		"USER_PROFILES_AVATAR_ASSET_ID_INDEX",
+	} {
+		if !strings.Contains(assetIndexesSQL, expectedIndex) {
+			t.Fatalf("asset reference indexes migration missing %s: %s", expectedIndex, assetIndexesSQL)
+		}
 	}
 }
 

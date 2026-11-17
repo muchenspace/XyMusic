@@ -1,27 +1,29 @@
 package database
 
 import (
-	"context"
 	"strings"
 	"testing"
 )
 
-func TestLargeLibraryIndexStatementsAreIdempotentAndNonBlocking(t *testing.T) {
-	if len(largeLibraryIndexStatements) < 10 {
-		t.Fatalf("large-library index plan is unexpectedly small: %d", len(largeLibraryIndexStatements))
-	}
-	seen := make(map[string]struct{}, len(largeLibraryIndexStatements))
-	for _, statement := range largeLibraryIndexStatements {
-		if !strings.Contains(statement, "CREATE INDEX CONCURRENTLY IF NOT EXISTS") {
-			t.Fatalf("index is not idempotent/concurrent: %s", statement)
+func TestLargeLibraryIndexDeclarationsAreConsistentAndDeduplicated(t *testing.T) {
+	seen := make(map[string]struct{}, len(largeLibraryIndexes))
+	for _, index := range largeLibraryIndexes {
+		if index.name == "" {
+			t.Fatal("managed index name cannot be empty")
 		}
-		name := strings.TrimPrefix(strings.SplitN(statement, " ON ", 2)[0], "CREATE INDEX CONCURRENTLY IF NOT EXISTS ")
-		if _, exists := seen[name]; exists {
-			t.Fatalf("duplicate performance index name: %s", name)
+		if _, duplicate := seen[index.name]; duplicate {
+			t.Fatalf("duplicate managed index name: %s", index.name)
 		}
-		seen[name] = struct{}{}
+		seen[index.name] = struct{}{}
+
+		expectedPrefix := "CREATE INDEX CONCURRENTLY IF NOT EXISTS " + index.name + " ON "
+		if !strings.HasPrefix(index.statement, expectedPrefix) {
+			t.Fatalf("statement for %s must start with %q, got %q", index.name, expectedPrefix, index.statement)
+		}
 	}
-	if err := EnsureLargeLibraryIndexes(context.Background(), nil); err == nil {
-		t.Fatal("nil database pool should be rejected")
+	for _, obsolete := range obsoleteDuplicateIndexes {
+		if _, stillPresent := seen[obsolete]; stillPresent {
+			t.Fatalf("obsolete duplicate index %s is still declared in largeLibraryIndexes", obsolete)
+		}
 	}
 }

@@ -23,7 +23,9 @@ class CatalogUseCases(private val repository: CatalogRepository) {
 
     suspend fun refreshTrack(trackId: String) = repository.refreshTrack(trackId)
 
-    suspend fun refreshArtist(artistId: String) = repository.refreshArtist(artistId)
+    suspend fun refreshArtist(artistId: String, forceRefresh: Boolean = false) =
+        repository.refreshArtist(artistId, forceRefresh)
 
-    suspend fun refreshAlbum(albumId: String) = repository.refreshAlbum(albumId)
+    suspend fun refreshAlbum(albumId: String, forceRefresh: Boolean = false) =
+        repository.refreshAlbum(albumId, forceRefresh)
 }

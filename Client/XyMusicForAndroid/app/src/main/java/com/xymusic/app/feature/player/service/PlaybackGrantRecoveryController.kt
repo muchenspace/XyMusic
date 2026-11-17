@@ -36,7 +36,7 @@ internal class PlaybackGrantRecoveryController(
         val now = SystemClock.elapsedRealtime()
         if (
             lastRecoveredMediaId == mediaId &&
-                now - lastRecoveryAtElapsedRealtimeMs < RECOVERY_RETRY_COOLDOWN_MS
+            now - lastRecoveryAtElapsedRealtimeMs < RECOVERY_RETRY_COOLDOWN_MS
         ) {
             return
         }

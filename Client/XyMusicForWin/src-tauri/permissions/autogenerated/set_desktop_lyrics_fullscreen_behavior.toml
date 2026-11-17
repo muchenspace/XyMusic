@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-desktop-lyrics-fullscreen-behavior"
+description = "Enables the set_desktop_lyrics_fullscreen_behavior command without any pre-configured scope."
+commands.allow = ["set_desktop_lyrics_fullscreen_behavior"]
+
+[[permission]]
+identifier = "deny-set-desktop-lyrics-fullscreen-behavior"
+description = "Denies the set_desktop_lyrics_fullscreen_behavior command without any pre-configured scope."
+commands.deny = ["set_desktop_lyrics_fullscreen_behavior"]

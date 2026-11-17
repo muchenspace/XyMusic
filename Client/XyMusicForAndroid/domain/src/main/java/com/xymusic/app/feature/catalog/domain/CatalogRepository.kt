@@ -30,9 +30,9 @@ interface CatalogRepository {
 
     suspend fun refreshTrack(trackId: String): CatalogResult<Unit>
 
-    suspend fun refreshArtist(artistId: String): CatalogResult<Unit>
+    suspend fun refreshArtist(artistId: String, forceRefresh: Boolean = false): CatalogResult<Unit>
 
-    suspend fun refreshAlbum(albumId: String): CatalogResult<Unit>
+    suspend fun refreshAlbum(albumId: String, forceRefresh: Boolean = false): CatalogResult<Unit>
 }
 
 sealed interface CatalogResult<out T> {

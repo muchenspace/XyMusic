@@ -10,6 +10,7 @@ import com.xymusic.app.core.network.MediaHttpClient
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState
 import com.xymusic.app.core.session.SessionInvalidator
+import com.xymusic.app.core.ui.component.clearArtworkAmbientPaletteCache
 import com.xymusic.app.feature.player.data.media.OfflineMediaCache
 import com.xymusic.app.feature.player.domain.PlaybackGrantRepository
 import com.xymusic.app.feature.player.domain.PlayerRepository
@@ -76,6 +77,7 @@ constructor(
         attempt { playbackGrantRepository.clear() }
         attempt { searchOverviewStore.clearMemory() }
         attempt { profileMemoryCache.clear() }
+        attempt { clearArtworkAmbientPaletteCache() }
         attempt {
             val imageLoader = SingletonImageLoader.get(context)
             imageLoader.memoryCache?.clear()

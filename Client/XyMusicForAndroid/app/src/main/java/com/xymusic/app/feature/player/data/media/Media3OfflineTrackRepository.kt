@@ -260,17 +260,15 @@ constructor(
         }
     }
 
-    private suspend fun beginDownload(
-        claim: DownloadClaim,
-        downloadIdentity: ActiveSessionIdentity,
-    ): Boolean = sessionMutationCoordinator.mutate {
-        if (isCurrent(downloadIdentity)) {
-            offlineMediaStore.beginDownload(claim)
-            true
-        } else {
-            false
+    private suspend fun beginDownload(claim: DownloadClaim, downloadIdentity: ActiveSessionIdentity): Boolean =
+        sessionMutationCoordinator.mutate {
+            if (isCurrent(downloadIdentity)) {
+                offlineMediaStore.beginDownload(claim)
+                true
+            } else {
+                false
+            }
         }
-    }
 
     private suspend fun commitDownload(
         track: OfflineTrackEntity,

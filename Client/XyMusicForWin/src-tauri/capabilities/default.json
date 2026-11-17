@@ -22,6 +22,21 @@
     "core:window:allow-primary-monitor",
     "core:window:allow-start-dragging",
     "notification:default",
-    "log:default"
+    "log:default",
+    "allow-credential-read",
+    "allow-credential-write",
+    "allow-credential-delete",
+    "allow-get-desktop-lyrics-window-state",
+    "allow-set-desktop-lyrics-visible",
+    "allow-toggle-desktop-lyrics-visible",
+    "allow-set-desktop-lyrics-locked",
+    "allow-set-desktop-lyrics-fullscreen-behavior",
+    "allow-update-media-metadata",
+    "allow-update-media-playback",
+    "allow-clear-media-session",
+    "allow-hide-main-window",
+    "allow-toggle-main-window-maximize",
+    "allow-toggle-main-window-fullscreen",
+    "allow-set-mini-mode"
   ]
 }

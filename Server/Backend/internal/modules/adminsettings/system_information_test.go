@@ -29,7 +29,7 @@ func TestSystemInformationDTOIncludesInjectedRuntimeMetrics(t *testing.T) {
 		setup.RuntimeSnapshot{Source: setup.RuntimeSourceManaged},
 		"16.4", "202607160001", nil,
 		workerstatus.Snapshot{Available: true},
-		QueueDTO{Media: 2, Total: 2},
+		QueueDTO{Cleanup: 2, Total: 2},
 	)
 	if result.ApplicationVersion != "1.2.3" || result.UptimeSeconds != 5 ||
 		result.ConfigurationSource != setup.RuntimeSourceManaged || !reflect.DeepEqual(result.Metrics, wantMetrics) {

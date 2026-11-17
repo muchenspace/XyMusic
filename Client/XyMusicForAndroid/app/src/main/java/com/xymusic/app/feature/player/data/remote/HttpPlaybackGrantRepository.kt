@@ -40,10 +40,7 @@ constructor(
     private var storeGeneration = 0L
     private var storeIdentity: ActiveSessionIdentity? = null
 
-    override suspend fun get(
-        trackId: String,
-        forceRefresh: Boolean,
-    ): PlayerResult<PlaybackGrant> {
+    override suspend fun get(trackId: String, forceRefresh: Boolean): PlayerResult<PlaybackGrant> {
         val identity =
             sessionIdentityProvider.activeIdentity()
                 ?: return PlayerResult.Failure(PlayerFailure.PlaybackUnavailable)
@@ -215,10 +212,7 @@ constructor(
             storeGeneration == expectedGeneration && isCurrentIdentity(identity)
         }
 
-    private fun requestKey(
-        identity: ActiveSessionIdentity,
-        trackId: String,
-    ): PlaybackGrantKey {
+    private fun requestKey(identity: ActiveSessionIdentity, trackId: String): PlaybackGrantKey {
         UUID.fromString(trackId)
         return PlaybackGrantKey(
             ownerUserId = identity.userId,

@@ -31,14 +31,11 @@ function track(overrides: Partial<TrackSummary> = {}): TrackSummary {
 }
 
 describe("TrackStatusDisc", () => {
-  it("shows source analysis and direct playback details on hover", async () => {
+  it("shows source analysis details on hover", async () => {
     const wrapper = mount(TrackStatusDisc, { props: { track: track() }, attachTo: document.body });
     await wrapper.find(".inline-flex").trigger("mouseenter");
     expect(document.body.textContent).toContain("源文件分析");
     expect(document.body.textContent).toContain("源文件分析完成");
-    expect(document.body.textContent).toContain("源文件直出");
-    expect(document.body.textContent).toContain("播放时直接读取已发布的源音频");
-    expect(document.body.textContent).toContain("不生成或缓存播放中间文件");
     expect(document.body.textContent).toContain("正常");
     expect(document.body.textContent).not.toContain("READY");
     wrapper.unmount();

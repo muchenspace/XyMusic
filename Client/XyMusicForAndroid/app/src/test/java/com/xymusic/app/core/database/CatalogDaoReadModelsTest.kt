@@ -276,6 +276,67 @@ class CatalogDaoReadModelsTest {
             .inOrder()
     }
 
+    @Test
+    fun summaryAndReferenceMergesPreserveDetailFreshnessIsolation() = runTest {
+        val dao = database.catalogDao()
+
+        dao.mergeArtistReferences(
+            listOf(artist("artist-ref").copy(cachedAtEpochMs = 1_000, detailCachedAtEpochMs = 1_000)),
+        )
+        dao.mergeArtistSummaries(
+            listOf(artist("artist-summary").copy(cachedAtEpochMs = 2_000, detailCachedAtEpochMs = 2_000)),
+        )
+        dao.mergeAlbumReferences(
+            listOf(album("album-ref").copy(cachedAtEpochMs = 3_000, detailCachedAtEpochMs = 3_000)),
+        )
+        dao.mergeAlbumSummaries(
+            listOf(album("album-summary").copy(cachedAtEpochMs = 4_000, detailCachedAtEpochMs = 4_000)),
+        )
+
+        assertThat(dao.artist("artist-ref")?.detailCachedAtEpochMs).isNull()
+        assertThat(dao.artist("artist-summary")?.detailCachedAtEpochMs).isNull()
+        assertThat(dao.album("album-ref")?.detailCachedAtEpochMs).isNull()
+        assertThat(dao.album("album-summary")?.detailCachedAtEpochMs).isNull()
+
+        dao.replaceArtist(
+            artist("artist-summary").copy(
+                description = "Authoritative artist bio",
+                cachedAtEpochMs = 5_000,
+                detailCachedAtEpochMs = 5_000,
+            ),
+        )
+        dao.replaceAlbum(
+            album("album-summary").copy(
+                description = "Authoritative album notes",
+                cachedAtEpochMs = 6_000,
+                detailCachedAtEpochMs = 6_000,
+            ),
+            credits = listOf(albumCredit("album-summary", "artist-summary")),
+        )
+
+        dao.mergeArtistSummaries(
+            listOf(artist("artist-summary").copy(name = "Renamed Artist", cachedAtEpochMs = 9_000)),
+        )
+        dao.mergeArtistReferences(
+            listOf(artist("artist-summary").copy(name = "Renamed Artist Ref", cachedAtEpochMs = 10_000)),
+        )
+        dao.mergeAlbumSummaries(
+            listOf(album("album-summary").copy(title = "Renamed Album", cachedAtEpochMs = 11_000)),
+        )
+        dao.mergeAlbumReferences(
+            listOf(album("album-summary").copy(title = "Renamed Album Ref", cachedAtEpochMs = 12_000)),
+        )
+
+        val storedArtist = dao.artist("artist-summary")
+        val storedAlbum = dao.album("album-summary")
+        assertThat(storedArtist?.name).isEqualTo("Renamed Artist Ref")
+        assertThat(storedArtist?.description).isEqualTo("Authoritative artist bio")
+        assertThat(storedArtist?.detailCachedAtEpochMs).isEqualTo(5_000L)
+        assertThat(storedAlbum?.title).isEqualTo("Renamed Album Ref")
+        assertThat(storedAlbum?.description).isEqualTo("Authoritative album notes")
+        assertThat(storedAlbum?.detailCachedAtEpochMs).isEqualTo(6_000L)
+    }
+
     @Suppress("UNCHECKED_CAST")
     private suspend fun <T : Any> PagingSource<Int, T>.refreshPage(): List<T> {
         val result =

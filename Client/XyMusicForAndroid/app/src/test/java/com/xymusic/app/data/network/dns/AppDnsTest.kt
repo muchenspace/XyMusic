@@ -111,10 +111,7 @@ class AppDnsTest {
         assertThat(systemCallCount.get()).isEqualTo(2)
     }
 
-    private fun createAppDns(
-        repository: AppSettingsRepository,
-        systemDns: Dns = Dns.SYSTEM,
-    ): AppDns = AppDns(
+    private fun createAppDns(repository: AppSettingsRepository, systemDns: Dns = Dns.SYSTEM): AppDns = AppDns(
         appSettingsRepository = repository,
         ioDispatcher = testDispatcher,
         systemDns = systemDns,

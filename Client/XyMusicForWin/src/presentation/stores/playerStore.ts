@@ -152,6 +152,7 @@ export const usePlayerStore = defineStore("player", () => {
     seekTo: (seconds: number) => session.seekTo(seconds),
     removeFromQueue: (trackId: string) => session.removeFromQueue(trackId),
     removeFromQueueAt: (index: number) => session.removeFromQueueAt(index),
+    keepCurrentTrack: () => session.keepCurrentTrack(),
     clearQueue: () => session.clearQueue(),
     stopPlayback: (terminalEvent?: PlaybackTerminalEvent | null) => session.stopPlayback(terminalEvent),
     reset,

@@ -28,7 +28,7 @@ func TestConfigurationFingerprintMatchesDocument(t *testing.T) {
 			StreamTTLSeconds: 1800,
 			MaxUploadBytes:   1024,
 		},
-		Media: config.Media{Mode: "DIRECTORY", FFmpegPath: "tools/ffmpeg", FFprobePath: "tools/ffprobe", FFmpegThreads: 4},
+		Media: config.Media{Mode: "DIRECTORY", FFmpegPath: "tools/ffmpeg", FFprobePath: "tools/ffprobe"},
 		LocalLibrary: config.LocalLibrary{
 			Name: "Local", Directory: "music", Mode: "READ_ONLY", Enabled: true,
 			SyncOnStartup: false, ScanIntervalMinutes: &interval,

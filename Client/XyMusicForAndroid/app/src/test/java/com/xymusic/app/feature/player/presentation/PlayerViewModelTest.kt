@@ -530,9 +530,11 @@ private class RefreshingCatalogRepository(var wordLyrics: Boolean = false) : Cat
 
     override fun observeAlbum(albumId: String): Flow<Album?> = flowOf(null)
 
-    override suspend fun refreshArtist(artistId: String): CatalogResult<Unit> = CatalogResult.Success(Unit)
+    override suspend fun refreshArtist(artistId: String, forceRefresh: Boolean): CatalogResult<Unit> =
+        CatalogResult.Success(Unit)
 
-    override suspend fun refreshAlbum(albumId: String): CatalogResult<Unit> = CatalogResult.Success(Unit)
+    override suspend fun refreshAlbum(albumId: String, forceRefresh: Boolean): CatalogResult<Unit> =
+        CatalogResult.Success(Unit)
 }
 
 private class BlockingRefreshCatalogRepository(trackId: String) : CatalogRepository {
@@ -592,9 +594,11 @@ private class BlockingRefreshCatalogRepository(trackId: String) : CatalogReposit
 
     override fun observeAlbum(albumId: String): Flow<Album?> = flowOf(null)
 
-    override suspend fun refreshArtist(artistId: String): CatalogResult<Unit> = CatalogResult.Success(Unit)
+    override suspend fun refreshArtist(artistId: String, forceRefresh: Boolean): CatalogResult<Unit> =
+        CatalogResult.Success(Unit)
 
-    override suspend fun refreshAlbum(albumId: String): CatalogResult<Unit> = CatalogResult.Success(Unit)
+    override suspend fun refreshAlbum(albumId: String, forceRefresh: Boolean): CatalogResult<Unit> =
+        CatalogResult.Success(Unit)
 }
 
 private class FakePlayerRepository(initialState: PlayerState) : PlayerRepository {

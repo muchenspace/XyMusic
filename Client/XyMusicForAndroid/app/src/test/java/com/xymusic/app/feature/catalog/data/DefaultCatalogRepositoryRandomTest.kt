@@ -137,6 +137,73 @@ class DefaultCatalogRepositoryRandomTest {
         assertThat(remote.randomAlbumCalls).isEqualTo(0)
     }
 
+    @Test
+    fun summaryAndReferenceMergesDoNotShortCircuitDetailRefreshAndForceRefreshBypassesTtl() = runTest {
+        val local = RoomCatalogLocalDataSource(database.catalogDao())
+        local.mergeArtistSummaries(
+            listOf(ArtistSummaryDto(id = ARTIST_ID, name = "Summary Artist", artwork = null)),
+            cachedAtEpochMs = clock.millis(),
+        )
+        local.mergeAlbumSummaries(
+            listOf(album(ALBUM_ID_1)),
+            cachedAtEpochMs = clock.millis(),
+        )
+        local.mergeTrackSummaries(
+            listOf(track(TRACK_ID_1)),
+            cachedAtEpochMs = clock.millis(),
+        )
+
+        remote.artistDetailResponse =
+            ArtistDetailDto(
+                id = ARTIST_ID,
+                name = "Full Artist",
+                artwork = null,
+                description = "Full artist bio",
+            )
+        remote.albumDetailResponse =
+            AlbumDetailDto(
+                id = ALBUM_ID_1,
+                title = "Full Album",
+                artists = listOf(ArtistReferenceDto(ARTIST_ID, "Full Artist")),
+                cover = null,
+                releaseDate = "2026-07-13",
+                trackCount = 8,
+                description = "Full album liner notes",
+            )
+
+        val repo = repository()
+        assertThat(repo.refreshArtist(ARTIST_ID)).isEqualTo(CatalogResult.Success(Unit))
+        assertThat(repo.refreshAlbum(ALBUM_ID_1)).isEqualTo(CatalogResult.Success(Unit))
+        assertThat(remote.artistDetailCalls).isEqualTo(1)
+        assertThat(remote.albumDetailCalls).isEqualTo(1)
+        assertThat(repo.observeArtist(ARTIST_ID).first()?.description).isEqualTo("Full artist bio")
+        assertThat(repo.observeAlbum(ALBUM_ID_1).first()?.description).isEqualTo("Full album liner notes")
+
+        // Within TTL, default refresh hits the detail cache even after subsequent summary merges.
+        local.mergeArtistSummaries(
+            listOf(ArtistSummaryDto(id = ARTIST_ID, name = "Full Artist", artwork = null)),
+            cachedAtEpochMs = clock.millis() + 1_000,
+        )
+        local.mergeAlbumSummaries(
+            listOf(album(ALBUM_ID_1)),
+            cachedAtEpochMs = clock.millis() + 1_000,
+        )
+        assertThat(repo.refreshArtist(ARTIST_ID)).isEqualTo(CatalogResult.Success(Unit))
+        assertThat(repo.refreshAlbum(ALBUM_ID_1)).isEqualTo(CatalogResult.Success(Unit))
+        assertThat(remote.artistDetailCalls).isEqualTo(1)
+        assertThat(remote.albumDetailCalls).isEqualTo(1)
+
+        // Explicit forceRefresh bypasses TTL and fetches fresh detail payloads.
+        remote.artistDetailResponse = remote.artistDetailResponse!!.copy(description = "Updated artist bio")
+        remote.albumDetailResponse = remote.albumDetailResponse!!.copy(description = "Updated album notes")
+        assertThat(repo.refreshArtist(ARTIST_ID, forceRefresh = true)).isEqualTo(CatalogResult.Success(Unit))
+        assertThat(repo.refreshAlbum(ALBUM_ID_1, forceRefresh = true)).isEqualTo(CatalogResult.Success(Unit))
+        assertThat(remote.artistDetailCalls).isEqualTo(2)
+        assertThat(remote.albumDetailCalls).isEqualTo(2)
+        assertThat(repo.observeArtist(ARTIST_ID).first()?.description).isEqualTo("Updated artist bio")
+        assertThat(repo.observeAlbum(ALBUM_ID_1).first()?.description).isEqualTo("Updated album notes")
+    }
+
     private fun repository(): DefaultCatalogRepository {
         val runtime = ServerRuntimeCoordinator()
         return DefaultCatalogRepository(
@@ -180,7 +247,11 @@ class DefaultCatalogRepositoryRandomTest {
     private class FakeCatalogRemoteDataSource : CatalogRemoteDataSource {
         var randomAlbumsResponse: List<AlbumSummaryDto> = emptyList()
         var randomTracksResponse: List<TrackSummaryDto> = emptyList()
+        var artistDetailResponse: ArtistDetailDto? = null
+        var albumDetailResponse: AlbumDetailDto? = null
         var randomAlbumCalls = 0
+        var artistDetailCalls = 0
+        var albumDetailCalls = 0
 
         override suspend fun randomAlbums(limit: Int): List<AlbumSummaryDto> {
             randomAlbumCalls += 1
@@ -200,9 +271,15 @@ class DefaultCatalogRepositoryRandomTest {
 
         override suspend fun track(trackId: String): TrackDetailDto = error("unused")
 
-        override suspend fun artist(artistId: String): ArtistDetailDto = error("unused")
+        override suspend fun artist(artistId: String): ArtistDetailDto {
+            artistDetailCalls += 1
+            return checkNotNull(artistDetailResponse) { "Missing artistDetailResponse" }
+        }
 
-        override suspend fun album(albumId: String): AlbumDetailDto = error("unused")
+        override suspend fun album(albumId: String): AlbumDetailDto {
+            albumDetailCalls += 1
+            return checkNotNull(albumDetailResponse) { "Missing albumDetailResponse" }
+        }
     }
 
     private companion object {

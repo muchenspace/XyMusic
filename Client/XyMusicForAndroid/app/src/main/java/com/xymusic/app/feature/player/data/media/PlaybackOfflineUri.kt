@@ -7,14 +7,13 @@ internal object PlaybackOfflineUri {
     private const val AUTHORITY = "track"
     private const val CACHE_KEY_PARAMETER = "cacheKey"
 
-    fun forTrack(trackId: String, cacheKey: String): Uri =
-        Uri
-            .Builder()
-            .scheme(SCHEME)
-            .authority(AUTHORITY)
-            .appendPath(trackId)
-            .appendQueryParameter(CACHE_KEY_PARAMETER, cacheKey)
-            .build()
+    fun forTrack(trackId: String, cacheKey: String): Uri = Uri
+        .Builder()
+        .scheme(SCHEME)
+        .authority(AUTHORITY)
+        .appendPath(trackId)
+        .appendQueryParameter(CACHE_KEY_PARAMETER, cacheKey)
+        .build()
 
     fun cacheKey(uri: Uri): String? {
         if (uri.scheme != SCHEME || uri.authority != AUTHORITY || uri.pathSegments.size != 1) return null

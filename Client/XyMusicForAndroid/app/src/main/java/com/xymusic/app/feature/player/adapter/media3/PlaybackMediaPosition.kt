@@ -3,8 +3,7 @@ package com.xymusic.app.feature.player.adapter.media3
 import androidx.media3.common.MediaItem
 import java.util.UUID
 
-internal fun MediaItem.globalPlaybackPositionMs(localPositionMs: Long): Long =
-    localPositionMs.coerceAtLeast(0)
+internal fun MediaItem.globalPlaybackPositionMs(localPositionMs: Long): Long = localPositionMs.coerceAtLeast(0)
 
 internal fun MediaItem.playbackMetadataDurationMs(): Long {
     val standardDurationMs = mediaMetadata.durationMs?.takeIf { it > 0 } ?: 0

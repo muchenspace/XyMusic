@@ -31,6 +31,7 @@ data class ArtistEntity(
     @ColumnInfo(name = "description") val description: String?,
     @Embedded(prefix = "artwork_") val artwork: ArtworkColumns?,
     @ColumnInfo(name = "cached_at_epoch_ms") val cachedAtEpochMs: Long,
+    @ColumnInfo(name = "detail_cached_at_epoch_ms") val detailCachedAtEpochMs: Long? = null,
 )
 
 @Entity(
@@ -49,6 +50,7 @@ data class AlbumEntity(
     @ColumnInfo(name = "track_count") val trackCount: Int,
     @Embedded(prefix = "cover_") val cover: ArtworkColumns?,
     @ColumnInfo(name = "cached_at_epoch_ms") val cachedAtEpochMs: Long,
+    @ColumnInfo(name = "detail_cached_at_epoch_ms") val detailCachedAtEpochMs: Long? = null,
 )
 
 @Entity(

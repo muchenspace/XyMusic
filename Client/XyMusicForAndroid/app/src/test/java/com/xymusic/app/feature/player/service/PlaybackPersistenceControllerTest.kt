@@ -1,11 +1,9 @@
 package com.xymusic.app.feature.player.service
 
 import android.app.Application
-import android.os.Bundle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import com.google.common.truth.Truth.assertThat
-import com.xymusic.app.feature.player.adapter.media3.PlaybackMediaMetadata
 import com.xymusic.app.feature.player.domain.PlaybackEventSink
 import com.xymusic.app.feature.player.domain.PlaybackModePreference
 import com.xymusic.app.feature.player.domain.PlaybackModeStore

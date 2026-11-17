@@ -229,6 +229,40 @@ class CatalogViewModelsTest {
             assertThat(state.value.refreshFailed).isFalse()
         }
     }
+
+    @Test
+    fun detailInitialRefreshRespectsCacheWhileExplicitRefreshForcesReload() = runTest {
+        val repository = RecordingCatalogRepository()
+        val useCases = CatalogUseCases(repository)
+        val albumId = "00000000-0000-0000-0000-000000000001"
+        val artistId = "00000000-0000-0000-0000-000000000002"
+
+        val albumViewModel =
+            AlbumDetailViewModel(
+                savedStateHandle = SavedStateHandle(mapOf(CatalogRouteArgs.AlbumId to albumId)),
+                useCases = useCases,
+            )
+        val artistViewModel =
+            ArtistDetailViewModel(
+                savedStateHandle = SavedStateHandle(mapOf(CatalogRouteArgs.ArtistId to artistId)),
+                useCases = useCases,
+            )
+        advanceUntilIdle()
+
+        assertThat(repository.albumRefreshRequests).containsExactly(albumId to false)
+        assertThat(repository.artistRefreshRequests).containsExactly(artistId to false)
+
+        albumViewModel.refresh()
+        artistViewModel.refresh()
+        advanceUntilIdle()
+
+        assertThat(repository.albumRefreshRequests)
+            .containsExactly(albumId to false, albumId to true)
+            .inOrder()
+        assertThat(repository.artistRefreshRequests)
+            .containsExactly(artistId to false, artistId to true)
+            .inOrder()
+    }
 }
 
 private class RecordingCatalogRepository(
@@ -245,6 +279,8 @@ private class RecordingCatalogRepository(
     var lastTrackQuery: TrackQuery? = null
     val randomAlbumRequestLimits = mutableListOf<Int>()
     val randomTrackRequestLimits = mutableListOf<Int>()
+    val artistRefreshRequests = mutableListOf<Pair<String, Boolean>>()
+    val albumRefreshRequests = mutableListOf<Pair<String, Boolean>>()
 
     override fun pagedTracks(query: TrackQuery): PagedStream<Track> {
         lastTrackQuery = query
@@ -277,12 +313,14 @@ private class RecordingCatalogRepository(
         return CatalogResult.Success(Unit)
     }
 
-    override suspend fun refreshArtist(artistId: String): CatalogResult<Unit> {
+    override suspend fun refreshArtist(artistId: String, forceRefresh: Boolean): CatalogResult<Unit> {
+        artistRefreshRequests += artistId to forceRefresh
         cancelIfRequested()
         return CatalogResult.Success(Unit)
     }
 
-    override suspend fun refreshAlbum(albumId: String): CatalogResult<Unit> {
+    override suspend fun refreshAlbum(albumId: String, forceRefresh: Boolean): CatalogResult<Unit> {
+        albumRefreshRequests += albumId to forceRefresh
         cancelIfRequested()
         return CatalogResult.Success(Unit)
     }

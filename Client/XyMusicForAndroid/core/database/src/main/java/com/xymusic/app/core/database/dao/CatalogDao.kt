@@ -145,7 +145,7 @@ abstract class CatalogDao {
     @Transaction
     open suspend fun mergeArtistReferences(artists: List<ArtistEntity>) {
         if (artists.isEmpty()) return
-        insertArtistsIfMissing(artists)
+        insertArtistsIfMissing(artists.map { it.copy(detailCachedAtEpochMs = null) })
         artists.forEach { artist ->
             updateArtistReference(artist.id, artist.name, artist.cachedAtEpochMs)
         }
@@ -154,7 +154,7 @@ abstract class CatalogDao {
     @Transaction
     open suspend fun mergeArtistSummaries(artists: List<ArtistEntity>) {
         if (artists.isEmpty()) return
-        insertArtistsIfMissing(artists)
+        insertArtistsIfMissing(artists.map { it.copy(detailCachedAtEpochMs = null) })
         artists.forEach { artist ->
             updateArtistSummary(
                 id = artist.id,
@@ -174,7 +174,7 @@ abstract class CatalogDao {
     @Transaction
     open suspend fun mergeAlbumReferences(albums: List<AlbumEntity>) {
         if (albums.isEmpty()) return
-        insertAlbumsIfMissing(albums)
+        insertAlbumsIfMissing(albums.map { it.copy(detailCachedAtEpochMs = null) })
         albums.forEach { album ->
             updateAlbumReference(album.id, album.title, album.cachedAtEpochMs)
         }
@@ -183,7 +183,7 @@ abstract class CatalogDao {
     @Transaction
     open suspend fun mergeAlbumSummaries(albums: List<AlbumEntity>) {
         if (albums.isEmpty()) return
-        insertAlbumsIfMissing(albums)
+        insertAlbumsIfMissing(albums.map { it.copy(detailCachedAtEpochMs = null) })
         albums.forEach { album ->
             updateAlbumSummary(
                 id = album.id,
@@ -228,9 +228,24 @@ abstract class CatalogDao {
     }
 
     @Transaction
+    open suspend fun replaceArtist(artist: ArtistEntity) {
+        upsertArtists(
+            listOf(
+                artist.copy(
+                    detailCachedAtEpochMs = artist.detailCachedAtEpochMs ?: artist.cachedAtEpochMs,
+                ),
+            ),
+        )
+    }
+
+    @Transaction
     open suspend fun replaceAlbum(album: AlbumEntity, credits: List<AlbumArtistCreditEntity>) {
         require(credits.all { it.albumId == album.id }) { "Album credit belongs to a different album" }
-        upsertAlbum(album)
+        upsertAlbum(
+            album.copy(
+                detailCachedAtEpochMs = album.detailCachedAtEpochMs ?: album.cachedAtEpochMs,
+            ),
+        )
         deleteAlbumCredits(album.id)
         if (credits.isNotEmpty()) insertAlbumCredits(credits)
     }

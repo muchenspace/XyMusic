@@ -5,6 +5,7 @@ import type {
   QueueStart,
 } from "../../src/application/ports/PlaybackSession";
 import type { Track } from "../../src/domain/music";
+import { keepCurrentTrack as retainCurrentTrack } from "../../src/domain/playbackQueue";
 import type { PlayMode } from "../../src/application/playbackMode";
 import { splitPlayMode } from "../../src/application/playbackMode";
 
@@ -134,9 +135,20 @@ export class FakePlaybackSession implements PlaybackSession {
     this.update({ queue: this.stateValue.queue.filter((_, candidate) => candidate !== index) });
   }
 
+  keepCurrentTrack(): void {
+    if (this.stateValue.currentIndex < 0 || this.stateValue.queue.length <= 1) return;
+    const selection = retainCurrentTrack(this.stateValue.queue, this.stateValue.currentIndex);
+    if (!selection.tracks.length) return;
+    this.update({
+      queue: [...selection.tracks],
+      queueVersion: this.stateValue.queueVersion + 1,
+      currentIndex: selection.currentIndex,
+    });
+  }
+
   clearQueue(): void {
-    const currentTrack = this.stateValue.queue[this.stateValue.currentIndex];
-    this.update({ queue: currentTrack ? [currentTrack] : [], currentIndex: currentTrack ? 0 : -1 });
+    this.update({ queue: [], queueVersion: this.stateValue.queueVersion + 1, currentIndex: -1 });
+    this.stopPlayback();
   }
 
   stopPlayback(): void { this.update({ isPlaying: false, currentTime: 0, progress: 0 }); }

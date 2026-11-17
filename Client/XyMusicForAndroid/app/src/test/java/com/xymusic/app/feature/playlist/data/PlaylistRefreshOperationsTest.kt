@@ -10,10 +10,10 @@ import com.xymusic.app.core.database.entity.PendingSyncOperationEntity
 import com.xymusic.app.core.database.entity.PlaylistEntity
 import com.xymusic.app.core.database.entity.PlaylistEntryEntity
 import com.xymusic.app.core.database.entity.TrackEntity
-import com.xymusic.app.core.model.playlist.PlaylistVisibility
 import com.xymusic.app.core.database.model.SyncOperationStatus
 import com.xymusic.app.core.database.model.SyncOperationType
 import com.xymusic.app.core.database.model.SyncTargetType
+import com.xymusic.app.core.model.playlist.PlaylistVisibility
 import com.xymusic.app.core.network.ServerRuntimeCoordinator
 import com.xymusic.app.core.session.AppSessionProvider
 import com.xymusic.app.core.session.AppSessionState

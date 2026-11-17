@@ -55,3 +55,40 @@ func TestCatalogSeekConditionHandlesNullableReleaseDates(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyTrackAttributesDeterministicallyMarksWritebackStates(t *testing.T) {
+	errorCode := "WRITEBACK_FAILED"
+	errorMessage := "Tag 写回失败"
+	failedRecord := &TrackRecord{ID: "track-failed", MetadataStatus: MetadataNormal}
+	supersededRecord := &TrackRecord{ID: "track-superseded", MetadataStatus: MetadataNormal}
+	pendingRecord := &TrackRecord{ID: "track-pending", MetadataStatus: MetadataNormal}
+	byID := map[string]*TrackRecord{
+		"track-failed":     failedRecord,
+		"track-superseded": supersededRecord,
+		"track-pending":    pendingRecord,
+	}
+
+	applyTrackAttributes(
+		byID,
+		map[string]SourceRecord{"track-failed": {ID: "source-1", RelativePath: "a.flac"}},
+		map[string]int{"track-failed": 3, "track-superseded": 4, "track-pending": 2},
+		map[string]trackWritebackSnapshot{
+			"track-failed":     {id: "job-1", status: "FAILED", metadataVersion: 3, lastErrorCode: &errorCode, lastError: &errorMessage},
+			"track-superseded": {id: "job-2", status: "FAILED", metadataVersion: 3, lastErrorCode: &errorCode, lastError: &errorMessage},
+			"track-pending":    {id: "job-3", status: "PROCESSING", metadataVersion: 2},
+		},
+	)
+
+	if failedRecord.MetadataStatus != MetadataWriteFailed || failedRecord.MetadataVersion == nil || *failedRecord.MetadataVersion != 3 {
+		t.Fatalf("failedRecord = %#v", failedRecord)
+	}
+	if failedRecord.Source == nil || failedRecord.Source.ID != "source-1" {
+		t.Fatalf("failedRecord source = %#v", failedRecord.Source)
+	}
+	if supersededRecord.MetadataStatus != MetadataNormal || supersededRecord.LatestWritebackErrorCode == nil {
+		t.Fatalf("supersededRecord = %#v", supersededRecord)
+	}
+	if pendingRecord.MetadataStatus != MetadataPendingWrite || pendingRecord.ActiveWritebackJobID == nil || *pendingRecord.ActiveWritebackJobID != "job-3" {
+		t.Fatalf("pendingRecord = %#v", pendingRecord)
+	}
+}

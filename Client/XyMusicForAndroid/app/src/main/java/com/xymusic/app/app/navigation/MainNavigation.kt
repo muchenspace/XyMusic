@@ -169,7 +169,7 @@ fun MainNavigation(
             visible = playerPresented,
             onDismissRequest = { playerPresented = false },
             modifier = Modifier.fillMaxSize(),
-        ) { onDismiss, dismissGestureModifier, immersiveLandscape ->
+        ) { onDismiss, dismissGestureModifier ->
             PlayerOverlayContent(
                 uiState = playerUiState,
                 playerViewModel = playerViewModel,
@@ -179,7 +179,6 @@ fun MainNavigation(
                 onToggleFavorite = trackActionsViewModel::togglePlayerFavorite,
                 onAddToPlaylist = trackActionsViewModel::open,
                 modifier = dismissGestureModifier,
-                immersiveLandscape = immersiveLandscape,
             )
         }
     }
@@ -222,7 +221,6 @@ private fun PlayerOverlayContent(
     onToggleFavorite: () -> Unit,
     onAddToPlaylist: (String) -> Unit,
     modifier: Modifier,
-    immersiveLandscape: Boolean,
 ) {
     PlayerScreen(
         uiState = uiState,
@@ -247,7 +245,6 @@ private fun PlayerOverlayContent(
         },
         playbackPosition = playbackPosition,
         dismissGestureModifier = modifier,
-        immersiveLandscape = immersiveLandscape,
     )
 }
 

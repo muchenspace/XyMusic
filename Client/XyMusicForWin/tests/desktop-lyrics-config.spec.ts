@@ -40,6 +40,37 @@ describe("desktop lyrics Tauri configuration", () => {
       "core:window:allow-set-position",
       "core:window:allow-set-size",
     ]));
+    for (const permission of capability.permissions) {
+      expect(permission).not.toMatch(/^allow-(?:credential|hide-main-window|toggle-main-window|set-mini-mode|update-media|clear-media|.*desktop-lyrics)/u);
+    }
+  });
+
+  it("enforces an explicit CSP and scopes custom Tauri commands to the main window", () => {
+    const config = readJson("src-tauri/tauri.conf.json") as {
+      app: { security?: { csp?: unknown } };
+    };
+    const csp = config.app.security?.csp;
+    expect(typeof csp).toBe("string");
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain("script-src 'self'");
+    expect(csp).toContain("object-src 'none'");
+    expect(csp).toContain("frame-ancestors 'none'");
+
+    const libSource = readFileSync(path.join(projectRoot, "src-tauri/src/lib.rs"), "utf8");
+    const buildSource = readFileSync(path.join(projectRoot, "src-tauri/build.rs"), "utf8");
+    const mainCapability = readJson("src-tauri/capabilities/default.json") as {
+      windows: string[];
+      permissions: string[];
+    };
+    const handlerBlock = libSource.match(/generate_handler!\[([\s\S]*?)\]/u)?.[1] ?? "";
+    const registeredCommands = [...handlerBlock.matchAll(/::([a-z0-9_]+)/gu)].map((match) => match[1]!);
+
+    expect(registeredCommands).toHaveLength(15);
+    expect(mainCapability.windows).toEqual(["main"]);
+    for (const command of registeredCommands) {
+      expect(buildSource).toContain(`"${command}"`);
+      expect(mainCapability.permissions).toContain(`allow-${command.replaceAll("_", "-")}`);
+    }
   });
 
   it("routes the overlay to its lightweight entry instead of the main application", () => {

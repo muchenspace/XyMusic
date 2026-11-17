@@ -130,7 +130,7 @@ func (s *Store) Save(cfg Config) error {
 		"ACCESS_TOKEN_SECRET", "IDEMPOTENCY_ENCRYPTION_SECRET", "CURSOR_SIGNING_SECRET", "PLAYBACK_TICKET_SECRET",
 		"ACCESS_TOKEN_TTL_SECONDS", "REFRESH_TOKEN_TTL_SECONDS",
 		"MEDIA_UPLOAD_TTL_SECONDS", "MEDIA_STREAM_TTL_SECONDS", "MEDIA_MAX_UPLOAD_BYTES",
-		"FFMPEG_PATH", "FFPROBE_PATH", "MEDIA_FFMPEG_THREADS",
+		"FFMPEG_PATH", "FFPROBE_PATH",
 		"LOCAL_MUSIC_SOURCE_NAME", "LOCAL_MUSIC_SOURCE_MODE", "LOCAL_MUSIC_SOURCE_ENABLED",
 		"LOCAL_MUSIC_SYNC_ON_STARTUP", "LOCAL_MUSIC_SCAN_INTERVAL_MINUTES",
 		"LOCAL_MUSIC_INCLUDE_PATTERNS", "LOCAL_MUSIC_EXCLUDE_PATTERNS",
@@ -181,10 +181,6 @@ func ToEnvironment(cfg Config) map[string]string {
 	scanProbeWorkers := cfg.LocalLibrary.ScanProbeWorkers
 	if scanProbeWorkers <= 0 {
 		scanProbeWorkers = defaultScanProbeWorkers()
-	}
-	mediaFFmpegThreads := cfg.Media.FFmpegThreads
-	if mediaFFmpegThreads < 0 {
-		mediaFFmpegThreads = 0
 	}
 	batchWorkers := cfg.Scraping.BatchWorkers
 	if batchWorkers <= 0 {
@@ -254,7 +250,6 @@ func ToEnvironment(cfg Config) map[string]string {
 		"MEDIA_MAX_UPLOAD_BYTES":             strconv.FormatInt(cfg.MediaStorage.MaxUploadBytes, 10),
 		"FFMPEG_PATH":                        cfg.Media.FFmpegPath,
 		"FFPROBE_PATH":                       cfg.Media.FFprobePath,
-		"MEDIA_FFMPEG_THREADS":               strconv.Itoa(mediaFFmpegThreads),
 		"LOCAL_MUSIC_SOURCE_NAME":            cfg.LocalLibrary.Name,
 		"LOCAL_MUSIC_SOURCE_MODE":            cfg.LocalLibrary.Mode,
 		"LOCAL_MUSIC_SOURCE_ENABLED":         strconv.FormatBool(cfg.LocalLibrary.Enabled),

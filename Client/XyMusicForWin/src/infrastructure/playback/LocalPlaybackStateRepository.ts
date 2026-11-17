@@ -155,8 +155,12 @@ function readCheckpoint(ownerKey: string): PlaybackProgressCheckpoint | null {
 
 function removeOwnedValue(key: string, ownerKey: string): void {
   try {
-    const value = JSON.parse(localStorage.getItem(key) ?? "null") as { ownerKey?: unknown } | null;
-    if (value?.ownerKey === ownerKey) localStorage.removeItem(key);
+    const value = JSON.parse(localStorage.getItem(key) ?? "null") as { ownerKey?: unknown } | CompactPlaybackState | null;
+    if (isCompactSnapshot(value)) {
+      if (value.o === ownerKey) localStorage.removeItem(key);
+      return;
+    }
+    if (value && typeof value === "object" && value.ownerKey === ownerKey) localStorage.removeItem(key);
   } catch {
     // Invalid values cannot be attributed safely to the requested owner.
   }

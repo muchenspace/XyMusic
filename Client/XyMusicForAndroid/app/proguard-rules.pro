@@ -2,10 +2,9 @@
 -keepattributes *Annotation*
 
 # Kotlin serialization
--keepclassmembers class **$$serializer {
-    *** INSTANCE;
-}
--keepclassmembers class * {
+-keep,includedescriptorclasses class **$$serializer { *; }
+-if @kotlinx.serialization.Serializable class **
+-keepclassmembers class <1> {
     *** Companion;
 }
 -keepclasseswithmembers class * {
@@ -24,19 +23,12 @@
 # Room loads the generated database implementation by its original class name.
 -keep class com.xymusic.app.core.database.XyMusicDatabase_Impl { *; }
 
-# Coil 3
+# Coil 3 ServiceLoader targets
 -keep class * extends coil3.util.FetcherServiceLoaderTarget { *; }
 -keep class * extends coil3.util.DecoderServiceLoaderTarget { *; }
--keep class coil3.network.okhttp.** { *; }
--keep class coil3.** { *; }
--keep interface coil3.** { *; }
 -dontwarn coil3.**
 
-# Media3 & MediaSession & Media Compat
--keep class androidx.media3.session.** { *; }
--keep interface androidx.media3.session.** { *; }
--keep class androidx.media3.common.** { *; }
--keep interface androidx.media3.common.** { *; }
+# Media Compat Parcelables
 -keep class android.support.v4.media.** { *; }
 -keep interface android.support.v4.media.** { *; }
 

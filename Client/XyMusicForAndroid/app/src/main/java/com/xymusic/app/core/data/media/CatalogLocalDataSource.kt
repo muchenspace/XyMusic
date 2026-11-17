@@ -43,9 +43,9 @@ interface CatalogLocalDataSource {
     /** When the cached detail row was written, or null when it is not cached. */
     suspend fun trackCachedAtEpochMs(trackId: String): Long?
 
-    suspend fun artistCachedAtEpochMs(artistId: String): Long?
+    suspend fun artistDetailCachedAtEpochMs(artistId: String): Long?
 
-    suspend fun albumCachedAtEpochMs(albumId: String): Long?
+    suspend fun albumDetailCachedAtEpochMs(albumId: String): Long?
 }
 
 class RoomCatalogLocalDataSource
@@ -132,7 +132,7 @@ constructor(private val catalogDao: CatalogDao) : CatalogLocalDataSource {
     }
 
     override suspend fun replaceArtist(detail: ArtistDetailDto, cachedAtEpochMs: Long) {
-        catalogDao.upsertArtists(listOf(detail.toEntity(cachedAtEpochMs)))
+        catalogDao.replaceArtist(detail.toEntity(cachedAtEpochMs))
     }
 
     override suspend fun replaceAlbum(detail: AlbumDetailDto, cachedAtEpochMs: Long) {
@@ -143,7 +143,9 @@ constructor(private val catalogDao: CatalogDao) : CatalogLocalDataSource {
 
     override suspend fun trackCachedAtEpochMs(trackId: String): Long? = catalogDao.track(trackId)?.cachedAtEpochMs
 
-    override suspend fun artistCachedAtEpochMs(artistId: String): Long? = catalogDao.artist(artistId)?.cachedAtEpochMs
+    override suspend fun artistDetailCachedAtEpochMs(artistId: String): Long? =
+        catalogDao.artist(artistId)?.detailCachedAtEpochMs
 
-    override suspend fun albumCachedAtEpochMs(albumId: String): Long? = catalogDao.album(albumId)?.cachedAtEpochMs
+    override suspend fun albumDetailCachedAtEpochMs(albumId: String): Long? =
+        catalogDao.album(albumId)?.detailCachedAtEpochMs
 }

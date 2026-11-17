@@ -27,6 +27,7 @@ import {
 } from "../playbackMode";
 import { normalizeResumePosition } from "../../domain/playbackState";
 import {
+  keepCurrentTrack as retainCurrentTrack,
   nextTrackIndex,
   previousTrackIndex,
   removeTrackFromQueue,
@@ -426,6 +427,22 @@ export class PlaybackSession implements PlaybackSessionPort {
     if (this.disposed || !Number.isInteger(index) || index < 0 || index >= this.stateValue.queue.length) return;
     const target = this.stateValue.queue[index];
     if (target) this.removeFromQueue(target.id);
+  }
+
+  keepCurrentTrack(): void {
+    if (this.disposed || this.stateValue.currentIndex < 0 || this.stateValue.queue.length <= 1) return;
+    const selection = retainCurrentTrack(this.stateValue.queue, this.stateValue.currentIndex);
+    if (!selection.tracks.length) return;
+    if (this.transitioning) {
+      this.loadRequest += 1;
+    }
+    this.updateState({
+      queue: Object.freeze([...selection.tracks]),
+      queueVersion: this.advanceQueueRevision(),
+      currentIndex: selection.currentIndex,
+    });
+    this.schedulePersistState();
+    this.refreshPrefetch();
   }
 
   clearQueue(): void {

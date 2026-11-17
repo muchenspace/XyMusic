@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { AlertTriangle, ChevronRight, Clock3, Folder, FolderOpen, Pencil, Play, Plus, RefreshCw, Square, Trash2 } from "lucide-vue-next";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/vue-query";
-import { computed, defineComponent, h, onMounted, reactive, ref, watch } from "vue";
+import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { z } from "zod";
 import { scanCachePort } from "@/app/query-client";
 import { useHealth } from "@/app/services/health";
@@ -182,6 +182,13 @@ watch(() => scansQuery.data.value?.items, (items) => {
 onMounted(() => {
   scanClock = window.setInterval(() => { scanNow.value = Date.now(); }, 5_000);
 });
+onBeforeUnmount(() => {
+  if (scanClock !== undefined) {
+    window.clearInterval(scanClock);
+    scanClock = undefined;
+  }
+  scanActivity.close();
+});
 const scanMutation = useMutation({
   mutationFn: (source: LibrarySource) => sourceAdmin.startScan(source.id),
   onMutate: (source) => {
@@ -259,14 +266,14 @@ const ToggleSource = defineComponent({ inheritAttrs: false, props: { modelValue:
     <section class="ui-card overflow-hidden">
       <div class="flex flex-col gap-3 border-b border-[var(--border)] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div class="flex flex-wrap items-center gap-2"><h2 class="font-bold">扫描状态</h2><StatusBadge status="LOCAL" label="仅处理音源基础信息" dot /></div>
-          <p class="mt-1 text-xs text-[var(--muted)]">扫描只读取音源元数据、侧车歌词和封面信息，不会生成播放中间文件。</p>
+          <h2 class="font-bold">扫描状态</h2>
+          <p class="mt-1 text-xs text-[var(--muted)]">当前所选音源的实时扫描进度</p>
         </div>
         <div class="flex gap-2"><select v-model="historySourceId" class="ui-select min-w-48" @change="resetScanPaging()"><option v-for="source in sourcesQuery.data.value?.items" :key="source.id" :value="source.id">{{ source.name }}</option></select><AppButton icon-only :loading="scansQuery.isFetching.value" @click="scansQuery.refetch()"><template #icon><RefreshCw :size="16" /></template>刷新</AppButton></div>
       </div>
       <StatePanel v-if="!historySourceId" state="empty" compact title="请先添加音源" />
       <template v-else>
-        <div v-if="livePipelineVisible" class="border-b border-[var(--border)] bg-[var(--surface-muted)] p-5" aria-live="polite">
+        <div v-if="livePipelineVisible" class="bg-[var(--surface-muted)] p-5" aria-live="polite">
           <div v-if="showingSubmission" class="flex flex-col gap-4 sm:flex-row sm:items-center">
             <span class="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[var(--primary-soft)] text-[var(--primary)]"><RefreshCw :size="19" class="animate-spin" /></span>
             <div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><p class="font-bold">正在提交扫描任务</p><StatusBadge status="PENDING" label="连接服务端" dot /></div><p class="mt-1 truncate text-xs text-[var(--muted)]">{{ currentSubmission?.sourceName }} · 请求已发出，页面无需等待返回即可看到此状态</p></div>
@@ -279,9 +286,7 @@ const ToggleSource = defineComponent({ inheritAttrs: false, props: { modelValue:
             <p v-if="scanHealth(visibleScan).warning" class="text-xs text-[var(--danger)]">{{ scanHealth(visibleScan).warning }}</p>
           </div>
         </div>
-        <div class="p-5">
-          <div class="flex items-start gap-3 rounded-xl bg-[var(--primary-soft)] p-4 text-sm text-[var(--primary)]"><RefreshCw :size="18" class="mt-0.5 shrink-0" /><div><p class="font-bold">源文件直出</p><p class="mt-1 text-xs leading-5">扫描结束后不会继续排队播放处理任务。服务端保存音源路径和基础信息，客户端播放时直接读取已发布的源文件。</p></div></div>
-        </div>
+        <StatePanel v-else state="empty" compact title="当前无进行中的扫描任务" />
       </template>
     </section>
 

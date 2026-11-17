@@ -1,9 +1,6 @@
 package com.xymusic.app.core.ui.dns
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.selection.toggleable
-import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -31,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -73,7 +72,6 @@ fun DnsSettingsDialog(
     var disableDnsCache by rememberSaveable(currentSettings) {
         mutableStateOf(currentSettings.disableDnsCache)
     }
-
     var dnsServerError by rememberSaveable { mutableStateOf<String?>(null) }
     var dohUrlError by rememberSaveable { mutableStateOf<String?>(null) }
 
@@ -81,45 +79,19 @@ fun DnsSettingsDialog(
     val invalidDohMessage = stringResource(R.string.dns_settings_error_invalid_doh)
 
     val onConfirm = {
-        var hasError = false
-        val trimmedDns = dnsServer.trim()
-        val trimmedDoh = dohUrl.trim()
-
-        if (customDnsEnabled) {
-            val ips = trimmedDns.split(',', ';', ' ').map { it.trim() }.filter { it.isNotEmpty() }
-            if (ips.isEmpty() || !ips.all { isIpAddress(it) }) {
-                dnsServerError = invalidDnsMessage
-                hasError = true
-            } else {
-                dnsServerError = null
-            }
-
-            if (dohEnabled) {
-                if (trimmedDoh.isBlank() || !trimmedDoh.startsWith("https://", ignoreCase = true)) {
-                    dohUrlError = invalidDohMessage
-                    hasError = true
-                } else {
-                    dohUrlError = null
-                }
-            } else {
-                dohUrlError = null
-            }
-        } else {
-            dnsServerError = null
-            dohUrlError = null
-        }
-
-        if (!hasError) {
-            onSave(
-                DnsSettings(
-                    customDnsEnabled = customDnsEnabled,
-                    dnsServer = if (trimmedDns.isBlank()) DnsSettings.DEFAULT_DNS_SERVER else trimmedDns,
-                    dohEnabled = dohEnabled,
-                    dohUrl = if (trimmedDoh.isBlank()) DnsSettings.DEFAULT_DOH_URL else trimmedDoh,
-                    disableDnsCache = disableDnsCache,
-                ),
+        val validation =
+            validateDnsDialogInput(
+                customDnsEnabled = customDnsEnabled,
+                dnsServer = dnsServer,
+                dohEnabled = dohEnabled,
+                dohUrl = dohUrl,
+                disableDnsCache = disableDnsCache,
+                invalidDnsMessage = invalidDnsMessage,
+                invalidDohMessage = invalidDohMessage,
             )
-        }
+        dnsServerError = validation.dnsServerError
+        dohUrlError = validation.dohUrlError
+        validation.settings?.let(onSave)
     }
 
     AlertDialog(
@@ -133,139 +105,48 @@ fun DnsSettingsDialog(
             )
         },
         text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                // Custom DNS Toggle Row
-                DnsSettingToggleRow(
-                    title = stringResource(R.string.dns_settings_custom_dns),
-                    summary = stringResource(R.string.dns_settings_custom_dns_summary),
-                    checked = customDnsEnabled,
-                    onCheckedChange = {
-                        customDnsEnabled = it
-                        dnsServerError = null
-                    },
-                    testTag = DnsSettingsTestTags.CustomDnsSwitch,
-                )
-
-                // DNS Server Input Field
-                AnimatedVisibility(visible = customDnsEnabled) {
-                    Column(modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)) {
-                        OutlinedTextField(
-                            value = dnsServer,
-                            onValueChange = {
-                                dnsServer = it
-                                dnsServerError = null
-                            },
-                            label = { Text(stringResource(R.string.dns_settings_server_label)) },
-                            placeholder = { Text(stringResource(R.string.dns_settings_server_placeholder)) },
-                            supportingText = {
-                                Text(
-                                    text = dnsServerError ?: stringResource(R.string.dns_settings_server_supporting),
-                                    color = if (dnsServerError != null) {
-                                        MaterialTheme.colorScheme.error
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                )
-                            },
-                            isError = dnsServerError != null,
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Ascii,
-                                imeAction = ImeAction.Next,
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag(DnsSettingsTestTags.DnsServerInput),
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // DoH Toggle Row
-                DnsSettingToggleRow(
-                    title = stringResource(R.string.dns_settings_doh),
-                    summary = stringResource(R.string.dns_settings_doh_summary),
-                    checked = dohEnabled,
-                    enabled = customDnsEnabled,
-                    onCheckedChange = {
-                        dohEnabled = it
-                        dohUrlError = null
-                    },
-                    testTag = DnsSettingsTestTags.DohSwitch,
-                )
-
-                // DoH Server URL Input Field
-                AnimatedVisibility(visible = customDnsEnabled && dohEnabled) {
-                    Column(modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)) {
-                        OutlinedTextField(
-                            value = dohUrl,
-                            onValueChange = {
-                                dohUrl = it
-                                dohUrlError = null
-                            },
-                            label = { Text(stringResource(R.string.dns_settings_doh_url_label)) },
-                            placeholder = { Text(stringResource(R.string.dns_settings_doh_url_placeholder)) },
-                            supportingText = {
-                                Text(
-                                    text = dohUrlError ?: stringResource(R.string.dns_settings_doh_url_supporting),
-                                    color = if (dohUrlError != null) {
-                                        MaterialTheme.colorScheme.error
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                )
-                            },
-                            isError = dohUrlError != null,
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Uri,
-                                imeAction = ImeAction.Done,
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag(DnsSettingsTestTags.DohUrlInput),
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Disable DNS Cache Toggle Row
-                DnsSettingToggleRow(
-                    title = stringResource(R.string.dns_settings_disable_cache),
-                    summary = stringResource(R.string.dns_settings_disable_cache_summary),
-                    checked = disableDnsCache,
-                    onCheckedChange = { disableDnsCache = it },
-                    testTag = DnsSettingsTestTags.DisableCacheSwitch,
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Reset to Default Button
-                TextButton(
-                    onClick = {
-                        customDnsEnabled = true
-                        dnsServer = DnsSettings.DEFAULT_DNS_SERVER
-                        dohEnabled = true
-                        dohUrl = DnsSettings.DEFAULT_DOH_URL
-                        disableDnsCache = false
-                        dnsServerError = null
-                        dohUrlError = null
-                    },
-                    modifier = Modifier.testTag(DnsSettingsTestTags.ResetButton),
-                ) {
-                    Text(stringResource(R.string.dns_settings_reset))
-                }
-            }
+            DnsSettingsDialogContent(
+                state =
+                DnsDialogFormState(
+                    customDnsEnabled = customDnsEnabled,
+                    dnsServer = dnsServer,
+                    dohEnabled = dohEnabled,
+                    dohUrl = dohUrl,
+                    disableDnsCache = disableDnsCache,
+                    dnsServerError = dnsServerError,
+                    dohUrlError = dohUrlError,
+                ),
+                onCustomDnsChanged = {
+                    customDnsEnabled = it
+                    dnsServerError = null
+                },
+                onDnsServerChanged = {
+                    dnsServer = it
+                    dnsServerError = null
+                },
+                onDohChanged = {
+                    dohEnabled = it
+                    dohUrlError = null
+                },
+                onDohUrlChanged = {
+                    dohUrl = it
+                    dohUrlError = null
+                },
+                onDisableCacheChanged = { disableDnsCache = it },
+                onReset = {
+                    customDnsEnabled = true
+                    dnsServer = DnsSettings.DEFAULT_DNS_SERVER
+                    dohEnabled = true
+                    dohUrl = DnsSettings.DEFAULT_DOH_URL
+                    disableDnsCache = false
+                    dnsServerError = null
+                    dohUrlError = null
+                },
+            )
         },
         confirmButton = {
             Button(
-                onClick = onConfirm,
+                onClick = { onConfirm() },
                 modifier = Modifier.testTag(DnsSettingsTestTags.SaveButton),
             ) {
                 Text(stringResource(R.string.common_confirm))
@@ -282,6 +163,192 @@ fun DnsSettingsDialog(
     )
 }
 
+private data class DnsDialogFormState(
+    val customDnsEnabled: Boolean,
+    val dnsServer: String,
+    val dohEnabled: Boolean,
+    val dohUrl: String,
+    val disableDnsCache: Boolean,
+    val dnsServerError: String?,
+    val dohUrlError: String?,
+)
+
+private data class DnsDialogValidation(
+    val settings: DnsSettings? = null,
+    val dnsServerError: String? = null,
+    val dohUrlError: String? = null,
+)
+
+private fun validateDnsDialogInput(
+    customDnsEnabled: Boolean,
+    dnsServer: String,
+    dohEnabled: Boolean,
+    dohUrl: String,
+    disableDnsCache: Boolean,
+    invalidDnsMessage: String,
+    invalidDohMessage: String,
+): DnsDialogValidation {
+    val trimmedDns = dnsServer.trim()
+    val trimmedDoh = dohUrl.trim()
+    val dnsError = validateCustomDnsInput(customDnsEnabled, trimmedDns, invalidDnsMessage)
+    val dohError = validateDohUrlInput(customDnsEnabled, dohEnabled, trimmedDoh, invalidDohMessage)
+    if (dnsError != null || dohError != null) {
+        return DnsDialogValidation(dnsServerError = dnsError, dohUrlError = dohError)
+    }
+    return DnsDialogValidation(
+        settings =
+        DnsSettings(
+            customDnsEnabled = customDnsEnabled,
+            dnsServer = trimmedDns.ifBlank { DnsSettings.DEFAULT_DNS_SERVER },
+            dohEnabled = dohEnabled,
+            dohUrl = trimmedDoh.ifBlank { DnsSettings.DEFAULT_DOH_URL },
+            disableDnsCache = disableDnsCache,
+        ),
+    )
+}
+
+private fun validateCustomDnsInput(customDnsEnabled: Boolean, trimmedDns: String, invalidDnsMessage: String): String? {
+    if (!customDnsEnabled) return null
+    val ips = trimmedDns.split(',', ';', ' ').map(String::trim).filter(String::isNotEmpty)
+    return if (ips.isEmpty() || !ips.all(::isIpAddress)) invalidDnsMessage else null
+}
+
+private fun validateDohUrlInput(
+    customDnsEnabled: Boolean,
+    dohEnabled: Boolean,
+    trimmedDoh: String,
+    invalidDohMessage: String,
+): String? {
+    if (!customDnsEnabled || !dohEnabled) return null
+    return if (trimmedDoh.isBlank() || !trimmedDoh.startsWith("https://", ignoreCase = true)) {
+        invalidDohMessage
+    } else {
+        null
+    }
+}
+
+@Composable
+private fun DnsSettingsDialogContent(
+    state: DnsDialogFormState,
+    onCustomDnsChanged: (Boolean) -> Unit,
+    onDnsServerChanged: (String) -> Unit,
+    onDohChanged: (Boolean) -> Unit,
+    onDohUrlChanged: (String) -> Unit,
+    onDisableCacheChanged: (Boolean) -> Unit,
+    onReset: () -> Unit,
+) {
+    Column(
+        modifier =
+        Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState()),
+    ) {
+        DnsSettingToggleRow(
+            title = stringResource(R.string.dns_settings_custom_dns),
+            summary = stringResource(R.string.dns_settings_custom_dns_summary),
+            checked = state.customDnsEnabled,
+            onCheckedChange = onCustomDnsChanged,
+            testTag = DnsSettingsTestTags.CustomDnsSwitch,
+        )
+        DnsValidatedTextFieldSection(
+            visible = state.customDnsEnabled,
+            value = state.dnsServer,
+            onValueChange = onDnsServerChanged,
+            label = stringResource(R.string.dns_settings_server_label),
+            placeholder = stringResource(R.string.dns_settings_server_placeholder),
+            supporting = stringResource(R.string.dns_settings_server_supporting),
+            error = state.dnsServerError,
+            keyboardOptions =
+            KeyboardOptions(
+                keyboardType = KeyboardType.Ascii,
+                imeAction = ImeAction.Next,
+            ),
+            testTag = DnsSettingsTestTags.DnsServerInput,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        DnsSettingToggleRow(
+            title = stringResource(R.string.dns_settings_doh),
+            summary = stringResource(R.string.dns_settings_doh_summary),
+            checked = state.dohEnabled,
+            enabled = state.customDnsEnabled,
+            onCheckedChange = onDohChanged,
+            testTag = DnsSettingsTestTags.DohSwitch,
+        )
+        DnsValidatedTextFieldSection(
+            visible = state.customDnsEnabled && state.dohEnabled,
+            value = state.dohUrl,
+            onValueChange = onDohUrlChanged,
+            label = stringResource(R.string.dns_settings_doh_url_label),
+            placeholder = stringResource(R.string.dns_settings_doh_url_placeholder),
+            supporting = stringResource(R.string.dns_settings_doh_url_supporting),
+            error = state.dohUrlError,
+            keyboardOptions =
+            KeyboardOptions(
+                keyboardType = KeyboardType.Uri,
+                imeAction = ImeAction.Done,
+            ),
+            testTag = DnsSettingsTestTags.DohUrlInput,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        DnsSettingToggleRow(
+            title = stringResource(R.string.dns_settings_disable_cache),
+            summary = stringResource(R.string.dns_settings_disable_cache_summary),
+            checked = state.disableDnsCache,
+            onCheckedChange = onDisableCacheChanged,
+            testTag = DnsSettingsTestTags.DisableCacheSwitch,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        TextButton(
+            onClick = onReset,
+            modifier = Modifier.testTag(DnsSettingsTestTags.ResetButton),
+        ) {
+            Text(stringResource(R.string.dns_settings_reset))
+        }
+    }
+}
+
+@Composable
+private fun DnsValidatedTextFieldSection(
+    visible: Boolean,
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String,
+    supporting: String,
+    error: String?,
+    keyboardOptions: KeyboardOptions,
+    testTag: String,
+) {
+    AnimatedVisibility(visible = visible) {
+        Column(modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)) {
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                label = { Text(label) },
+                placeholder = { Text(placeholder) },
+                supportingText = {
+                    Text(
+                        text = error ?: supporting,
+                        color =
+                        if (error != null) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                },
+                isError = error != null,
+                singleLine = true,
+                keyboardOptions = keyboardOptions,
+                modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .testTag(testTag),
+            )
+        }
+    }
+}
+
 @Composable
 private fun DnsSettingToggleRow(
     title: String,
@@ -293,15 +360,15 @@ private fun DnsSettingToggleRow(
     enabled: Boolean = true,
 ) {
     Row(
-        modifier = modifier
+        modifier =
+        modifier
             .fillMaxWidth()
             .toggleable(
                 value = checked,
                 enabled = enabled,
                 role = Role.Switch,
                 onValueChange = onCheckedChange,
-            )
-            .testTag(testTag)
+            ).testTag(testTag)
             .padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
@@ -311,7 +378,8 @@ private fun DnsSettingToggleRow(
                 text = title,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Medium,
-                color = if (enabled) {
+                color =
+                if (enabled) {
                     MaterialTheme.colorScheme.onSurface
                 } else {
                     MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
@@ -320,7 +388,8 @@ private fun DnsSettingToggleRow(
             Text(
                 text = summary,
                 style = MaterialTheme.typography.bodySmall,
-                color = if (enabled) {
+                color =
+                if (enabled) {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)

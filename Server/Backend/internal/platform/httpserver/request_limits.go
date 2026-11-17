@@ -39,10 +39,6 @@ var avatarContentUploadPath = regexp.MustCompile(
 	`(?i)^/api/v1/users/me/avatar/uploads/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$`,
 )
 
-var objectStorageProxyUploadPath = regexp.MustCompile(
-	`^/api/v1/oss/[A-Za-z0-9_-]+/.+$`,
-)
-
 // MediaUploadMatcher identifies endpoints allowed to stream up to the media
 // upload ceiling. Keeping this explicit prevents arbitrary routes from opting
 // into a 1 GiB request body merely by changing Content-Type.
@@ -95,13 +91,13 @@ func IsAvatarContentUpload(request *http.Request) bool {
 	return avatarContentUploadPath.MatchString(request.URL.Path)
 }
 
-// IsMediaContentUpload matches PUT requests that stream media either through
-// the UUID-scoped application endpoint or the pre-signed object proxy.
+// IsMediaContentUpload matches PUT requests that stream media through the
+// UUID-scoped application endpoint.
 func IsMediaContentUpload(request *http.Request) bool {
 	if request == nil || request.Method != http.MethodPut || request.URL == nil {
 		return false
 	}
-	return mediaContentUploadPath.MatchString(request.URL.Path) || objectStorageProxyUploadPath.MatchString(request.URL.Path)
+	return mediaContentUploadPath.MatchString(request.URL.Path)
 }
 
 // RequestSizeLimiter rejects declared oversize bodies before routing and wraps

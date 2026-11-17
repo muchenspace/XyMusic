@@ -907,5 +907,5 @@ function settings() {
 }
 
 function systemInformation() {
-  return { applicationVersion: "test", runtimeVersion: "go", platform: "windows", architecture: "amd64", uptimeSeconds: 60, databaseVersion: "PostgreSQL", migrationVersion: "1", ffmpegVersion: "7", dataDirectory: "data", configurationFile: ".env", configurationSource: "managed", worker: { mode: "inline", state: "READY", responsive: true, synchronized: true, available: true, updatedAt: null }, metrics: null, queues: { media: 0, scans: 0, cleanup: 0, writeback: 0, scraping: 0, total: 0 } };
+  return { applicationVersion: "test", runtimeVersion: "go", platform: "windows", architecture: "amd64", uptimeSeconds: 60, databaseVersion: "PostgreSQL", migrationVersion: "1", ffmpegVersion: "7", dataDirectory: "data", configurationFile: ".env", configurationSource: "managed", worker: { mode: "inline", state: "READY", responsive: true, synchronized: true, available: true, updatedAt: null }, metrics: null, queues: { scans: 0, cleanup: 0, writeback: 0, scraping: 0, total: 0 } };
 }

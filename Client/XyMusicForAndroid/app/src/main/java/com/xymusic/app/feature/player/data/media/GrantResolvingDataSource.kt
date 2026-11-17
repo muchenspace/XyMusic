@@ -85,15 +85,12 @@ private class GrantResolvingDataSource(
         onlineFactory,
     )
 
-    private fun openOfflineResource(
-        dataSpec: DataSpec,
-        identity: ActiveSessionIdentity,
-        cacheKey: String,
-    ): Long = openUpstreamForIdentity(
-        dataSpec.buildUpon().setKey(cacheKey).build(),
-        identity,
-        offlineFactory,
-    )
+    private fun openOfflineResource(dataSpec: DataSpec, identity: ActiveSessionIdentity, cacheKey: String): Long =
+        openUpstreamForIdentity(
+            dataSpec.buildUpon().setKey(cacheKey).build(),
+            identity,
+            offlineFactory,
+        )
 
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
         requireCurrentIdentity(boundIdentity ?: throw IOException("Playback data source is not open"))
@@ -103,8 +100,7 @@ private class GrantResolvingDataSource(
 
     override fun getUri(): Uri? = stableUri
 
-    override fun getResponseHeaders(): Map<String, List<String>> =
-        upstream?.responseHeaders ?: emptyMap()
+    override fun getResponseHeaders(): Map<String, List<String>> = upstream?.responseHeaders ?: emptyMap()
 
     override fun close() {
         closeUpstream()

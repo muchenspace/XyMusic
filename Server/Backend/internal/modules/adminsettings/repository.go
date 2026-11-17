@@ -49,16 +49,20 @@ func (repository *Repository) QueueInformation(ctx context.Context) (QueueDTO, e
 	err := repository.database.QueryRow(ctx, `
 		select
 			(select count(*)::int from library_scan_runs where status in ('PENDING','RUNNING')),
+			(
+				(select count(*)::int from track_delete_batches where status in ('PENDING','RUNNING')) +
+				(select count(*)::int from media_assets where status = 'DELETE_PENDING')
+			),
 			(select count(*)::int from metadata_writeback_jobs where status in ('PENDING','PROCESSING')),
 			(
 				(select count(*)::int from tag_scraping_jobs where status in ('PENDING','RUNNING')) +
 				(select count(*)::int from artist_artwork_scraping_jobs where status in ('PENDING','RUNNING'))
 			)
-	`).Scan(&result.Scans, &result.Writeback, &result.Scraping)
+	`).Scan(&result.Scans, &result.Cleanup, &result.Writeback, &result.Scraping)
 	if err != nil {
 		return QueueDTO{}, err
 	}
-	result.Total = result.Media + result.Scans + result.Cleanup + result.Writeback + result.Scraping
+	result.Total = result.Scans + result.Cleanup + result.Writeback + result.Scraping
 	return result, nil
 }
 

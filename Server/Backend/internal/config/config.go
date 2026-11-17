@@ -86,10 +86,9 @@ type MediaStorage struct {
 }
 
 type Media struct {
-	Mode          string
-	FFmpegPath    string
-	FFprobePath   string
-	FFmpegThreads int
+	Mode        string
+	FFmpegPath  string
+	FFprobePath string
 }
 
 type Scraping struct {
@@ -198,10 +197,6 @@ func Parse(env map[string]string) (Config, error) {
 		return Config{}, err
 	}
 	scanProbeWorkers, err := integer(env, "LOCAL_MUSIC_SCAN_PROBE_WORKERS", defaultScanProbeWorkers(), 1, 128)
-	if err != nil {
-		return Config{}, err
-	}
-	mediaFFmpegThreads, err := integer(env, "MEDIA_FFMPEG_THREADS", 0, 0, 64)
 	if err != nil {
 		return Config{}, err
 	}
@@ -352,10 +347,9 @@ func Parse(env map[string]string) (Config, error) {
 			MaxUploadBytes:   maxUploadBytes,
 		},
 		Media: Media{
-			Mode:          mediaMode,
-			FFmpegPath:    ffmpegPath,
-			FFprobePath:   ffprobePath,
-			FFmpegThreads: mediaFFmpegThreads,
+			Mode:        mediaMode,
+			FFmpegPath:  ffmpegPath,
+			FFprobePath: ffprobePath,
 		},
 		Scraping: Scraping{
 			BatchWorkers:       batchWorkers,

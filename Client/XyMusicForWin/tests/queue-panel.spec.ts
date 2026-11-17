@@ -93,6 +93,47 @@ describe("queue panel", () => {
     expect(updates).not.toHaveBeenCalled();
     wrapper.unmount();
   });
+
+  it("keeps only the current track without clearing active playback when clicking '仅保留当前歌曲'", async () => {
+    const first = track("first");
+    const second = track("second");
+    const third = track("third");
+    const playbackSession = new FakePlaybackSession({
+      state: { queue: [first, second, third], currentIndex: 1, isPlaying: true, currentTime: 48, duration: 180 },
+    });
+    const keepCurrentTrack = vi.spyOn(playbackSession, "keepCurrentTrack");
+    const clearQueue = vi.spyOn(playbackSession, "clearQueue");
+    const pinia = createPinia();
+    const wrapper = mount(QueuePanel, {
+      global: {
+        plugins: [pinia],
+        provide: { [applicationServicesKey as symbol]: { playbackSession } as unknown as ApplicationServices },
+      },
+    });
+    const player = usePlayerStore();
+
+    player.queueOpen = true;
+    await settle();
+
+    const keepButton = wrapper.get('button[aria-label="仅保留当前歌曲"]');
+    expect(keepButton.attributes("disabled")).toBeUndefined();
+
+    await keepButton.trigger("click");
+    await settle();
+
+    expect(keepCurrentTrack).toHaveBeenCalledOnce();
+    expect(clearQueue).not.toHaveBeenCalled();
+    expect(playbackSession.state()).toMatchObject({
+      currentIndex: 0,
+      isPlaying: true,
+      currentTime: 48,
+    });
+    expect(playbackSession.state().queue.map((item) => item.id)).toEqual(["second"]);
+    expect(wrapper.findAll(".queue-item")).toHaveLength(1);
+    expect(keepButton.attributes("disabled")).toBeDefined();
+
+    wrapper.unmount();
+  });
 });
 
 async function settle(): Promise<void> {

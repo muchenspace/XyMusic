@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-media-playback"
+description = "Enables the update_media_playback command without any pre-configured scope."
+commands.allow = ["update_media_playback"]
+
+[[permission]]
+identifier = "deny-update-media-playback"
+description = "Denies the update_media_playback command without any pre-configured scope."
+commands.deny = ["update_media_playback"]

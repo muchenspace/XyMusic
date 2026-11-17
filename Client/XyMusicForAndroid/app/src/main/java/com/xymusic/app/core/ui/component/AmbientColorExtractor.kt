@@ -15,7 +15,9 @@ import androidx.palette.graphics.Palette
 import coil3.SingletonImageLoader
 import coil3.asDrawable
 import coil3.request.ImageRequest
+import coil3.request.ImageResult
 import coil3.request.SuccessResult
+import coil3.request.allowHardware
 import com.xymusic.app.core.common.runCatchingPreservingCancellation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -65,16 +67,18 @@ fun rememberArtworkAmbientPalette(artworkUrl: String?, cacheKey: String?): Artwo
     return state.value
 }
 
-private suspend fun extractArtworkAmbientColor(
+internal suspend fun extractArtworkAmbientColor(
     artworkUrl: String,
     cacheKey: String?,
     artworkIdentity: String,
     context: Context,
     resources: Resources,
+    executeImageRequest: suspend (ImageRequest) -> ImageResult = { request ->
+        SingletonImageLoader.get(context).execute(request)
+    },
 ): ArtworkAmbientPalette? = runCatchingPreservingCancellation {
     val bitmap =
         withContext(Dispatchers.IO) {
-            val loader = SingletonImageLoader.get(context)
             val request =
                 ImageRequest
                     .Builder(context)
@@ -82,8 +86,9 @@ private suspend fun extractArtworkAmbientColor(
                     // Keep the small palette request separate from the full-size artwork entry.
                     .applyAmbientArtworkCacheKey(cacheKey)
                     .size(128)
+                    .allowHardware(false)
                     .build()
-            val result = loader.execute(request)
+            val result = executeImageRequest(request)
             if (result is SuccessResult) {
                 result.image.asDrawable(resources).toBitmap(128, 128)
             } else {
@@ -136,14 +141,20 @@ private fun cacheArtworkAmbientPalette(key: String, colors: ArtworkAmbientPalett
     }
 }
 
+internal fun clearArtworkAmbientPaletteCache() {
+    synchronized(artworkAmbientPaletteCache) {
+        artworkAmbientPaletteCache.evictAll()
+    }
+}
+
+internal fun cachedArtworkAmbientPaletteForTest(key: String): ArtworkAmbientPalette? = cachedArtworkAmbientPalette(key)
+
 internal fun cacheArtworkAmbientPaletteForTest(key: String, colors: ArtworkAmbientPalette) {
     cacheArtworkAmbientPalette(key, colors)
 }
 
 internal fun clearArtworkAmbientPaletteCacheForTest() {
-    synchronized(artworkAmbientPaletteCache) {
-        artworkAmbientPaletteCache.evictAll()
-    }
+    clearArtworkAmbientPaletteCache()
 }
 
 private fun ImageRequest.Builder.applyAmbientArtworkCacheKey(cacheKey: String?): ImageRequest.Builder = apply {

@@ -258,7 +258,7 @@ func mergeStorage(current config.Config, input StorageInput) (config.Config, err
 		if *input.MaxUploadBytes < 1 || *input.MaxUploadBytes > config.MaxServerRequestBodyBytes {
 			return config.Config{}, validation("storage.maxUploadBytes is invalid")
 		}
-		overrides["MAX_UPLOAD_BYTES"] = strconv.FormatInt(*input.MaxUploadBytes, 10)
+		overrides["MEDIA_MAX_UPLOAD_BYTES"] = strconv.FormatInt(*input.MaxUploadBytes, 10)
 	}
 	return applyEnvironment(current, overrides)
 }

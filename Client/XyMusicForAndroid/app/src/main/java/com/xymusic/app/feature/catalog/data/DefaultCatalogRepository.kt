@@ -169,8 +169,10 @@ constructor(
         persist = { detail: TrackDetailDto, cachedAt -> local.replaceTrack(detail, cachedAt) },
     )
 
-    override suspend fun refreshArtist(artistId: String): CatalogResult<Unit> {
-        if (local.artistCachedAtEpochMs(artistId).isFresh()) return CatalogResult.Success(Unit)
+    override suspend fun refreshArtist(artistId: String, forceRefresh: Boolean): CatalogResult<Unit> {
+        if (!forceRefresh && local.artistDetailCachedAtEpochMs(artistId).isFresh()) {
+            return CatalogResult.Success(Unit)
+        }
         return refreshExecutor.execute(
             request = {
                 remote.artist(artistId).also { detail ->
@@ -181,8 +183,10 @@ constructor(
         )
     }
 
-    override suspend fun refreshAlbum(albumId: String): CatalogResult<Unit> {
-        if (local.albumCachedAtEpochMs(albumId).isFresh()) return CatalogResult.Success(Unit)
+    override suspend fun refreshAlbum(albumId: String, forceRefresh: Boolean): CatalogResult<Unit> {
+        if (!forceRefresh && local.albumDetailCachedAtEpochMs(albumId).isFresh()) {
+            return CatalogResult.Success(Unit)
+        }
         return refreshExecutor.execute(
             request = {
                 remote.album(albumId).also { detail ->

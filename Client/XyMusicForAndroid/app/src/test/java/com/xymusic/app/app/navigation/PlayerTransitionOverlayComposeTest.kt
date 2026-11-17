@@ -171,7 +171,7 @@ class PlayerTransitionOverlayComposeTest {
                             dismissRequests++
                             visible = false
                         },
-                    ) { onDismiss, dismissGestureModifier, _ ->
+                    ) { onDismiss, dismissGestureModifier ->
                         requestDismiss = onDismiss
                         SideEffect { contentCompositionCount += 1 }
                         Box(

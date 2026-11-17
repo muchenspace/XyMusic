@@ -44,11 +44,18 @@ func (cleaner *Cleaner) RunOnce(ctx context.Context) (bool, error) {
 	if cleaner == nil || cleaner.pool == nil || cleaner.media == nil {
 		return false, errors.New("local asset cleaner is not initialized")
 	}
-	rows, err := cleaner.pool.Query(ctx, `
+	tx, err := cleaner.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin local asset cleanup: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	rows, err := tx.Query(ctx, `
 		SELECT asset.id, asset.storage_path
 		FROM media_assets asset
 		WHERE asset.status = 'DELETE_PENDING'
 		  AND asset.updated_at <= now() - ($1::double precision * interval '1 second')
+		  AND NOT EXISTS (SELECT 1 FROM tracks track WHERE track.source_asset_id = asset.id)
 		  AND NOT EXISTS (SELECT 1 FROM local_music_sources source WHERE source.source_asset_id = asset.id)
 		  AND NOT EXISTS (SELECT 1 FROM lyrics lyric WHERE lyric.asset_id = asset.id)
 		  AND NOT EXISTS (SELECT 1 FROM media_uploads upload WHERE upload.asset_id = asset.id)
@@ -57,16 +64,17 @@ func (cleaner *Cleaner) RunOnce(ctx context.Context) (bool, error) {
 		  AND NOT EXISTS (SELECT 1 FROM playlists playlist WHERE playlist.cover_asset_id = asset.id)
 		  AND NOT EXISTS (SELECT 1 FROM user_profiles profile WHERE profile.avatar_asset_id = asset.id)
 		ORDER BY asset.updated_at, asset.id
-		LIMIT $2`, assetCleanupGrace.Seconds(), assetCleanupBatchSize)
+		LIMIT $2
+		FOR UPDATE OF asset SKIP LOCKED`, assetCleanupGrace.Seconds(), assetCleanupBatchSize)
 	if err != nil {
 		return false, fmt.Errorf("list pending local assets: %w", err)
 	}
-	defer rows.Close()
 
 	assets := make([]pendingAsset, 0, assetCleanupBatchSize)
 	for rows.Next() {
 		var asset pendingAsset
 		if err := rows.Scan(&asset.id, &asset.storagePath); err != nil {
+			rows.Close()
 			return false, fmt.Errorf("scan pending local asset: %w", err)
 		}
 		assets = append(assets, asset)
@@ -75,30 +83,46 @@ func (cleaner *Cleaner) RunOnce(ctx context.Context) (bool, error) {
 		rows.Close()
 		return false, fmt.Errorf("iterate pending local assets: %w", err)
 	}
-	// Release the pool connection before the per-file UPDATE calls. This also
-	// keeps the cleaner safe when an integration/test pool is configured with
-	// only one connection.
 	rows.Close()
+	if len(assets) == 0 {
+		return false, nil
+	}
 
-	worked := false
+	deletedIDs := make([]string, 0, len(assets))
+	var deleteErr error
 	for _, asset := range assets {
 		if err := cleaner.media.DeleteAsset(asset.storagePath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return worked, fmt.Errorf("delete local asset %s: %w", asset.id, err)
+			deleteErr = fmt.Errorf("delete local asset %s: %w", asset.id, err)
+			break
 		}
-		command, err := cleaner.pool.Exec(ctx, `
-			UPDATE media_assets asset SET status = 'DELETED', updated_at = now()
-			WHERE asset.id = $1 AND asset.status = 'DELETE_PENDING'
+		deletedIDs = append(deletedIDs, asset.id)
+	}
+
+	worked := false
+	if len(deletedIDs) > 0 {
+		command, err := tx.Exec(ctx, `
+			UPDATE media_assets asset
+			SET status = 'DELETED', updated_at = now()
+			WHERE asset.id = ANY($1::uuid[])
+			  AND asset.status = 'DELETE_PENDING'
+			  AND NOT EXISTS (SELECT 1 FROM tracks track WHERE track.source_asset_id = asset.id)
 			  AND NOT EXISTS (SELECT 1 FROM local_music_sources source WHERE source.source_asset_id = asset.id)
 			  AND NOT EXISTS (SELECT 1 FROM lyrics lyric WHERE lyric.asset_id = asset.id)
 			  AND NOT EXISTS (SELECT 1 FROM media_uploads upload WHERE upload.asset_id = asset.id)
 			  AND NOT EXISTS (SELECT 1 FROM artists artist WHERE artist.artwork_asset_id = asset.id)
 			  AND NOT EXISTS (SELECT 1 FROM albums album WHERE album.cover_asset_id = asset.id)
 			  AND NOT EXISTS (SELECT 1 FROM playlists playlist WHERE playlist.cover_asset_id = asset.id)
-			  AND NOT EXISTS (SELECT 1 FROM user_profiles profile WHERE profile.avatar_asset_id = asset.id)`, asset.id)
+			  AND NOT EXISTS (SELECT 1 FROM user_profiles profile WHERE profile.avatar_asset_id = asset.id)`, deletedIDs)
 		if err != nil {
-			return worked, fmt.Errorf("mark local asset deleted: %w", err)
+			return false, fmt.Errorf("mark local assets deleted: %w", err)
 		}
-		worked = worked || command.RowsAffected() > 0
+		if err := tx.Commit(ctx); err != nil {
+			return false, fmt.Errorf("commit local asset cleanup: %w", err)
+		}
+		worked = command.RowsAffected() > 0
+	}
+	if deleteErr != nil {
+		return worked, deleteErr
 	}
 	return worked, nil
 }

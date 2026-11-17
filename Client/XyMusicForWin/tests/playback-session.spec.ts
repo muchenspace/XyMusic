@@ -521,6 +521,73 @@ describe("playback session", () => {
     expect(harness.preferences.flush).toHaveBeenCalledTimes(2);
     expect(harness.persistence.flush).toHaveBeenCalledTimes(2);
   });
+
+  it("keeps only the active track at index 0 without interrupting playback or losing persistence", async () => {
+    const harness = createHarness();
+    (harness.persistence as { ownerKey: string }).ownerKey = "owner-1";
+    const tracks = [track("first"), track("second"), track("third")];
+    const started = harness.session.startQueue(tracks, 1);
+    await started?.playback;
+
+    harness.audio.setPlaybackPosition(42);
+    harness.session.setPlayMode("shuffle");
+    harness.persistence.scheduleSnapshot.mockClear();
+    harness.audio.stop.mockClear();
+    harness.audio.pause.mockClear();
+    const discontinuityBefore = harness.session.state().positionDiscontinuityVersion;
+
+    harness.session.keepCurrentTrack();
+
+    expect(harness.audio.stop).not.toHaveBeenCalled();
+    expect(harness.audio.pause).not.toHaveBeenCalled();
+    expect(harness.session.state()).toMatchObject({
+      currentIndex: 0,
+      isPlaying: true,
+      currentTime: 42,
+      shuffled: true,
+      queueVersion: started!.revision + 1,
+      positionDiscontinuityVersion: discontinuityBefore,
+    });
+    expect(harness.session.state().queue.map((item) => item.id)).toEqual(["second"]);
+    expectOwnedQueue(harness.session.state().queue, [tracks[1]!]);
+    expect(harness.session.appendToQueue(started!.revision, [track("stale")])).toBe(false);
+
+    expect(harness.persistence.scheduleSnapshot).toHaveBeenCalledOnce();
+    const createSnapshot = harness.persistence.scheduleSnapshot.mock.calls[0]?.[0] as (() => unknown) | undefined;
+    expect(createSnapshot?.()).toMatchObject({
+      ownerKey: "owner-1",
+      currentIndex: 0,
+      position: 42,
+      shuffled: true,
+      queue: [expect.objectContaining({ id: "second" })],
+    });
+
+    await harness.session.next();
+    expect(harness.session.state().currentIndex).toBe(0);
+    expect(harness.session.state().queue.map((item) => item.id)).toEqual(["second"]);
+
+    harness.session.dispose();
+  });
+
+  it("treats keepCurrentTrack as a safe no-op when no track is selected or the queue has at most one item", async () => {
+    const harness = createHarness();
+
+    harness.session.seed([track("seeded-1"), track("seeded-2")]);
+    const seededState = harness.session.state();
+    harness.session.keepCurrentTrack();
+    expect(harness.session.state()).toBe(seededState);
+
+    harness.session.reset();
+    await harness.session.startQueue([track("solo")], 0)?.playback;
+    harness.persistence.scheduleSnapshot.mockClear();
+    const soloState = harness.session.state();
+
+    harness.session.keepCurrentTrack();
+    expect(harness.session.state()).toBe(soloState);
+    expect(harness.persistence.scheduleSnapshot).not.toHaveBeenCalled();
+
+    harness.session.dispose();
+  });
 });
 
 function createHarness(options: {
@@ -551,6 +618,7 @@ function createHarness(options: {
     dispose: vi.fn(),
   } as unknown as PlaybackStatePersistence & {
     flush: ReturnType<typeof vi.fn>;
+    scheduleSnapshot: ReturnType<typeof vi.fn>;
     scheduleCheckpoint: ReturnType<typeof vi.fn>;
   };
   const grants = {
